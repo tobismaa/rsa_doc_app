@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=0.75, maximum-scale=1.0, user-scalable=yes">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>CMBank RSA - RSA Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/reviewer-dashboard.css">
+    <!-- Security: DOMPurify for XSS protection -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+    <!-- PDF-Lib needed for merging documents -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+</head>
+<body>
+    <!-- Security utilities loaded after DOM ready -->
+    <script src="js/security-utils.js"></script>
+    <div class="app-container">
+        <!-- Mobile Header -->
+        <header class="mobile-header">
+            <button class="menu-toggle" id="menuToggle" aria-label="Toggle navigation" aria-expanded="false">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="mobile-logo">
+                <i class="fas fa-landmark"></i>
+                <span>CMBank RSA</span>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <button class="sign-out-btn mobile" id="forceRefreshBtnMobile" title="Refresh">
+                    <i class="fas fa-arrows-rotate"></i>
+                </button>
+                <button class="sign-out-btn mobile" onclick="signOutUser()" title="Sign Out">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Overlay for mobile sidebar -->
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="logo">
+                <i class="fas fa-landmark"></i>
+                <span>CMBank RSA</span>
+            </div>
+
+            <div class="user-profile">
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='16'%3E👤%3C/text%3E%3C/svg%3E" alt="User" id="userAvatar">
+                <div class="user-info">
+                    <span id="userName">Loading...</span>
+                    <small id="userRole">RSA</small>
+                </div>
+                <button onclick="signOutUser()" class="sign-out-btn" title="Sign Out">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-tab="approved">
+                    <i class="fas fa-check-circle"></i>
+                    <span>Approved Applications</span>
+                    <span class="badge" id="approvedCount">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="finally-submitted">
+                    <i class="fas fa-paper-plane"></i>
+                    <span>Finally Submitted</span>
+                    <span class="badge" id="finallySubmittedCount">0</span>
+                </a>
+            </nav>
+            
+            <!-- Mobile Close Button -->
+            <button class="sidebar-close" id="sidebarClose" aria-label="Close menu">
+                <i class="fas fa-times"></i>
+            </button>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="content-header">
+                <h1 id="pageTitle">Approved Applications</h1>
+                <button id="forceRefreshBtn" class="action-btn" style="padding: 10px 14px; font-size: 13px;" title="Refresh">
+                    <i class="fas fa-arrows-rotate"></i> Refresh
+                </button>
+            </header>
+
+            <div id="approvedTab" class="tab-content active">
+                <div class="table-section">
+                    <div class="filters-bar" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+                        <input type="text" id="rsaSearch" placeholder="Search Customer or Reviewer" style="padding:8px; border-radius:8px; border:1px solid #e5e7eb; min-width:200px;">
+                        <input type="date" id="rsaStartDate" style="padding:8px; border-radius:8px; border:1px solid #e5e7eb;">
+                        <input type="date" id="rsaEndDate" style="padding:8px; border-radius:8px; border:1px solid #e5e7eb;">
+                        <button id="rsaFilterBtn" class="action-btn" style="padding:6px 12px;">Filter</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="customers-table" id="rsaTable" style="min-width:800px;">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Uploader</th>
+                                    <th>Reviewer</th>
+                                    <th>Upload Date/Time</th>
+                                    <th>Approved Time</th>
+                                    <th>Status</th>
+                                    <th>Documents</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rsaTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="finally-submittedTab" class="tab-content">
+                <div class="table-section">
+                    <div class="filters-bar" style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+                        <input type="text" id="finalSearch" placeholder="Search Customer or Reviewer" style="padding:8px; border-radius:8px; border:1px solid #e5e7eb; min-width:200px;">
+                        <input type="date" id="finalStartDate" style="padding:8px; border-radius:8px; border:1px solid #e5e7eb;">
+                        <input type="date" id="finalEndDate" style="padding:8px; border-radius:8px; border:1px solid #e5e7eb;">
+                        <button id="finalFilterBtn" class="action-btn" style="padding:6px 12px;">Filter</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="customers-table" style="min-width:800px;">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Uploader</th>
+                                    <th>Reviewer</th>
+                                    <th>RSA Officer</th>
+                                    <th>Upload Date/Time</th>
+                                    <th>Approved Time</th>
+                                    <th>Submitted Time</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="finallySubmittedTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- FULL SCREEN LOADING SPINNER -->
+    <div id="globalLoader" class="loading-overlay">
+        <div class="spinner-circle"></div>
+        <div class="loading-text" id="loaderText">Processing...</div>
+    </div>
+
+    <div id="notification" class="notification"></div>
+
+    <!-- Customer Details Modal -->
+    <div id="customerDetailsModal" class="modal">
+        <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h2 id="customerDetailsTitle">Customer Details</h2>
+                <button class="close-btn" id="closeCustomerDetails">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <!-- Customer Information Section -->
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3>Personal Information</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px;">
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Customer Name</label>
+                            <div id="detailCustomerName" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Date of Birth</label>
+                            <div id="detailDOB" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Account No</label>
+                            <div id="detailAccountNo" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">NIN</label>
+                            <div id="detailNIN" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Email</label>
+                            <div id="detailEmail" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Phone</label>
+                            <div id="detailPhone" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div style="grid-column: 1 / -1;">
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Address</label>
+                            <div id="detailAddress" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Employer</label>
+                            <div id="detailEmployer" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Originating TP</label>
+                            <div id="detailOriginatingTP" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">PFA</label>
+                            <div id="detailPFA" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">PEN No</label>
+                            <div id="detailPenNo" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RSA Information Section -->
+                <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3>RSA Information</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px;">
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">RSA Balance</label>
+                            <div id="detailRSABalance" style="font-size: 18px; color: #003366; margin-top: 5px; font-weight: 600;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">RSA Statement Date</label>
+                            <div id="detailRSADate" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">25% RSA</label>
+                            <div id="detailRSA25" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Property Information Section -->
+                <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3>Property / Loan</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px;">
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Property Type</label>
+                            <div id="detailPropertyType" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">House No</label>
+                            <div id="detailHouseNo" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Tenor</label>
+                            <div id="detailTenor" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Property Value</label>
+                            <div id="detailPropertyValue" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Facility Fee</label>
+                            <div id="detailFacilityFee" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Loan Amount</label>
+                            <div id="detailLoanAmount" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Submission Information -->
+                <div style="background: #fef5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3>Submission Information</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px;">
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Uploaded By</label>
+                            <div id="detailUploadedBy" style="font-size: 14px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Upload Date/Time</label>
+                            <div id="detailUploadedAt" style="font-size: 14px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Status</label>
+                            <div id="detailStatus" style="font-size: 14px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Reviewed By</label>
+                            <div id="detailReviewedBy" style="font-size: 14px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Documents Section -->
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                    <h3>Submitted Documents</h3>
+                    <div id="customerDocumentsList" style="margin-top: 15px;">
+                        <!-- Documents will be inserted here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 15px; border-top: 1px solid #e5e7eb;">
+                <button class="action-btn" id="finalSubmitBtn" style="padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                    <i class="fas fa-paper-plane"></i> Final Submission
+                </button>
+                <button class="close-btn" id="closeCustomerDetailsFooter" style="padding: 8px 16px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Document Viewer Modal -->
+    <div id="viewerModal" class="modal">
+        <div class="modal-content viewer-content">
+            <div class="viewer-header">
+                <h3 id="viewerFileName"></h3>
+                <div class="viewer-controls">
+                    <button class="action-btn download-btn-small" id="viewerDownloadBtn" style="display: none;">
+                        <i class="fas fa-download"></i> Download
+                    </button>
+                    <button class="close-btn" id="closeViewer">&times;</button>
+                </div>
+            </div>
+            <div class="viewer-body">
+                <iframe id="documentViewer" frameborder="0" title="Document Viewer"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <!-- Merge Modal borrowed from viewer dashboard -->
+    <div id="mergeModal" class="modal">
+        <div class="modal-content merge-modal-content">
+            <div class="modal-header">
+                <h2>
+                    <i class="fas fa-compress-alt"></i>
+                    Merge Documents - <span id="mergeCustomerName"></span>
+                </h2>
+                <button class="close-btn" id="closeMergeModal">&times;</button>
+            </div>
+
+            <div class="modal-body merge-modal-body">
+                <div class="merge-upload-column">
+                    <h3>
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        Add More Documents
+                    </h3>
+                    <div class="upload-additional-section">
+                        <div class="upload-area-large" id="additionalUploadArea">
+                            <i class="fas fa-plus-circle"></i>
+                            <p>Drag & drop files here or <span class="browse-text">browse</span></p>
+                            <p class="file-limit-note">Max 10 files (PDF, JPG, PNG)</p>
+                            <input type="file" id="additionalFileInput" multiple accept=".pdf,.jpg,.jpeg,.png" hidden>
+                        </div>
+                        <div id="additionalFilesPreview" class="files-preview-container"></div>
+                    </div>
+                </div>
+                <div class="merge-list-column">
+                    <h3>
+                        <i class="fas fa-list"></i>
+                        Select Documents to Merge
+                    </h3>
+                    <div id="mergeList" class="merge-list-container"></div>
+                </div>
+            </div>
+
+            <div class="modal-footer merge-modal-footer">
+                <button class="cancel-btn" id="cancelMerge">Cancel</button>
+                <button class="merge-btn" id="mergeDocumentsBtn">
+                    <i class="fas fa-compress-alt"></i> Merge Selected (<span id="selectedCount">0</span>)
+                </button>
+            </div>
+
+            <div class="merge-download-section" id="mergeDownloadSection" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script type="module" src="js/firebase-config.js"></script>
+    <script type="module" src="js/rsa-dashboard.js"></script>
+</body>
+</html>

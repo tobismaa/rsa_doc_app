@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=0.75, maximum-scale=1.0, user-scalable=yes">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Admin Dashboard - CMBank RSA</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260308">
+    <!-- Security: DOMPurify for XSS protection -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+</head>
+<body>
+    <!-- Security utilities loaded after DOM ready -->
+    <script src="js/security-utils.js"></script>
+
+    <div class="app-container">
+        <!-- Mobile Header -->
+        <header class="mobile-header">
+            <button class="menu-toggle" id="menuToggle" aria-label="Toggle navigation" aria-expanded="false">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="mobile-logo">
+                <i class="fas fa-landmark"></i>
+                <span>CMBank RSA Admin</span>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <button class="sign-out-btn mobile" id="forceRefreshBtnMobile" title="Refresh">
+                    <i class="fas fa-arrows-rotate"></i>
+                </button>
+                <button class="sign-out-btn mobile" onclick="signOutUser()" title="Sign Out">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Overlay for mobile sidebar -->
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+        <!-- Sidebar -->
+        <aside class="sidebar admin-sidebar" id="sidebar">
+            <div class="logo">
+                <i class="fas fa-landmark"></i>
+                <span>CMBank RSA Admin</span>
+            </div>
+
+            <div class="user-profile">
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='16'%3E👤%3C/text%3E%3C/svg%3E" alt="Admin" id="adminAvatar">
+                <div class="user-info">
+                    <span id="adminName">Loading...</span>
+                    <small>Administrator</small>
+                </div>
+                <button onclick="signOutUser()" class="sign-out-btn" title="Sign Out">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-tab="users">
+                    <i class="fas fa-users"></i>
+                    <span>User Management</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="pending-users">
+                    <i class="fas fa-user-clock"></i>
+                    <span>Pending Users</span>
+                    <span class="badge" id="pendingUserCount">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="pending-docs">
+                    <i class="fas fa-clock"></i>
+                    <span>Pending Documents</span>
+                    <span class="badge" id="pendingDocCount">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="approved-docs">
+                    <i class="fas fa-check-circle"></i>
+                    <span>Approved Documents</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="track-apps">
+                    <i class="fas fa-magnifying-glass"></i>
+                    <span>Track Applications</span>
+                </a>
+                <!-- NEW: Rejected Documents Tab -->
+                <a href="#" class="nav-item" data-tab="rejected-docs">
+                    <i class="fas fa-times-circle"></i>
+                    <span>Rejected Documents</span>
+                    <span class="badge" id="rejectedDocCount" style="background:#ef4444">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="round-robin">
+                    <i class="fas fa-exchange-alt"></i>
+                    <span>Round-Robin Monitor</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="rsa-round-robin">
+                    <i class="fas fa-random"></i>
+                    <span>RSA Round-Robin</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="finally-submitted">
+                    <i class="fas fa-paper-plane"></i>
+                    <span>Finally Submitted</span>
+                    <span class="badge" id="finallySubmittedCount">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="audit">
+                    <i class="fas fa-history"></i>
+                    <span>Audit Log</span>
+                </a>
+            </nav>
+
+            <!-- Mobile Close Button -->
+            <button class="sidebar-close" id="sidebarClose" aria-label="Close menu">
+                <i class="fas fa-times"></i>
+            </button>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Desktop Header -->
+            <header class="content-header desktop-only">
+                <h1 id="pageTitle">User Management</h1>
+                <button id="forceRefreshBtn" class="action-btn" style="padding: 10px 14px; font-size: 13px;" title="Refresh">
+                    <i class="fas fa-arrows-rotate"></i> Refresh
+                </button>
+            </header>
+
+            <!-- User Management Tab -->
+            <div id="usersTab" class="tab-content active">
+                <!-- Search and Filter -->
+                <div class="filters-bar">
+                    <div class="search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="userSearch" placeholder="Search users..." aria-label="Search users">
+                    </div>
+                    <select id="userRoleFilter" aria-label="Filter by role">
+                        <option value="all">All Roles</option>
+                        <option value="uploader">Uploader</option>
+                        <option value="reviewer">Reviewer</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                    <select id="userStatusFilter" aria-label="Filter by status">
+                        <option value="all">All Status</option>
+                        <option value="active">Active</option>
+                        <option value="deactivated">Deactivated</option>
+                    </select>
+                </div>
+
+                <!-- Users Table -->
+                <div class="table-container">
+                    <table class="users-table">
+                        <thead>
+                            <tr>
+                                <th>Full Name</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                                <th>Joined</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTableBody">
+                            <!-- Users will be inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Pending Users Tab -->
+            <div id="pending-usersTab" class="tab-content">
+                <div class="pending-requests">
+                    <h2>Pending User Activations</h2>
+                    <p style="color: #666; margin-bottom: 20px;">Approve or reject newly registered users</p>
+                    <div class="pending-grid" id="pendingUsersGrid">
+                        <!-- Pending users will be inserted here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pending Documents Tab -->
+            <div id="pending-docsTab" class="tab-content">
+                <div class="all-documents">
+                    <h2>Pending Documents Review</h2>
+                    <div class="filters-bar">
+                        <div class="search-box">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="pendingDocSearch" placeholder="Search documents..." aria-label="Search documents">
+                        </div>
+
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer Name</th>
+                                    <th>Upload Date/Time</th>
+                                    <th>Uploaded By</th>
+                                    <th>Assigned To</th>
+                                    <th>Status</th>
+                                    <th>Rejection Reason</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pendingDocsTableBody">
+                                <!-- Pending documents will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Approved Documents Tab -->
+            <div id="approved-docsTab" class="tab-content">
+                <div class="all-documents">
+                    <h2>Approved Documents</h2>
+                    <div class="filters-bar">
+                        <div class="search-box">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="approvedDocSearch" placeholder="Search documents..." aria-label="Search documents">
+                        </div>
+
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer Name</th>
+                                    <th>Upload Date/Time</th>
+                                    <th>Uploaded By</th>
+                                    <th>Approved By</th>
+                                    <th>Approved Date/Time</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="approvedDocsTableBody">
+                                <!-- Approved documents will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- NEW: Rejected Documents Tab -->
+            <div id="rejected-docsTab" class="tab-content">
+                <div class="all-documents">
+                    <h2>Rejected Documents Review</h2>
+                    <div class="filters-bar">
+                        <div class="search-box">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="rejectedDocSearch" placeholder="Search documents..." aria-label="Search documents">
+                        </div>
+
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer Name</th>
+                                    <th>Upload Time</th>
+                                    <th>Uploaded By</th>
+                                    <th>Rejected By</th>
+                                    <th>Rejected Time/Date</th>
+                                    <th>Reason for Rejection</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rejectedDocsTableBody">
+                                <!-- Rejected documents will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Track Applications Tab -->
+            <div id="track-appsTab" class="tab-content">
+                <div class="all-documents">
+                    <h2>Track Customer Applications</h2>
+                    <div class="filters-bar">
+                        <div class="search-box">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="trackUserSearch" placeholder="Search uploader by name or email..." aria-label="Search uploader">
+                        </div>
+                        <input type="date" id="trackStartDate" aria-label="Start date">
+                        <input type="date" id="trackEndDate" aria-label="End date">
+                        <select id="trackStatusFilter" aria-label="Filter by status">
+                            <option value="all">All Status</option>
+                            <option value="pending">Pending</option>
+                            <option value="approved">Approved</option>
+                            <option value="rejected">Rejected</option>
+                        </select>
+                        <button class="action-btn" id="trackFilterBtn" style="padding: 6px 12px;">Filter</button>
+                    </div>
+
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Uploaded By</th>
+                                    <th>Status</th>
+                                    <th>Uploaded At</th>
+                                    <th>Assigned Reviewer</th>
+                                    <th>Attended At</th>
+                                    <th>Assigned RSA</th>
+                                    <th>Finalized At</th>
+                                </tr>
+                            </thead>
+                            <tbody id="trackAppsTableBody">
+                                <!-- Results inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div style="display:flex; gap:10px; align-items:center; justify-content:flex-end; margin-top:10px; flex-wrap:wrap;">
+                        <button class="action-btn" id="trackPrevPageBtn" title="Previous page" style="padding: 6px 10px;">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <span id="trackPageInfo" style="color:#64748b; font-size:13px;">Page 1 of 1</span>
+                        <button class="action-btn" id="trackNextPageBtn" title="Next page" style="padding: 6px 10px;">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                        <span style="color:#64748b; font-size:13px;">Jump to:</span>
+                        <input id="trackJumpPageInput" type="number" min="1" step="1" style="width:90px; padding:6px 8px; border:1px solid #e5e7eb; border-radius:8px;">
+                        <button class="action-btn" id="trackJumpPageBtn" style="padding: 6px 12px;">Go</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audit Log Tab -->
+            <div id="auditTab" class="tab-content">
+                <div class="audit-log">
+                    <h2>System Audit Log</h2>
+                    <div class="filters-bar">
+                        <input type="date" id="auditDate" aria-label="Filter by date">
+                        <select id="auditAction" aria-label="Filter by action">
+                            <option value="all">All Actions</option>
+                            <option value="user_created">User Created</option>
+                            <option value="user_approved">User Approved</option>
+                            <option value="user_rejected">User Rejected</option>
+                            <option value="user_deactivated">User Deactivated</option>
+                            <option value="document_uploaded">Document Uploaded</option>
+                            <option value="document_approved">Document Approved</option>
+                            <option value="document_rejected">Document Rejected</option>
+                        </select>
+                    </div>
+                    <div class="table-container">
+                        <table class="audit-table">
+                            <thead>
+                                <tr>
+                                    <th>Date/Time</th>
+                                    <th>Action</th>
+                                    <th>Details</th>
+                                    <th>Performed By (Email)</th>
+                                    <th>Admin Name</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditTableBody">
+                                <!-- Audit entries will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Finally Submitted Tab -->
+            <div id="finally-submittedTab" class="tab-content">
+                <div class="table-section">
+                    <h2>Finally Submitted Applications</h2>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Uploader</th>
+                                    <th>Reviewer</th>
+                                    <th>RSA Officer</th>
+                                    <th>Upload Date/Time</th>
+                                    <th>Approved Time</th>
+                                    <th>Submitted Time</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="finallySubmittedTableBody">
+                                <!-- Finally submitted entries will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Round-Robin Monitoring Tab -->
+            <div id="round-robinTab" class="tab-content">
+                <div class="round-robin-monitor">
+                    <h2>Round-Robin Distribution Monitor</h2>
+                    <p style="color: #666; margin-bottom: 20px;">Monitor and manage document distribution to reviewers</p>
+
+                    <!-- Current State Section -->
+                    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3>Current Distribution State</h3>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+                            <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e5e7eb;">
+                                <div style="font-size: 12px; color: #999; margin-bottom: 5px;">Last Distribution</div>
+                                <div id="lastDistributionViewer" style="font-size: 16px; font-weight: 600; color: #003366;">Loading...</div>
+                            </div>
+                            <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e5e7eb;">
+                                <div style="font-size: 12px; color: #999; margin-bottom: 5px;">Current Index</div>
+                                <div id="currentDistributionIndex" style="font-size: 16px; font-weight: 600; color: #003366;">Loading...</div>
+                            </div>
+                            <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e5e7eb;">
+                                <div style="font-size: 12px; color: #999; margin-bottom: 5px;">Last Reset Date</div>
+                                <div id="lastResetDate" style="font-size: 16px; font-weight: 600; color: #003366;">Loading...</div>
+                            </div>
+                            <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e5e7eb;">
+                                <div style="font-size: 12px; color: #999; margin-bottom: 5px;">Total Reviewers</div>
+                                <div id="totalViewerCount" style="font-size: 16px; font-weight: 600; color: #003366;">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Distribution Statistics -->
+                    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3>Distribution Statistics (Today)</h3>
+                        <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                            <table class="documents-table" style="margin-bottom: 0;">
+                                <thead>
+                                    <tr>
+                                        <th>Reviewer Name</th>
+                                        <th>Email</th>
+                                        <th>Assigned Today</th>
+                                        <th>Completed</th>
+                                        <th>Pending</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="distributionStatsBody">
+                                    <!-- Distribution stats will be inserted here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Recent Assignment History -->
+                    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3>Recent Assignment History (Last 20)</h3>
+                        <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                            <table class="documents-table" style="margin-bottom: 0;">
+                                <thead>
+                                    <tr>
+                                        <th>Timestamp</th>
+                                        <th>Customer</th>
+                                        <th>Assigned To</th>
+                                        <th>Assigned By</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="assignmentHistoryBody">
+                                    <!-- Assignment history will be inserted here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Admin Controls -->
+                    <div style="background: #fff3cd; padding: 20px; border-radius: 8px; border-left: 4px solid #ffc107;">
+                        <h3 style="margin-top: 0;">Administrator Controls</h3>
+                        <p style="color: #333; margin: 10px 0;">Use these tools to reset the distribution counter or test the system</p>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px;">
+                            <button id="resetRoundRobinBtn" class="action-btn" style="background: #ef4444; color: white; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                                <i class="fas fa-redo"></i> Reset Counter (Today)
+                            </button>
+                            <button id="testDistributionBtn" class="action-btn" style="background: #3b82f6; color: white; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                                <i class="fas fa-flask"></i> Test Distribution
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RSA Round-Robin Monitoring Tab -->
+            <div id="rsa-round-robinTab" class="tab-content">
+                <div class="round-robin-monitor">
+                    <h2>RSA Round-Robin Distribution Monitor</h2>
+                    <p style="color: #666; margin-bottom: 20px;">Monitor and manage document distribution to RSA users</p>
+
+                    <!-- Current State Section -->
+                    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3>Current Distribution State</h3>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+                            <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e5e7eb;">
+                                <div style="font-size: 12px; color: #999; margin-bottom: 5px;">Last Distribution</div>
+                                <div id="lastDistributionRSA" style="font-size: 16px; font-weight: 600; color: #003366;">Loading...</div>
+                            </div>
+                            <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e5e7eb;">
+                                <div style="font-size: 12px; color: #999; margin-bottom: 5px;">Current Index</div>
+                                <div id="currentDistributionIndexRSA" style="font-size: 16px; font-weight: 600; color: #003366;">Loading...</div>
+                            </div>
+                            <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e5e7eb;">
+                                <div style="font-size: 12px; color: #999; margin-bottom: 5px;">Last Reset Date</div>
+                                <div id="lastResetDateRSA" style="font-size: 16px; font-weight: 600; color: #003366;">Loading...</div>
+                            </div>
+                            <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e5e7eb;">
+                                <div style="font-size: 12px; color: #999; margin-bottom: 5px;">Total RSA Users</div>
+                                <div id="totalRSAUserCount" style="font-size: 16px; font-weight: 600; color: #003366;">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Distribution Statistics -->
+                    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3>Distribution Statistics (Today)</h3>
+                        <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                            <table class="documents-table" style="margin-bottom: 0;">
+                                <thead>
+                                    <tr>
+                                        <th>RSA User Name</th>
+                                        <th>Email</th>
+                                        <th>Assigned Today</th>
+                                        <th>Completed (Processed)</th>
+                                        <th>Pending</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="distributionStatsRSABody">
+                                    <!-- Distribution stats will be inserted here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Recent Assignment History -->
+                    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3>Recent RSA Assignment History (Last 20)</h3>
+                        <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                            <table class="documents-table" style="margin-bottom: 0;">
+                                <thead>
+                                    <tr>
+                                        <th>Timestamp</th>
+                                        <th>Customer</th>
+                                        <th>Assigned To (RSA)</th>
+                                        <th>Assigned By (Reviewer)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="assignmentHistoryRSABody">
+                                    <!-- Assignment history will be inserted here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Admin Controls -->
+                    <div style="background: #fff3cd; padding: 20px; border-radius: 8px; border-left: 4px solid #ffc107;">
+                        <h3 style="margin-top: 0;">Administrator Controls</h3>
+                        <p style="color: #333; margin: 10px 0;">Use these tools to reset the RSA distribution counter or test the system</p>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 15px;">
+                            <button id="resetRoundRobinRSABtn" class="action-btn" style="background: #ef4444; color: white; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                                <i class="fas fa-redo"></i> Reset Counter (Today)
+                            </button>
+                            <button id="testDistributionRSABtn" class="action-btn" style="background: #3b82f6; color: white; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                                <i class="fas fa-flask"></i> Test RSA Distribution
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- View User Modal -->
+    <div id="viewUserModal" class="modal" role="dialog" aria-modal="true">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>User Details</h2>
+                <button class="close-btn" id="closeViewUserModal" aria-label="Close modal">&times;</button>
+            </div>
+            <div class="user-details" id="userDetails">
+                <!-- User details will be inserted here -->
+            </div>
+            <div class="modal-footer">
+                <button class="edit-user-btn" id="editFromViewBtn">Edit User</button>
+                <button class="deactivate-user-btn" id="deactivateFromViewBtn">Deactivate</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Document Viewer Modal -->
+    <div id="viewerModal" class="modal" role="dialog" aria-modal="true">
+        <div class="modal-content viewer-content">
+            <div class="viewer-header">
+                <h3 id="viewerFileName"></h3>
+                <button class="close-btn" id="closeViewer" aria-label="Close viewer">&times;</button>
+            </div>
+            <div class="viewer-body">
+                <iframe id="documentViewer" frameborder="0" title="Document Viewer"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmModal" class="modal" role="dialog" aria-modal="true">
+        <div class="modal-content small">
+            <div class="modal-header">
+                <h2 id="confirmTitle">Confirm Action</h2>
+                <button class="close-btn" id="closeConfirmModal" aria-label="Close modal">&times;</button>
+            </div>
+            <div class="confirm-body">
+                <p id="confirmMessage">Are you sure?</p>
+            </div>
+            <div class="modal-footer">
+                <button class="cancel-btn" id="cancelConfirm">Cancel</button>
+                <button class="confirm-btn" id="confirmAction">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification -->
+    <div id="notification" class="notification" style="display: none;" role="alert" aria-live="polite"></div>
+
+    <!-- Test Result Modal -->
+    <div id="testResultModal" class="modal" role="dialog" aria-modal="true">
+        <div class="modal-content test-result-modal">
+            <div class="modal-header">
+                <h2 id="testResultTitle">Distribution Test Result</h2>
+                <button class="close-btn" id="closeTestResultModal" aria-label="Close modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="testResultBody" class="test-result-grid"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="confirm-btn" id="closeTestResultBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create/Edit User Modal -->
+    <div id="userModal" class="modal" role="dialog" aria-modal="true">
+        <div class="modal-content small">
+            <div class="modal-header">
+                <h2 id="modalTitle">Edit User</h2>
+                <button id="closeUserModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+            </div>
+            <form id="userForm">
+                <div class="form-grid">
+                    <label>Full Name
+                        <input type="text" id="modalFullName" required>
+                    </label>
+                    <label>Email
+                        <input type="email" id="modalEmail" required readonly>
+                    </label>
+                    <label>Role
+                        <select id="modalRole">
+                            <option value="uploader">Uploader</option>
+                            <option value="reviewer">Reviewer</option>
+                            <option value="admin">Admin</option>
+                            <option value="rsa">RSA</option>
+                        </select>
+                    </label>
+                    <label>Status
+                        <select id="modalStatus">
+                            <option value="active">Active</option>
+                            <option value="deactivated">Deactivated</option>
+                            <option value="pending">Pending</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="modal-footer">
+                    <button id="cancelUserModalBtn" type="button" class="cancel-btn">Cancel</button>
+                    <button id="saveUserModalBtn" type="submit" class="confirm-btn">
+                        <i class="fas fa-save"></i> Save
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="module" src="js/firebase-config.js"></script>
+    <script type="module" src="js/admin.js?v=20260308"></script>
+</body>
+</html>

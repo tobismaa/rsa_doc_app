@@ -1,0 +1,1238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=0.8, maximum-scale=1.0, user-scalable=yes">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>CMBank RSA - Uploader Dashboard</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- DOMPurify for security -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+    <!-- External CSS -->
+    <link rel="stylesheet" href="css/uploader-dashboard.css">
+    <style>
+        /* Additional modal styles to ensure visibility */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            animation: modalSlideIn 0.3s ease;
+        }
+
+        .modal-content.large-modal {
+            max-width: 900px;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                transform: translateY(-30px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .warning-header {
+            padding: 20px;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .warning-header h2 {
+            margin: 0;
+            color: #1e293b;
+            font-size: 20px;
+        }
+
+        .warning-header h2 i {
+            color: #f59e0b;
+            margin-right: 10px;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #64748b;
+            padding: 0 10px;
+        }
+
+        .close-btn:hover {
+            color: #1e293b;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .modal-footer {
+            padding: 20px;
+            border-top: 1px solid #e2e8f0;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .understand-btn {
+            background: #003366;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .understand-btn:hover {
+            background: #002244;
+        }
+
+        .cancel-btn {
+            background: #e2e8f0;
+            color: #1e293b;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .cancel-btn:hover {
+            background: #cbd5e1;
+        }
+
+        .proceed-btn {
+            background: #003366;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .proceed-btn:hover {
+            background: #002244;
+        }
+
+        .file-info {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .file-info i {
+            font-size: 48px;
+            color: #ef4444;
+            margin-bottom: 15px;
+        }
+
+        .file-details {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .file-name {
+            font-weight: 600;
+            color: #1e293b;
+            word-break: break-all;
+        }
+
+        .file-size-badge {
+            color: #ef4444;
+            font-weight: 600;
+            margin-top: 5px;
+        }
+
+        .tips-section {
+            background: #f0f9ff;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .tips-title {
+            font-weight: 600;
+            color: #0369a1;
+            margin-bottom: 10px;
+        }
+
+        .tips-title i {
+            color: #f59e0b;
+            margin-right: 8px;
+        }
+
+        .tips-section ul {
+            list-style-type: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .tips-section li {
+            padding: 5px 0;
+        }
+
+        .tips-section li i {
+            color: #10b981;
+            margin-right: 8px;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            border-radius: 4px;
+            margin-bottom: 5px;
+        }
+
+        .file-item.oversized {
+            background: #fee2e2;
+        }
+
+        .file-item.valid {
+            background: #dcfce7;
+        }
+
+        .file-item .file-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0;
+        }
+
+        .file-item .file-info i {
+            font-size: 16px;
+            margin: 0;
+        }
+
+        .file-item .file-name {
+            font-size: 14px;
+            color: inherit;
+        }
+
+        .file-list-title.oversized {
+            color: #ef4444;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .file-list-title.valid {
+            color: #10b981;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .warning-summary {
+            font-size: 16px;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #f8fafc;
+            border-radius: 8px;
+        }
+
+        .file-list-section {
+            margin-bottom: 20px;
+        }
+
+        /* Batch mapping styles */
+        .batch-mapping-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .batch-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            background: white;
+        }
+
+        .batch-item-icon {
+            margin-right: 12px;
+        }
+
+        .batch-item-icon i {
+            font-size: 24px;
+            color: #003366;
+        }
+
+        .batch-item-info {
+            flex: 1;
+        }
+
+        .batch-item-name {
+            font-weight: 600;
+            font-size: 14px;
+            color: #1e293b;
+        }
+
+        .batch-item-size {
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        .batch-item-select {
+            min-width: 200px;
+        }
+
+        .batch-map-select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .batch-map-select:focus {
+            outline: none;
+            border-color: #003366;
+        }
+
+        /* Notification styles */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 8px;
+            background: white;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            z-index: 2000;
+            display: none;
+            animation: slideIn 0.3s ease;
+        }
+
+        .notification.show {
+            display: block;
+        }
+
+        .notification.success {
+            background: #10b981;
+            color: white;
+        }
+
+        .notification.error {
+            background: #ef4444;
+            color: white;
+        }
+
+        .notification.warning {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .notification.info {
+            background: #3b82f6;
+            color: white;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Loading overlay */
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 3000;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+
+        .loading-overlay.active {
+            display: flex;
+        }
+
+        .spinner-circle {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #003366;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: white;
+            font-size: 16px;
+            font-weight: 500;
+        }
+
+        /* Global error box */
+        #globalErrorBox {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 15px 25px;
+            border-radius: 8px;
+            border-left: 4px solid #ef4444;
+            z-index: 2500;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            max-width: 500px;
+            width: 90%;
+        }
+
+        #globalErrorBox button {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #991b1b;
+            padding: 0 10px;
+        }
+
+        /* Document grid item styles */
+        .document-grid-item.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .document-grid-item .doc-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* File preview styles */
+        .single-file-preview {
+            margin-top: 15px;
+        }
+
+        .preview-image {
+            width: 100%;
+            max-height: 260px;
+            object-fit: contain;
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        .file-icon-large {
+            font-size: 48px;
+            color: #003366;
+        }
+    </style>
+</head>
+<body>
+    <!-- Global Error Display Box -->
+    <div id="globalErrorBox" style="display: none;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <i class="fas fa-exclamation-triangle"></i>
+            <div style="flex: 1;">
+                <strong>Error</strong>
+                <span id="globalErrorMessage"></span>
+            </div>
+            <button onclick="document.getElementById('globalErrorBox').style.display='none'">&times;</button>
+        </div>
+    </div>
+
+    <div class="app-container">
+        <!-- Mobile Header -->
+        <header class="mobile-header">
+            <button class="menu-toggle" id="menuToggle" aria-label="Toggle navigation">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="mobile-logo">
+                <i class="fas fa-landmark"></i>
+                <span>CMBank Uploader</span>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <button class="sign-out-btn mobile" id="forceRefreshBtnMobile" title="Refresh">
+                    <i class="fas fa-arrows-rotate"></i>
+                </button>
+                <button class="sign-out-btn mobile" onclick="window.signOutUser()" title="Sign Out">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Overlay for mobile sidebar -->
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="logo">
+                <i class="fas fa-landmark"></i>
+                <span>CMBank RSA</span>
+            </div>
+
+            <div class="user-profile">
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='16'%3E👤%3C/text%3E%3C/svg%3E" alt="User" id="userAvatar">
+                <div class="user-info">
+                    <span id="userName">Loading...</span>
+                    <small id="userRole">Uploader</small>
+                </div>
+                <button onclick="window.signOutUser()" class="sign-out-btn" title="Sign Out">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-tab="overview">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="pending">
+                    <i class="fas fa-clock"></i>
+                    <span>Pending Review</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="approved">
+                    <i class="fas fa-check-circle"></i>
+                    <span>Approved</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="rejected">
+                    <i class="fas fa-times-circle"></i>
+                    <span>Rejected</span>
+                </a>
+            </nav>
+
+            <!-- Mobile Close Button -->
+            <button class="sidebar-close" id="sidebarClose" aria-label="Close menu">
+                <i class="fas fa-times"></i>
+            </button>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="content-header">
+                <h1 id="pageTitle">Dashboard</h1>
+                <div class="header-actions">
+                    <button class="global-track-btn" id="forceRefreshBtn" title="Refresh">
+                        <i class="fas fa-arrows-rotate"></i> <span>Refresh</span>
+                    </button>
+                    <button class="loan-calc-btn" id="loanCalcBtn">
+                        <i class="fas fa-calculator"></i> <span>Loan Calculator</span>
+                    </button>
+                    <button class="global-track-btn" id="globalTrackBtn">
+                        <i class="fas fa-search-location"></i> <span>Track Application</span>
+                    </button>
+                    <button class="new-upload-btn" id="newUploadBtn">
+                        <i class="fas fa-plus-circle"></i> <span class="btn-text">New Submission</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Dashboard Tab -->
+            <div id="overviewTab" class="tab-content active">
+                <div class="overview-cards">
+                    <div class="stat-card approved" id="cardApproved">
+                        <div class="stat-content">
+                            <div>
+                                <div class="stat-label">Approved</div>
+                                <div class="stat-value" id="cardApprovedCount">0</div>
+                            </div>
+                            <i class="fas fa-check-circle stat-icon"></i>
+                        </div>
+                    </div>
+                    <div class="stat-card pending" id="cardPending">
+                        <div class="stat-content">
+                            <div>
+                                <div class="stat-label">Pending</div>
+                                <div class="stat-value" id="cardPendingCount">0</div>
+                            </div>
+                            <i class="fas fa-clock stat-icon"></i>
+                        </div>
+                    </div>
+                    <div class="stat-card rejected" id="cardRejected">
+                        <div class="stat-content">
+                            <div>
+                                <div class="stat-label">Rejected</div>
+                                <div class="stat-value" id="cardRejectedCount">0</div>
+                            </div>
+                            <i class="fas fa-times-circle stat-icon"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="recent-section">
+                    <div class="recent-header">
+                        <h3>Recent Applications</h3>
+                        <input id="recentSearch" placeholder="Search by customer or uploader">
+                    </div>
+                    <div class="table-container">
+                        <table class="customers-table" id="recentTable">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Upload Date/Time</th>
+                                    <th>Status</th>
+                                    <th>Uploaded By</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recentTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pending Tab -->
+            <div id="pendingTab" class="tab-content">
+                <div class="table-section">
+                    <div class="filters-bar">
+                        <input type="text" id="pendingSearch" placeholder="Search Customer">
+                    </div>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer Name</th>
+                                    <th>Assigned To</th>
+                                    <th>Upload Date/Time</th>
+                                    <th>Status</th>
+                                    <th>Comment</th>
+                                    <th>View</th>
+                                    <th>Track</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pendingTableBody">
+                                <tr><td colspan="7" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Approved Tab -->
+            <div id="approvedTab" class="tab-content">
+                <div class="table-section">
+                    <div class="filters-bar">
+                        <input type="text" id="approvedSearch" placeholder="Search Customer">
+                    </div>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer Name</th>
+                                    <th>Assigned To</th>
+                                    <th>Upload Date/Time</th>
+                                    <th>Status</th>
+                                    <th>Approved By</th>
+                                    <th>Approved Date/Time</th>
+                                    <th>View</th>
+                                    <th>Track</th>
+                                </tr>
+                            </thead>
+                            <tbody id="approvedTableBody">
+                                <tr><td colspan="8" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rejected Tab -->
+            <div id="rejectedTab" class="tab-content">
+                <div class="table-section">
+                    <div class="filters-bar">
+                        <input type="text" id="rejectedSearch" placeholder="Search Customer">
+                    </div>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer Name</th>
+                                    <th>Assigned To</th>
+                                    <th>Upload Date/Time</th>
+                                    <th>Status</th>
+                                    <th>Rejection Reason</th>
+                                    <th>Rejected By</th>
+                                    <th>Rejected Date/Time</th>
+                                    <th>Action</th>
+                                    <th>View</th>
+                                    <th>Track</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rejectedTableBody">
+                                <tr><td colspan="10" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- New Submission Modal -->
+    <div id="uploadModal" class="modal">
+        <div class="modal-content large-modal">
+            <div class="modal-header">
+                <h2><i class="fas fa-user-plus"></i> New Customer Submission</h2>
+                <button class="close-btn" id="closeModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="customer-details-section">
+                    <div class="form-section">
+                        <div class="section-header">
+                            <h3>Customer Details</h3>
+                            <p class="section-sub">Full Name, DOB, Account and contact</p>
+                        </div>
+                        <div class="section-body">
+                            <div class="customer-input-grid">
+                                <div>
+                                    <label for="customerName">Full Name *</label>
+                                    <input type="text" id="customerName" placeholder="e.g. John Doe">
+                                </div>
+                                <div>
+                                    <label for="customerDob">Date of Birth *</label>
+                                    <input type="date" id="customerDob">
+                                </div>
+                                <div>
+                                    <label for="accountNo">Account No *</label>
+                                    <input type="text" id="accountNo" placeholder="10 digits" maxlength="10" inputmode="numeric">
+                                </div>
+                                <div>
+                                    <label for="customerEmail">Email *</label>
+                                    <input type="email" id="customerEmail" placeholder="name@example.com">
+                                </div>
+                                <div>
+                                    <label for="customerPhone">Phone *</label>
+                                    <input type="tel" id="customerPhone" placeholder="0801xxxxxxx" maxlength="11">
+                                </div>
+                                <div>
+                                    <label for="customerNIN">NIN *</label>
+                                    <input type="text" id="customerNIN" placeholder="National ID" maxlength="11">
+                                </div>
+                                <div class="full-width">
+                                    <label for="customerAddress">Address *</label>
+                                    <input type="text" id="customerAddress" placeholder="Residential address">
+                                </div>
+                                <div>
+                                    <label for="employer">Employer *</label>
+                                    <input type="text" id="employer" placeholder="Employer name">
+                                </div>
+                                <div>
+                                    <label for="originatingTP">Originating TP *</label>
+                                    <input type="text" id="originatingTP" placeholder="Originating TP">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="section-header">
+                            <h3>PFA Details</h3>
+                            <p class="section-sub">PFA, PEN, RSA Statement and balances</p>
+                        </div>
+                        <div class="section-body">
+                            <div class="customer-input-grid">
+                                <div>
+                                    <label for="pfa">PFA *</label>
+                                    <input type="text" id="pfa" placeholder="PFA name">
+                                </div>
+                                <div>
+                                    <label for="penNo">PEN No *</label>
+                                    <input type="text" id="penNo" placeholder="e.g. penXXXXXXXXXXXX" maxlength="15">
+                                </div>
+                                <div>
+                                    <label for="rsaStatementDate">RSA Statement Date *</label>
+                                    <input type="date" id="rsaStatementDate">
+                                </div>
+                                <div>
+                                    <label for="rsaBalance">RSA Balance *</label>
+                                    <input type="text" inputmode="decimal" id="rsaBalance" placeholder="0.00">
+                                </div>
+                                <div>
+                                    <label>25% of RSA Balance</label>
+                                    <div class="currency-field">
+                                        <span class="formatted-currency" id="rsa25Formatted"></span>
+                                        <input type="hidden" id="rsa25Percent">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <div class="section-header">
+                            <h3>Property Details</h3>
+                            <p class="section-sub">Type, value, loan and house allocation</p>
+                        </div>
+                        <div class="section-body">
+                            <div class="customer-input-grid">
+                                <div>
+                                    <label for="propertyType">Property Type (auto)</label>
+                                    <input type="text" id="propertyType" readonly placeholder="Auto-selected">
+                                </div>
+                                <div>
+                                    <label>Property Value</label>
+                                    <div class="currency-field">
+                                        <span class="formatted-currency" id="propertyValueFormatted"></span>
+                                        <input type="hidden" id="propertyValue">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label>Facility Fee</label>
+                                    <div class="currency-field">
+                                        <span class="formatted-currency" id="facilityFeeFormatted"></span>
+                                        <input type="hidden" id="facilityFee">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label for="tenor">Tenor (years)</label>
+                                    <input type="number" id="tenor" readonly>
+                                </div>
+                                <div>
+                                    <label>Loan Amount</label>
+                                    <div class="currency-field">
+                                        <span class="formatted-currency" id="loanAmountFormatted"></span>
+                                        <input type="hidden" id="loanAmount">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button class="submit-btn" id="saveDetailsBtn">
+                            <i class="fas fa-save"></i> Save Details
+                        </button>
+                        <button class="cancel-btn" id="resetDetailsBtn">
+                            <i class="fas fa-undo"></i> Reset
+                        </button>
+                    </div>
+                </div>
+
+                <div class="document-grid-section">
+                    <h3>Required Documents</h3>
+                    <div class="batch-upload-bar">
+                        <button id="batchUploadBtn" class="upload-btn" disabled>
+                            <i class="fas fa-file-upload"></i> Batch Upload
+                        </button>
+                        <small>Save details first to enable batch upload (Max 1.5MB per file)</small>
+                        <input type="file" id="batchFileInput" accept=".pdf,.jpg,.jpeg,.png" multiple hidden>
+                    </div>
+                    <div class="document-grid" id="documentGrid"></div>
+                </div>
+
+                <div class="document-grid-section">
+                    <h3>Optional Documents</h3>
+                    <div class="document-grid" id="optionalDocumentGrid"></div>
+                </div>
+
+                <div class="submit-section">
+                    <div class="progress-indicator">
+                        <span id="uploadedCount">0</span>/<span id="totalCount">16</span> documents ready
+                    </div>
+                    <button class="submit-btn" id="submitCustomerBtn" disabled>
+                        <i class="fas fa-check-circle"></i> Submit All Documents
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="editModal" class="modal">
+        <div class="modal-content large-modal">
+            <div class="modal-header">
+                <h2><i class="fas fa-edit"></i> Correct & Re-upload</h2>
+                <button class="close-btn" id="closeEditModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="customer-info">
+                    <h3 id="editCustomerName"></h3>
+                    <div class="rejection-box" id="rejectionComment"></div>
+                </div>
+                <div class="document-grid-section">
+                    <h3>Update Documents</h3>
+                    <div class="document-grid" id="editDocumentGrid"></div>
+                </div>
+                <div class="submit-section">
+                    <button class="submit-btn" id="submitEditBtn">
+                        <i class="fas fa-upload"></i> Re-upload Corrected Files
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Single Upload Modal -->
+    <div id="singleUploadModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="uploadModalTitle">Upload Document</h2>
+                <button class="close-btn" id="closeSingleModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="document-info">
+                    <h3 id="uploadDocType"></h3>
+                </div>
+                <div class="upload-area" id="singleUploadArea">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <p>Drag file here or <span class="browse-text">browse</span></p>
+                    <p class="file-size-limit">Max file size: 1.5MB</p>
+                    <input type="file" id="singleFileInput" accept=".pdf,image/*" hidden>
+                </div>
+                <div class="file-preview" id="singleFilePreview"></div>
+                <div class="modal-footer">
+                    <button class="cancel-btn" id="cancelSingleBtn">Cancel</button>
+                    <button class="upload-btn" id="confirmSingleUpload" disabled>Upload File</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Viewer Modal -->
+    <div id="viewerModal" class="modal">
+        <div class="modal-content viewer-content">
+            <div class="viewer-header">
+                <h3 id="viewerFileName"></h3>
+                <button class="close-btn" id="closeViewer">&times;</button>
+            </div>
+            <div class="viewer-body">
+                <iframe id="documentViewer" frameborder="0"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <!-- Batch Mapping Modal -->
+    <div id="batchMappingModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-link"></i> Map Files to Document Slots</h2>
+                <button class="close-btn" id="closeBatchMappingBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Review and assign each uploaded file to a document type. You can skip files you don't want to upload.</p>
+                <div id="batchMappingList" class="batch-mapping-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="cancel-btn" id="cancelBatchMapping">Cancel</button>
+                <button class="upload-btn" id="confirmBatchMapping">Upload Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Global Track Search Modal -->
+    <div id="globalTrackModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header track-header">
+                <h2><i class="fas fa-search-location"></i> Track Application</h2>
+                <button class="close-btn" id="closeGlobalTrackModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="track-description">Search for any application by ID or Customer Name</p>
+
+                <div class="search-type-selector">
+                    <label>Search by:</label>
+                    <select id="trackSearchType">
+                        <option value="id">Application ID</option>
+                        <option value="name" selected>Customer Name</option>
+                    </select>
+                </div>
+
+                <div class="search-input-group">
+                    <input type="text" id="trackSearchInput" placeholder="Enter search term...">
+                </div>
+
+                <div class="search-actions">
+                    <button class="cancel-btn" id="cancelGlobalTrack">Cancel</button>
+                    <button class="upload-btn" id="searchTrackBtn">
+                        <i class="fas fa-search"></i> Search
+                    </button>
+                </div>
+
+                <!-- Search Results Section -->
+                <div id="trackSearchResults" class="search-results" style="display: none;">
+                    <h3>Search Results</h3>
+                    <div id="trackResultsList" class="results-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loan Calculator Modal (Simplified) -->
+    <div id="loanCalculatorModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header calculator-header">
+                <h2><i class="fas fa-calculator"></i> RSA Loan Calculator</h2>
+                <button class="close-btn" id="closeLoanCalcModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label for="calcRsaBalance">RSA Balance (₦)</label>
+                    <input type="text" id="calcRsaBalance" placeholder="Enter RSA balance (min ₦4,000,000)">
+                </div>
+
+                <button id="calculateLoanBtn" class="calculate-btn">
+                    <i class="fas fa-calculator"></i> Calculate
+                </button>
+
+                <!-- Results Section -->
+                <div id="calcResults" class="calc-results" style="display: none;">
+                    <h4>Calculation Results</h4>
+                    <div class="results-grid">
+                        <div class="result-item">
+                            <span class="result-label">25% of RSA:</span>
+                            <span class="result-value" id="calc25Percent">₦0.00</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">Facility Fee:</span>
+                            <span class="result-value" id="calcFacilityFee">₦0.00</span>
+                        </div>
+                        <div class="result-item full-width">
+                            <span class="result-label">Property Type:</span>
+                            <span class="result-value" id="calcPropertyType">-</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">Property Value:</span>
+                            <span class="result-value" id="calcPropertyValue">₦0.00</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">Loan Amount:</span>
+                            <span class="result-value highlight" id="calcLoanAmount">₦0.00</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="cancel-btn" id="closeLoanCalcBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="globalLoader" class="loading-overlay">
+        <div class="spinner-circle"></div>
+        <div class="loading-text" id="loaderText">Processing...</div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="notification" class="notification"></div>
+
+    <!-- ========== SCRIPTS - ORDER IS CRITICAL ========== -->
+    <!-- 1. Firebase Config (no dependencies) -->
+    <script type="module" src="js/firebase-config.js"></script>
+
+    <!-- 2. jsPDF - MUST LOAD BEFORE MODULE SCRIPTS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <!-- 3. jsPDF Verification Script -->
+    <script>
+        window.jsPDFReady = false;
+        (function checkJsPDF() {
+            if (window.jspdf && window.jspdf.jsPDF) {
+                window.jsPDFReady = true;
+                // Make it available globally in the format our code expects
+                window.jsPDF = window.jspdf.jsPDF;
+            } else if (window.jsPDF && typeof window.jsPDF === 'function') {
+                window.jspdf = window.jspdf || {};
+                window.jspdf.jsPDF = window.jsPDF;
+                window.jsPDFReady = true;
+            } else {
+                setTimeout(checkJsPDF, 100);
+            }
+        })();
+    </script>
+
+    <!-- 4. Auth Module -->
+    <script type="module" src="js/auth.js"></script>
+
+    <!-- 5. Backblaze Storage -->
+    <script type="module" src="js/backblaze-storage.js"></script>
+
+    <!-- 6. Document Uploader (main upload logic) -->
+    <script type="module" src="js/document-uploader.js"></script>
+
+    <!-- 7. Dashboard (Track & Calculator only) -->
+    <script type="module" src="js/uploader-dashboard.js"></script>
+
+    <script>
+        // `window.signOutUser` is provided by `js/auth.js` (Firebase sign-out).
+
+        // Mobile sidebar functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const menuToggle = document.getElementById('menuToggle');
+            const sidebarClose = document.getElementById('sidebarClose');
+            const sidebarOverlay = document.getElementById('sidebarOverlay');
+            const sidebar = document.getElementById('sidebar');
+
+            function openSidebar() {
+                sidebar.classList.add('active');
+                sidebarOverlay.classList.add('active');
+                document.body.style.overflow = 'hidden';
+            }
+
+            function closeSidebar() {
+                sidebar.classList.remove('active');
+                sidebarOverlay.classList.remove('active');
+                document.body.style.overflow = '';
+            }
+
+            if (menuToggle) {
+                menuToggle.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    if (sidebar.classList.contains('active')) {
+                        closeSidebar();
+                    } else {
+                        openSidebar();
+                    }
+                });
+            }
+
+            if (sidebarClose) {
+                sidebarClose.addEventListener('click', closeSidebar);
+            }
+
+            if (sidebarOverlay) {
+                sidebarOverlay.addEventListener('click', closeSidebar);
+            }
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && sidebar.classList.contains('active')) {
+                    closeSidebar();
+                }
+            });
+        });
+    </script>
+
+<script>
+// FORCE TRACK BUTTON TO WORK - ADD THIS AT THE VERY BOTTOM
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(function() {
+        document.body.addEventListener('click', function(e) {
+            const trackBtn = e.target.closest('.track-btn');
+            if (trackBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                // Get ID from onclick attribute
+                const onclickAttr = trackBtn.getAttribute('onclick');
+                if (onclickAttr) {
+                    const match = onclickAttr.match(/'([^']+)'/);
+                    if (match && match[1]) {
+                        const id = match[1];
+
+                        // Try both possible functions
+                        if (typeof window.showApplicationTrack === 'function') {
+                            window.showApplicationTrack(id);
+                        } else {
+                            alert('Track Application ID: ' + id + '\n\nFunction not available yet. Check console.');
+                        }
+                        return false;
+                    }
+                }
+
+                // If no onclick, try data-id
+                const id = trackBtn.getAttribute('data-id');
+                if (id) {
+                    if (typeof window.showApplicationTrack === 'function') {
+                        window.showApplicationTrack(id);
+                    } else {
+                        alert('Track Application ID: ' + id);
+                    }
+                }
+            }
+        });
+
+    }, 2000);
+});
+</script>
+
+<script>
+// DIRECT FIX FOR TRACK BUTTONS - ADD THIS AT THE VERY END
+(function() {
+    // Wait for page to load
+    window.addEventListener('load', function() {
+
+        // Direct click handler on document
+        document.addEventListener('click', function(e) {
+            // Check if clicked element or parent is a track button
+            const trackBtn = e.target.closest('.track-btn');
+            if (!trackBtn) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+
+            // Get the submission ID from the onclick attribute
+            const onclickAttr = trackBtn.getAttribute('onclick');
+            if (!onclickAttr) {
+                alert('Track button missing ID');
+                return;
+            }
+
+            // Extract ID using regex
+            const match = onclickAttr.match(/'([^']+)'/);
+            if (!match || !match[1]) {
+                alert('Could not extract ID');
+                return;
+            }
+
+            const submissionId = match[1];
+
+            // Try to use the existing function
+            if (typeof window.showApplicationTrack === 'function') {
+                window.showApplicationTrack(submissionId);
+            }
+            // Try to use the function from document-uploader
+            else if (window.documentUploader && typeof window.documentUploader.showApplicationTrack === 'function') {
+                window.documentUploader.showApplicationTrack(submissionId);
+            }
+            // Fallback - show alert with ID
+            else {
+                alert('Track Application ID: ' + submissionId + '\n\nThe tracking feature is loading. Please try again in a moment.');
+            }
+        });
+
+
+    });
+})();
+</script>
+</body>
+</html>

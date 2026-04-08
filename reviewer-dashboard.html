@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=0.75, maximum-scale=1.0, user-scalable=yes">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>CMBank RSA - Reviewer Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/reviewer-dashboard.css">
+    <!-- PDF-Lib for client-side PDF merging -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    </head>
+    <body>
+    <!-- Security utilities loaded after DOM ready -->
+    <script src="js/security-utils.js"></script>
+    <div class="app-container">
+        <!-- Mobile Header -->
+        <header class="mobile-header">
+            <button class="menu-toggle" id="menuToggle" aria-label="Toggle navigation" aria-expanded="false">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="mobile-logo">
+                <i class="fas fa-landmark"></i>
+                <span>CMBank RSA Reviewer</span>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <button class="sign-out-btn mobile" id="forceRefreshBtnMobile" title="Refresh">
+                    <i class="fas fa-arrows-rotate"></i>
+                </button>
+                <button class="sign-out-btn mobile" onclick="signOutUser()" title="Sign Out">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Overlay for mobile sidebar -->
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="logo">
+                <i class="fas fa-landmark"></i>
+                <span>CMBank RSA</span>
+            </div>
+
+            <div class="user-profile">
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='16'%3E👤%3C/text%3E%3C/svg%3E" alt="User" id="userAvatar">
+                <div class="user-info">
+                    <span id="userName">Loading...</span>
+                    <small id="userRole">Reviewer</small>
+                </div>
+                <button onclick="signOutUser()" class="sign-out-btn" title="Sign Out">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-tab="overview">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="pending">
+                    <i class="fas fa-clock"></i>
+                    <span>Pending Review</span>
+                    <span class="badge" id="pendingCount">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="approved">
+                    <i class="fas fa-check-circle"></i>
+                    <span>Approved</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="rejected">
+                    <i class="fas fa-times-circle"></i>
+                    <span>Rejected</span>
+                </a>
+            </nav>
+            
+            <!-- Mobile Close Button -->
+            <button class="sidebar-close" id="sidebarClose" aria-label="Close menu">
+                <i class="fas fa-times"></i>
+            </button>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="content-header">
+                <h1 id="pageTitle">Dashboard</h1>
+                <button id="forceRefreshBtn" class="action-btn" style="padding: 10px 14px; font-size: 13px;" title="Refresh">
+                    <i class="fas fa-arrows-rotate"></i> Refresh
+                </button>
+            </header>
+
+            <!-- Dashboard Tab -->
+            <div id="overviewTab" class="tab-content active">
+                <div class="overview-cards" style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:20px;">
+                    <div class="stat-card approved" id="vCardApproved" style="flex:1; min-width:160px; background:#fff; padding:16px; border-radius:10px; box-shadow:0 4px 8px rgba(0,0,0,0.04);">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <div style="font-size:12px; color:#6b7280;">Approved</div>
+                                <div id="vCardApprovedCount" style="font-size:24px; font-weight:700; color:#10b981;">0</div>
+                            </div>
+                            <div><i class="fas fa-check-circle" style="font-size:22px; color:#10b981;"></i></div>
+                        </div>
+                    </div>
+                    <div class="stat-card pending" id="vCardPending" style="flex:1; min-width:160px; background:#fff; padding:16px; border-radius:10px; box-shadow:0 4px 8px rgba(0,0,0,0.04);">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <div style="font-size:12px; color:#6b7280;">Pending</div>
+                                <div id="vCardPendingCount" style="font-size:24px; font-weight:700; color:#f59e0b;">0</div>
+                            </div>
+                            <div><i class="fas fa-clock" style="font-size:22px; color:#f59e0b;"></i></div>
+                        </div>
+                    </div>
+                    <div class="stat-card rejected" id="vCardRejected" style="flex:1; min-width:160px; background:#fff; padding:16px; border-radius:10px; box-shadow:0 4px 8px rgba(0,0,0,0.04);">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <div style="font-size:12px; color:#6b7280;">Rejected</div>
+                                <div id="vCardRejectedCount" style="font-size:24px; font-weight:700; color:#ef4444;">0</div>
+                            </div>
+                            <div><i class="fas fa-times-circle" style="font-size:22px; color:#ef4444;"></i></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="recent-section" style="background:#fff; padding:12px; border-radius:10px; box-shadow:0 4px 12px rgba(0,0,0,0.04); margin-bottom:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <h3 style="margin:0">Recent Reviews</h3>
+                        <input id="vRecentSearch" placeholder="Search by customer" style="padding:6px 8px; border-radius:8px; border:1px solid #e5e7eb; min-width:180px;">
+                    </div>
+                    <div style="overflow:auto;">
+                        <table class="customers-table" id="vRecentTable" style="min-width:700px;">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Action</th>
+                                    <th>Date/Time</th>
+                                    <th>Uploaded By</th>
+                                    <th>View</th>
+                                </tr>
+                            </thead>
+                            <tbody id="vRecentTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pending Tab -->
+            <div id="pendingTab" class="tab-content">
+                <div class="table-section">
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer Name</th>
+                                    <th>Upload Date/Time</th>
+                                    <th>Document Types</th>
+                                    <th>Uploaded By</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pendingTableBody">
+                                <tr><td colspan="6" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Approved Tab -->
+            <div id="approvedTab" class="tab-content">
+                <div class="table-section">
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer Name</th>
+                                    <th>Upload Date/Time</th>
+                                    <th>Uploaded By</th>
+                                    <th>Approved By</th>
+                                    <th>Approved Date/Time</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="approvedTableBody">
+                                <tr><td colspan="6" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rejected Tab -->
+            <div id="rejectedTab" class="tab-content">
+                <div class="table-section">
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer Name</th>
+                                    <th>Upload Date/Time</th>
+                                    <th>Document Types</th>
+                                    <th>Uploaded By</th>
+                                    <th>Rejection Comment</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rejectedTableBody">
+                                <tr><td colspan="6" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Comment Modal -->
+    <div id="commentModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Review Document</h2>
+                <button class="close-btn" id="closeCommentModal">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="document-info">
+                    <h3 id="modalCustomerName"></h3>
+                    <p id="modalDocumentType"></p>
+                </div>
+
+                <div class="comment-area">
+                    <label for="commentText">
+                        <i class="fas fa-comment"></i>
+                        Comment (required for rejection):
+                    </label>
+                    <textarea id="commentText" placeholder="Enter your feedback here..." rows="4"></textarea>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button class="cancel-btn" id="cancelComment">Cancel</button>
+                <button class="reject-btn" id="rejectDocument">
+                    <i class="fas fa-times"></i> Reject
+                </button>
+                <button class="approve-btn" id="approveDocument">
+                    <i class="fas fa-check"></i> Approve
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Document Viewer Modal - WITH ZOOM CONTROLS AND NAVIGATION -->
+    <div id="viewerModal" class="modal">
+        <div class="modal-content viewer-content">
+            <div class="viewer-header">
+                <h3 id="viewerFileName"></h3>
+                <div class="viewer-controls">
+                    <!-- Document Navigation -->
+                    <div class="viewer-nav" id="viewerNav"></div>
+                    <div class="viewer-context-box" id="viewerContextBox" style="display:none;"></div>
+                    <!-- Zoom Controls -->
+                    <div class="zoom-controls">
+                        <button class="zoom-btn" id="zoomOutBtn" title="Zoom Out">
+                            <i class="fas fa-search-minus"></i>
+                        </button>
+                        <span class="zoom-level" id="zoomLevel">100%</span>
+                        <button class="zoom-btn" id="zoomInBtn" title="Zoom In">
+                            <i class="fas fa-search-plus"></i>
+                        </button>
+                        <button class="zoom-btn" id="zoomResetBtn" title="Reset Zoom">
+                            <i class="fas fa-redo-alt"></i>
+                        </button>
+                    </div>
+                    <button class="action-btn download-btn-small" id="viewerDownloadBtn" style="display: none;">
+                        <i class="fas fa-download"></i> Download
+                    </button>
+                    <button class="close-btn" id="closeViewer">&times;</button>
+                </div>
+            </div>
+            <div class="viewer-body">
+                <iframe id="documentViewer" frameborder="0" title="Document Viewer"></iframe>
+            </div>
+            <!-- Download section for merged PDFs -->
+            <div class="viewer-download-section" id="viewerDownloadSection" style="display: none;">
+                <button class="action-btn download-merged-btn" id="viewerMergedDownloadBtn">
+                    <i class="fas fa-download"></i> Download Merged PDF to Folder
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Customer Details Modal -->
+    <div id="customerDetailsModal" class="modal">
+        <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h2 id="customerDetailsTitle">Customer Details</h2>
+                <button class="close-btn" id="closeCustomerDetails">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <!-- Customer Information Section -->
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3>Personal Information</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px;">
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Customer Name</label>
+                            <div id="detailCustomerName" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Date of Birth</label>
+                            <div id="detailDOB" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Account No</label>
+                            <div id="detailAccountNo" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">NIN</label>
+                            <div id="detailNIN" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Email</label>
+                            <div id="detailEmail" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Phone</label>
+                            <div id="detailPhone" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div style="grid-column: 1 / -1;">
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Address</label>
+                            <div id="detailAddress" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Employer</label>
+                            <div id="detailEmployer" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Originating TP</label>
+                            <div id="detailOriginatingTP" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">PFA</label>
+                            <div id="detailPFA" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">PEN No</label>
+                            <div id="detailPenNo" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RSA Information Section -->
+                <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3>RSA Information</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px;">
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">RSA Balance</label>
+                            <div id="detailRSABalance" style="font-size: 18px; color: #003366; margin-top: 5px; font-weight: 600;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">RSA Statement Date</label>
+                            <div id="detailRSADate" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">25% RSA</label>
+                            <div id="detailRSA25" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Property Information Section -->
+                <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3>Property / Loan</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px;">
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Property Type</label>
+                            <div id="detailPropertyType" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Tenor</label>
+                            <div id="detailTenor" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Property Value</label>
+                            <div id="detailPropertyValue" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Facility Fee</label>
+                            <div id="detailFacilityFee" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Loan Amount</label>
+                            <div id="detailLoanAmount" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Submission Information -->
+                <div style="background: #fef5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3>Submission Information</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px;">
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Uploaded By</label>
+                            <div id="detailUploadedBy" style="font-size: 14px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Upload Date/Time</label>
+                            <div id="detailUploadedAt" style="font-size: 14px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Status</label>
+                            <div id="detailStatus" style="font-size: 14px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Reviewed By</label>
+                            <div id="detailReviewedBy" style="font-size: 14px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Documents Section -->
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                    <h3>Submitted Documents</h3>
+                    <div id="customerDocumentsList" style="margin-top: 15px;">
+                        <!-- Documents will be inserted here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 15px; border-top: 1px solid #e5e7eb; display: flex; justify-content: flex-end; gap: 10px;">
+                <button class="close-btn" id="closeCustomerDetailsFooter" style="padding: 8px 16px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Merge Modal - WIDER LAYOUT with improved UI -->
+    <div id="mergeModal" class="modal">
+        <div class="modal-content merge-modal-content">
+            <div class="modal-header">
+                <h2>
+                    <i class="fas fa-compress-alt"></i>
+                    Merge Documents - <span id="mergeCustomerName"></span>
+                </h2>
+                <button class="close-btn" id="closeMergeModal">&times;</button>
+            </div>
+
+            <div class="modal-body merge-modal-body">
+                <!-- Left Column - Upload Section -->
+                <div class="merge-upload-column">
+                    <h3>
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        Add More Documents
+                    </h3>
+                    
+                    <div class="upload-additional-section">
+                        <div class="upload-area-large" id="additionalUploadArea">
+                            <i class="fas fa-plus-circle"></i>
+                            <p>Drag & drop files here or <span class="browse-text">browse</span></p>
+                            <p class="file-limit-note">Max 10 files (PDF, JPG, PNG)</p>
+                            <input type="file" id="additionalFileInput" multiple accept=".pdf,.jpg,.jpeg,.png" hidden>
+                        </div>
+                        
+                        <div id="additionalFilesPreview" class="files-preview-container">
+                            <!-- File previews will be shown here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column - Merge List -->
+                <div class="merge-list-column">
+                    <h3>
+                        <i class="fas fa-list"></i>
+                        Select Documents to Merge
+                    </h3>
+                    
+                    <div id="mergeList" class="merge-list-container">
+                        <!-- Documents will be inserted here -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer merge-modal-footer">
+                <button class="cancel-btn" id="cancelMerge">Cancel</button>
+                <button class="merge-btn" id="mergeDocumentsBtn">
+                    <i class="fas fa-compress-alt"></i> Merge Selected (<span id="selectedCount">0</span>)
+                </button>
+            </div>
+
+            <!-- Download section (shown after merge) -->
+            <div class="merge-download-section" id="mergeDownloadSection" style="display: none;">
+                <!-- Will be populated dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- FULL SCREEN LOADING SPINNER -->
+    <div id="globalLoader" class="loading-overlay">
+        <div class="spinner-circle"></div>
+        <div class="loading-text" id="loaderText">Processing...</div>
+    </div>
+
+    <!-- Notification -->
+    <div id="notification" class="notification"></div>
+
+    <script type="module" src="js/firebase-config.js"></script>
+    <script type="module" src="js/reviewer-dashboard.js?v=20260310"></script>
+    
+    <script>
+        // Mobile sidebar functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const menuToggle = document.getElementById('menuToggle');
+            const sidebarClose = document.getElementById('sidebarClose');
+            const sidebarOverlay = document.getElementById('sidebarOverlay');
+            const sidebar = document.getElementById('sidebar');
+            
+            function openSidebar() {
+                sidebar.classList.add('active');
+                sidebarOverlay.classList.add('active');
+                document.body.style.overflow = 'hidden';
+                if (menuToggle) menuToggle.setAttribute('aria-expanded', 'true');
+            }
+            
+            function closeSidebar() {
+                sidebar.classList.remove('active');
+                sidebarOverlay.classList.remove('active');
+                document.body.style.overflow = '';
+                if (menuToggle) menuToggle.setAttribute('aria-expanded', 'false');
+            }
+            
+            if (menuToggle) {
+                menuToggle.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    if (sidebar.classList.contains('active')) {
+                        closeSidebar();
+                    } else {
+                        openSidebar();
+                    }
+                });
+            }
+            
+            if (sidebarClose) {
+                sidebarClose.addEventListener('click', closeSidebar);
+            }
+            
+            if (sidebarOverlay) {
+                sidebarOverlay.addEventListener('click', closeSidebar);
+            }
+            
+            // Close sidebar on ESC key
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && sidebar.classList.contains('active')) {
+                    closeSidebar();
+                }
+            });
+            
+            // Tab switching with sidebar close on mobile
+            document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
+                item.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const tabId = this.dataset.tab;
+                    
+                    // Update active states
+                    document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Show selected tab
+                    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+                    document.getElementById(tabId + 'Tab').classList.add('active');
+                    
+                    // Update page title
+                    const titles = {
+                        'pending': 'Pending Documents Review',
+                        'approved': 'Approved Documents',
+                        'rejected': 'Rejected Documents'
+                    };
+                    document.getElementById('pageTitle').textContent = titles[tabId];
+                    
+                    // Close sidebar on mobile
+                    if (window.innerWidth <= 768) {
+                        closeSidebar();
+                    }
+                });
+            });
+            
+            // Handle window resize
+            let resizeTimer;
+            window.addEventListener('resize', function() {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(function() {
+                    if (window.innerWidth > 768) {
+                        sidebar.classList.remove('active');
+                        sidebarOverlay.classList.remove('active');
+                        document.body.style.overflow = '';
+                        if (menuToggle) menuToggle.setAttribute('aria-expanded', 'false');
+                    }
+                }, 250);
+            });
+
+            // Make signOutUser globally available
+            window.signOutUser = function() {
+                window.location.href = 'index.html';
+            };
+        });
+    </script>
+</body>
+</html>

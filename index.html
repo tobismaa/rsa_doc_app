@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=0.7, maximum-scale=1.0, user-scalable=yes">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>CMBank RSA Document Portal</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/index.css">
+    <!-- Security: DOMPurify for XSS protection -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+    <style>
+        /* Security: Disable text selection and inspect */
+        body {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            animation: modalFadeIn 0.3s ease;
+        }
+        
+        @keyframes modalFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #003366;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .modal-message {
+            margin-top: 20px;
+            font-size: 16px;
+            color: #333;
+        }
+        
+        .modal-success {
+            color: #28a745;
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+        
+        .modal-error {
+            color: #dc3545;
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+        
+        .modal-button {
+            background: #003366;
+            color: white;
+            border: none;
+            padding: 10px 30px;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: background 0.3s;
+        }
+        
+        .modal-button:hover {
+            background: #004080;
+        }
+
+        /* Field validation styles */
+        .field-note {
+            color: #666;
+            font-size: 12px;
+            margin-top: 5px;
+            font-style: italic;
+        }
+
+        .input-error {
+            border-color: #dc3545 !important;
+        }
+
+        .error-message {
+            color: #dc3545;
+            font-size: 12px;
+            margin-top: 5px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+    </style>
+</head>
+<body class="white-bg" oncontextmenu="return false" onkeydown="return disableKeys(event)">
+    <!-- Security Script -->
+    <script>
+        (function() {
+            // Disable console in production
+            if (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
+                window.console = {
+                    log: function() {},
+                    warn: function() {},
+                    error: function() {},
+                    info: function() {},
+                    debug: function() {}
+                };
+            }
+            
+            // Prevent right click
+            document.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+                return false;
+            });
+            
+            // Prevent F12, Ctrl+Shift+I, Ctrl+U
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'F12' || 
+                    (e.ctrlKey && e.shiftKey && e.key === 'I') || 
+                    (e.ctrlKey && e.shiftKey && e.key === 'J') || 
+                    (e.ctrlKey && e.key === 'U') ||
+                    (e.ctrlKey && e.shiftKey && e.key === 'C')) {
+                    e.preventDefault();
+                    return false;
+                }
+            });
+        })();
+
+        function disableKeys(e) {
+            if (e.key === 'F12' || 
+                (e.ctrlKey && e.shiftKey && e.key === 'I') || 
+                (e.ctrlKey && e.shiftKey && e.key === 'J') || 
+                (e.ctrlKey && e.key === 'U')) {
+                e.preventDefault();
+                return false;
+            }
+            return true;
+        }
+    </script>
+
+    <!-- Spinner/Message Modal -->
+    <div id="messageModal" class="modal">
+        <div class="modal-content">
+            <div id="modalSpinner" class="spinner"></div>
+            <div id="modalIcon" class="modal-success" style="display: none;">
+                <i class="fas fa-check-circle"></i>
+            </div>
+            <div id="modalErrorIcon" class="modal-error" style="display: none;">
+                <i class="fas fa-times-circle"></i>
+            </div>
+            <div id="modalMessage" class="modal-message">Processing...</div>
+            <button id="modalCloseBtn" class="modal-button" style="display: none;">Close</button>
+        </div>
+    </div>
+
+    <div class="auth-container white">
+        <div class="auth-box white">
+            <div class="logo">
+                <i class="fas fa-landmark" style="color: #003366;"></i>
+                <span style="color: #003366;">CMBank RSA</span>
+            </div>
+
+            <!-- Tab Switcher -->
+            <div class="auth-tabs">
+                <button class="tab-btn active" id="loginTab">Login</button>
+                <button class="tab-btn" id="signupTab">Sign Up</button>
+            </div>
+
+            <!-- Login Form -->
+            <div id="loginForm" class="auth-form active">
+                <h2>Welcome Back</h2>
+                <p>Sign in to your account</p>
+
+                <form id="loginFormElement" autocomplete="off">
+                    <div class="form-group">
+                        <label for="loginEmail">
+                            <i class="fas fa-envelope"></i>
+                            Email
+                        </label>
+                        <input type="email" id="loginEmail" required placeholder="Enter your email" 
+                               autocomplete="off" maxlength="100">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="loginPassword">
+                            <i class="fas fa-lock"></i>
+                            Password
+                        </label>
+                        <input type="password" id="loginPassword" required placeholder="Enter your password" 
+                               autocomplete="off" maxlength="50">
+                    </div>
+
+                    <button type="submit" class="auth-submit-btn">Sign In</button>
+                </form>
+
+                <p class="auth-note">Only authorized CMBank personnel can access</p>
+            </div>
+
+            <!-- Signup Form -->
+            <div id="signupForm" class="auth-form">
+                <h2>Create Account</h2>
+                <p>Fill in your details for approval</p>
+
+                <form id="signupFormElement" autocomplete="off">
+                    <div class="form-group">
+                        <label for="fullName">
+                            <i class="fas fa-user"></i>
+                            Full Name
+                        </label>
+                        <input type="text" id="fullName" required placeholder="Enter your full name" 
+                               maxlength="100" 
+                               onkeypress="return (event.charCode >= 65 && event.charCode <= 90) || (event.charCode >= 97 && event.charCode <= 122) || event.charCode === 32">
+                        <div class="field-note">Only letters and spaces allowed</div>
+                        <div id="nameError" class="error-message"></div>
+                    </div>
+
+
+                    <div class="form-group">
+                        <label for="signupEmail">
+                            <i class="fas fa-envelope"></i>
+                            Official Email
+                        </label>
+                        <input type="email" id="signupEmail" required placeholder="Enter your official email" 
+                               maxlength="100" 
+                               oninput="this.value = this.value.toLowerCase()">
+                        <div class="field-note">Use your @cmbankng.com email</div>
+                        <div id="emailError" class="error-message"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="signupPassword">
+                            <i class="fas fa-lock"></i>
+                            Password
+                        </label>
+                        <input type="password" id="signupPassword" required placeholder="Create password" 
+                               maxlength="50" minlength="6">
+                        <div class="field-note">Minimum 6 characters</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="confirmPassword">
+                            <i class="fas fa-lock"></i>
+                            Confirm Password
+                        </label>
+                        <input type="password" id="confirmPassword" required placeholder="Confirm password" 
+                               maxlength="50">
+                        <div id="passwordError" class="error-message"></div>
+                    </div>
+
+                    <button type="submit" class="auth-submit-btn">Submit for Approval</button>
+                </form>
+
+                <p class="form-note">Your account will be activated upon admin approval</p>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="js/firebase-config.js"></script>
+    <script type="module" src="js/auth.js?v=20260308"></script>
+</body>
+</html>
