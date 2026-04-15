@@ -265,22 +265,19 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
         }
 
         const subRef = adminDb.collection('submissions').doc(submissionId);
-        const chatRef = adminDb.collection('applicationChats').doc(submissionId);
-        const [subSnap, chatSnap] = await Promise.all([subRef.get(), chatRef.get()]);
+        const subSnap = await subRef.get();
         if (!subSnap.exists) {
             return res.status(404).json({ ok: false, error: 'Submission not found' });
         }
         const sub = subSnap.data() || {};
-        const chat = chatSnap.exists ? (chatSnap.data() || {}) : {};
 
+        // Strict live participant set only from current submission workflow.
+        // Avoid stale historical chat/admin participant lists.
         const participantEmails = Array.from(new Set([
             safeLowerEmail(sub.uploadedBy),
             safeLowerEmail(sub.assignedTo),
-            safeLowerEmail(sub.reviewedBy),
             safeLowerEmail(sub.assignedToRSA),
-            safeLowerEmail(sub.assignedToPayment),
-            ...(Array.isArray(chat.participants) ? chat.participants.map(safeLowerEmail) : []),
-            ...(Array.isArray(chat.adminParticipants) ? chat.adminParticipants.map(safeLowerEmail) : [])
+            safeLowerEmail(sub.assignedToPayment)
         ].filter(Boolean)));
 
         const senderCanAccess = participantEmails.includes(senderEmail);
@@ -327,11 +324,12 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
             });
         }
 
-        // Exclude super admin from chat notifications/recipients.
+        // Exclude super admin and inactive accounts from chat notifications/recipients.
         recipientEmails = recipientEmails.filter((email) => {
             const user = usersByEmail.get(email);
             const role = normalizeRole(user?.role);
-            return role !== 'super_admin';
+            const status = String(user?.status || '').toLowerCase();
+            return role !== 'super_admin' && status !== 'deactivated' && status !== 'pending';
         });
 
         if (recipientEmails.length === 0) {
