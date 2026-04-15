@@ -379,9 +379,11 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
         });
 
         const badTokens = [];
+        const failedCodes = [];
         response.responses.forEach((r, idx) => {
             if (r.success) return;
             const code = String(r.error?.code || '');
+            if (code) failedCodes.push(code);
             if (
                 code.includes('registration-token-not-registered') ||
                 code.includes('invalid-argument')
@@ -411,7 +413,8 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
                 participantEmails,
                 recipientEmails,
                 usersMatched: Array.from(usersByEmail.keys()),
-                tokenOwners: uniqueOwners.map((x) => x.email)
+                tokenOwners: uniqueOwners.map((x) => x.email),
+                failedCodes
             }
         });
     } catch (err) {
