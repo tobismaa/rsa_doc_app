@@ -292,7 +292,8 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
             }
         }
 
-        const recipientEmails = participantEmails.filter((e) => e !== senderEmail);
+        const recipientEmailsRaw = participantEmails.filter((e) => e !== senderEmail);
+        let recipientEmails = [...recipientEmailsRaw];
         if (recipientEmails.length === 0) {
             return res.json({
                 ok: true,
@@ -326,6 +327,28 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
             });
         }
 
+        // Exclude super admin from chat notifications/recipients.
+        recipientEmails = recipientEmails.filter((email) => {
+            const user = usersByEmail.get(email);
+            const role = normalizeRole(user?.role);
+            return role !== 'super_admin';
+        });
+
+        if (recipientEmails.length === 0) {
+            return res.json({
+                ok: true,
+                sent: 0,
+                reason: 'no-recipients-after-role-filter',
+                debug: {
+                    senderEmail,
+                    participantEmails,
+                    recipientEmailsRaw,
+                    recipientEmails,
+                    usersMatched: Array.from(usersByEmail.keys())
+                }
+            });
+        }
+
         const tokenOwners = [];
         for (const email of recipientEmails) {
             const userData = usersByEmail.get(email);
@@ -348,6 +371,7 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
                 debug: {
                     senderEmail,
                     participantEmails,
+                    recipientEmailsRaw,
                     recipientEmails,
                     usersMatched: Array.from(usersByEmail.keys()),
                     tokenOwners: uniqueOwners.map((x) => x.email)
@@ -411,6 +435,7 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
             debug: {
                 senderEmail,
                 participantEmails,
+                recipientEmailsRaw,
                 recipientEmails,
                 usersMatched: Array.from(usersByEmail.keys()),
                 tokenOwners: uniqueOwners.map((x) => x.email),

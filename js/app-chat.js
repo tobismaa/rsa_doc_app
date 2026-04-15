@@ -564,10 +564,8 @@ async function escalateToAdmin() {
 
   const usersRef = collection(db, 'users');
   const adminSnap = await getDocs(query(usersRef, where('role', '==', 'admin')));
-  const superSnap = await getDocs(query(usersRef, where('role', '==', 'super_admin')));
   const adminEmails = [
-    ...adminSnap.docs.map((d) => String(d.data()?.email || '').toLowerCase()).filter(Boolean),
-    ...superSnap.docs.map((d) => String(d.data()?.email || '').toLowerCase()).filter(Boolean)
+    ...adminSnap.docs.map((d) => String(d.data()?.email || '').toLowerCase()).filter(Boolean)
   ];
   const unique = Array.from(new Set(adminEmails));
 
