@@ -639,7 +639,7 @@ async function triggerServerPush({ submissionId, customerName, messageText }) {
     const base = getEmailApiBaseUrl();
     if (!base || !submissionId || !currentUser) return;
     const idToken = await currentUser.getIdToken();
-    await fetch(`${base}/api/chat/push`, {
+    const res = await fetch(`${base}/api/chat/push`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -651,7 +651,24 @@ async function triggerServerPush({ submissionId, customerName, messageText }) {
         messageText: String(messageText || '').slice(0, 500)
       })
     });
-  } catch (_) {}
+    let data = null;
+    try { data = await res.json(); } catch (_) {}
+
+    if (!res.ok) {
+      const reason = String(data?.error || `HTTP ${res.status}`);
+      showChatNotice(`Push server error: ${reason}`, true);
+      return;
+    }
+
+    const sent = Number(data?.sent || 0);
+    if (sent <= 0) {
+      const reason = String(data?.reason || 'no-recipient-device-token');
+      showChatNotice(`Push not delivered yet: ${reason}`, true);
+    }
+  } catch (error) {
+    const msg = String(error?.message || 'network/cors failure');
+    showChatNotice(`Push request failed: ${msg}`, true);
+  }
 }
 
 window.openApplicationChat = async (submissionId) => {
