@@ -328,6 +328,39 @@ body {
   border-color: var(--cm-primary);
 }
 
+/* Unified sub-tab strip/buttons inside tabs */
+.admin-subtab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.admin-subtab-btn {
+  border: 1px solid #d5dfeb !important;
+  background: #eef3f9 !important;
+  color: #1e293b !important;
+  border-radius: 999px !important;
+  padding: 8px 14px !important;
+  font-size: 13px !important;
+  font-weight: 700;
+  box-shadow: 0 3px 10px rgba(2, 16, 43, 0.06);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.admin-subtab-btn:hover {
+  transform: translateY(-1px);
+  background: #e2ebf7 !important;
+  box-shadow: 0 8px 16px rgba(2, 16, 43, 0.12);
+}
+
+.admin-subtab-btn.active {
+  background: linear-gradient(120deg, #0f3b67, #1e6cb9) !important;
+  color: #ffffff !important;
+  border-color: #0f4d8a !important;
+  box-shadow: 0 10px 18px rgba(15, 59, 103, 0.24);
+}
+
 .report-content {
   display: none;
 }
@@ -549,6 +582,127 @@ body {
   display: block;
 }
 
+/* ==================== KPI CARDS ==================== */
+.overview-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.stat-card {
+  position: relative;
+  background: linear-gradient(160deg, #ffffff 0%, #f7fbff 100%);
+  border: 1px solid #dbe7f5;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 10px 24px rgba(15, 36, 66, 0.08);
+  overflow: hidden;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.stat-card::after {
+  content: "";
+  position: absolute;
+  inset: auto -40px -40px auto;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  opacity: 0.08;
+  pointer-events: none;
+  background: #0f4d8a;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-5px);
+  border-color: #b8d0ec;
+  box-shadow: 0 18px 34px rgba(12, 40, 74, 0.16);
+}
+
+.stat-card:hover::after {
+  opacity: 0.14;
+  transform: scale(1.08);
+}
+
+.stat-card:hover .stat-icon {
+  transform: translateY(-2px) scale(1.04);
+}
+
+.stat-card.pending {
+  border-color: #dce6f8;
+}
+
+.stat-card.approved {
+  border-color: #cfead9;
+}
+
+.stat-card.rejected {
+  border-color: #f4d2d7;
+}
+
+.stat-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.stat-label {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.stat-value {
+  color: #0f172a;
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.stat-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: #ffffff;
+  background: linear-gradient(145deg, #0f4d8a, #0a3a69);
+  box-shadow: 0 10px 18px rgba(11, 58, 105, 0.3);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.stat-card.approved .stat-icon {
+  background: linear-gradient(145deg, #1f8a4d, #16653a);
+  box-shadow: 0 10px 18px rgba(22, 101, 58, 0.3);
+}
+
+.stat-card.rejected .stat-icon {
+  background: linear-gradient(145deg, #d6455d, #a92f44);
+  box-shadow: 0 10px 18px rgba(169, 47, 68, 0.3);
+}
+
+@media screen and (max-width: 768px) {
+  .overview-cards {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .stat-card {
+    padding: 14px;
+  }
+
+  .stat-value {
+    font-size: 24px;
+  }
+}
+
 /* ==================== FILTERS BAR ==================== */
 .filters-bar {
   background: var(--bg-card);
@@ -631,15 +785,56 @@ body {
 /* Users Table */
 .users-table,
 .documents-table,
-.audit-table {
+.audit-table,
+.customers-table {
   width: 100%;
   border-collapse: collapse;
   min-width: 900px;
 }
 
+/* Super Admin - keep Application Redirect contained with controlled horizontal scroll */
+#redirectTab .table-container {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+#redirectTab .documents-table {
+  min-width: 1080px;
+  table-layout: fixed;
+}
+
+#redirectTab .documents-table th,
+#redirectTab .documents-table td {
+  white-space: nowrap;
+}
+
+#redirectTab .documents-table th:nth-child(1),
+#redirectTab .documents-table td:nth-child(1) { width: 180px; }
+#redirectTab .documents-table th:nth-child(2),
+#redirectTab .documents-table td:nth-child(2) { width: 110px; }
+#redirectTab .documents-table th:nth-child(3),
+#redirectTab .documents-table td:nth-child(3),
+#redirectTab .documents-table th:nth-child(4),
+#redirectTab .documents-table td:nth-child(4),
+#redirectTab .documents-table th:nth-child(5),
+#redirectTab .documents-table td:nth-child(5) { width: 170px; }
+#redirectTab .documents-table th:nth-child(6),
+#redirectTab .documents-table td:nth-child(6) { width: 210px; }
+#redirectTab .documents-table th:nth-child(7),
+#redirectTab .documents-table td:nth-child(7) { width: 120px; }
+
+#redirectTab .documents-table td select,
+#redirectTab .documents-table td input {
+  width: 100%;
+  min-width: 0 !important;
+  max-width: 100%;
+}
+
 .users-table th,
 .documents-table th,
-.audit-table th {
+.audit-table th,
+.customers-table th {
   background: #f8fafc;
   padding: var(--spacing-md) var(--spacing-lg);
   text-align: left;
@@ -654,7 +849,8 @@ body {
 
 .users-table td,
 .documents-table td,
-.audit-table td {
+.audit-table td,
+.customers-table td {
   padding: var(--spacing-md) var(--spacing-lg);
   border-bottom: 1px solid var(--border-color);
   vertical-align: middle;
@@ -665,13 +861,15 @@ body {
 
 .users-table tbody tr:hover,
 .documents-table tbody tr:hover,
-.audit-table tbody tr:hover {
+.audit-table tbody tr:hover,
+.customers-table tbody tr:hover {
   background: #f8fafc;
 }
 
 .users-table tr:last-child td,
 .documents-table tr:last-child td,
-.audit-table tr:last-child td {
+.audit-table tr:last-child td,
+.customers-table tr:last-child td {
   border-bottom: none;
 }
 
@@ -960,6 +1158,66 @@ body {
   color: white;
   border-color: var(--danger);
   transform: translateY(-1px);
+}
+
+/* Pending agent table action buttons */
+#pending-agentsTab .action-buttons,
+#registered-agentsTab .action-buttons {
+  gap: 8px;
+}
+
+#pending-agentsTab .pending-agent-btn,
+#registered-agentsTab .pending-agent-btn {
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+#pending-agentsTab .pending-agent-btn i,
+#registered-agentsTab .pending-agent-btn i {
+  font-size: 12px;
+}
+
+#pending-agentsTab .pending-agent-btn.view-btn,
+#registered-agentsTab .pending-agent-btn.view-btn {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+#pending-agentsTab .pending-agent-btn.view-btn:hover,
+#registered-agentsTab .pending-agent-btn.view-btn:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+#pending-agentsTab .pending-agent-btn.activate-btn {
+  background: #ecfdf3;
+  border-color: #86efac;
+  color: #15803d;
+}
+
+#pending-agentsTab .pending-agent-btn.activate-btn:hover {
+  background: #dcfce7;
+  border-color: #4ade80;
+}
+
+#pending-agentsTab .pending-agent-btn.reject-btn {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
+#pending-agentsTab .pending-agent-btn.reject-btn:hover {
+  background: #fee2e2;
+  border-color: #f87171;
 }
 
 /* ==================== MODALS ==================== */
@@ -1802,6 +2060,113 @@ body {
 
 /* ==================== FINALLY SUBMITTED TABLE STYLES ==================== */
 
+/* ==================== PAYMENT DASHBOARD TABLE STYLES ==================== */
+#paymentsTab .table-section {
+    background: white;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+#paymentsTab h2 {
+    color: #003366;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+#paymentsTab .table-container {
+    overflow-x: auto;
+    max-width: 100%;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+}
+
+#paymentsTab .customers-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 820px;
+    font-size: 14px;
+}
+
+#paymentsTab .customers-table thead {
+    background: #f8fafc;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+#paymentsTab .customers-table th {
+    padding: 14px 12px;
+    text-align: left;
+    font-weight: 700;
+    color: #475569;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+
+#paymentsTab .customers-table td {
+    padding: 14px 12px;
+    border-bottom: 1px solid #e5e7eb;
+    color: #334155;
+    vertical-align: middle;
+}
+
+#paymentsTab .customers-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+#paymentsTab .customers-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+#paymentsTab .customers-table th:nth-child(3),
+#paymentsTab .customers-table td:nth-child(3),
+#paymentsTab .customers-table th:nth-child(4),
+#paymentsTab .customers-table td:nth-child(4),
+#paymentsTab .customers-table th:nth-child(5),
+#paymentsTab .customers-table td:nth-child(5),
+#paymentsTab .customers-table th:nth-child(6),
+#paymentsTab .customers-table td:nth-child(6) {
+    white-space: nowrap;
+}
+
+#paymentsTab .customers-table td:nth-child(3) {
+    font-weight: 600;
+    color: #0f172a;
+}
+
+#paymentsTab .status-badge.status-approved {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #86efac;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+#paymentsTab .status-badge.status-approved::before {
+    content: '\f00c';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    font-size: 10px;
+}
+
+#paymentsTab .action-btn {
+    min-width: 92px;
+}
+
+#paymentsTab .no-data {
+    text-align: center;
+    color: #94a3b8;
+    padding: 32px !important;
+    font-style: italic;
+}
+
 #finally-submittedTab .table-section {
     background: white;
     border-radius: 12px;
@@ -1829,6 +2194,7 @@ body {
 
 #finally-submittedTab .table-container {
     overflow-x: auto;
+    max-width: 100%;
     border-radius: 8px;
     border: 1px solid #e5e7eb;
 }
@@ -1837,7 +2203,7 @@ body {
     width: 100%;
     border-collapse: collapse;
     font-size: 14px;
-    min-width: 1200px;
+    min-width: 1000px;
 }
 
 #finally-submittedTab .customers-table thead {
@@ -1861,6 +2227,18 @@ body {
     border-bottom: 1px solid #e5e7eb;
     color: #334155;
     vertical-align: middle;
+}
+
+/* Keep status/action columns compact to avoid full-page spill */
+#finally-submittedTab .customers-table th:nth-child(8),
+#finally-submittedTab .customers-table td:nth-child(8),
+#finally-submittedTab .customers-table th:nth-child(9),
+#finally-submittedTab .customers-table td:nth-child(9) {
+    white-space: nowrap;
+}
+
+#finally-submittedTab .customers-table td:nth-child(9) {
+    min-width: 220px;
 }
 
 #finally-submittedTab .customers-table tbody tr:hover {
@@ -1903,7 +2281,20 @@ body {
     align-items: center;
     gap: 6px;
     transition: all 0.2s;
-    margin: 0 4px;
+    margin: 2px 4px 2px 0;
+}
+
+/* Rejected tab: prevent upload time wrapping */
+#rejected-docsTab .documents-table th:nth-child(1),
+#rejected-docsTab .documents-table td:nth-child(1) {
+    white-space: nowrap;
+    min-width: 190px;
+}
+
+#rejected-docsTab .documents-table th:nth-child(2),
+#rejected-docsTab .documents-table td:nth-child(2) {
+    white-space: nowrap;
+    min-width: 150px;
 }
 
 #finally-submittedTab .action-btn.view-btn-small {

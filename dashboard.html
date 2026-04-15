@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=0.8, maximum-scale=1.0, user-scalable=yes">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="theme-color" content="#0f3b67">
+    <link rel="manifest" href="manifest.webmanifest">
     <title>CMBank RSA - Uploader Dashboard</title>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -511,7 +513,7 @@
             </div>
 
             <div class="user-profile">
-                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='16'%3E👤%3C/text%3E%3C/svg%3E" alt="User" id="userAvatar">
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='16'%3E%26%23128100%3B%3C/text%3E%3C/svg%3E" alt="User" id="userAvatar">
                 <div class="user-info">
                     <span id="userName">Loading...</span>
                     <small id="userRole">Uploader</small>
@@ -537,6 +539,19 @@
                 <a href="#" class="nav-item" data-tab="rejected">
                     <i class="fas fa-times-circle"></i>
                     <span>Rejected</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="paid">
+                    <i class="fas fa-money-check-dollar"></i>
+                    <span>Paid Customers</span>
+                    <span class="badge" id="paidCount">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="register-agent">
+                    <i class="fas fa-user-tie"></i>
+                    <span>Register Agent</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="profile">
+                    <i class="fas fa-user-circle"></i>
+                    <span>My Profile</span>
                 </a>
             </nav>
 
@@ -631,6 +646,7 @@
                             <thead>
                                 <tr>
                                     <th>Customer Name</th>
+                                    <th>Contact (WhatsApp)</th>
                                     <th>Assigned To</th>
                                     <th>Upload Date/Time</th>
                                     <th>Status</th>
@@ -640,7 +656,7 @@
                                 </tr>
                             </thead>
                             <tbody id="pendingTableBody">
-                                <tr><td colspan="7" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
+                                <tr><td colspan="8" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -658,6 +674,7 @@
                             <thead>
                                 <tr>
                                     <th>Customer Name</th>
+                                    <th>Contact (WhatsApp)</th>
                                     <th>Assigned To</th>
                                     <th>Upload Date/Time</th>
                                     <th>Status</th>
@@ -668,7 +685,7 @@
                                 </tr>
                             </thead>
                             <tbody id="approvedTableBody">
-                                <tr><td colspan="8" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
+                                <tr><td colspan="9" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -686,6 +703,7 @@
                             <thead>
                                 <tr>
                                     <th>Customer Name</th>
+                                    <th>Chat</th>
                                     <th>Assigned To</th>
                                     <th>Upload Date/Time</th>
                                     <th>Status</th>
@@ -698,13 +716,222 @@
                                 </tr>
                             </thead>
                             <tbody id="rejectedTableBody">
-                                <tr><td colspan="10" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
+                                <tr><td colspan="11" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
                             </tbody>
                         </table>
                     </div>
                 </div>
             </div>
+
+            <!-- Paid Customers Tab -->
+            <div id="paidTab" class="tab-content">
+                <div class="overview-cards">
+                    <div class="stat-card approved" id="activeTotal25Card">
+                        <div class="stat-content">
+                            <div>
+                                <div class="stat-label">Active Total 25%</div>
+                                <div class="stat-value" id="paidTotal25">₦0.00</div>
+                            </div>
+                            <i class="fas fa-percent stat-icon"></i>
+                        </div>
+                    </div>
+                    <div class="stat-card approved" id="activeTotal1Card">
+                        <div class="stat-content">
+                            <div>
+                                <div class="stat-label">Active 2% Commission</div>
+                                <div class="stat-value" id="paidTotal1">₦0.00</div>
+                            </div>
+                            <i class="fas fa-coins stat-icon"></i>
+                        </div>
+                    </div>
+                    <div class="stat-card pending" id="clearedTotal25Card" style="display:none;">
+                        <div class="stat-content">
+                            <div>
+                                <div class="stat-label">Cleared Total 25%</div>
+                                <div class="stat-value" id="clearedTotal25">₦0.00</div>
+                            </div>
+                            <i class="fas fa-percent stat-icon"></i>
+                        </div>
+                    </div>
+                    <div class="stat-card pending" id="clearedTotal1Card" style="display:none;">
+                        <div class="stat-content">
+                            <div>
+                                <div class="stat-label">Cleared 2% Commission</div>
+                                <div class="stat-value" id="clearedTotal1">₦0.00</div>
+                            </div>
+                            <i class="fas fa-coins stat-icon"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-section" style="margin-top: 16px;">
+                    <div class="admin-subtab-strip" style="margin-bottom: 12px;">
+                        <button id="activeCommissionTabBtn" class="admin-subtab-btn active" type="button">
+                            Active Commission
+                            <span class="subtab-badge" id="activeCommissionCount">0</span>
+                        </button>
+                        <button id="clearedCommissionTabBtn" class="admin-subtab-btn" type="button">
+                            Cleared Commission
+                            <span class="subtab-badge" id="clearedCommissionCount">0</span>
+                        </button>
+                    </div>
+
+                    <div id="activeCommissionSection">
+                        <div class="filters-bar">
+                            <input type="text" id="activeCommissionSearch" placeholder="Search customer or PFA">
+                            <input type="date" id="activeCommissionStartDate">
+                            <input type="date" id="activeCommissionEndDate">
+                        </div>
+                        <div class="table-container">
+                            <table class="customers-table">
+                                <thead>
+                                    <tr>
+                                        <th>Customer</th>
+                                        <th>PFA</th>
+                                        <th>Agent</th>
+                                        <th>25% RSA</th>
+                                        <th>2% Commission</th>
+                                        <th>Status</th>
+                                        <th>Paid Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="activeCommissionTableBody">
+                                    <tr><td colspan="7" class="loading-row"><div class="loading-spinner"></div> Loading paid records...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="clearedCommissionSection" style="display:none;">
+                        <div class="filters-bar">
+                            <input type="text" id="clearedCommissionSearch" placeholder="Search customer or PFA">
+                            <input type="date" id="clearedCommissionStartDate">
+                            <input type="date" id="clearedCommissionEndDate">
+                        </div>
+                        <div class="table-container">
+                            <table class="customers-table">
+                                <thead>
+                                    <tr>
+                                        <th>Customer</th>
+                                        <th>PFA</th>
+                                        <th>Agent</th>
+                                        <th>25% RSA</th>
+                                        <th>2% Commission</th>
+                                        <th>Status</th>
+                                        <th>Cleared Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="clearedCommissionTableBody">
+                                    <tr><td colspan="7" class="loading-row"><div class="loading-spinner"></div> Loading cleared records...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Register Agent Tab -->
+            <div id="register-agentTab" class="tab-content">
+                <div class="table-section">
+                    <div class="filters-bar" style="justify-content: flex-end; margin-bottom: 12px;">
+                        <button id="openAgentRegistrationBtn" class="new-upload-btn">
+                            <i class="fas fa-user-plus"></i> Register New Agent
+                        </button>
+                    </div>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Agent Name</th>
+                                    <th>Contact Number</th>
+                                    <th>Account Number</th>
+                                    <th>Account Bank</th>
+                                    <th>Status</th>
+                                    <th>Date Registered</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="registeredAgentsTableBody">
+                                <tr><td colspan="7" class="loading-row"><div class="loading-spinner"></div> Loading agents...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Profile Tab -->
+            <div id="profileTab" class="tab-content">
+                <div class="profile-card-wrap">
+                    <div class="profile-card">
+                        <div class="profile-card-head">
+                            <h2>My Profile</h2>
+                            <p>Uploader account information</p>
+                        </div>
+                        <div class="profile-grid">
+                            <div class="profile-item"><span class="profile-label">Full Name</span><span id="profileName" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Email</span><span id="profileEmail" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">WhatsApp</span><span id="profileWhatsapp" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Location</span><span id="profileLocation" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Role</span><span id="profileRole" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Status</span><span id="profileStatus" class="profile-value">-</span></div>
+                            <div class="profile-item profile-item-wide"><span class="profile-label">Date Registered</span><span id="profileRegisteredAt" class="profile-value">-</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </main>
+    </div>
+
+    <button type="button" id="helpFab" class="help-fab" title="Open SOP">
+        <i class="fas fa-circle-question"></i>
+        <span>Help</span>
+    </button>
+
+    <div id="sopHelpModal" class="modal">
+        <div class="modal-content sop-help-modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-book-open"></i> Uploader SOP</h2>
+                <button class="close-btn" id="closeSopHelpModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="sop-topics">
+                    <div class="sop-topic">
+                        <h4>1. New Submission</h4>
+                        <p>Start with <strong>New Submission</strong>, complete customer details, and click <strong>Save Details</strong> before uploading any file.</p>
+                        <p>Upload required documents one by one or with <strong>Batch Upload</strong>, then submit all documents when counters show readiness.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>2. Track Application</h4>
+                        <p>Use <strong>Track Application</strong> from the header to search by application ID or customer name.</p>
+                        <p>Confirm stage, status, comments, and who has worked on the file before escalating to another team.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>3. Loan Calculator</h4>
+                        <p>Use <strong>Loan Calculator</strong> to quickly estimate 25% RSA contribution, facility fee, property value, and loan amount.</p>
+                        <p>This is a guide tool; always submit customer data values from validated source documents.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>4. Register Agent</h4>
+                        <p>Open <strong>Register Agent</strong>, click <strong>Register New Agent</strong>, and fill full name, phone, account number, and bank.</p>
+                        <p>Agent stays pending until admin approval; only approved agents appear in submission dropdown.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>5. Paid Customers</h4>
+                        <p>Use <strong>Active Commission</strong> and <strong>Cleared Commission</strong> subtabs to monitor payouts and settled commissions.</p>
+                        <p>Filter by dates and customer/PFA to reconcile records and confirm payment lifecycle.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>6. Rejected Items</h4>
+                        <p>Open rejected records, read reviewer comments, correct files, and re-upload using the correction action.</p>
+                        <p>After correction submission, recheck status from Pending and Track Application.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="closeSopHelpModalFooterBtn">Close</button>
+            </div>
+        </div>
     </div>
 
     <!-- New Submission Modal -->
@@ -742,6 +969,12 @@
                                 <div>
                                     <label for="customerPhone">Phone *</label>
                                     <input type="tel" id="customerPhone" placeholder="0801xxxxxxx" maxlength="11">
+                                </div>
+                                <div class="full-width">
+                                    <label for="customerAgent">Agent (Optional - Approved Agents Only)</label>
+                                    <select id="customerAgent">
+                                        <option value="">No Agent</option>
+                                    </select>
                                 </div>
                                 <div>
                                     <label for="customerNIN">NIN *</label>
@@ -876,6 +1109,74 @@
         </div>
     </div>
 
+    <!-- Agent Registration Modal -->
+    <div id="agentRegistrationModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-user-tie"></i> Register New Agent</h2>
+                <button class="close-btn" id="closeAgentRegistrationModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="agentRegistrationForm">
+                    <div class="customer-input-grid">
+                        <div class="full-width">
+                            <label for="agentFullName">Full Name *</label>
+                            <input type="text" id="agentFullName" required>
+                        </div>
+                        <div>
+                            <label for="agentContactNumber">Contact Number *</label>
+                            <input type="tel" id="agentContactNumber" maxlength="11" inputmode="numeric" required>
+                        </div>
+                        <div>
+                            <label for="agentAccountNumber">Account Number *</label>
+                            <input type="text" id="agentAccountNumber" maxlength="10" inputmode="numeric" required>
+                        </div>
+                        <div class="full-width">
+                            <label for="agentAccountBank">Account Bank *</label>
+                            <select id="agentAccountBank" required>
+                                <option value="">Select Bank</option>
+                                <option>Access Bank</option>
+                                <option>Citibank</option>
+                                <option>Ecobank</option>
+                                <option>Fidelity Bank</option>
+                                <option>First Bank of Nigeria</option>
+                                <option>First City Monument Bank (FCMB)</option>
+                                <option>Globus Bank</option>
+                                <option>Guaranty Trust Bank (GTBank)</option>
+                                <option>Heritage Bank</option>
+                                <option>Keystone Bank</option>
+                                <option>Lotus Bank</option>
+                                <option>Moniepoint MFB</option>
+                                <option>Opay</option>
+                                <option>Parallex Bank</option>
+                                <option>Polaris Bank</option>
+                                <option>PremiumTrust Bank</option>
+                                <option>Providus Bank</option>
+                                <option>Stanbic IBTC Bank</option>
+                                <option>Standard Chartered Bank</option>
+                                <option>Sterling Bank</option>
+                                <option>SunTrust Bank</option>
+                                <option>TajBank</option>
+                                <option>Titan Trust Bank</option>
+                                <option>Union Bank of Nigeria</option>
+                                <option>United Bank for Africa (UBA)</option>
+                                <option>Unity Bank</option>
+                                <option>Wema Bank</option>
+                                <option>Zenith Bank</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="cancel-btn" id="resetAgentFormBtn">Reset</button>
+                        <button type="submit" class="submit-btn" id="submitAgentFormBtn">
+                            <i class="fas fa-paper-plane"></i> Submit for Approval
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Edit Modal -->
     <div id="editModal" class="modal">
         <div class="modal-content large-modal">
@@ -1005,8 +1306,8 @@
             </div>
             <div class="modal-body">
                 <div class="input-group">
-                    <label for="calcRsaBalance">RSA Balance (₦)</label>
-                    <input type="text" id="calcRsaBalance" placeholder="Enter RSA balance (min ₦4,000,000)">
+                    <label for="calcRsaBalance">RSA Balance (&#8358;)</label>
+                    <input type="text" id="calcRsaBalance" placeholder="Enter RSA balance (min &#8358;4,000,000)">
                 </div>
 
                 <button id="calculateLoanBtn" class="calculate-btn">
@@ -1019,11 +1320,11 @@
                     <div class="results-grid">
                         <div class="result-item">
                             <span class="result-label">25% of RSA:</span>
-                            <span class="result-value" id="calc25Percent">₦0.00</span>
+                            <span class="result-value" id="calc25Percent">&#8358;0.00</span>
                         </div>
                         <div class="result-item">
                             <span class="result-label">Facility Fee:</span>
-                            <span class="result-value" id="calcFacilityFee">₦0.00</span>
+                            <span class="result-value" id="calcFacilityFee">&#8358;0.00</span>
                         </div>
                         <div class="result-item full-width">
                             <span class="result-label">Property Type:</span>
@@ -1031,11 +1332,11 @@
                         </div>
                         <div class="result-item">
                             <span class="result-label">Property Value:</span>
-                            <span class="result-value" id="calcPropertyValue">₦0.00</span>
+                            <span class="result-value" id="calcPropertyValue">&#8358;0.00</span>
                         </div>
                         <div class="result-item">
                             <span class="result-label">Loan Amount:</span>
-                            <span class="result-value highlight" id="calcLoanAmount">₦0.00</span>
+                            <span class="result-value highlight" id="calcLoanAmount">&#8358;0.00</span>
                         </div>
                     </div>
                 </div>
@@ -1087,10 +1388,10 @@
     <script type="module" src="js/backblaze-storage.js"></script>
 
     <!-- 6. Document Uploader (main upload logic) -->
-    <script type="module" src="js/document-uploader.js"></script>
+<script type="module" src="js/document-uploader.js?v=20260415d"></script>
 
     <!-- 7. Dashboard (Track & Calculator only) -->
-    <script type="module" src="js/uploader-dashboard.js"></script>
+<script type="module" src="js/uploader-dashboard.js?v=20260415d"></script>
 
     <script>
         // `window.signOutUser` is provided by `js/auth.js` (Firebase sign-out).
@@ -1234,5 +1535,16 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 })();
 </script>
+<script src="js/table-enhancer.js?v=20260415"></script>
+<script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
+<link rel="stylesheet" href="css/app-chat.css?v=20260415d">
+<script type="module" src="js/app-chat.js?v=20260415i"></script>
+<link rel="stylesheet" href="css/pwa-install.css">
+<script src="js/pwa-install.js"></script>
+<link rel="stylesheet" href="css/profile-card.css">
+<link rel="stylesheet" href="css/sop-help.css">
+<script src="js/sop-help.js"></script>
+<link rel="stylesheet" href="css/developer-badge.css">
+<script src="js/developer-badge.js"></script>
 </body>
 </html>

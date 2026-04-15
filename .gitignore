@@ -1,0 +1,4 @@
+api/backblaze-config.php
+render-email-api/.env
+
+FIREBASE_SERVICE_ACCOUNT_JSON_RENDER.txt

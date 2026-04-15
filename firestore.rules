@@ -1,0 +1,204 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDocPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function hasUserProfile() {
+      return signedIn() && exists(userDocPath());
+    }
+
+    function myEmail() {
+      return signedIn() ? request.auth.token.email : '';
+    }
+
+    function userRole() {
+      return hasUserProfile() ? get(userDocPath()).data.role : '';
+    }
+
+    function isRole(role) {
+      return userRole() == role;
+    }
+
+    function isAnyRole(roles) {
+      return userRole() in roles;
+    }
+
+    function isAdminLike() {
+      return isAnyRole(['admin', 'super_admin']);
+    }
+
+    function isOwnUserDoc(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function submissionDocPath(submissionId) {
+      return /databases/$(database)/documents/submissions/$(submissionId);
+    }
+
+    function canAccessSubmissionById(submissionId) {
+      return signedIn()
+        && exists(submissionDocPath(submissionId))
+        && (
+          isAdminLike() ||
+          get(submissionDocPath(submissionId)).data.uploadedBy == myEmail() ||
+          get(submissionDocPath(submissionId)).data.assignedTo == myEmail() ||
+          get(submissionDocPath(submissionId)).data.reviewedBy == myEmail() ||
+          get(submissionDocPath(submissionId)).data.assignedToRSA == myEmail() ||
+          get(submissionDocPath(submissionId)).data.assignedToPayment == myEmail()
+        );
+    }
+
+    function chatDocPath(chatId) {
+      return /databases/$(database)/documents/applicationChats/$(chatId);
+    }
+
+    function chatDataHasParticipant(data) {
+      return (data.participants is list) && (myEmail() in data.participants);
+    }
+
+    function canAccessChatByParticipants(chatId) {
+      return signedIn()
+        && exists(chatDocPath(chatId))
+        && chatDataHasParticipant(get(chatDocPath(chatId)).data);
+    }
+
+    function canReadSubmission() {
+      return signedIn() && (
+        isAdminLike() ||
+        resource.data.uploadedBy == myEmail() ||
+        resource.data.assignedTo == myEmail() ||
+        resource.data.reviewedBy == myEmail() ||
+        resource.data.assignedToRSA == myEmail() ||
+        resource.data.assignedToPayment == myEmail()
+      );
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create: if isOwnUserDoc(userId)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == myEmail()
+        && request.resource.data.role in ['uploader', 'admin', 'super_admin', 'reviewer', 'viewer', 'rsa', 'payment']
+        && request.resource.data.status in ['pending', 'active', 'deactivated'];
+      allow update: if isOwnUserDoc(userId) || isAdminLike();
+      allow delete: if isAdminLike();
+    }
+
+    match /submissions/{submissionId} {
+      allow read: if canReadSubmission();
+      allow create: if signedIn()
+        && isAnyRole(['uploader', 'admin', 'super_admin'])
+        && request.resource.data.uploadedBy == myEmail();
+      allow update: if signedIn() && (
+        isAdminLike() ||
+        resource.data.uploadedBy == myEmail() ||
+        resource.data.assignedTo == myEmail() ||
+        resource.data.assignedToRSA == myEmail() ||
+        resource.data.assignedToPayment == myEmail()
+      );
+      allow delete: if isAdminLike();
+    }
+
+    match /uploaderRoutingRules/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdminLike();
+    }
+
+    match /settings/{docId} {
+      allow read: if signedIn();
+      allow write: if isAnyRole(['super_admin']);
+    }
+
+    match /audit/{docId} {
+      allow read: if isAdminLike();
+      allow create: if signedIn() && isAnyRole(['admin', 'super_admin', 'payment', 'rsa', 'reviewer', 'viewer']);
+      allow update, delete: if false;
+    }
+
+    match /counters/{docId} {
+      allow read: if signedIn();
+      allow write: if isAnyRole(['admin', 'super_admin', 'uploader', 'reviewer', 'viewer', 'rsa']);
+    }
+
+    match /roundRobinAssignments/{docId} {
+      allow read: if signedIn();
+      allow write: if isAnyRole(['admin', 'super_admin', 'uploader']);
+    }
+
+    match /roundRobinAssignmentsRSA/{docId} {
+      allow read: if signedIn();
+      allow write: if isAnyRole(['admin', 'super_admin', 'reviewer', 'viewer']);
+    }
+
+    match /roundRobinAssignmentsPayment/{docId} {
+      allow read: if signedIn();
+      allow write: if isAnyRole(['admin', 'super_admin', 'rsa']);
+    }
+
+    match /emailNotificationEvents/{docId} {
+      allow read: if isAdminLike();
+      allow create, update: if signedIn();
+      allow delete: if false;
+    }
+
+    match /agents/{agentId} {
+      allow read: if signedIn() && (
+        resource.data.status == 'approved' ||
+        isAdminLike()
+      );
+      allow create: if signedIn()
+        && isAnyRole(['uploader', 'admin', 'super_admin'])
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdBy == myEmail();
+      allow update: if isAdminLike();
+      allow delete: if isAdminLike();
+    }
+
+    match /applicationChats/{chatId} {
+      allow read: if signedIn() && (
+        chatDataHasParticipant(resource.data) ||
+        (resource.data.submissionId is string && canAccessSubmissionById(resource.data.submissionId)) ||
+        canAccessSubmissionById(chatId)
+      );
+      allow create: if signedIn() && (
+        chatDataHasParticipant(request.resource.data) ||
+        (request.resource.data.submissionId is string && canAccessSubmissionById(request.resource.data.submissionId)) ||
+        canAccessSubmissionById(chatId)
+      );
+      allow update: if signedIn() && (
+        chatDataHasParticipant(resource.data) ||
+        chatDataHasParticipant(request.resource.data) ||
+        (resource.data.submissionId is string && canAccessSubmissionById(resource.data.submissionId)) ||
+        canAccessSubmissionById(chatId)
+      );
+      allow delete: if isAdminLike();
+
+      match /messages/{messageId} {
+        allow read: if signedIn() && (
+          canAccessSubmissionById(chatId) ||
+          canAccessChatByParticipants(chatId)
+        );
+        allow create: if signedIn()
+          && (
+            canAccessSubmissionById(chatId) ||
+            canAccessChatByParticipants(chatId)
+          )
+          && request.resource.data.senderEmail == myEmail()
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000;
+        allow update, delete: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

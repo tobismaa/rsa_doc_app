@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=0.8, maximum-scale=1.0, user-scalable=yes">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="theme-color" content="#0f3b67">
+    <link rel="manifest" href="manifest.webmanifest">
+    <title>Payment Dashboard - CMBank RSA</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <script src="js/console-guard.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260409">
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+</head>
+<body>
+    <script src="js/security-utils.js"></script>
+
+    <div class="app-container">
+        <aside class="sidebar admin-sidebar" id="sidebar">
+            <div class="logo">
+                <i class="fas fa-money-check-dollar"></i>
+                <span>Payment Dashboard</span>
+            </div>
+
+            <div class="user-profile">
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='16'%3EP%3C/text%3E%3C/svg%3E" alt="Payment User" id="paymentAvatar">
+                <div class="user-info">
+                    <span id="paymentUserName">Loading...</span>
+                    <small>Payment Officer</small>
+                </div>
+                <button class="sign-out-btn" onclick="window.signOutUser()" title="Sign Out">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-tab="payments">
+                    <i class="fas fa-money-bill-transfer"></i>
+                    <span>Payment Queue</span>
+                    <span class="badge" id="paymentPendingCount">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="paid-customers">
+                    <i class="fas fa-circle-check"></i>
+                    <span>Paid Customers</span>
+                    <span class="badge" id="paidCustomerCount">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="profile">
+                    <i class="fas fa-user"></i>
+                    <span>Profile</span>
+                </a>
+            </nav>
+        </aside>
+
+        <main class="main-content">
+            <header class="content-header">
+                <h1 id="pageTitle">Payment Queue</h1>
+                <button id="forceRefreshBtn" class="action-btn" style="padding:10px 14px;font-size:13px;">
+                    <i class="fas fa-arrows-rotate"></i> Refresh
+                </button>
+            </header>
+
+            <div id="paymentsTab" class="tab-content active">
+                <div class="table-section">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+                        <h2 style="margin:0;">Payment Dashboard</h2>
+                        <button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.clearPaidSubmissions()">
+                            <i class="fas fa-check-double"></i> Settle Commission
+                        </button>
+                    </div>
+                    <p style="color:#64748b;margin:0 0 14px;">Mark applications as paid after PFA payment, then clear paid records once commission has been settled.</p>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>PFA</th>
+                                    <th>Agent</th>
+                                    <th>25% Balance</th>
+                                    <th>2% of 25%</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paymentsTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="paid-customersTab" class="tab-content">
+                <div class="table-section">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+                        <h2 style="margin:0;">Paid Customers</h2>
+                        <button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.clearPaidSubmissions()">
+                            <i class="fas fa-check-double"></i> Settle Commission
+                        </button>
+                    </div>
+                    <p style="color:#64748b;margin:0 0 14px;">Customers marked as paid await commission settlement and final clearing.</p>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>PFA</th>
+                                    <th>Agent</th>
+                                    <th>25% Balance</th>
+                                    <th>2% of 25%</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paidCustomersTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="profileTab" class="tab-content">
+                <div class="profile-card-wrap">
+                    <div class="profile-card">
+                        <div class="profile-card-head">
+                            <h2>My Profile</h2>
+                            <p>Payment officer account information</p>
+                        </div>
+                        <div class="profile-grid">
+                            <div class="profile-item"><span class="profile-label">Full Name</span><span id="profileName" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Email</span><span id="profileEmail" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">WhatsApp</span><span id="profileWhatsapp" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Location</span><span id="profileLocation" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Role</span><span id="profileRole" class="profile-value">Payment</span></div>
+                            <div class="profile-item"><span class="profile-label">Status</span><span id="profileStatus" class="profile-value">Active</span></div>
+                            <div class="profile-item profile-item-wide"><span class="profile-label">Date Registered</span><span id="profileRegisteredAt" class="profile-value">-</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <button type="button" id="helpFab" class="sop-fab" title="Open SOP">
+        <i class="fas fa-circle-question"></i>
+        <span>SOP</span>
+    </button>
+    <div id="sopHelpModal" class="modal">
+        <div class="modal-content sop-help-modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-book-open"></i> Payment SOP</h2>
+                <button class="close-btn" id="closeSopHelpModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="sop-topics">
+                    <div class="sop-topic">
+                        <h4>1. Payment Queue</h4>
+                        <p>Process only verified records in <strong>Payment Queue</strong> and confirm status is ready for payout confirmation.</p>
+                        <p>Check customer, PFA, agent, and amount fields before any payment action.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>2. Mark Paid</h4>
+                        <p>Click <strong>Mark Paid</strong> only after payment evidence is confirmed by operations.</p>
+                        <p>This updates customer status and makes records available for post-payment settlement tracking.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>3. Paid Customers</h4>
+                        <p>Use <strong>Paid Customers</strong> tab to audit all paid records and identify items pending settlement.</p>
+                        <p>Use filters/search to support reconciliation with external payment reports.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>4. Settle Commission</h4>
+                        <p>Use <strong>Settle Commission</strong> after commission disbursement is complete to mark records cleared.</p>
+                        <p><strong>Paid</strong> means customer payment confirmed; <strong>Cleared</strong> means commission fully settled.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="closeSopHelpModalFooterBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
+
+    <script src="js/table-enhancer.js?v=20260412"></script>
+    <script type="module" src="js/payment-dashboard.js?v=20260420"></script>
+    <script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
+    <link rel="stylesheet" href="css/app-chat.css?v=20260415d">
+    <script type="module" src="js/app-chat.js?v=20260415i"></script>
+    <link rel="stylesheet" href="css/pwa-install.css">
+    <script src="js/pwa-install.js"></script>
+    <link rel="stylesheet" href="css/profile-card.css">
+    <link rel="stylesheet" href="css/sop-help.css">
+    <script src="js/sop-help.js"></script>
+    <link rel="stylesheet" href="css/developer-badge.css">
+    <script src="js/developer-badge.js"></script>
+</body>
+</html>

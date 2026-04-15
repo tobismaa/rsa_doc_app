@@ -17,9 +17,6 @@ import {
     addDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
-// ==================== CORS PROXY CONFIG - YOUR WORKER ====================
-const CORS_PROXY = 'https://cors-proxy.naniadezz.workers.dev?url=';
-
 // ==================== DOCUMENT TYPES MAPPING ====================
 const DOCUMENT_TYPES = {
     'birth_certificate': 'Birth Certificate',
@@ -44,6 +41,34 @@ let currentSubmissionId = null;
 let currentViewerSubmission = null;
 let currentViewerIndex = 0;
 let downloadInProgress = false;
+
+function isRsaProcessingStatus(status) {
+    const normalized = String(status || '').toLowerCase();
+    return normalized === 'processing_to_pfa' || normalized === 'approved';
+}
+
+function formatReviewerStatusLabel(status) {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized === 'processing_to_pfa' || normalized === 'approved') return 'Processing to PFA';
+    if (!normalized) return '-';
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function normalizeWhatsAppPhone(raw) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.startsWith('0') && digits.length === 11) return `234${digits.slice(1)}`;
+    if (digits.length === 10) return `234${digits}`;
+    if (digits.startsWith('234')) return digits;
+    return digits;
+}
+
+function renderWhatsAppLink(raw) {
+    const display = String(raw || '').trim();
+    const normalized = normalizeWhatsAppPhone(display);
+    if (!normalized) return '-';
+    return `<a href="https://wa.me/${normalized}" target="_blank" rel="noopener noreferrer">${display}</a>`;
+}
 
 // Cache for user full names
 const userFullNameCache = new Map();
@@ -78,35 +103,51 @@ const zoomOutBtn = document.getElementById('zoomOutBtn');
 const zoomResetBtn = document.getElementById('zoomResetBtn');
 const zoomLevel = document.getElementById('zoomLevel');
 const selectedCount = document.getElementById('selectedCount');
+const profileNameEl = document.getElementById('profileName');
+const profileRegisteredAtEl = document.getElementById('profileRegisteredAt');
+const profileEmailEl = document.getElementById('profileEmail');
+const profileWhatsappEl = document.getElementById('profileWhatsapp');
+const profileLocationEl = document.getElementById('profileLocation');
+const profileRoleEl = document.getElementById('profileRole');
+const profileStatusEl = document.getElementById('profileStatus');
+
+function renderProfileTab() {
+    if (!profileNameEl && !profileEmailEl && !profileRoleEl && !profileStatusEl) return;
+    const fullName = currentUserData?.fullName || currentUserData?.displayName || currentUser?.displayName || currentUser?.email || 'N/A';
+    const registeredAt = currentUserData?.createdAt ? formatTimestamp(currentUserData.createdAt) : '-';
+    const email = currentUserData?.email || currentUser?.email || 'N/A';
+    const whatsapp = currentUserData?.whatsappNumber || currentUserData?.phone || '-';
+    const location = currentUserData?.location || '-';
+    const role = String(currentUserData?.role || 'reviewer');
+    const normalizedRole = role === 'viewer' ? 'reviewer' : role;
+    const status = String(currentUserData?.status || 'active');
+    if (profileNameEl) profileNameEl.textContent = fullName;
+    if (profileRegisteredAtEl) profileRegisteredAtEl.textContent = registeredAt;
+    if (profileEmailEl) profileEmailEl.textContent = email;
+    if (profileWhatsappEl) profileWhatsappEl.textContent = whatsapp;
+    if (profileLocationEl) profileLocationEl.textContent = location;
+    if (profileRoleEl) profileRoleEl.textContent = normalizedRole.charAt(0).toUpperCase() + normalizedRole.slice(1);
+    if (profileStatusEl) profileStatusEl.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+}
 
 // ==================== ZOOM LEVEL ====================
 let currentZoom = 1.0;
 
-// ==================== CORS HELPER FUNCTION ====================
+// ==================== DOCUMENT FETCH HELPER ====================
 async function fetchWithCorsFallback(url) {
     const cleanUrl = url?.toString().trim().replace(/[\s\n\r\t]+/g, '');
     if (!cleanUrl) throw new Error('Invalid URL');
 
-    // Try direct fetch first
-    try {
-        const response = await fetch(cleanUrl, { 
-            mode: 'cors', 
-            credentials: 'omit',
-            headers: {
-                'Accept': 'application/pdf, image/*, */*'
-            }
-        });
-        if (response.ok) return response;
-    } catch (e) { 
-        console.log('Direct fetch failed, trying proxy...');
-    }
+    const response = await fetch(cleanUrl, {
+        mode: 'cors',
+        credentials: 'omit',
+        headers: {
+            'Accept': 'application/pdf, image/*, */*'
+        }
+    });
 
-    // Use your custom proxy with ?url= parameter
-    const proxyUrl = `${CORS_PROXY}${encodeURIComponent(cleanUrl)}`;
-    const response = await fetch(proxyUrl);
-    
     if (!response.ok) {
-        throw new Error(`Proxy fetch failed: ${response.status}`);
+        throw new Error(`Document fetch failed: ${response.status}`);
     }
     return response;
 }
@@ -506,10 +547,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     currentUserData = userSnapshot.docs[0].data();
                     userName.textContent = currentUserData.fullName || currentUserData.displayName || user.email.split('@')[0];
                 } else {
+                    currentUserData = { email: user.email, fullName: user.displayName || user.email, role: 'reviewer', status: 'active' };
                     userName.textContent = user.displayName || user.email.split('@')[0];
                 }
             } catch (err) {
                 console.error('Error fetching user data:', err);
+                currentUserData = { email: user.email, fullName: user.displayName || user.email, role: 'reviewer', status: 'active' };
                 userName.textContent = user.displayName || user.email.split('@')[0];
             }
 
@@ -525,6 +568,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const role = String(snapshot.docs[0]?.data()?.role || '').toLowerCase();
             if (!snapshot.empty && (role === 'reviewer' || role === 'viewer')) {
+                renderProfileTab();
                 loadSubmissions();
             } else {
                 showNotification('Access denied. Reviewer privileges required.', 'error');
@@ -731,7 +775,7 @@ function updatePendingCount() {
 
 // --- DASHBOARD HELPERS ---
 function updateDashboardCards() {
-    const approved = allSubmissions.filter(s => s.status === 'approved' && s.reviewedBy === currentUser?.email).length;
+    const approved = allSubmissions.filter(s => isRsaProcessingStatus(s.status) && s.reviewedBy === currentUser?.email).length;
     const pending = allSubmissions.filter(s => s.status === 'pending').length;
     const rejected = allSubmissions.filter(s => s.status === 'rejected' && s.reviewedBy === currentUser?.email).length;
     document.getElementById('vCardApprovedCount') && (document.getElementById('vCardApprovedCount').textContent = approved);
@@ -743,7 +787,7 @@ function renderRecentReviews() {
     const tbody = document.getElementById('vRecentTableBody');
     if (!tbody) return;
     const q = (document.getElementById('vRecentSearch')?.value || '').toLowerCase();
-    const items = allSubmissions.filter(s => (s.reviewedBy === currentUser?.email) && (s.status === 'approved' || s.status === 'rejected'))
+    const items = allSubmissions.filter(s => (s.reviewedBy === currentUser?.email) && (isRsaProcessingStatus(s.status) || s.status === 'rejected'))
         .slice().sort((a,b) => {
             const ta = a.reviewedAt?.seconds ? a.reviewedAt.seconds*1000 : (a.reviewedAt ? new Date(a.reviewedAt).getTime() : 0);
             const tb = b.reviewedAt?.seconds ? b.reviewedAt.seconds*1000 : (b.reviewedAt ? new Date(b.reviewedAt).getTime() : 0);
@@ -759,7 +803,7 @@ function renderRecentReviews() {
         return `
             <tr>
                 <td><strong>${sub.customerName || 'Unknown'}</strong></td>
-                <td>${sub.status.charAt(0).toUpperCase() + sub.status.slice(1)}</td>
+                <td>${formatReviewerStatusLabel(sub.status)}</td>
                 <td>${dt}</td>
                 <td>${sub.uploadedByName || 'N/A'}</td>
                 <td><button class="action-btn view-btn-small" onclick="window.viewSubmission('${sub.id}')"><i class="fas fa-eye"></i></button></td>
@@ -774,7 +818,7 @@ function renderAllTables() {
     renderPendingTable(pendingSubs);
 
     // Viewer should only see approved/rejected items they reviewed
-    const approvedSubs = allSubmissions.filter(sub => sub.status === 'approved' && sub.reviewedBy === currentUser?.email);
+    const approvedSubs = allSubmissions.filter(sub => isRsaProcessingStatus(sub.status) && sub.reviewedBy === currentUser?.email);
     renderApprovedTable(approvedSubs);
 
     const rejectedSubs = allSubmissions.filter(sub => sub.status === 'rejected' && sub.reviewedBy === currentUser?.email);
@@ -785,7 +829,7 @@ function renderPendingTable(submissions) {
     if (!pendingTableBody) return;
 
     if (submissions.length === 0) {
-        pendingTableBody.innerHTML = '<tr><td colspan="6" class="no-data">No pending documents found</td></tr>';
+        pendingTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No pending documents found</td></tr>';
         return;
     }
 
@@ -797,12 +841,14 @@ function renderPendingTable(submissions) {
         
         const docTypes = sub.documentTypes?.map(type => DOCUMENT_TYPES[type] || type).join(', ') || 'N/A';
         const docCount = sub.documents?.length || 0;
+        const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>`;
 
         return `
             <tr>
                 <td><strong>${sub.customerName || 'Unknown'}</strong></td>
                 <td>${date}</td>
                 <td>${docTypes} <small class="text-muted">(${docCount})</small></td>
+                <td>${whatsapp}</td>
                 <td>${sub.uploadedByName || 'N/A'}</td>
                 <td><span class="status-badge status-pending">Pending</span></td>
                 <td>
@@ -812,6 +858,9 @@ function renderPendingTable(submissions) {
                         </button>
                         <button class="action-btn download-all-btn" onclick="window.downloadAll('${sub.id}')" ${downloadInProgress ? 'disabled' : ''}>
                             ${downloadInProgress ? '<i class="fas fa-spinner fa-spin"></i>' : '<i class="fas fa-download"></i>'} Download
+                        </button>
+                        <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
+                            <i class="fas fa-comments"></i> Chat
                         </button>
                         <button class="action-btn review-btn" onclick="window.openReviewModal('${sub.id}')">
                             <i class="fas fa-check-circle"></i> Review
@@ -827,7 +876,7 @@ function renderApprovedTable(submissions) {
     if (!approvedTableBody) return;
 
     if (submissions.length === 0) {
-        approvedTableBody.innerHTML = '<tr><td colspan="6" class="no-data">No approved documents found</td></tr>';
+        approvedTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No approved documents found</td></tr>';
         return;
     }
 
@@ -841,11 +890,13 @@ function renderApprovedTable(submissions) {
         if (sub.reviewedAt) {
             approvedDate = formatTimestamp(sub.reviewedAt);
         }
+        const whatsapp = renderWhatsAppLink(sub.customerDetails?.phone || sub.customerPhone || '');
 
         return `
             <tr>
                 <td><strong>${sub.customerName || 'Unknown'}</strong></td>
                 <td>${uploadDate}</td>
+                <td>${whatsapp}</td>
                 <td>${sub.uploadedByName || 'N/A'}</td>
                 <td>${sub.reviewedByName || 'N/A'}</td>
                 <td>${approvedDate}</td>
@@ -856,6 +907,9 @@ function renderApprovedTable(submissions) {
                         </button>
                         <button class="action-btn download-all-btn" onclick="window.downloadAll('${sub.id}')" ${downloadInProgress ? 'disabled' : ''}>
                             ${downloadInProgress ? '<i class="fas fa-spinner fa-spin"></i>' : '<i class="fas fa-download"></i>'} Download
+                        </button>
+                        <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
+                            <i class="fas fa-comments"></i> Chat
                         </button>
                     </div>
                 </td>
@@ -868,7 +922,7 @@ function renderRejectedTable(submissions) {
     if (!rejectedTableBody) return;
 
     if (submissions.length === 0) {
-        rejectedTableBody.innerHTML = '<tr><td colspan="6" class="no-data">No rejected documents found</td></tr>';
+        rejectedTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No rejected documents found</td></tr>';
         return;
     }
 
@@ -880,12 +934,14 @@ function renderRejectedTable(submissions) {
         
         const docTypes = sub.documentTypes?.map(type => DOCUMENT_TYPES[type] || type).join(', ') || 'N/A';
         const docCount = sub.documents?.length || 0;
+        const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>`;
 
         return `
             <tr>
                 <td><strong>${sub.customerName || 'Unknown'}</strong></td>
                 <td>${date}</td>
                 <td>${docTypes} <small class="text-muted">(${docCount})</small></td>
+                <td>${chatBtn}</td>
                 <td>${sub.uploadedByName || 'N/A'}</td>
                 <td>${sub.comment || 'No reason provided'}</td>
                 <td>
@@ -1011,40 +1067,121 @@ function updateViewerNavigation(currentIndex) {
 // ==================== RSA ROUND-ROBIN ASSIGNMENT ====================
 const RSA_COUNTER_DOC = doc(db, 'counters', 'roundRobinRSA');
 
+function normalizeEmail(email) {
+    return String(email || '').trim().toLowerCase();
+}
+
+function routingRuleDocId(uploaderEmail) {
+    return encodeURIComponent(normalizeEmail(uploaderEmail));
+}
+
+async function getUploaderRoutingRule(uploaderEmail) {
+    const normalizedUploader = normalizeEmail(uploaderEmail);
+    if (!normalizedUploader) return null;
+    try {
+        const snap = await getDoc(doc(db, 'uploaderRoutingRules', routingRuleDocId(normalizedUploader)));
+        if (!snap.exists()) return null;
+        const data = snap.data() || {};
+        if (data.enabled === false) return null;
+        return {
+            uploaderEmail: normalizedUploader,
+            reviewerEmail: normalizeEmail(data.reviewerEmail),
+            rsaEmail: normalizeEmail(data.rsaEmail)
+        };
+    } catch (_) {
+        return null;
+    }
+}
+
+async function isActiveRSAUser(email) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return false;
+    try {
+        const userQ = query(collection(db, 'users'), where('email', '==', normalized));
+        const snap = await getDocs(userQ);
+        if (snap.empty) return false;
+        const data = snap.docs[0].data() || {};
+        const role = String(data.role || '').toLowerCase();
+        const status = String(data.status || 'active').toLowerCase();
+        return role === 'rsa' && status !== 'deactivated';
+    } catch (_) {
+        return false;
+    }
+}
+
 async function getRSAEmails() {
     const q = query(collection(db, 'users'), where('role', '==', 'rsa'));
     const snap = await getDocs(q);
     return snap.docs
-        .map(d => d.data().email)
+        .map(d => d.data() || {})
+        .filter((u) => String(u.status || 'active').toLowerCase() !== 'deactivated')
+        .map(u => u.email)
         .filter(Boolean)
         .sort(); // alphabetical so order is deterministic
 }
 
 async function assignRoundRobinRSA(submissionRef) {
+    let uploaderEmail = '';
+    try {
+        const subSnap = await getDoc(submissionRef);
+        if (subSnap.exists()) uploaderEmail = normalizeEmail(subSnap.data()?.uploadedBy);
+    } catch (_) { }
+
+    const routingRule = await getUploaderRoutingRule(uploaderEmail);
+    const mappedRsa = routingRule?.rsaEmail || '';
+    if (mappedRsa && await isActiveRSAUser(mappedRsa)) {
+        await updateDoc(submissionRef, { assignedToRSA: mappedRsa, rsaAssignmentMode: 'uploader_routing' });
+        try {
+            const subSnap = await getDoc(submissionRef);
+            if (subSnap.exists()) {
+                const subData = subSnap.data();
+                await addDoc(collection(db, 'roundRobinAssignmentsRSA'), {
+                    submissionId: submissionRef.id,
+                    customerName: subData.customerName || 'N/A',
+                    assignedToRSA: mappedRsa,
+                    assignedBy: currentUser?.email || 'System',
+                    assignedAt: serverTimestamp(),
+                    reviewedBy: subData.reviewedBy || 'N/A',
+                    assignmentMethod: 'uploader_routing'
+                });
+            }
+        } catch (_) { }
+        return mappedRsa;
+    }
+
     const rsaUsers = await getRSAEmails();
     if (!rsaUsers.length) return null;
     
     let assigned = null;
-    await runTransaction(db, async tx => {
-        let lastIndex = -1;
-        let lastDate = '';
-        const today = new Date().toISOString().slice(0, 10);
-        const counterSnap = await tx.get(RSA_COUNTER_DOC);
-        
-        if (counterSnap.exists()) {
-            const data = counterSnap.data();
-            lastIndex = typeof data.lastIndex === 'number' ? data.lastIndex : -1;
-            lastDate = data.lastDate || '';
+    let assignmentMethod = 'round_robin';
+    try {
+        await runTransaction(db, async tx => {
+            let lastIndex = -1;
+            let lastDate = '';
+            const today = new Date().toISOString().slice(0, 10);
+            const counterSnap = await tx.get(RSA_COUNTER_DOC);
+            
+            if (counterSnap.exists()) {
+                const data = counterSnap.data();
+                lastIndex = typeof data.lastIndex === 'number' ? data.lastIndex : -1;
+                lastDate = data.lastDate || '';
+            }
+            
+            if (lastDate !== today) lastIndex = -1;
+            
+            const newIndex = (lastIndex + 1) % rsaUsers.length;
+            assigned = rsaUsers[newIndex];
+            
+            tx.set(RSA_COUNTER_DOC, { lastIndex: newIndex, lastDate: today }, { merge: true });
+            tx.update(submissionRef, { assignedToRSA: assigned, rsaAssignmentMode: 'round_robin' });
+        });
+    } catch (_) {
+        assigned = rsaUsers[0] || null;
+        if (assigned) {
+            await updateDoc(submissionRef, { assignedToRSA: assigned, rsaAssignmentMode: 'round_robin_fallback' });
+            assignmentMethod = 'round_robin_fallback';
         }
-        
-        if (lastDate !== today) lastIndex = -1;
-        
-        const newIndex = (lastIndex + 1) % rsaUsers.length;
-        assigned = rsaUsers[newIndex];
-        
-        tx.set(RSA_COUNTER_DOC, { lastIndex: newIndex, lastDate: today }, { merge: true });
-        tx.update(submissionRef, { assignedToRSA: assigned });
-    });
+    }
     
     // Track assignment in history collection (after transaction)
     if (assigned) {
@@ -1058,7 +1195,8 @@ async function assignRoundRobinRSA(submissionRef) {
                     assignedToRSA: assigned,
                     assignedBy: currentUser?.email || 'System',
                     assignedAt: serverTimestamp(),
-                    reviewedBy: subData.reviewedBy || 'N/A'
+                    reviewedBy: subData.reviewedBy || 'N/A',
+                    assignmentMethod
                 });
                 console.log(`ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ RSA Assignment tracked: ${subData.customerName} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ${assigned}`);
             }
@@ -1125,7 +1263,7 @@ async function reviewDocument(action) {
             const rsaAssigned = await assignRoundRobinRSA(submissionRef);
             
             await updateDoc(submissionRef, {
-                status: action,
+                status: 'processing_to_pfa',
                 comment: comment || '',
                 reviewedBy: currentUser.email,
                 reviewedAt: serverTimestamp(),
@@ -1156,7 +1294,7 @@ async function reviewDocument(action) {
                 });
             }
             
-            showNotification(`Document approved and assigned to RSA: ${rsaAssigned || 'pending'}`, 'success');
+            showNotification(`Document moved to Processing to PFA and assigned to RSA: ${rsaAssigned || 'pending'}`, 'success');
         } else {
             // If rejecting, don't assign to RSA
             await updateDoc(submissionRef, {
@@ -1423,7 +1561,9 @@ window.switchTab = (tabId, triggerEl = null) => {
     const titles = {
         'pending': 'Pending Documents Review',
         'approved': 'Approved Documents',
-        'rejected': 'Rejected Documents'
+        'rejected': 'Rejected Documents',
+        'profile': 'My Profile',
+        'help': 'Help & SOP'
     };
     if (pageTitle) pageTitle.textContent = titles[tabId] || 'Dashboard';
 };

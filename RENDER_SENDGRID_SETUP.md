@@ -21,17 +21,17 @@ Your frontend now calls a Render API, and Render sends email through SendGrid.
    - `New` -> `Web Service`
    - Connect your repo.
    - Set:
-     - `Root Directory`: `render-email-api`
-     - `Build Command`: `npm install`
-     - `Start Command`: `npm start`
-     - `Environment`: `Node`
+   - `Root Directory`: `render-email-api`
+   - `Build Command`: `npm install`
+   - `Start Command`: `npm start`
+   - `Environment`: `Node`
 
 ## 2. Add environment variables in Render
 
 From `render-email-api/.env.example`, set:
 
 - `SENDGRID_API_KEY`: your SendGrid API key (Mail Send permission)
-- `SENDGRID_FROM_EMAIL`: verified sender (for example `alerts@yourdomain.com`)
+- `SENDGRID_FROM_EMAIL`: verified sender (for example `alert@cmbankrsa.com`)
 - `REQUIRE_FIREBASE_AUTH`: `true`
 - `ALLOWED_ORIGINS`: comma-separated origins for your app
   - example: `http://localhost:8000,http://localhost:63342,https://your-frontend-domain.com`

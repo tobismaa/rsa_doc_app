@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=0.75, maximum-scale=1.0, user-scalable=yes">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="theme-color" content="#0f3b67">
+    <link rel="manifest" href="manifest.webmanifest">
     <title>CMBank RSA - Reviewer Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/reviewer-dashboard.css">
@@ -44,7 +46,7 @@
             </div>
 
             <div class="user-profile">
-                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='16'%3E👤%3C/text%3E%3C/svg%3E" alt="User" id="userAvatar">
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='16'%3E??%3C/text%3E%3C/svg%3E" alt="User" id="userAvatar">
                 <div class="user-info">
                     <span id="userName">Loading...</span>
                     <small id="userRole">Reviewer</small>
@@ -71,6 +73,10 @@
                 <a href="#" class="nav-item" data-tab="rejected">
                     <i class="fas fa-times-circle"></i>
                     <span>Rejected</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="profile">
+                    <i class="fas fa-user-circle"></i>
+                    <span>My Profile</span>
                 </a>
             </nav>
             
@@ -153,13 +159,14 @@
                                     <th>Customer Name</th>
                                     <th>Upload Date/Time</th>
                                     <th>Document Types</th>
+                                    <th>Contact (WhatsApp)</th>
                                     <th>Uploaded By</th>
                                     <th>Status</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="pendingTableBody">
-                                <tr><td colspan="6" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
+                                <tr><td colspan="7" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -175,6 +182,7 @@
                                 <tr>
                                     <th>Customer Name</th>
                                     <th>Upload Date/Time</th>
+                                    <th>Contact (WhatsApp)</th>
                                     <th>Uploaded By</th>
                                     <th>Approved By</th>
                                     <th>Approved Date/Time</th>
@@ -182,7 +190,7 @@
                                 </tr>
                             </thead>
                             <tbody id="approvedTableBody">
-                                <tr><td colspan="6" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
+                                <tr><td colspan="7" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -199,15 +207,36 @@
                                     <th>Customer Name</th>
                                     <th>Upload Date/Time</th>
                                     <th>Document Types</th>
+                                    <th>Chat</th>
                                     <th>Uploaded By</th>
                                     <th>Rejection Comment</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="rejectedTableBody">
-                                <tr><td colspan="6" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
+                                <tr><td colspan="7" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="profileTab" class="tab-content">
+                <div class="profile-card-wrap">
+                    <div class="profile-card">
+                        <div class="profile-card-head">
+                            <h2>My Profile</h2>
+                            <p>Reviewer account information</p>
+                        </div>
+                        <div class="profile-grid">
+                            <div class="profile-item"><span class="profile-label">Full Name</span><span id="profileName" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Email</span><span id="profileEmail" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">WhatsApp</span><span id="profileWhatsapp" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Location</span><span id="profileLocation" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Role</span><span id="profileRole" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Status</span><span id="profileStatus" class="profile-value">-</span></div>
+                            <div class="profile-item profile-item-wide"><span class="profile-label">Date Registered</span><span id="profileRegisteredAt" class="profile-value">-</span></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -500,8 +529,48 @@
     <!-- Notification -->
     <div id="notification" class="notification"></div>
 
+    <button type="button" id="helpFab" class="sop-fab" title="Open SOP">
+        <i class="fas fa-circle-question"></i>
+        <span>SOP</span>
+    </button>
+    <div id="sopHelpModal" class="modal">
+        <div class="modal-content sop-help-modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-book-open"></i> Reviewer SOP</h2>
+                <button class="close-btn" id="closeSopHelpModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="sop-topics">
+                    <div class="sop-topic">
+                        <h4>1. Pending Review</h4>
+                        <p>Open <strong>Pending Review</strong>, inspect customer details and all uploaded documents before deciding.</p>
+                        <p>Always validate file clarity, consistency, and required documents completeness.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>2. Approve Action</h4>
+                        <p>Use <strong>Approve</strong> only when submission meets policy and document quality standards.</p>
+                        <p>Approved records move forward to RSA stage; verify customer name and document set before confirming.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>3. Reject Action</h4>
+                        <p>Use <strong>Reject</strong> with a clear comment describing exact corrections required.</p>
+                        <p>Keep comments actionable so uploader can fix quickly without repeated rejection cycles.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>4. Viewer and Zoom Controls</h4>
+                        <p>Use document viewer tools (zoom, fit, next/prev file) to inspect signatures, dates, and numbers.</p>
+                        <p>Reject blurry or incomplete scans that create audit/compliance risk.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="closeSopHelpModalFooterBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script type="module" src="js/firebase-config.js"></script>
-    <script type="module" src="js/reviewer-dashboard.js?v=20260310"></script>
+    <script type="module" src="js/reviewer-dashboard.js?v=20260415d"></script>
     
     <script>
         // Mobile sidebar functionality
@@ -600,5 +669,16 @@
             };
         });
     </script>
+    <script src="js/table-enhancer.js?v=20260415"></script>
+    <script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
+    <link rel="stylesheet" href="css/app-chat.css?v=20260415d">
+    <script type="module" src="js/app-chat.js?v=20260415i"></script>
+    <link rel="stylesheet" href="css/pwa-install.css">
+    <script src="js/pwa-install.js"></script>
+    <link rel="stylesheet" href="css/profile-card.css">
+    <link rel="stylesheet" href="css/sop-help.css">
+    <script src="js/sop-help.js"></script>
+    <link rel="stylesheet" href="css/developer-badge.css">
+    <script src="js/developer-badge.js"></script>
 </body>
 </html>

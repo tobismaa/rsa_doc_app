@@ -41,6 +41,16 @@ function normalizeEmail(value) {
     return v.includes('@') ? v : '';
 }
 
+function normalizeRole(value) {
+    const v = String(value || '').trim().toLowerCase();
+    if (v === 'viewer') return 'reviewer';
+    return v;
+}
+
+function safeLowerEmail(value) {
+    return normalizeEmail(value);
+}
+
 function corsOptionsDelegate(req, callback) {
     if (allowedOrigins.length === 0) {
         callback(null, { origin: true });
@@ -71,17 +81,14 @@ async function authMiddleware(req, res, next) {
 }
 
 initFirebaseAdmin();
+const adminDb = admin.firestore();
 
 const sendgridApiKey = String(process.env.SENDGRID_API_KEY || '').trim();
-if (!sendgridApiKey) {
-    throw new Error('SENDGRID_API_KEY is required');
+if (sendgridApiKey) {
+    sgMail.setApiKey(sendgridApiKey);
 }
-sgMail.setApiKey(sendgridApiKey);
 
 const defaultFromEmail = normalizeEmail(process.env.SENDGRID_FROM_EMAIL);
-if (!defaultFromEmail) {
-    throw new Error('SENDGRID_FROM_EMAIL is required and must be a valid email');
-}
 
 app.use(cors(corsOptionsDelegate));
 app.use(express.json({ limit: '256kb' }));
@@ -95,8 +102,53 @@ app.get('/health', (_req, res) => {
     });
 });
 
+async function requireAdminRole(req, res, next) {
+    if (!req.user?.uid && !req.user?.email) {
+        return res.status(401).json({ ok: false, error: 'Missing authenticated user context' });
+    }
+
+    try {
+        let role = '';
+        let status = '';
+
+        if (req.user?.uid) {
+            const byUid = await adminDb.collection('users').where('uid', '==', req.user.uid).limit(1).get();
+            if (!byUid.empty) {
+                const data = byUid.docs[0].data() || {};
+                role = normalizeRole(data.role);
+                status = String(data.status || '').toLowerCase();
+            }
+        }
+
+        if (!role && req.user?.email) {
+            const normalizedEmail = normalizeEmail(req.user.email);
+            const byEmail = await adminDb.collection('users').where('email', '==', normalizedEmail).limit(1).get();
+            if (!byEmail.empty) {
+                const data = byEmail.docs[0].data() || {};
+                role = normalizeRole(data.role);
+                status = String(data.status || '').toLowerCase();
+            }
+        }
+
+        if (role !== 'admin' || (status && status !== 'active')) {
+            return res.status(403).json({ ok: false, error: 'Admin access required' });
+        }
+
+        return next();
+    } catch (err) {
+        return res.status(500).json({ ok: false, error: 'Failed to validate admin role' });
+    }
+}
+
 app.post('/api/send-alert', authMiddleware, async (req, res) => {
     try {
+        if (!sendgridApiKey || !defaultFromEmail) {
+            return res.status(503).json({
+                ok: false,
+                error: 'SendGrid is not configured on this service'
+            });
+        }
+
         const eventKey = String(req.body?.eventKey || '').trim();
         const to = normalizeEmail(req.body?.to);
         const subject = String(req.body?.subject || '').trim();
@@ -124,15 +176,199 @@ app.post('/api/send-alert', authMiddleware, async (req, res) => {
             }
         });
 
-        const headerMessageId = sendResult?.headers?.['x-message-id'] || '';
         return res.json({
             ok: true,
-            messageId: String(headerMessageId || '')
+            messageId: String(sendResult?.headers?.['x-message-id'] || '')
         });
     } catch (err) {
         return res.status(500).json({
             ok: false,
             error: String(err?.message || 'Failed to send alert email')
+        });
+    }
+});
+
+app.post('/api/admin/reset-password', authMiddleware, requireAdminRole, async (req, res) => {
+    try {
+        const userId = String(req.body?.userId || '').trim();
+        const newPassword = String(req.body?.newPassword || '123456').trim();
+
+        if (!userId) {
+            return res.status(400).json({ ok: false, error: 'userId is required' });
+        }
+        if (newPassword.length < 6) {
+            return res.status(400).json({ ok: false, error: 'Password must be at least 6 characters' });
+        }
+
+        const userRef = adminDb.collection('users').doc(userId);
+        const userSnap = await userRef.get();
+        if (!userSnap.exists) {
+            return res.status(404).json({ ok: false, error: 'Target user not found' });
+        }
+
+        const userData = userSnap.data() || {};
+        const targetUid = String(userData.uid || '').trim();
+        const targetEmail = normalizeEmail(userData.email);
+
+        if (!targetUid && !targetEmail) {
+            return res.status(400).json({ ok: false, error: 'Target user has no uid/email linked to Auth' });
+        }
+
+        let authUid = targetUid;
+        if (!authUid && targetEmail) {
+            const userRecord = await admin.auth().getUserByEmail(targetEmail);
+            authUid = userRecord.uid;
+        }
+
+        await admin.auth().updateUser(authUid, { password: newPassword });
+
+        await userRef.set({
+            passwordResetAt: admin.firestore.FieldValue.serverTimestamp(),
+            passwordResetBy: req.user?.email || req.user?.uid || 'admin-api',
+            passwordResetMethod: 'admin_direct',
+            passwordResetDefault: true
+        }, { merge: true });
+
+        await adminDb.collection('audit').add({
+            action: 'user_password_reset_direct',
+            userId,
+            userEmail: targetEmail || '',
+            resetTo: '123456',
+            performedBy: req.user?.email || req.user?.uid || 'admin-api',
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        return res.json({
+            ok: true,
+            message: 'Password reset to default (123456)'
+        });
+    } catch (err) {
+        return res.status(500).json({
+            ok: false,
+            error: String(err?.message || 'Failed to reset password')
+        });
+    }
+});
+
+app.post('/api/chat/push', authMiddleware, async (req, res) => {
+    try {
+        const submissionId = String(req.body?.submissionId || '').trim();
+        const customerName = String(req.body?.customerName || '').trim();
+        const messageText = String(req.body?.messageText || '').trim();
+        if (!submissionId || !messageText) {
+            return res.status(400).json({ ok: false, error: 'submissionId and messageText are required' });
+        }
+
+        const senderEmail = safeLowerEmail(req.user?.email);
+        if (!senderEmail) {
+            return res.status(401).json({ ok: false, error: 'Authenticated email is required' });
+        }
+
+        const subRef = adminDb.collection('submissions').doc(submissionId);
+        const subSnap = await subRef.get();
+        if (!subSnap.exists) {
+            return res.status(404).json({ ok: false, error: 'Submission not found' });
+        }
+        const sub = subSnap.data() || {};
+
+        const participantEmails = Array.from(new Set([
+            safeLowerEmail(sub.uploadedBy),
+            safeLowerEmail(sub.assignedTo),
+            safeLowerEmail(sub.reviewedBy),
+            safeLowerEmail(sub.assignedToRSA),
+            safeLowerEmail(sub.assignedToPayment)
+        ].filter(Boolean)));
+
+        const senderCanAccess = participantEmails.includes(senderEmail);
+        if (!senderCanAccess) {
+            const senderUserSnap = await adminDb.collection('users').where('email', '==', senderEmail).limit(1).get();
+            const senderRole = !senderUserSnap.empty ? normalizeRole(senderUserSnap.docs[0].data()?.role) : '';
+            if (!['admin', 'super_admin'].includes(senderRole)) {
+                return res.status(403).json({ ok: false, error: 'Not permitted for this submission' });
+            }
+        }
+
+        const recipientEmails = participantEmails.filter((e) => e !== senderEmail);
+        if (recipientEmails.length === 0) return res.json({ ok: true, sent: 0, reason: 'no-recipients' });
+
+        const usersByEmail = new Map();
+        for (const email of recipientEmails) {
+            const uSnap = await adminDb.collection('users').where('email', '==', email).limit(1).get();
+            if (!uSnap.empty) usersByEmail.set(email, { id: uSnap.docs[0].id, ...(uSnap.docs[0].data() || {}) });
+        }
+
+        const tokenOwners = [];
+        for (const email of recipientEmails) {
+            const userData = usersByEmail.get(email);
+            const tokens = Array.isArray(userData?.fcmTokens) ? userData.fcmTokens : [];
+            for (const token of tokens) {
+                const t = String(token || '').trim();
+                if (t) tokenOwners.push({ email, userId: userData?.id || '', token: t });
+            }
+        }
+
+        const uniqueMap = new Map();
+        tokenOwners.forEach((entry) => { if (!uniqueMap.has(entry.token)) uniqueMap.set(entry.token, entry); });
+        const uniqueOwners = Array.from(uniqueMap.values());
+        const tokens = uniqueOwners.map((x) => x.token);
+        if (tokens.length === 0) return res.json({ ok: true, sent: 0, reason: 'no-device-tokens' });
+
+        const title = `New Chat Message - ${customerName || 'Application'}`;
+        const body = messageText.slice(0, 120);
+        const clickUrl = `/dashboard.html?chat=${encodeURIComponent(submissionId)}`;
+
+        const response = await admin.messaging().sendEachForMulticast({
+            tokens,
+            notification: { title, body },
+            data: {
+                submissionId,
+                clickUrl
+            },
+            webpush: {
+                fcmOptions: { link: clickUrl },
+                notification: {
+                    title,
+                    body,
+                    icon: '/favicon.svg',
+                    badge: '/favicon.svg',
+                    data: { url: clickUrl }
+                }
+            }
+        });
+
+        const badTokens = [];
+        response.responses.forEach((r, idx) => {
+            if (r.success) return;
+            const code = String(r.error?.code || '');
+            if (
+                code.includes('registration-token-not-registered') ||
+                code.includes('invalid-argument')
+            ) {
+                badTokens.push(uniqueOwners[idx]);
+            }
+        });
+
+        for (const bad of badTokens) {
+            if (!bad?.userId) continue;
+            try {
+                const ref = adminDb.collection('users').doc(bad.userId);
+                const snap = await ref.get();
+                if (!snap.exists) continue;
+                const arr = Array.isArray(snap.data()?.fcmTokens) ? snap.data().fcmTokens : [];
+                const next = arr.filter((t) => String(t || '').trim() !== bad.token);
+                await ref.set({ fcmTokens: next, fcmTokenPrunedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+            } catch (_) {}
+        }
+
+        return res.json({
+            ok: true,
+            sent: response.successCount,
+            failed: response.failureCount
+        });
+    } catch (err) {
+        return res.status(500).json({
+            ok: false,
+            error: String(err?.message || 'Failed to send chat push')
         });
     }
 });

@@ -6,13 +6,13 @@ import { getAnalytics } from "https://www.gstatic.com/firebasejs/9.22.0/firebase
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "REPLACE_WITH_FIREBASE_API_KEY",
-  authDomain: "REPLACE_WITH_FIREBASE_AUTH_DOMAIN",
-  projectId: "REPLACE_WITH_FIREBASE_PROJECT_ID",
-  storageBucket: "REPLACE_WITH_FIREBASE_STORAGE_BUCKET",
-  messagingSenderId: "REPLACE_WITH_FIREBASE_MESSAGING_SENDER_ID",
-  appId: "REPLACE_WITH_FIREBASE_APP_ID",
-  measurementId: "REPLACE_WITH_FIREBASE_MEASUREMENT_ID"
+  apiKey: "AIzaSyABQ-RR3Mlot7Vz2_s06AcFp3AlHb6elmw",
+  authDomain: "rsa-doc-app.firebaseapp.com",
+  projectId: "rsa-doc-app",
+  storageBucket: "rsa-doc-app.firebasestorage.app",
+  messagingSenderId: "749343098749",
+  appId: "1:749343098749:web:ed78989a0b2c620d156e14",
+  measurementId: "G-KQHMRNDZ6X"
 };
 
 // Initialize Firebase
@@ -21,4 +21,4 @@ const analytics = getAnalytics(app);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-export { auth, db, analytics };
+export { app, auth, db, analytics };

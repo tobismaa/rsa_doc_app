@@ -1,0 +1,53 @@
+.pwa-install-banner {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  z-index: 17000;
+  background: #0f172a;
+  color: #fff;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.45);
+  width: min(92vw, 370px);
+  padding: 12px;
+  display: none;
+}
+
+.pwa-install-banner.active {
+  display: block;
+}
+
+.pwa-install-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.pwa-install-text {
+  margin: 6px 0 10px;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.pwa-install-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.pwa-install-btn {
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #fff;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pwa-install-btn.primary {
+  background: #0f766e;
+  border-color: #0f766e;
+}

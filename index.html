@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=0.7, maximum-scale=1.0, user-scalable=yes">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="theme-color" content="#0f3b67">
     <title>CMBank RSA Document Portal</title>
+    <link rel="manifest" href="manifest.webmanifest">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/index.css">
     <!-- Security: DOMPurify for XSS protection -->
@@ -253,16 +255,47 @@
                         <div id="nameError" class="error-message"></div>
                     </div>
 
+                    <div class="form-group">
+                        <label for="signupLocation">
+                            <i class="fas fa-location-dot"></i>
+                            Location
+                        </label>
+                        <input type="text" id="signupLocation" required placeholder="Enter your location" maxlength="120">
+                        <div class="field-note">Example: Lagos, Abuja, Port Harcourt</div>
+                        <div id="locationError" class="error-message"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="signupWhatsappNumber">
+                            <i class="fab fa-whatsapp"></i>
+                            WhatsApp Number
+                        </label>
+                        <div class="phone-input-row">
+                            <select id="signupWhatsappCode" required>
+                                <option value="+234">🇳🇬 +234</option>
+                                <option value="+233">🇬🇭 +233</option>
+                                <option value="+254">🇰🇪 +254</option>
+                                <option value="+27">🇿🇦 +27</option>
+                                <option value="+1">🇺🇸 +1</option>
+                                <option value="+44">🇬🇧 +44</option>
+                                <option value="+971">🇦🇪 +971</option>
+                            </select>
+                            <input type="text" id="signupWhatsappNumber" required placeholder="10-digit number" maxlength="10" inputmode="numeric" pattern="[0-9]{10}">
+                        </div>
+                        <div class="field-note">Select code and enter exactly 10 digits</div>
+                        <div id="whatsappError" class="error-message"></div>
+                    </div>
+
 
                     <div class="form-group">
                         <label for="signupEmail">
                             <i class="fas fa-envelope"></i>
                             Official Email
                         </label>
-                        <input type="email" id="signupEmail" required placeholder="Enter your official email" 
+                        <input type="email" id="signupEmail" required placeholder="Enter your email" 
                                maxlength="100" 
                                oninput="this.value = this.value.toLowerCase()">
-                        <div class="field-note">Use your @cmbankng.com email</div>
+                        <div class="field-note">Any valid email is allowed</div>
                         <div id="emailError" class="error-message"></div>
                     </div>
 
@@ -296,5 +329,9 @@
 
     <script type="module" src="js/firebase-config.js"></script>
     <script type="module" src="js/auth.js?v=20260308"></script>
+    <link rel="stylesheet" href="css/pwa-install.css">
+    <script src="js/pwa-install.js"></script>
+    <link rel="stylesheet" href="css/developer-badge.css">
+    <script src="js/developer-badge.js"></script>
 </body>
 </html>

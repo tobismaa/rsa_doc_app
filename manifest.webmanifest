@@ -1,0 +1,24 @@
+{
+  "name": "CMBank RSA Document Portal",
+  "short_name": "CMBank RSA",
+  "start_url": "/index.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b1d2f",
+  "theme_color": "#0f3b67",
+  "description": "RSA document workflow portal for uploader, reviewer, RSA, admin and payment teams.",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

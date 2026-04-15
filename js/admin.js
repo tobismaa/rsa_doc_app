@@ -1,5 +1,6 @@
 ﻿// js/admin.js - COMPLETE UPDATED VERSION WITH FIXED DOWNLOAD ALL
 import { auth, db } from './firebase-config.js';
+import { ADMIN_API_BASE_URL } from './admin-api-config.js';
 import {
     collection,
     addDoc,
@@ -34,9 +35,6 @@ import {
     } catch (e) { /* ignore */ }
 })();
 
-// ==================== CORS PROXY CONFIG ====================
-const CORS_PROXY = 'https://cors-proxy.naniadezz.workers.dev?url=';
-
 // ==================== DOCUMENT TYPES MAPPING ====================
 const DOCUMENT_TYPES = {
     'birth_certificate': 'Birth Certificate',
@@ -55,19 +53,48 @@ const DOCUMENT_TYPES = {
 
 // ==================== GLOBAL VARIABLES ====================
 let currentAdmin = null;
+let currentAdminProfileData = null;
 let selectedUserId = null;
 let selectedSubmissionId = null;
 let allUsers = [];
 let allAudits = [];
 let allSubmissions = [];
+let allPendingAgents = [];
+let allApprovedAgents = [];
 let adminNames = {};
 let uploaderNames = {};
 let userIdNameCache = new Map();
 let userEmailNameCache = new Map();
-const TRACK_PAGE_SIZE = 20;
+const TRACK_PAGE_SIZE = 10;
 let trackAppsPage = 1;
+let currentParentTab = 'user-management';
+let currentLeafTab = 'users';
+
+const TAB_GROUPS = {
+    'user-management': ['users', 'pending-users', 'pending-agents', 'registered-agents'],
+    'application-management': ['pending-docs', 'approved-docs', 'rejected-docs', 'track-apps', 'finally-submitted', 'payments']
+};
+
+const TAB_LABELS = {
+    users: 'Users',
+    'pending-users': 'Pending Users',
+    'pending-agents': 'Pending Agents',
+    'registered-agents': 'Registered Agents',
+    'pending-docs': 'Pending',
+    'approved-docs': 'Approved',
+    'rejected-docs': 'Rejected',
+    'track-apps': 'Track Applications',
+    'finally-submitted': 'Final Submission',
+    payments: 'Payment'
+};
 
 const REVIEWER_ROLE_ALIASES = new Set(['reviewer', 'viewer']);
+const SUPER_ADMIN_ONLY_ACTIONS = new Set([
+    'admin_management_updated',
+    'application_redirected',
+    'round_robin_counter_reset',
+    'super_admin_settings_updated'
+]);
 
 function normalizeUserRole(role) {
     const normalized = String(role || '').trim().toLowerCase();
@@ -77,7 +104,9 @@ function normalizeUserRole(role) {
 
 function getRoleLabel(role) {
     const normalized = normalizeUserRole(role);
+    if (normalized === 'super_admin') return 'Super Admin';
     if (normalized === 'rsa') return 'RSA';
+    if (normalized === 'payment') return 'Payment';
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
@@ -97,6 +126,22 @@ async function getReviewerUsersForRoundRobin() {
         .sort((a, b) => a.email.localeCompare(b.email));
 }
 
+async function getPaymentUsersForRoundRobin() {
+    const usersSnap = await getDocs(collection(db, 'users'));
+    return usersSnap.docs
+        .map((d) => {
+            const data = d.data() || {};
+            return {
+                id: d.id,
+                email: data.email,
+                fullName: data.fullName || data.email || 'Unknown',
+                role: normalizeUserRole(data.role)
+            };
+        })
+        .filter((u) => u.email && u.role === 'payment')
+        .sort((a, b) => a.email.localeCompare(b.email));
+}
+
 // ==================== DOM ELEMENTS ====================
 const adminName = document.getElementById('adminName');
 const adminAvatar = document.getElementById('adminAvatar');
@@ -104,11 +149,15 @@ const pageTitle = document.getElementById('pageTitle');
 const pendingUserCountBadge = document.getElementById('pendingUserCount');
 const pendingDocCountBadge = document.getElementById('pendingDocCount');
 const rejectedDocCountBadge = document.getElementById('rejectedDocCount');
+const paymentPendingCountBadge = document.getElementById('paymentPendingCount');
 const usersTableBody = document.getElementById('usersTableBody');
 const pendingUsersGrid = document.getElementById('pendingUsersGrid');
+const pendingAgentsTableBody = document.getElementById('pendingAgentsTableBody');
+const approvedAgentsTableBody = document.getElementById('approvedAgentsTableBody');
 const pendingDocsTableBody = document.getElementById('pendingDocsTableBody');
 const approvedDocsTableBody = document.getElementById('approvedDocsTableBody');
 const rejectedDocsTableBody = document.getElementById('rejectedDocsTableBody');
+const paymentsTableBody = document.getElementById('paymentsTableBody');
 const trackAppsTableBody = document.getElementById('trackAppsTableBody');
 const trackPrevPageBtn = document.getElementById('trackPrevPageBtn');
 const trackNextPageBtn = document.getElementById('trackNextPageBtn');
@@ -120,32 +169,125 @@ const notification = document.getElementById('notification');
 const viewerModal = document.getElementById('viewerModal');
 const viewerFileName = document.getElementById('viewerFileName');
 const documentViewer = document.getElementById('documentViewer');
+const profileNameEl = document.getElementById('profileName');
+const profileRegisteredAtEl = document.getElementById('profileRegisteredAt');
+const profileEmailEl = document.getElementById('profileEmail');
+const profileWhatsappEl = document.getElementById('profileWhatsapp');
+const profileLocationEl = document.getElementById('profileLocation');
+const profileRoleEl = document.getElementById('profileRole');
+const profileStatusEl = document.getElementById('profileStatus');
 // Admin password reset removed (per request).
 
-// ==================== CORS HELPER FUNCTION (IMPROVED) ====================
+function renderProfileTab() {
+    if (!profileNameEl && !profileEmailEl && !profileRoleEl && !profileStatusEl) return;
+    const fullName = currentAdminProfileData?.fullName || currentAdmin?.displayName || currentAdmin?.email || 'N/A';
+    const registeredAt = currentAdminProfileData?.createdAt ? formatDate(currentAdminProfileData.createdAt) : '-';
+    const email = currentAdminProfileData?.email || currentAdmin?.email || 'N/A';
+    const whatsapp = currentAdminProfileData?.whatsappNumber || currentAdminProfileData?.phone || '-';
+    const location = currentAdminProfileData?.location || '-';
+    const role = String(currentAdminProfileData?.role || 'admin');
+    const status = String(currentAdminProfileData?.status || 'active');
+    if (profileNameEl) profileNameEl.textContent = fullName;
+    if (profileRegisteredAtEl) profileRegisteredAtEl.textContent = registeredAt;
+    if (profileEmailEl) profileEmailEl.textContent = email;
+    if (profileWhatsappEl) profileWhatsappEl.textContent = whatsapp;
+    if (profileLocationEl) profileLocationEl.textContent = location;
+    if (profileRoleEl) profileRoleEl.textContent = role.charAt(0).toUpperCase() + role.slice(1);
+    if (profileStatusEl) profileStatusEl.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function ensureRoundRobinUnifiedTab() {
+    const roundRobinTab = document.getElementById('round-robinTab');
+    if (!roundRobinTab) return;
+    if (document.getElementById('reviewerMonitorSection')) return;
+
+    const reviewerMonitor = roundRobinTab.querySelector('.round-robin-monitor');
+    const rsaLegacyTab = document.getElementById('rsa-round-robinTab');
+    const rsaMonitor = rsaLegacyTab?.querySelector('.round-robin-monitor') || null;
+
+    const monitorShell = document.createElement('div');
+    monitorShell.className = 'round-robin-tabs-shell';
+    monitorShell.innerHTML = `
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+            <button id="rrReviewerBtn" class="action-btn active" type="button" style="padding:8px 14px;">Reviewer</button>
+            <button id="rrRsaBtn" class="action-btn" type="button" style="padding:8px 14px;">RSA</button>
+            <button id="rrPaymentBtn" class="action-btn" type="button" style="padding:8px 14px;">Payment</button>
+        </div>
+        <div id="reviewerMonitorSection"></div>
+        <div id="rsaMonitorSection" style="display:none;"></div>
+        <div id="paymentMonitorSection" style="display:none;">
+            <div class="round-robin-monitor">
+                <h2>Payment Round-Robin Distribution Monitor</h2>
+                <p style="color:#666;margin-bottom:20px;">Monitor and manage queue distribution to payment officers</p>
+                <div style="background:#f8f9fa;padding:20px;border-radius:8px;margin-bottom:25px;">
+                    <h3>Current Distribution State</h3>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin-top:15px;">
+                        <div style="background:white;padding:15px;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:12px;color:#999;margin-bottom:5px;">Last Distribution</div><div id="lastDistributionPayment" style="font-size:16px;font-weight:600;color:#003366;">Loading...</div></div>
+                        <div style="background:white;padding:15px;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:12px;color:#999;margin-bottom:5px;">Current Index</div><div id="currentDistributionIndexPayment" style="font-size:16px;font-weight:600;color:#003366;">Loading...</div></div>
+                        <div style="background:white;padding:15px;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:12px;color:#999;margin-bottom:5px;">Last Reset Date</div><div id="lastResetDatePayment" style="font-size:16px;font-weight:600;color:#003366;">Loading...</div></div>
+                        <div style="background:white;padding:15px;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:12px;color:#999;margin-bottom:5px;">Total Payment Users</div><div id="totalPaymentUserCount" style="font-size:16px;font-weight:600;color:#003366;">Loading...</div></div>
+                    </div>
+                </div>
+                <div style="background:#f8f9fa;padding:20px;border-radius:8px;margin-bottom:25px;">
+                    <h3>Distribution Statistics (Today)</h3>
+                    <div class="table-container" style="max-height:400px;overflow-y:auto;">
+                        <table class="documents-table" style="margin-bottom:0;">
+                            <thead><tr><th>Payment User Name</th><th>Email</th><th>Assigned Today</th><th>Completed</th><th>Pending</th></tr></thead>
+                            <tbody id="distributionStatsPaymentBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div style="background:#f8f9fa;padding:20px;border-radius:8px;margin-bottom:25px;">
+                    <h3>Recent Payment Assignment History (Last 20)</h3>
+                    <div class="table-container" style="max-height:400px;overflow-y:auto;">
+                        <table class="documents-table" style="margin-bottom:0;">
+                            <thead><tr><th>Timestamp</th><th>Customer</th><th>Assigned To (Payment)</th><th>Assigned By</th></tr></thead>
+                            <tbody id="assignmentHistoryPaymentBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div style="background:#fff3cd;padding:20px;border-radius:8px;border-left:4px solid #ffc107;">
+                    <h3 style="margin-top:0;">Administrator Controls</h3>
+                    <p style="color:#333;margin:10px 0;">Use these tools to reset payment distribution or test assignment order</p>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:15px;">
+                        <button id="resetRoundRobinPaymentBtn" class="action-btn" style="background:#ef4444;color:white;padding:10px 20px;border:none;border-radius:6px;cursor:pointer;font-weight:600;"><i class="fas fa-redo"></i> Reset Counter (Today)</button>
+                        <button id="testDistributionPaymentBtn" class="action-btn" style="background:#3b82f6;color:white;padding:10px 20px;border:none;border-radius:6px;cursor:pointer;font-weight:600;"><i class="fas fa-flask"></i> Test Payment Distribution</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    roundRobinTab.innerHTML = '';
+    roundRobinTab.appendChild(monitorShell);
+
+    if (reviewerMonitor) {
+        const reviewerSection = document.getElementById('reviewerMonitorSection');
+        reviewerSection?.appendChild(reviewerMonitor);
+    }
+    if (rsaMonitor) {
+        const rsaSection = document.getElementById('rsaMonitorSection');
+        rsaSection?.appendChild(rsaMonitor);
+    }
+    if (rsaLegacyTab) {
+        rsaLegacyTab.remove();
+    }
+
+    document.getElementById('rrReviewerBtn')?.addEventListener('click', () => window.switchRoundRobinMonitor('reviewer'));
+    document.getElementById('rrRsaBtn')?.addEventListener('click', () => window.switchRoundRobinMonitor('rsa'));
+    document.getElementById('rrPaymentBtn')?.addEventListener('click', () => window.switchRoundRobinMonitor('payment'));
+    document.getElementById('resetRoundRobinPaymentBtn')?.addEventListener('click', handleResetRoundRobinPayment);
+    document.getElementById('testDistributionPaymentBtn')?.addEventListener('click', handleTestDistributionPayment);
+}
+
+// ==================== DOCUMENT FETCH HELPER ====================
 async function fetchWithCorsFallback(url) {
     const cleanUrl = url?.toString().trim().replace(/[\s\n\r\t]+/g, '');
     if (!cleanUrl) throw new Error('Invalid URL');
 
-    // Always use proxy for Backblaze URLs to avoid CORS issues
-    if (cleanUrl.includes('backblazeb2.com')) {
-        const proxyUrl = `${CORS_PROXY}${encodeURIComponent(cleanUrl)}`;
-        const response = await fetch(proxyUrl);
-        if (!response.ok) {
-            throw new Error(`Proxy fetch failed: ${response.status}`);
-        }
-        return response;
-    }
-
-    try {
-        const response = await fetch(cleanUrl, { mode: 'cors', credentials: 'omit' });
-        if (response.ok) return response;
-    } catch (e) { /* Continue to proxy */ }
-
-    const proxyUrl = `${CORS_PROXY}${encodeURIComponent(cleanUrl)}`;
-    const response = await fetch(proxyUrl);
+    const response = await fetch(cleanUrl, { mode: 'cors', credentials: 'omit' });
     if (!response.ok) {
-        throw new Error(`Proxy fetch failed: ${response.status}`);
+        throw new Error(`Document fetch failed: ${response.status}`);
     }
     return response;
 }
@@ -306,17 +448,28 @@ async function checkAdminAuth() {
                 return;
             }
 
+            if (userData.role === 'super_admin') {
+                window.location.href = 'super-admin-dashboard.html';
+                return;
+            }
+
             if (userData.role === 'admin') {
                 currentAdmin = user;
+                currentAdminProfileData = userData;
+                ensureRoundRobinUnifiedTab();
                 adminName.textContent = userData.fullName || user.email;
                 adminAvatar.src = user.photoURL || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'40\' height=\'40\' viewBox=\'0 0 40 40\'%3E%3Ccircle cx=\'20\' cy=\'20\' r=\'20\' fill=\'%23003366\'/%3E%3Ctext x=\'20\' y=\'25\' text-anchor=\'middle\' fill=\'%23ffffff\' font-size=\'16\'%3EUser%3C/text%3E%3C/svg%3E';
+                renderProfileTab();
 
                 loadUsers();
                 loadPendingUsers();
+                loadPendingAgents();
+                loadApprovedAgents();
                 loadSubmissions();
                 loadAuditLog();
                 loadAdminNames();
                 loadUploaderNames();
+                switchTab('user-management');
             } else {
                 showNotification('Access denied. Admin privileges required.', 'error');
                 window.location.href = 'index.html';
@@ -433,6 +586,8 @@ function setupEventListeners() {
     });
 
     document.getElementById('closeViewUserModal')?.addEventListener('click', closeViewUserModal);
+    document.getElementById('closeViewAgentModal')?.addEventListener('click', closeViewAgentModal);
+    document.getElementById('closeAgentDetailsBtn')?.addEventListener('click', closeViewAgentModal);
     document.getElementById('editFromViewBtn')?.addEventListener('click', () => {
         if (selectedUserId) {
             window.editUser(selectedUserId);
@@ -505,45 +660,150 @@ function setupEventListeners() {
     document.getElementById('testDistributionBtn')?.addEventListener('click', handleTestDistribution);
     document.getElementById('resetRoundRobinRSABtn')?.addEventListener('click', handleResetRoundRobinRSA);
     document.getElementById('testDistributionRSABtn')?.addEventListener('click', handleTestDistributionRSA);
+    document.getElementById('resetRoundRobinPaymentBtn')?.addEventListener('click', handleResetRoundRobinPayment);
+    document.getElementById('testDistributionPaymentBtn')?.addEventListener('click', handleTestDistributionPayment);
     document.getElementById('closeTestResultModal')?.addEventListener('click', closeTestResultModal);
     document.getElementById('closeTestResultBtn')?.addEventListener('click', closeTestResultModal);
 }
 
 // ==================== TAB SWITCHING ====================
-function switchTab(tabId) {
-    document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
-    document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
+function getParentTabForLeaf(tabId) {
+    const entries = Object.entries(TAB_GROUPS);
+    for (const [parent, leaves] of entries) {
+        if (leaves.includes(tabId)) return parent;
+    }
+    return null;
+}
 
-    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-    document.getElementById(`${tabId}Tab`)?.classList.add('active');
+function renderAdminSubTabs(parentTabId) {
+    const host = document.getElementById('adminSubTabs');
+    if (!host) return;
 
-    const titles = {
-        users: 'User Management',
-        'pending-users': 'Approve New Users',
-        'pending-docs': 'Pending Documents',
-        'approved-docs': 'Approved Documents',
-        'rejected-docs': 'Rejected Documents',
-        'track-apps': 'Track Applications',
-        'finally-submitted': 'Finally Submitted Applications',
-        audit: 'Audit Log',
-        'round-robin': 'Round-Robin Monitor',
-        'rsa-round-robin': 'RSA Round-Robin Monitor'
-    };
+    const leaves = TAB_GROUPS[parentTabId] || [];
+    if (!leaves.length) {
+        host.innerHTML = '';
+        host.style.display = 'none';
+        return;
+    }
 
-    if (pageTitle) pageTitle.textContent = titles[tabId];
+    host.style.display = 'flex';
+    host.classList.add('admin-subtab-strip');
+    host.innerHTML = leaves.map((leaf) => {
+        const active = leaf === currentLeafTab;
+        const label = TAB_LABELS[leaf] || leaf;
+        return `
+            <button
+                type="button"
+                class="action-btn admin-subtab-btn ${active ? 'active' : ''}"
+                data-subtab="${leaf}"
+            >${label}</button>
+        `;
+    }).join('');
+
+    host.querySelectorAll('[data-subtab]').forEach((btn) => {
+        btn.addEventListener('click', () => switchLeafTab(btn.getAttribute('data-subtab')));
+    });
+}
+
+function runTabEffects(tabId) {
     if (tabId === 'track-apps') {
         renderTrackApplications();
     }
     if (tabId === 'finally-submitted') {
         renderFinallySubmitted();
     }
+    if (tabId === 'payments') {
+        renderPaymentQueue();
+    }
     if (tabId === 'round-robin') {
         loadRoundRobinMonitor();
-    }
-    if (tabId === 'rsa-round-robin') {
         loadRSARoundRobinMonitor();
+        loadPaymentRoundRobinMonitor();
+        window.switchRoundRobinMonitor('reviewer');
     }
 }
+
+function switchLeafTab(tabId) {
+    currentLeafTab = tabId;
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    document.getElementById(`${tabId}Tab`)?.classList.add('active');
+
+    const titles = {
+        users: 'User Management - Users',
+        'pending-users': 'User Management - Pending Users',
+        'pending-agents': 'User Management - Pending Agents',
+        'registered-agents': 'User Management - Registered Agents',
+        'pending-docs': 'Application Management - Pending',
+        'approved-docs': 'Application Management - Approved',
+        'rejected-docs': 'Application Management - Rejected',
+        'track-apps': 'Application Management - Track Applications',
+        'finally-submitted': 'Application Management - Final Submission',
+        payments: 'Application Management - Payment',
+        audit: 'Audit Log',
+        profile: 'My Profile',
+        'round-robin': 'Round Robin Monitor',
+        help: 'Help & SOP'
+    };
+    if (pageTitle) pageTitle.textContent = titles[tabId] || 'Admin Dashboard';
+
+    renderAdminSubTabs(currentParentTab);
+    runTabEffects(tabId);
+}
+
+function switchTab(tabId) {
+    const directParent = TAB_GROUPS[tabId] ? tabId : null;
+    const inferredParent = getParentTabForLeaf(tabId);
+    const parentTab = directParent || inferredParent;
+
+    if (parentTab) {
+        currentParentTab = parentTab;
+        document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
+        document.querySelector(`[data-tab="${parentTab}"]`)?.classList.add('active');
+
+        const defaultLeaf = TAB_GROUPS[parentTab][0];
+        const leafToShow = TAB_GROUPS[parentTab].includes(currentLeafTab) ? currentLeafTab : defaultLeaf;
+        switchLeafTab(inferredParent ? tabId : leafToShow);
+        return;
+    }
+
+    currentParentTab = '';
+    document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
+    document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    document.getElementById(`${tabId}Tab`)?.classList.add('active');
+    const titles = {
+        payments: 'Application Management - Payment',
+        audit: 'Audit Log',
+        profile: 'My Profile',
+        'round-robin': 'Round Robin Monitor',
+        help: 'Help & SOP'
+    };
+    if (pageTitle) pageTitle.textContent = titles[tabId] || 'Admin Dashboard';
+    renderAdminSubTabs('');
+    runTabEffects(tabId);
+}
+
+window.switchRoundRobinMonitor = (type = 'reviewer') => {
+    const reviewerSection = document.getElementById('reviewerMonitorSection');
+    const rsaSection = document.getElementById('rsaMonitorSection');
+    const paymentSection = document.getElementById('paymentMonitorSection');
+    const reviewerBtn = document.getElementById('rrReviewerBtn');
+    const rsaBtn = document.getElementById('rrRsaBtn');
+    const paymentBtn = document.getElementById('rrPaymentBtn');
+    const mode = String(type || '').toLowerCase();
+    const isReviewer = mode === 'reviewer';
+    const isRSA = mode === 'rsa';
+    const isPayment = mode === 'payment';
+
+    if (reviewerSection) reviewerSection.style.display = isReviewer ? 'block' : 'none';
+    if (rsaSection) rsaSection.style.display = isRSA ? 'block' : 'none';
+    if (paymentSection) paymentSection.style.display = isPayment ? 'block' : 'none';
+
+    [reviewerBtn, rsaBtn, paymentBtn].forEach((btn) => btn?.classList.remove('active'));
+    if (isReviewer) reviewerBtn?.classList.add('active');
+    if (isRSA) rsaBtn?.classList.add('active');
+    if (isPayment) paymentBtn?.classList.add('active');
+};
 
 // ==================== LOAD USERS ====================
 function loadUsers() {
@@ -553,7 +813,8 @@ function loadUsers() {
         const users = [];
         snapshot.forEach((doc) => {
             const userData = doc.data();
-            if (userData.status !== 'pending') {
+            const normalizedRole = normalizeUserRole(userData.role);
+            if (userData.status !== 'pending' && normalizedRole !== 'super_admin') {
                 const email = String(userData.email || '').toLowerCase();
                 const displayName = userData.fullName || (email ? email.split('@')[0] : 'Unknown');
                 if (email) userEmailNameCache.set(email, displayName);
@@ -582,7 +843,9 @@ function loadPendingUsers() {
     onSnapshot(q, (snapshot) => {
         const pendingUsers = [];
         snapshot.forEach((doc) => {
-            pendingUsers.push({ id: doc.id, ...doc.data() });
+            const data = doc.data() || {};
+            if (normalizeUserRole(data.role) === 'super_admin') return;
+            pendingUsers.push({ id: doc.id, ...data });
         });
         renderPendingUsersGrid(pendingUsers);
         updatePendingUserCount(pendingUsers);
@@ -593,6 +856,95 @@ function loadPendingUsers() {
     });
 }
 
+function loadPendingAgents() {
+    const q = query(collection(db, 'agents'), where('status', '==', 'pending'));
+    onSnapshot(q, (snapshot) => {
+        allPendingAgents = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
+        renderPendingAgentsTable(allPendingAgents);
+    }, () => {
+        renderPendingAgentsTable([]);
+    });
+}
+
+function loadApprovedAgents() {
+    const q = query(collection(db, 'agents'), where('status', '==', 'approved'));
+    onSnapshot(q, (snapshot) => {
+        allApprovedAgents = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
+        renderApprovedAgentsTable(allApprovedAgents);
+    }, () => {
+        renderApprovedAgentsTable([]);
+    });
+}
+
+function renderPendingAgentsTable(items) {
+    if (!pendingAgentsTableBody) return;
+
+    if (!items.length) {
+        pendingAgentsTableBody.innerHTML = '<tr><td colspan="5" class="no-data">No pending agent registrations</td></tr>';
+        return;
+    }
+
+    pendingAgentsTableBody.innerHTML = items.map((agent) => {
+        const registeredByRaw = String(agent.createdBy || '').trim();
+        const registeredByName = registeredByRaw ? getDisplayNameByEmail(registeredByRaw) : '-';
+        const registeredBy = registeredByName && registeredByName !== registeredByRaw ? registeredByName : (registeredByName || registeredByRaw || '-');
+        return `
+            <tr>
+                <td><strong>${escapeHtml(agent.fullName || '-')}</strong></td>
+                <td>${escapeHtml(registeredBy)}</td>
+                <td>${formatDate(agent.createdAt)}</td>
+                <td>
+                    <button class="action-btn view-btn pending-agent-btn" onclick="window.viewPendingAgent('${agent.id}')" title="View Agent">
+                        <i class="fas fa-eye"></i> View
+                    </button>
+                </td>
+                <td>
+                    <div class="action-buttons">
+                        <button class="action-btn activate-btn pending-agent-btn" onclick="window.approveAgentRegistration('${agent.id}', this)" title="Approve">
+                            <i class="fas fa-check"></i> Approve
+                        </button>
+                        <button class="action-btn reject-btn pending-agent-btn" onclick="window.rejectAgentRegistration('${agent.id}', this)" title="Reject">
+                            <i class="fas fa-times"></i> Reject
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderApprovedAgentsTable(items) {
+    if (!approvedAgentsTableBody) return;
+
+    if (!items.length) {
+        approvedAgentsTableBody.innerHTML = '<tr><td colspan="5" class="no-data">No approved agents yet</td></tr>';
+        return;
+    }
+
+    approvedAgentsTableBody.innerHTML = items.map((agent) => {
+        const registeredByRaw = String(agent.createdBy || '').trim();
+        const registeredByName = registeredByRaw ? getDisplayNameByEmail(registeredByRaw) : '-';
+        const registeredBy = registeredByName && registeredByName !== registeredByRaw ? registeredByName : (registeredByName || registeredByRaw || '-');
+        const approvedByRaw = String(agent.approvedBy || '').trim();
+        const approvedByName = approvedByRaw ? getDisplayNameByEmail(approvedByRaw) : '-';
+        const approvedBy = approvedByName && approvedByName !== approvedByRaw ? approvedByName : (approvedByName || approvedByRaw || '-');
+
+        return `
+            <tr>
+                <td><strong>${escapeHtml(agent.fullName || '-')}</strong></td>
+                <td>${escapeHtml(registeredBy)}</td>
+                <td>${escapeHtml(approvedBy)}</td>
+                <td>${formatDate(agent.approvedAt || agent.updatedAt || agent.createdAt)}</td>
+                <td>
+                    <button class="action-btn view-btn pending-agent-btn" onclick="window.viewApprovedAgent('${agent.id}')" title="View Agent">
+                        <i class="fas fa-eye"></i> View
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
 async function loadPendingUsersFallback() {
     const q = query(collection(db, 'users'));
     const snapshot = await getDocs(q);
@@ -600,7 +952,7 @@ async function loadPendingUsersFallback() {
 
     snapshot.forEach((doc) => {
         const userData = doc.data();
-        if (userData.status === 'pending') {
+        if (userData.status === 'pending' && normalizeUserRole(userData.role) !== 'super_admin') {
             pendingUsers.push({ id: doc.id, ...userData });
         }
     });
@@ -647,6 +999,7 @@ function renderPendingUsersGrid(pendingUsers) {
                             <option value="">Select role...</option>
                             <option value="uploader">Uploader</option>
                             <option value="reviewer">Reviewer</option>
+                            <option value="payment">Payment</option>
                             <option value="rsa">RSA</option>
                             <option value="admin">Admin</option>
                         </select>
@@ -670,7 +1023,7 @@ function renderUsersTable(users) {
     if (!usersTableBody) return;
 
     if (users.length === 0) {
-        usersTableBody.innerHTML = '<tr><td colspan="6" class="no-data">No users found</td></tr>';
+        usersTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No users found</td></tr>';
         return;
     }
 
@@ -682,6 +1035,7 @@ function renderUsersTable(users) {
             <tr data-user-id="${user.id}">
                 <td><strong>${fullName}</strong></td>
                 <td>${user.email}</td>
+                <td>${renderWhatsAppContactCell(user)}</td>
                 <td><span class="role-badge ${normalizedRole}">${roleLabel}</span></td>
                 <td><span class="status-badge ${user.status || 'active'}">${user.status || 'active'}</span></td>
                 <td>${formatDate(user.createdAt)}</td>
@@ -727,9 +1081,11 @@ function loadSubmissions() {
         renderRejectedDocs();
         renderTrackApplications();
         renderFinallySubmitted();
+        renderPaymentQueue();
         updatePendingDocCount(allSubmissions.filter(s => s.status === 'pending'));
         updateRejectedDocCount(allSubmissions.filter(s => s.status === 'rejected'));
         updateFinallySubmittedCount();
+        updatePaymentPendingCount();
     }, (error) => {
         // Silent fail
     });
@@ -795,6 +1151,9 @@ function renderPendingDocs() {
                     <button class="action-btn download-all-btn" onclick="window.downloadAllSubmission('${sub.id}')">
                         <i class="fas fa-download"></i> Download All
                     </button>
+                    <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
+                        <i class="fas fa-comments"></i> Chat
+                    </button>
                 </td>
             </tr>
         `;
@@ -805,7 +1164,10 @@ function renderPendingDocs() {
 function renderApprovedDocs() {
     if (!approvedDocsTableBody) return;
 
-    const approved = allSubmissions.filter(s => s.status === 'approved');
+    const approved = allSubmissions.filter(s => {
+        const status = String(s.status || '').toLowerCase();
+        return status === 'processing_to_pfa' || status === 'approved';
+    });
 
     if (approved.length === 0) {
         approvedDocsTableBody.innerHTML = '<tr><td colspan="6" class="no-data">No approved documents</td></tr>';
@@ -831,6 +1193,9 @@ function renderApprovedDocs() {
                     </button>
                     <button class="action-btn download-all-btn" onclick="window.downloadAllSubmission('${sub.id}')">
                         <i class="fas fa-download"></i> Download All
+                    </button>
+                    <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
+                        <i class="fas fa-comments"></i> Chat
                     </button>
                 </td>
             </tr>
@@ -871,6 +1236,9 @@ function renderRejectedDocs() {
                     <button class="action-btn download-all-btn" onclick="window.downloadAllSubmission('${sub.id}')">
                         <i class="fas fa-download"></i> Download All
                     </button>
+                    <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
+                        <i class="fas fa-comments"></i> Chat
+                    </button>
                 </td>
             </tr>
         `;
@@ -903,6 +1271,12 @@ function renderFinallySubmitted() {
         const uploadedAt = formatDate(sub.uploadedAt);
         const approvedAt = formatDate(sub.reviewedAt);
         const submittedAt = formatDate(sub.finalSubmittedAt || sub.rsaSubmittedAt || sub.uploadedAt);
+        const currentStatus = String(sub.status || '').toLowerCase();
+        const statusLabel = currentStatus === 'paid'
+            ? 'Paid'
+            : currentStatus === 'cleared'
+                ? 'Cleared'
+                : 'Sent to PFA';
 
         return `
             <tr>
@@ -913,7 +1287,7 @@ function renderFinallySubmitted() {
                 <td>${uploadedAt}</td>
                 <td>${approvedAt}</td>
                 <td>${submittedAt}</td>
-                <td><span class="status-badge status-approved">Submitted</span></td>
+                <td><span class="status-badge status-approved">${statusLabel}</span></td>
                 <td>
                     <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
                         <i class="fas fa-eye"></i> View All
@@ -921,12 +1295,52 @@ function renderFinallySubmitted() {
                     <button class="action-btn download-all-btn" onclick="window.downloadAllSubmission('${sub.id}')">
                         <i class="fas fa-download"></i> Download All
                     </button>
+                    <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
+                        <i class="fas fa-comments"></i> Chat
+                    </button>
                 </td>
             </tr>
         `;
     }).join('');
 
     updateFinallySubmittedCount();
+}
+
+function renderPaymentQueue() {
+    if (!paymentsTableBody) return;
+
+    const paymentQueue = allSubmissions.filter((sub) => {
+        const status = String(sub.status || '').toLowerCase();
+        const isFinal = sub.finalSubmitted === true || sub.rsaSubmitted === true || status === 'sent_to_pfa' || status === 'rsa_submitted' || status === 'paid';
+        return isFinal && status !== 'cleared';
+    });
+
+    if (paymentQueue.length === 0) {
+        paymentsTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No payment records available</td></tr>';
+        return;
+    }
+
+    paymentsTableBody.innerHTML = paymentQueue.map((sub) => {
+        const { pfa, twentyFive, commission2 } = getSubmissionFinancials(sub);
+        const status = String(sub.status || '').toLowerCase();
+        const isPaid = status === 'paid';
+        const statusLabel = isPaid ? 'Paid' : 'Sent to PFA';
+        const actionHtml = isPaid
+            ? '<button class="action-btn" style="opacity:.65;cursor:not-allowed;" disabled><i class="fas fa-check"></i> Paid</button>'
+            : `<button class="action-btn" style="background:#16a34a;color:#fff;border:none;" onclick="window.markSubmissionPaid('${sub.id}')"><i class="fas fa-check-circle"></i> Paid</button>`;
+
+        return `
+            <tr>
+                <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
+                <td>${escapeHtml(pfa)}</td>
+                <td>${escapeHtml(sub.agentName || '-')}</td>
+                <td>${formatCurrency(twentyFive)}</td>
+                <td>${formatCurrency(commission2)}</td>
+                <td><span class="status-badge status-approved">${statusLabel}</span></td>
+                <td>${actionHtml} <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button></td>
+            </tr>
+        `;
+    }).join('');
 }
 
 // ==================== UPDATE FINALLY SUBMITTED COUNT ====================
@@ -937,6 +1351,52 @@ function updateFinallySubmittedCount() {
         badge.textContent = cnt;
         badge.style.display = cnt > 0 ? 'inline' : 'none';
     }
+}
+
+function updatePaymentPendingCount() {
+    const cnt = allSubmissions.filter((s) => {
+        const status = String(s.status || '').toLowerCase();
+        return status === 'sent_to_pfa' || status === 'rsa_submitted';
+    }).length;
+    if (paymentPendingCountBadge) {
+        paymentPendingCountBadge.textContent = cnt;
+        paymentPendingCountBadge.style.display = cnt > 0 ? 'inline' : 'none';
+    }
+}
+
+function parseMoney(value) {
+    const raw = String(value ?? '').replace(/[^0-9.\-]/g, '');
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : 0;
+}
+
+function formatCurrency(value) {
+    const num = Number(value || 0);
+    try {
+        return num.toLocaleString('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 2 });
+    } catch (e) {
+        return `₦${num.toLocaleString()}`;
+    }
+}
+
+function getSubmissionFinancials(sub) {
+    const details = sub?.customerDetails || {};
+    const rsaBalance = parseMoney(details.rsaBalance || sub?.rsaBalance || 0);
+    const computed25 = Math.ceil((rsaBalance * 0.25) / 100) * 100;
+    const twentyFive = parseMoney(details.rsa25Percent || sub?.rsa25Percent || computed25);
+    const commission2 = twentyFive * 0.02;
+    const pfa = String(details.pfa || sub?.pfa || '').trim() || '-';
+    return { pfa, twentyFive, commission2 };
+}
+
+function formatStatusLabel(status) {
+    const normalized = String(status || '').toLowerCase().trim();
+    if (!normalized) return '-';
+    if (normalized === 'processing_to_pfa' || normalized === 'approved') return 'Processing to PFA';
+    if (normalized === 'sent_to_pfa' || normalized === 'rsa_submitted') return 'Sent to PFA';
+    if (normalized === 'paid') return 'Paid';
+    if (normalized === 'cleared') return 'Cleared';
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
 // ==================== GET DISPLAY NAME BY EMAIL ====================
@@ -959,6 +1419,22 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function getUserWhatsApp(user = {}) {
+    const direct = String(user.whatsappNumber || user.phone || '').trim();
+    if (direct) return direct;
+
+    const code = String(user.whatsappCode || '').trim();
+    const local = String(user.whatsappLocalNumber || '').trim();
+    return `${code}${local}`.trim();
+}
+
+function renderWhatsAppContactCell(user = {}) {
+    const raw = getUserWhatsApp(user);
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return '-';
+    return `<a href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer">${escapeHtml(raw)}</a>`;
+}
+
 // ==================== VIEW ALL DOCUMENTS FOR A SUBMISSION ====================
 window.viewSubmissionDocs = (submissionId) => {
     const sub = allSubmissions.find(s => s.id === submissionId);
@@ -973,7 +1449,7 @@ window.viewSubmissionDocs = (submissionId) => {
     if (viewerModal && viewerFileName && documentViewer) {
         viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel}`;
         const cleanUrl = firstDoc.fileUrl?.trim();
-        documentViewer.src = cleanUrl ? `${CORS_PROXY}${encodeURIComponent(cleanUrl)}` : '';
+        documentViewer.src = cleanUrl || '';
         viewerModal.classList.add('active');
     }
 
@@ -985,7 +1461,7 @@ window.viewSubmissionDocs = (submissionId) => {
             const docTypeLabel = DOCUMENT_TYPES[doc.documentType] || doc.documentType || 'Document';
             viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel} (${index + 1}/${sub.documents.length})`;
             const cleanUrl = doc.fileUrl?.trim();
-            documentViewer.src = cleanUrl ? `${CORS_PROXY}${encodeURIComponent(cleanUrl)}` : '';
+            documentViewer.src = cleanUrl || '';
         };
 
         const addViewerNav = () => {
@@ -1270,7 +1746,7 @@ window.activatePendingUser = (userId) => {
     const selectEl = document.getElementById(`pendingRole-${userId}`);
     const selectedRole = (selectEl?.value || '').trim().toLowerCase();
     const roleToSet = normalizeUserRole(selectedRole);
-    const validRoles = new Set(['uploader', 'reviewer', 'rsa', 'admin']);
+    const validRoles = new Set(['uploader', 'reviewer', 'rsa', 'payment', 'admin']);
 
     if (!selectedRole) {
         showNotification('Please select a role before approving this user', 'warning');
@@ -1335,6 +1811,159 @@ window.rejectPendingUser = (userId) => {
     });
 };
 
+function openAgentDetailsModal(selected) {
+    if (!selected) {
+        showNotification('Agent record not found', 'error');
+        return;
+    }
+
+    const detailsDiv = document.getElementById('agentDetails');
+    const modal = document.getElementById('viewAgentModal');
+    if (!detailsDiv || !modal) return;
+    const registeredByRaw = String(selected.createdBy || '').trim();
+    const registeredByName = registeredByRaw ? getDisplayNameByEmail(registeredByRaw) : '-';
+    const registeredBy = registeredByName && registeredByName !== registeredByRaw ? registeredByName : (registeredByName || registeredByRaw || '-');
+    const statusRaw = String(selected.status || 'pending').toLowerCase().trim();
+    const statusClass = (statusRaw === 'processing_to_pfa' || statusRaw === 'approved') ? 'status-approved' : (statusRaw === 'rejected' ? 'status-rejected' : 'pending');
+    const statusLabel = formatStatusLabel(statusRaw || 'pending');
+
+    detailsDiv.innerHTML = `
+        <div class="detail-section">
+            <h4>Agent Information</h4>
+            <div class="detail-row">
+                <span class="detail-label">Full Name:</span>
+                <span class="detail-value">${escapeHtml(selected.fullName || '-')}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Contact Number:</span>
+                <span class="detail-value">${escapeHtml(selected.contactNumber || '-')}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Account Number:</span>
+                <span class="detail-value">${escapeHtml(selected.accountNumber || '-')}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Account Bank:</span>
+                <span class="detail-value">${escapeHtml(selected.accountBank || '-')}</span>
+            </div>
+        </div>
+        <div class="detail-section">
+            <h4>Registration Information</h4>
+            <div class="detail-row">
+                <span class="detail-label">Registered By:</span>
+                <span class="detail-value">${escapeHtml(registeredBy)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Submitted At:</span>
+                <span class="detail-value">${formatDate(selected.createdAt)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Status:</span>
+                <span class="detail-value"><span class="status-badge ${statusClass}">${escapeHtml(statusLabel)}</span></span>
+            </div>
+        </div>
+    `;
+
+    modal.classList.add('active');
+}
+
+window.viewPendingAgent = (agentId) => {
+    const selected = allPendingAgents.find((a) => a.id === agentId);
+    openAgentDetailsModal(selected);
+};
+
+window.viewApprovedAgent = (agentId) => {
+    const selected = allApprovedAgents.find((a) => a.id === agentId);
+    openAgentDetailsModal(selected);
+};
+
+function setAgentActionButtonLoading(button, text) {
+    if (!button) return () => {};
+    const row = button.closest('tr');
+    const rowButtons = row ? Array.from(row.querySelectorAll('button')) : [button];
+    const previousDisabled = rowButtons.map((btn) => ({ btn, disabled: btn.disabled }));
+    const originalHtml = button.innerHTML;
+
+    rowButtons.forEach((btn) => { btn.disabled = true; });
+    button.classList.add('loading');
+    button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${escapeHtml(text || 'Processing...')}`;
+
+    return () => {
+        previousDisabled.forEach(({ btn, disabled }) => { btn.disabled = disabled; });
+        button.classList.remove('loading');
+        button.innerHTML = originalHtml;
+    };
+}
+
+function showAgentActionSuccessModal(title, message) {
+    showTestResultModal(title, [
+        { label: 'Status', value: 'PASSED', ok: true },
+        { label: 'Result', value: message, ok: true }
+    ]);
+}
+
+window.approveAgentRegistration = async (agentId, btnEl = null) => {
+    const selected = allPendingAgents.find((a) => a.id === agentId);
+    if (!selected) {
+        showNotification('Agent record not found', 'error');
+        return;
+    }
+    showConfirmModal('Approve Agent Registration', `Approve ${selected.fullName || 'this agent'} for use in submissions?`, async () => {
+        closeConfirmModal();
+        const restoreButton = setAgentActionButtonLoading(btnEl, 'Approving...');
+        try {
+            await updateDoc(doc(db, 'agents', agentId), {
+                status: 'approved',
+                approvedAt: serverTimestamp(),
+                approvedBy: currentAdmin?.email || ''
+            });
+            await addDoc(collection(db, 'audit'), {
+                action: 'agent_registration_approved',
+                agentId,
+                agentName: selected.fullName || '',
+                performedBy: currentAdmin?.email || '',
+                timestamp: serverTimestamp()
+            });
+            showAgentActionSuccessModal('Agent Approval Successful', `${selected.fullName || 'Agent'} has been approved.`);
+        } catch (_) {
+            showNotification('Failed to approve agent', 'error');
+        } finally {
+            restoreButton();
+        }
+    });
+};
+
+window.rejectAgentRegistration = async (agentId, btnEl = null) => {
+    const selected = allPendingAgents.find((a) => a.id === agentId);
+    if (!selected) {
+        showNotification('Agent record not found', 'error');
+        return;
+    }
+    showConfirmModal('Reject Agent Registration', `Reject ${selected.fullName || 'this agent'}?`, async () => {
+        closeConfirmModal();
+        const restoreButton = setAgentActionButtonLoading(btnEl, 'Rejecting...');
+        try {
+            await updateDoc(doc(db, 'agents', agentId), {
+                status: 'rejected',
+                rejectedAt: serverTimestamp(),
+                rejectedBy: currentAdmin?.email || ''
+            });
+            await addDoc(collection(db, 'audit'), {
+                action: 'agent_registration_rejected',
+                agentId,
+                agentName: selected.fullName || '',
+                performedBy: currentAdmin?.email || '',
+                timestamp: serverTimestamp()
+            });
+            showAgentActionSuccessModal('Agent Rejected', `${selected.fullName || 'Agent'} has been rejected.`);
+        } catch (_) {
+            showNotification('Failed to reject agent', 'error');
+        } finally {
+            restoreButton();
+        }
+    });
+};
+
 // ==================== LOAD AUDIT LOG ====================
 function loadAuditLog() {
     const q = query(collection(db, 'audit'), orderBy('timestamp', 'desc'), limit(500));
@@ -1347,6 +1976,7 @@ function loadAuditLog() {
             if (data.performedBy && adminNames[data.performedBy]) {
                 adminName = adminNames[data.performedBy];
             }
+            if (SUPER_ADMIN_ONLY_ACTIONS.has(String(data.action || '').trim())) continue;
             audits.push({ id: docSnap.id, ...data, adminName });
         }
         renderAuditTable(audits);
@@ -1381,7 +2011,7 @@ window.viewDocument = (fileUrl, fileName) => {
     if (viewerModal && viewerFileName && documentViewer) {
         viewerFileName.textContent = fileName;
         const cleanUrl = fileUrl?.trim();
-        documentViewer.src = cleanUrl ? `${CORS_PROXY}${encodeURIComponent(cleanUrl)}` : '';
+        documentViewer.src = cleanUrl || '';
         viewerModal.classList.add('active');
     }
 };
@@ -1405,6 +2035,10 @@ window.viewUser = async (userId) => {
         const userDoc = await getDoc(doc(db, 'users', userId));
         if (userDoc.exists()) {
             const user = userDoc.data();
+            if (normalizeUserRole(user.role) === 'super_admin') {
+                showNotification('Access denied for Super Admin account', 'error');
+                return;
+            }
             const detailsDiv = document.getElementById('userDetails');
             const fullName = user.fullName || user.email?.split('@')[0] || 'Unknown';
 
@@ -1424,8 +2058,16 @@ window.viewUser = async (userId) => {
                         <span class="detail-value">${user.email}</span>
                     </div>
                     <div class="detail-row">
-                        <span class="detail-label">Phone:</span>
-                        <span class="detail-value">${user.phone || 'N/A'}</span>
+                        <span class="detail-label">WhatsApp:</span>
+                        <span class="detail-value">${renderWhatsAppContactCell(user)}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Location:</span>
+                        <span class="detail-value">${user.location || 'N/A'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Department:</span>
+                        <span class="detail-value">${user.department || 'N/A'}</span>
                     </div>
                 </div>
                 <div class="detail-section">
@@ -1473,9 +2115,17 @@ async function loadUserForEdit(userId) {
             return;
         }
         const user = userDoc.data();
+        if (normalizeUserRole(user.role) === 'super_admin') {
+            showNotification('Access denied for Super Admin account', 'error');
+            return;
+        }
         document.getElementById('modalFullName').value = user.fullName || '';
+        document.getElementById('modalLocation').value = user.location || '';
         document.getElementById('modalEmail').value = user.email || '';
         document.getElementById('modalEmail').setAttribute('readonly', 'true');
+        document.getElementById('modalDepartment').value = user.department || '';
+        document.getElementById('modalWhatsappCode').value = user.whatsappCode || '';
+        document.getElementById('modalWhatsappLocalNumber').value = user.whatsappLocalNumber || '';
         document.getElementById('modalRole').value = normalizeUserRole(user.role);
         document.getElementById('modalStatus').value = user.status || 'active';
     } catch (error) {
@@ -1561,7 +2211,7 @@ function renderTrackApplications() {
             <tr>
                 <td><strong>${s.customerName || 'Unknown'}</strong></td>
                 <td>${uploaderLabel}</td>
-                <td>${status.charAt(0).toUpperCase() + status.slice(1)}</td>
+                <td>${formatStatusLabel(status)}</td>
                 <td>${formatDate(s.uploadedAt)}</td>
                 <td>${assignedReviewer}</td>
                 <td>${attendedAt}</td>
@@ -1572,9 +2222,76 @@ function renderTrackApplications() {
     }).join('');
 }
 
+window.markSubmissionPaid = async (submissionId) => {
+    const sub = allSubmissions.find((s) => s.id === submissionId);
+    if (!sub) {
+        showNotification('Submission not found', 'error');
+        return;
+    }
+
+    const confirmed = confirm(`Mark ${sub.customerName || 'this customer'} as PAID?`);
+    if (!confirmed) return;
+
+    try {
+        await updateDoc(doc(db, 'submissions', submissionId), {
+            status: 'paid',
+            paidAt: serverTimestamp(),
+            paidBy: currentAdmin?.email || ''
+        });
+
+        await addDoc(collection(db, 'audit'), {
+            action: 'submission_paid',
+            submissionId,
+            customerName: sub.customerName || '',
+            performedBy: currentAdmin?.email || '',
+            timestamp: serverTimestamp()
+        });
+
+        showNotification('Marked as paid successfully', 'success');
+    } catch (error) {
+        showNotification('Failed to mark paid: ' + (error?.message || 'Unknown error'), 'error');
+    }
+};
+
+window.clearPaidSubmissions = async () => {
+    const paidItems = allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'paid');
+    if (paidItems.length === 0) {
+        showNotification('No paid records to clear', 'info');
+        return;
+    }
+
+    const confirmed = confirm(`Clear ${paidItems.length} paid record(s)?\nThis will change their status to Cleared.`);
+    if (!confirmed) return;
+
+    try {
+        await Promise.all(paidItems.map((sub) => updateDoc(doc(db, 'submissions', sub.id), {
+            status: 'cleared',
+            clearedAt: serverTimestamp(),
+            clearedBy: currentAdmin?.email || ''
+        })));
+
+        await addDoc(collection(db, 'audit'), {
+            action: 'paid_records_cleared',
+            count: paidItems.length,
+            performedBy: currentAdmin?.email || '',
+            timestamp: serverTimestamp()
+        });
+
+        showNotification(`Cleared ${paidItems.length} paid record(s)`, 'success');
+    } catch (error) {
+        showNotification('Failed to clear paid records: ' + (error?.message || 'Unknown error'), 'error');
+    }
+};
+
 window.deactivateUser = (userId) => {
     showConfirmModal('Deactivate User', 'Are you sure you want to deactivate this user? They will not be able to login.', async () => {
         try {
+            const userSnap = await getDoc(doc(db, 'users', userId));
+            if (userSnap.exists() && normalizeUserRole(userSnap.data()?.role) === 'super_admin') {
+                showNotification('Access denied for Super Admin account', 'error');
+                closeConfirmModal();
+                return;
+            }
             await updateDoc(doc(db, 'users', userId), {
                 status: 'deactivated',
                 deactivatedAt: serverTimestamp(),
@@ -1599,6 +2316,12 @@ window.deactivateUser = (userId) => {
 window.activateUser = (userId) => {
     showConfirmModal('Activate User', 'Activate this user? They will be able to login again.', async () => {
         try {
+            const userSnap = await getDoc(doc(db, 'users', userId));
+            if (userSnap.exists() && normalizeUserRole(userSnap.data()?.role) === 'super_admin') {
+                showNotification('Access denied for Super Admin account', 'error');
+                closeConfirmModal();
+                return;
+            }
             await updateDoc(doc(db, 'users', userId), {
                 status: 'active',
                 activatedAt: serverTimestamp(),
@@ -1620,11 +2343,89 @@ window.activateUser = (userId) => {
     });
 };
 
+window.resetUserPassword = (userId) => {
+    showConfirmModal(
+        'Reset Password',
+        'Reset this user password directly to 123456?',
+        async () => {
+            try {
+                const userRef = doc(db, 'users', userId);
+                const userSnap = await getDoc(userRef);
+                if (!userSnap.exists()) {
+                    showNotification('User not found', 'error');
+                    return;
+                }
+
+                const userData = userSnap.data() || {};
+                const userEmail = String(userData.email || '').trim().toLowerCase();
+                if (!userEmail) {
+                    showNotification('User email is missing', 'error');
+                    return;
+                }
+
+                const baseUrl = String(ADMIN_API_BASE_URL || '').trim().replace(/\/+$/, '');
+                if (!baseUrl || baseUrl.includes('YOUR-RENDER-URL')) {
+                    showNotification('Admin API URL is not configured', 'error');
+                    return;
+                }
+
+                const currentUser = getAuth().currentUser;
+                const idToken = currentUser ? await currentUser.getIdToken() : '';
+                if (!idToken) {
+                    showNotification('Admin session token is missing. Please login again.', 'error');
+                    return;
+                }
+
+                const response = await fetch(`${baseUrl}/api/admin/reset-password`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${idToken}`
+                    },
+                    body: JSON.stringify({
+                        userId,
+                        newPassword: '123456'
+                    })
+                });
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok || !result.ok) {
+                    throw new Error(result.error || `Reset API failed (${response.status})`);
+                }
+
+                await updateDoc(userRef, {
+                    passwordResetAt: serverTimestamp(),
+                    passwordResetBy: currentAdmin?.email || '',
+                    passwordResetDefault: true
+                });
+
+                await addDoc(collection(db, 'audit'), {
+                    action: 'user_password_reset_direct',
+                    userId,
+                    userEmail,
+                    resetTo: '123456',
+                    performedBy: currentAdmin?.email,
+                    timestamp: serverTimestamp()
+                });
+
+                showNotification(`Password reset to 123456 for ${userEmail}`, 'success');
+                closeConfirmModal();
+            } catch (error) {
+                showNotification('Failed to reset password: ' + (error?.message || 'Unknown error'), 'error');
+            }
+        }
+    );
+};
+
 window.deleteUser = (userId) => {
     showConfirmModal('Delete User', 'Are you sure you want to permanently delete this user?', async () => {
         try {
             const userDoc = await getDoc(doc(db, 'users', userId));
             const userData = userDoc.data();
+            if (userDoc.exists() && normalizeUserRole(userData?.role) === 'super_admin') {
+                showNotification('Access denied for Super Admin account', 'error');
+                closeConfirmModal();
+                return;
+            }
 
             await deleteDoc(doc(db, 'users', userId));
 
@@ -1655,6 +2456,14 @@ function openCreateUserModal() {
     const emailInput = document.getElementById('modalEmail');
     if (emailInput) emailInput.removeAttribute('readonly');
     document.getElementById('modalStatus').value = 'active';
+    const locationInput = document.getElementById('modalLocation');
+    if (locationInput) locationInput.value = '';
+    const deptInput = document.getElementById('modalDepartment');
+    if (deptInput) deptInput.value = '';
+    const whatsappCodeInput = document.getElementById('modalWhatsappCode');
+    if (whatsappCodeInput) whatsappCodeInput.value = '+234';
+    const whatsappLocalInput = document.getElementById('modalWhatsappLocalNumber');
+    if (whatsappLocalInput) whatsappLocalInput.value = '';
     document.getElementById('userModal').classList.add('active');
 }
 
@@ -1665,14 +2474,43 @@ async function saveUser(e) {
     const statusValue = document.getElementById('modalStatus').value || 'active';
     const saveBtn = document.getElementById('saveUserModalBtn');
     const originalSaveBtnHtml = saveBtn ? saveBtn.innerHTML : '';
+    const whatsappCodeRaw = (document.getElementById('modalWhatsappCode')?.value || '').trim();
+    const whatsappLocalRaw = (document.getElementById('modalWhatsappLocalNumber')?.value || '').trim();
+    const whatsappLocalDigits = whatsappLocalRaw.replace(/\D/g, '');
+    const normalizedWhatsappCode = whatsappCodeRaw
+        ? (whatsappCodeRaw.startsWith('+') ? whatsappCodeRaw : `+${whatsappCodeRaw}`)
+        : '';
+    const normalizedWhatsappNumber = (normalizedWhatsappCode && whatsappLocalDigits)
+        ? `${normalizedWhatsappCode}${whatsappLocalDigits}`
+        : '';
 
     const userData = {
         fullName: document.getElementById('modalFullName').value.trim(),
+        location: document.getElementById('modalLocation')?.value.trim() || '',
         email: document.getElementById('modalEmail').value.trim().toLowerCase(),
+        department: document.getElementById('modalDepartment')?.value.trim() || '',
+        whatsappCode: normalizedWhatsappCode,
+        whatsappLocalNumber: whatsappLocalDigits,
+        whatsappNumber: normalizedWhatsappNumber,
+        phone: normalizedWhatsappNumber || whatsappLocalDigits || '',
         role: document.getElementById('modalRole').value,
         status: statusValue,
         updatedAt: serverTimestamp()
     };
+
+    if (normalizedWhatsappCode && !/^\+\d{1,4}$/.test(normalizedWhatsappCode)) {
+        showNotification('WhatsApp country code is invalid', 'error');
+        return;
+    }
+    if (whatsappLocalDigits && !/^\d{10}$/.test(whatsappLocalDigits)) {
+        showNotification('WhatsApp number must be exactly 10 digits', 'error');
+        return;
+    }
+
+    if (normalizeUserRole(userData.role) === 'super_admin') {
+        showNotification('Admin cannot create or assign Super Admin role', 'error');
+        return;
+    }
 
     if (saveBtn) {
         saveBtn.disabled = true;
@@ -1681,6 +2519,29 @@ async function saveUser(e) {
     }
 
     try {
+        const emailDupSnap = await getDocs(query(collection(db, 'users'), where('email', '==', userData.email)));
+        const emailDuplicate = emailDupSnap.docs.find((d) => d.id !== selectedUserId);
+        if (emailDuplicate) {
+            showNotification('Another user already has this email address', 'error');
+            return;
+        }
+
+        if (userData.whatsappNumber) {
+            const waDupSnap = await getDocs(query(collection(db, 'users'), where('whatsappNumber', '==', userData.whatsappNumber)));
+            const waDuplicate = waDupSnap.docs.find((d) => d.id !== selectedUserId);
+            if (waDuplicate) {
+                showNotification('Another user already has this WhatsApp number', 'error');
+                return;
+            }
+
+            const legacyPhoneDupSnap = await getDocs(query(collection(db, 'users'), where('phone', '==', userData.whatsappNumber)));
+            const phoneDuplicate = legacyPhoneDupSnap.docs.find((d) => d.id !== selectedUserId);
+            if (phoneDuplicate) {
+                showNotification('Another user already has this WhatsApp number', 'error');
+                return;
+            }
+        }
+
         if (selectedUserId) {
             await updateDoc(doc(db, 'users', selectedUserId), userData);
 
@@ -1793,6 +2654,9 @@ function filterPendingDocs() {
                     <button class="action-btn download-all-btn" onclick="window.downloadAllSubmission('${sub.id}')">
                         <i class="fas fa-download"></i> Download All
                     </button>
+                    <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
+                        <i class="fas fa-comments"></i> Chat
+                    </button>
                 </td>
             </tr>
         `;
@@ -1801,7 +2665,10 @@ function filterPendingDocs() {
 
 function filterApprovedDocs() {
     const searchTerm = document.getElementById('approvedDocSearch')?.value.toLowerCase() || '';
-    const approved = allSubmissions.filter(s => s.status === 'approved');
+    const approved = allSubmissions.filter(s => {
+        const status = String(s.status || '').toLowerCase();
+        return status === 'processing_to_pfa' || status === 'approved';
+    });
 
     const filtered = approved.filter(sub => {
         const matchesSearch = searchTerm === '' ||
@@ -1838,6 +2705,9 @@ function filterApprovedDocs() {
                     </button>
                     <button class="action-btn download-all-btn" onclick="window.downloadAllSubmission('${sub.id}')">
                         <i class="fas fa-download"></i> Download All
+                    </button>
+                    <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
+                        <i class="fas fa-comments"></i> Chat
                     </button>
                 </td>
             </tr>
@@ -1887,6 +2757,9 @@ function filterRejectedDocs() {
                     <button class="action-btn download-all-btn" onclick="window.downloadAllSubmission('${sub.id}')">
                         <i class="fas fa-download"></i> Download All
                     </button>
+                    <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
+                        <i class="fas fa-comments"></i> Chat
+                    </button>
                 </td>
             </tr>
         `;
@@ -1920,6 +2793,10 @@ function closeUserModal() {
 
 function closeViewUserModal() {
     document.getElementById('viewUserModal').classList.remove('active');
+}
+
+function closeViewAgentModal() {
+    document.getElementById('viewAgentModal')?.classList.remove('active');
 }
 
 function closeTestResultModal() {
@@ -2434,6 +3311,202 @@ async function handleTestDistributionRSA() {
             ]);
 
             showNotification(`Test successful. Next RSA user: ${nextRSA}`, 'success');
+        } catch (error) {
+            showNotification('Test failed: ' + error.message, 'error');
+        }
+    });
+}
+
+// ==================== PAYMENT ROUND-ROBIN MONITORING ====================
+
+async function loadPaymentRoundRobinMonitor() {
+    try {
+        const PAYMENT_COUNTER_DOC = doc(db, 'counters', 'roundRobinPayment');
+        const counterSnap = await getDoc(PAYMENT_COUNTER_DOC);
+
+        let lastIndex = -1;
+        let lastDate = '';
+
+        if (counterSnap.exists()) {
+            const data = counterSnap.data();
+            lastIndex = data.lastIndex ?? -1;
+            lastDate = data.lastDate || 'Never';
+        }
+
+        const paymentUsers = await getPaymentUsersForRoundRobin();
+        const nextIndex = (lastIndex + 1) % (paymentUsers.length || 1);
+        const nextPaymentEmail = paymentUsers[nextIndex]?.email || 'N/A';
+        const nextPaymentName = paymentUsers[nextIndex]?.fullName || 'N/A';
+
+        const lastPaymentEmail = lastIndex >= 0 && lastIndex < paymentUsers.length ? paymentUsers[lastIndex]?.email : 'N/A';
+        const lastPaymentName = lastIndex >= 0 && lastIndex < paymentUsers.length ? paymentUsers[lastIndex]?.fullName : 'N/A';
+
+        document.getElementById('lastDistributionPayment').textContent = `${lastPaymentName} (${lastPaymentEmail})`;
+        document.getElementById('currentDistributionIndexPayment').textContent = `${nextIndex} of ${paymentUsers.length}`;
+        document.getElementById('lastResetDatePayment').textContent = lastDate;
+        document.getElementById('totalPaymentUserCount').textContent = paymentUsers.length;
+
+        await loadPaymentDistributionStats(paymentUsers);
+        await loadPaymentAssignmentHistory();
+    } catch (error) {
+        showNotification('Error loading Payment monitor: ' + error.message, 'error');
+    }
+}
+
+async function loadPaymentDistributionStats(paymentUsers) {
+    const today = new Date().toISOString().slice(0, 10);
+    const statsBody = document.getElementById('distributionStatsPaymentBody');
+    if (!statsBody) return;
+
+    const stats = [];
+
+    for (const paymentUser of paymentUsers) {
+        const assignedQuery = query(
+            collection(db, 'submissions'),
+            where('assignedToPayment', '==', paymentUser.email),
+            where('uploadedAt', '>=', new Date(today + 'T00:00:00Z'))
+        );
+        const assignedSnap = await getDocs(assignedQuery);
+        const assignedCount = assignedSnap.size;
+
+        const completedDocs = assignedSnap.docs.filter(d => ['paid', 'cleared'].includes(String(d.data().status || '').toLowerCase()));
+        const completedCount = completedDocs.length;
+        const pendingCount = Math.max(0, assignedCount - completedCount);
+
+        stats.push({
+            email: paymentUser.email,
+            fullName: paymentUser.fullName,
+            assigned: assignedCount,
+            completed: completedCount,
+            pending: pendingCount
+        });
+    }
+
+    stats.sort((a, b) => b.assigned - a.assigned);
+
+    statsBody.innerHTML = stats.map(s => `
+        <tr>
+            <td>${s.fullName}</td>
+            <td>${s.email}</td>
+            <td style="text-align: center; font-weight: 600;">${s.assigned}</td>
+            <td style="text-align: center; color: #10b981;">${s.completed}</td>
+            <td style="text-align: center; color: #f59e0b;">${s.pending}</td>
+        </tr>
+    `).join('');
+}
+
+async function loadPaymentAssignmentHistory() {
+    const historyBody = document.getElementById('assignmentHistoryPaymentBody');
+    if (!historyBody) return;
+
+    try {
+        const assignmentQuery = query(
+            collection(db, 'roundRobinAssignmentsPayment'),
+            orderBy('assignedAt', 'desc'),
+            limit(20)
+        );
+
+        const assignmentSnap = await getDocs(assignmentQuery);
+
+        if (assignmentSnap.empty) {
+            historyBody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px; color: #999;">No Payment assignment history yet</td></tr>';
+            return;
+        }
+
+        const rows = assignmentSnap.docs.map(doc => {
+            const data = doc.data();
+            const timestamp = data.assignedAt?.toDate?.() || new Date(data.assignedAt);
+            const timeStr = timestamp.toLocaleString();
+
+            return `
+                <tr>
+                    <td>${timeStr}</td>
+                    <td>${data.customerName || 'N/A'}</td>
+                    <td>${data.assignedToPayment || 'N/A'}</td>
+                    <td>${data.assignedBy || 'System'}</td>
+                </tr>
+            `;
+        }).join('');
+
+        historyBody.innerHTML = rows;
+    } catch (error) {
+        historyBody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 20px; color: #999;">Payment assignment history not available</td></tr>';
+    }
+}
+
+async function handleResetRoundRobinPayment() {
+    showConfirmModal(
+        'Reset Payment Round-Robin Counter?',
+        'This will reset the Payment distribution counter to start from the first Payment user. Are you sure?',
+        async () => {
+            closeConfirmModal();
+            await runWithButtonSpinner('resetRoundRobinPaymentBtn', 'Resetting...', async () => {
+                try {
+                    const PAYMENT_COUNTER_DOC = doc(db, 'counters', 'roundRobinPayment');
+                    await setDoc(PAYMENT_COUNTER_DOC, {
+                        lastIndex: -1,
+                        lastDate: ''
+                    }, { merge: true });
+
+                    await loadPaymentRoundRobinMonitor();
+
+                    showTestResultModal('Payment Round-Robin Reset Result', [
+                        { label: 'Counter', value: 'Payment Round-Robin' },
+                        { label: 'Reset By', value: currentAdmin?.email || 'Admin' },
+                        { label: 'Reset Time', value: new Date().toLocaleString() },
+                        { label: 'Action Status', value: 'PASSED', ok: true }
+                    ]);
+                } catch (error) {
+                    showTestResultModal('Payment Round-Robin Reset Result', [
+                        { label: 'Counter', value: 'Payment Round-Robin' },
+                        { label: 'Error', value: error.message || 'Unknown error' },
+                        { label: 'Action Status', value: 'FAILED', ok: false }
+                    ]);
+                }
+            });
+        }
+    );
+}
+
+async function handleTestDistributionPayment() {
+    await runWithButtonSpinner('testDistributionPaymentBtn', 'Testing...', async () => {
+        try {
+            showNotification('Testing Payment round-robin distribution...', 'info');
+
+            const paymentUsers = (await getPaymentUsersForRoundRobin()).map((u) => u.email);
+
+            if (paymentUsers.length === 0) {
+                throw new Error('No Payment users found in the system');
+            }
+
+            const counterRef = doc(db, 'counters', 'roundRobinPayment');
+            const counterSnap = await getDoc(counterRef);
+            let lastIndex = -1;
+            let lastDate = '';
+
+            if (counterSnap.exists()) {
+                const data = counterSnap.data();
+                lastIndex = data.lastIndex ?? -1;
+                lastDate = data.lastDate || '';
+            }
+
+            const today = new Date().toISOString().slice(0, 10);
+            if (lastDate !== today) lastIndex = -1;
+
+            const nextIndex = (lastIndex + 1) % paymentUsers.length;
+            const nextPaymentUser = paymentUsers[nextIndex];
+
+            showTestResultModal('Payment Round-Robin Test Result', [
+                { label: 'Total Payment Users', value: String(paymentUsers.length) },
+                { label: 'Last Index', value: String(lastIndex) },
+                { label: 'Next Index', value: String(nextIndex) },
+                { label: 'Next Payment User', value: nextPaymentUser },
+                { label: 'Current Date', value: today },
+                { label: 'Last Reset Date', value: lastDate || 'Never' },
+                { label: 'Test Status', value: 'PASSED', ok: true }
+            ]);
+
+            showNotification(`Test successful. Next Payment user: ${nextPaymentUser}`, 'success');
         } catch (error) {
             showNotification('Test failed: ' + error.message, 'error');
         }

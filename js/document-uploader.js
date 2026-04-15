@@ -68,13 +68,36 @@ function formatCurrency(value) {
   }
 }
 
+function roundDownToNearestThousand(value) {
+  const num = Number(value || 0);
+  return Math.floor(num / 1000) * 1000;
+}
+
+function parseMoney(value) {
+  const raw = String(value ?? '').replace(/[^0-9.\-]/g, '');
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function getFinancials(submission) {
+  const details = submission?.customerDetails || {};
+  const rsaBalance = parseMoney(details.rsaBalance || submission?.rsaBalance || 0);
+  const computed25 = rsaBalance * 0.25;
+  const twentyFive = parseMoney(details.rsa25Percent || submission?.rsa25Percent || computed25);
+  const commission2 = twentyFive * 0.02;
+  const pfa = String(details.pfa || submission?.pfa || '').trim() || '-';
+  return { pfa, twentyFive, commission2 };
+}
+
 // ==================== GLOBAL VARIABLES ====================
 let currentUser = null;
+let currentUserProfile = null;
 let allSubmissions = [];
 let currentCustomerUploads = {};
 let currentEditId = null;
 let currentDocType = null;
 let currentFile = null;
+let approvedAgents = [];
 let singlePreviewObjectUrl = null;
 let trustedNowCache = { value: null, fetchedAt: 0 };
 // Mobile camera photos can be large; compress only when needed.
@@ -343,34 +366,120 @@ async function getViewerEmails() {
     .map(d => d.data())
     .filter(data => {
       const role = String(data?.role || '').toLowerCase();
-      return role === 'reviewer' || role === 'viewer';
+      const status = String(data?.status || 'active').toLowerCase();
+      return (role === 'reviewer' || role === 'viewer') && status !== 'deactivated';
     })
     .map(data => data.email)
     .filter(Boolean)
     .sort();
 }
 
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function routingRuleDocId(uploaderEmail) {
+  return encodeURIComponent(normalizeEmail(uploaderEmail));
+}
+
+async function getUploaderRoutingRule(uploaderEmail) {
+  const normalizedUploader = normalizeEmail(uploaderEmail);
+  if (!normalizedUploader) return null;
+  try {
+    const snap = await getDoc(doc(db, 'uploaderRoutingRules', routingRuleDocId(normalizedUploader)));
+    if (!snap.exists()) return null;
+    const data = snap.data() || {};
+    if (data.enabled === false) return null;
+    return {
+      uploaderEmail: normalizedUploader,
+      reviewerEmail: normalizeEmail(data.reviewerEmail),
+      rsaEmail: normalizeEmail(data.rsaEmail)
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function isActiveUserWithRole(email, allowedRoles = []) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return false;
+  try {
+    const userQ = query(collection(db, 'users'), where('email', '==', normalized));
+    const snap = await getDocs(userQ);
+    if (snap.empty) return false;
+    const data = snap.docs[0].data() || {};
+    const role = String(data.role || '').toLowerCase();
+    const status = String(data.status || 'active').toLowerCase();
+    if (status === 'deactivated') return false;
+    return allowedRoles.includes(role);
+  } catch (_) {
+    return false;
+  }
+}
+
 async function assignRoundRobin(subRef) {
+  let uploaderEmail = normalizeEmail(currentUser?.email);
+  if (!uploaderEmail) {
+    try {
+      const subSnap = await getDoc(subRef);
+      uploaderEmail = normalizeEmail(subSnap.exists() ? subSnap.data()?.uploadedBy : '');
+    } catch (_) { }
+  }
+
+  const routingRule = await getUploaderRoutingRule(uploaderEmail);
+  const mappedReviewer = routingRule?.reviewerEmail || '';
+  if (mappedReviewer && await isActiveUserWithRole(mappedReviewer, ['reviewer', 'viewer'])) {
+    await updateDoc(subRef, {
+      assignedTo: mappedReviewer,
+      assignmentMode: 'uploader_routing',
+      assignmentUploader: uploaderEmail || ''
+    });
+    try {
+      const subSnap = await getDoc(subRef);
+      if (subSnap.exists()) {
+        const subData = subSnap.data();
+        await addDoc(collection(db, 'roundRobinAssignments'), {
+          submissionId: subRef.id,
+          customerName: subData.customerName || 'N/A',
+          assignedTo: mappedReviewer,
+          assignedBy: currentUser?.email || 'System',
+          assignedAt: serverTimestamp(),
+          uploadedBy: subData.uploadedBy || uploaderEmail || 'N/A',
+          assignmentMethod: 'uploader_routing'
+        });
+      }
+    } catch (_) { }
+    return mappedReviewer;
+  }
+
   const viewers = await getViewerEmails();
   if (!viewers.length) return null;
 
   let assigned = null;
-  await runTransaction(db, async tx => {
-    let lastIndex = -1;
-    let lastDate = '';
-    const today = new Date().toISOString().slice(0, 10);
-    const counterSnap = await tx.get(RR_COUNTER_DOC);
-    if (counterSnap.exists()) {
-      const data = counterSnap.data();
-      lastIndex = typeof data.lastIndex === 'number' ? data.lastIndex : -1;
-      lastDate = data.lastDate || '';
+  try {
+    await runTransaction(db, async tx => {
+      let lastIndex = -1;
+      let lastDate = '';
+      const today = new Date().toISOString().slice(0, 10);
+      const counterSnap = await tx.get(RR_COUNTER_DOC);
+      if (counterSnap.exists()) {
+        const data = counterSnap.data();
+        lastIndex = typeof data.lastIndex === 'number' ? data.lastIndex : -1;
+        lastDate = data.lastDate || '';
+      }
+      if (lastDate !== today) lastIndex = -1;
+      const newIndex = (lastIndex + 1) % viewers.length;
+      assigned = viewers[newIndex];
+      tx.set(RR_COUNTER_DOC, { lastIndex: newIndex, lastDate: today }, { merge: true });
+      tx.update(subRef, { assignedTo: assigned, assignmentMode: 'round_robin' });
+    });
+  } catch (_) {
+    // Fallback: if counter transaction fails, still assign to keep workflow moving.
+    assigned = viewers[0] || null;
+    if (assigned) {
+      await updateDoc(subRef, { assignedTo: assigned, assignmentMode: 'round_robin_fallback' });
     }
-    if (lastDate !== today) lastIndex = -1;
-    const newIndex = (lastIndex + 1) % viewers.length;
-    assigned = viewers[newIndex];
-    tx.set(RR_COUNTER_DOC, { lastIndex: newIndex, lastDate: today }, { merge: true });
-    tx.update(subRef, { assignedTo: assigned });
-  });
+  }
 
   if (assigned) {
     try {
@@ -383,7 +492,8 @@ async function assignRoundRobin(subRef) {
           assignedTo: assigned,
           assignedBy: currentUser?.email || 'System',
           assignedAt: serverTimestamp(),
-          uploadedBy: subData.uploadedBy || 'N/A'
+          uploadedBy: subData.uploadedBy || 'N/A',
+          assignmentMethod: 'round_robin'
         });
       }
     } catch (e) {
@@ -397,8 +507,12 @@ async function assignRoundRobin(subRef) {
 async function getApplicationStage(submission) {
   if (!submission) return 'Unknown';
   try {
-    if (submission.status === 'approved') return 'Approved - With RSA';
-    if (submission.status === 'rejected') return 'Rejected - Fix Required';
+    const status = String(submission.status || '').toLowerCase();
+    if (status === 'cleared') return 'Cleared';
+    if (status === 'paid') return 'Paid';
+    if (status === 'sent_to_pfa' || status === 'rsa_submitted') return 'Sent to PFA';
+    if (status === 'processing_to_pfa' || status === 'approved') return 'Processing to PFA';
+    if (status === 'rejected') return 'Rejected - Fix Required';
     if (submission.assignedTo) {
       const reviewerName = await getUserFullName(submission.assignedTo);
       return `With Reviewer: ${reviewerName}`;
@@ -475,9 +589,36 @@ const pageTitle = document.getElementById('pageTitle');
 const pendingTableBody = document.getElementById('pendingTableBody');
 const approvedTableBody = document.getElementById('approvedTableBody');
 const rejectedTableBody = document.getElementById('rejectedTableBody');
+const activeCommissionTableBody = document.getElementById('activeCommissionTableBody');
+const clearedCommissionTableBody = document.getElementById('clearedCommissionTableBody');
+const paidCountBadge = document.getElementById('paidCount');
+const activeCommissionCountEl = document.getElementById('activeCommissionCount');
+const clearedCommissionCountEl = document.getElementById('clearedCommissionCount');
+const paidTotal25El = document.getElementById('paidTotal25');
+const paidTotal1El = document.getElementById('paidTotal1');
+const clearedTotal25El = document.getElementById('clearedTotal25');
+const clearedTotal1El = document.getElementById('clearedTotal1');
+const activeTotal25Card = document.getElementById('activeTotal25Card');
+const activeTotal1Card = document.getElementById('activeTotal1Card');
+const clearedTotal25Card = document.getElementById('clearedTotal25Card');
+const clearedTotal1Card = document.getElementById('clearedTotal1Card');
+const activeCommissionTabBtn = document.getElementById('activeCommissionTabBtn');
+const clearedCommissionTabBtn = document.getElementById('clearedCommissionTabBtn');
+const activeCommissionSection = document.getElementById('activeCommissionSection');
+const clearedCommissionSection = document.getElementById('clearedCommissionSection');
+const activeCommissionSearch = document.getElementById('activeCommissionSearch');
+const clearedCommissionSearch = document.getElementById('clearedCommissionSearch');
+const activeCommissionStartDate = document.getElementById('activeCommissionStartDate');
+const activeCommissionEndDate = document.getElementById('activeCommissionEndDate');
+const clearedCommissionStartDate = document.getElementById('clearedCommissionStartDate');
+const clearedCommissionEndDate = document.getElementById('clearedCommissionEndDate');
 const viewerModal = document.getElementById('viewerModal');
 const viewerFileName = document.getElementById('viewerFileName');
 const documentViewer = document.getElementById('documentViewer');
+const helpFab = document.getElementById('helpFab');
+const sopHelpModal = document.getElementById('sopHelpModal');
+const closeSopHelpModalBtn = document.getElementById('closeSopHelpModalBtn');
+const closeSopHelpModalFooterBtn = document.getElementById('closeSopHelpModalFooterBtn');
 const batchUploadBtn = document.getElementById('batchUploadBtn');
 const batchFileInput = document.getElementById('batchFileInput');
 const saveDetailsBtn = document.getElementById('saveDetailsBtn');
@@ -487,7 +628,47 @@ const batchMappingList = document.getElementById('batchMappingList');
 const closeBatchMappingBtn = document.getElementById('closeBatchMappingBtn');
 const cancelBatchMapping = document.getElementById('cancelBatchMapping');
 const confirmBatchMapping = document.getElementById('confirmBatchMapping');
+const profileNameEl = document.getElementById('profileName');
+const profileRegisteredAtEl = document.getElementById('profileRegisteredAt');
+const profileEmailEl = document.getElementById('profileEmail');
+const profileWhatsappEl = document.getElementById('profileWhatsapp');
+const profileLocationEl = document.getElementById('profileLocation');
+const profileRoleEl = document.getElementById('profileRole');
+const profileStatusEl = document.getElementById('profileStatus');
+const registeredAgentsTableBody = document.getElementById('registeredAgentsTableBody');
+const customerAgentSelect = document.getElementById('customerAgent');
+const agentRegistrationForm = document.getElementById('agentRegistrationForm');
+const agentRegistrationModal = document.getElementById('agentRegistrationModal');
+const openAgentRegistrationBtn = document.getElementById('openAgentRegistrationBtn');
+const closeAgentRegistrationModalBtn = document.getElementById('closeAgentRegistrationModalBtn');
+const resetAgentFormBtn = document.getElementById('resetAgentFormBtn');
+const submitAgentFormBtn = document.getElementById('submitAgentFormBtn');
 let __batchFilesBuffer = [];
+let currentCommissionTab = 'active';
+let registeredAgents = [];
+
+function renderProfileTab() {
+  if (!profileNameEl && !profileEmailEl && !profileRoleEl && !profileStatusEl) return;
+  const setProfileField = (el, value) => {
+    if (!el) return;
+    if ('value' in el) el.value = String(value ?? '');
+    else el.textContent = String(value ?? '');
+  };
+  const fullName = currentUserProfile?.fullName || currentUser?.displayName || currentUser?.email || 'N/A';
+  const registeredAt = currentUserProfile?.createdAt ? safeFormatDate(currentUserProfile.createdAt) : '-';
+  const email = currentUserProfile?.email || currentUser?.email || 'N/A';
+  const whatsapp = currentUserProfile?.whatsappNumber || currentUserProfile?.phone || '-';
+  const location = currentUserProfile?.location || '-';
+  const role = String(currentUserProfile?.role || 'uploader');
+  const status = String(currentUserProfile?.status || 'active');
+  setProfileField(profileNameEl, fullName);
+  setProfileField(profileRegisteredAtEl, registeredAt);
+  setProfileField(profileEmailEl, email);
+  setProfileField(profileWhatsappEl, whatsapp);
+  setProfileField(profileLocationEl, location);
+  setProfileField(profileRoleEl, role.charAt(0).toUpperCase() + role.slice(1));
+  setProfileField(profileStatusEl, status.charAt(0).toUpperCase() + status.slice(1));
+}
 
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', () => {
@@ -499,15 +680,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const snap = await getDocs(q);
         if (!snap.empty) {
           const data = snap.docs[0].data();
+          currentUserProfile = data;
           userName.textContent = data.fullName || user.displayName || user.email;
         } else {
+          currentUserProfile = { email: user.email, fullName: user.displayName || user.email, role: 'uploader', status: 'active' };
           userName.textContent = user.displayName || user.email;
         }
       } catch (e) {
+        currentUserProfile = { email: user.email, fullName: user.displayName || user.email, role: 'uploader', status: 'active' };
         userName.textContent = user.displayName || user.email;
       }
       userAvatar.src = user.photoURL || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'40\' height=\'40\' viewBox=\'0 0 40 40\'%3E%3Ccircle cx=\'20\' cy=\'20\' r=\'20\' fill=\'%23003366\'/%3E%3Ctext x=\'20\' y=\'25\' text-anchor=\'middle\' fill=\'%23ffffff\' font-size=\'16\'%3E👤%3C/text%3E%3C/svg%3E';
+      renderProfileTab();
       totalCountSpan.textContent = DOCUMENT_TYPES.length;
+      await loadRegisteredAgents();
+      await loadApprovedAgents();
       await loadSubmissions();
     } else {
       window.location.href = 'index.html';
@@ -564,13 +751,12 @@ function setPropertyByRsaAndUpdate(rsaAmount) {
     if (feeEl) feeEl.value = rule.fee;
     if (feeFmt) feeFmt.textContent = formatCurrency(rule.fee);
 
-    // Calculate 25% of RSA and round up to nearest hundred
+    // Calculate exact 25% of RSA (no rounding)
     const rsaBalance = parseFloat(rsaAmount) || 0;
-    const rsa25 = rsaBalance * 0.25;
-    const rsa25Rounded = Math.ceil(rsa25 / 100) * 100;
+    const rsa25Exact = rsaBalance * 0.25;
 
-    // Calculate loan amount (property value - 25% of RSA)
-    const loanAmount = rule.value - rsa25Rounded;
+    // Calculate loan amount and round DOWN to nearest thousand
+    const loanAmount = roundDownToNearestThousand(rule.value - rsa25Exact);
 
     // Set loan amount
     if (loanEl) loanEl.value = loanAmount;
@@ -586,12 +772,12 @@ function setPropertyByRsaAndUpdate(rsaAmount) {
     // Also update the 25% display
     const rsa25FormattedEl = document.getElementById('rsa25Formatted');
     if (rsa25FormattedEl) {
-      rsa25FormattedEl.textContent = formatCurrency(rsa25Rounded);
+      rsa25FormattedEl.textContent = formatCurrency(rsa25Exact);
     }
 
     const rsa25PercentEl = document.getElementById('rsa25Percent');
     if (rsa25PercentEl) {
-      rsa25PercentEl.value = rsa25Rounded;
+      rsa25PercentEl.value = rsa25Exact;
     }
 
   } else {
@@ -659,14 +845,13 @@ function calculateAndDisplayCustomerInfo() {
   // Calculate years to retirement (assuming retirement at 60)
   const yearsToRetirement = Math.max(0, 60 - age);
 
-  // Get 25% of RSA and ROUND UP to nearest hundred
-  const rsa25 = rsaBalance * 0.25;
-  const rsa25Rounded = Math.ceil(rsa25 / 100) * 100;
+  // Get exact 25% of RSA (no rounding)
+  const rsa25Exact = rsaBalance * 0.25;
 
   // Get property rule
   const rule = determinePropertyByRsa(rsaBalance);
   const propertyValue = rule ? rule.value : 0;
-  const loanAmount = propertyValue - rsa25Rounded;
+  const loanAmount = roundDownToNearestThousand(propertyValue - rsa25Exact);
 
   // Find or create results container
   let resultsContainer = document.getElementById('customerInfoResults');
@@ -710,7 +895,7 @@ function calculateAndDisplayCustomerInfo() {
       </div>
       <div style="background: white; padding: 10px; border-radius: 6px;">
         <div style="font-size: 12px; color: #64748b;">25% of RSA</div>
-        <div style="font-size: 18px; font-weight: 700; color: #003366;">${formatCurrency(rsa25Rounded)}</div>
+        <div style="font-size: 18px; font-weight: 700; color: #003366;">${formatCurrency(rsa25Exact)}</div>
       </div>
       <div style="background: white; padding: 10px; border-radius: 6px;">
         <div style="font-size: 12px; color: #64748b;">Loan Amount</div>
@@ -758,20 +943,19 @@ function saveCustomerDetails() {
 
   const rsaBalance = parseFloat(document.getElementById('rsaBalance')?.value || 0);
 
-  // Calculate 25% and ROUND UP to nearest hundred
-  const rsa25 = rsaBalance * 0.25;
-  const rsa25Rounded = Math.ceil(rsa25 / 100) * 100;
+  // Calculate exact 25% (no rounding)
+  const rsa25Exact = rsaBalance * 0.25;
 
-  // Update RSA 25% display with rounded value
+  // Update RSA 25% display with exact value
   const rsa25FormattedEl = document.getElementById('rsa25Formatted');
   if (rsa25FormattedEl) {
-    rsa25FormattedEl.textContent = formatCurrency(rsa25Rounded);
+    rsa25FormattedEl.textContent = formatCurrency(rsa25Exact);
   }
 
-  // Store the rounded value in hidden input if needed
+  // Store exact value in hidden input
   const rsa25PercentEl = document.getElementById('rsa25Percent');
   if (rsa25PercentEl) {
-    rsa25PercentEl.value = rsa25Rounded;
+    rsa25PercentEl.value = rsa25Exact;
   }
 
   // Call property update function
@@ -904,9 +1088,34 @@ function validateDetailsBeforeBatch() {
 // ==================== EVENT LISTENERS ====================
 function setupEventListeners() {
   if (newUploadBtn) newUploadBtn.addEventListener('click', openUploadModal);
+  if (helpFab && sopHelpModal) {
+    helpFab.addEventListener('click', () => sopHelpModal.classList.add('active'));
+  }
+  if (closeSopHelpModalBtn && sopHelpModal) {
+    closeSopHelpModalBtn.addEventListener('click', () => sopHelpModal.classList.remove('active'));
+  }
+  if (closeSopHelpModalFooterBtn && sopHelpModal) {
+    closeSopHelpModalFooterBtn.addEventListener('click', () => sopHelpModal.classList.remove('active'));
+  }
   document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
     item.addEventListener('click', (e) => { e.preventDefault(); switchTab(item.dataset.tab); });
   });
+  if (rejectedTableBody) {
+    rejectedTableBody.addEventListener('click', (e) => {
+      const chatTrigger = e.target.closest('.app-chat-trigger');
+      if (chatTrigger) return;
+      const waLink = e.target.closest('a[href*="wa.me/"]');
+      if (!waLink) return;
+      const row = waLink.closest('tr');
+      const submissionId = row?.getAttribute('data-submission-id');
+      if (!submissionId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof window.openApplicationChat === 'function') {
+        window.openApplicationChat(submissionId);
+      }
+    });
+  }
   if (closeModalBtn) closeModalBtn.addEventListener('click', () => closeModal(uploadModal));
   if (closeEditModalBtn) closeEditModalBtn.addEventListener('click', () => closeModal(editModal));
   if (closeSingleModalBtn) closeSingleModalBtn.addEventListener('click', () => closeModal(singleUploadModal));
@@ -964,26 +1173,39 @@ function setupEventListeners() {
   if (customerNameInput) customerNameInput.addEventListener('input', updateSubmitButton);
   if (saveDetailsBtn) saveDetailsBtn.addEventListener('click', saveCustomerDetails);
   if (resetDetailsBtn) resetDetailsBtn.addEventListener('click', resetCustomerDetails);
+  if (agentRegistrationForm) {
+    agentRegistrationForm.addEventListener('submit', handleAgentRegistration);
+  }
+  if (openAgentRegistrationBtn) {
+    openAgentRegistrationBtn.addEventListener('click', openAgentRegistrationModal);
+  }
+  if (closeAgentRegistrationModalBtn) {
+    closeAgentRegistrationModalBtn.addEventListener('click', closeAgentRegistrationModal);
+  }
+  if (resetAgentFormBtn) {
+    resetAgentFormBtn.addEventListener('click', () => {
+      agentRegistrationForm?.reset();
+    });
+  }
 
   // ===== UPDATED: RSA Balance input listener with auto-fill =====
   document.getElementById('rsaBalance')?.addEventListener('input', (e) => {
     const rawStr = String(e.target.value).replace(/[^0-9.\-]+/g, '');
     const raw = parseFloat(rawStr) || 0;
 
-    // Calculate 25% and ROUND UP to nearest hundred
-    const rsa25 = raw * 0.25;
-    const rsa25Rounded = Math.ceil(rsa25 / 100) * 100;
+    // Calculate exact 25% (no rounding)
+    const rsa25Exact = raw * 0.25;
 
     // Update RSA 25% display immediately
     const rsa25FormattedEl = document.getElementById('rsa25Formatted');
     if (rsa25FormattedEl) {
-      rsa25FormattedEl.textContent = formatCurrency(rsa25Rounded);
+      rsa25FormattedEl.textContent = formatCurrency(rsa25Exact);
     }
 
-    // Store rounded value in hidden input
+    // Store exact value in hidden input
     const rsa25PercentEl = document.getElementById('rsa25Percent');
     if (rsa25PercentEl) {
-      rsa25PercentEl.value = rsa25Rounded;
+      rsa25PercentEl.value = rsa25Exact;
     }
 
     // Call property update function to auto-fill all property fields
@@ -1026,6 +1248,7 @@ function setupEventListeners() {
     if (e.target === editModal) closeModal(editModal);
     if (e.target === singleUploadModal) closeModal(singleUploadModal);
     if (e.target === viewerModal) closeViewerModal();
+    if (e.target === sopHelpModal) sopHelpModal.classList.remove('active');
   });
   if (closeBatchMappingBtn) closeBatchMappingBtn.addEventListener('click', () => batchMappingModal.classList.remove('active'));
   if (cancelBatchMapping) cancelBatchMapping.addEventListener('click', () => batchMappingModal.classList.remove('active'));
@@ -1046,6 +1269,24 @@ function setupEventListeners() {
       const tenorEl = document.getElementById('tenor'); if (tenorEl) tenorEl.value = t;
     }
   } catch (e) { }
+
+  activeCommissionTabBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    switchCommissionTab('active');
+  });
+  clearedCommissionTabBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    switchCommissionTab('cleared');
+  });
+
+  [activeCommissionSearch, activeCommissionStartDate, activeCommissionEndDate].forEach((el) => {
+    el?.addEventListener('input', () => renderPaidTable());
+    el?.addEventListener('change', () => renderPaidTable());
+  });
+  [clearedCommissionSearch, clearedCommissionStartDate, clearedCommissionEndDate].forEach((el) => {
+    el?.addEventListener('input', () => renderPaidTable());
+    el?.addEventListener('change', () => renderPaidTable());
+  });
 }
 
 // ==================== TAB SWITCHING ====================
@@ -1054,9 +1295,59 @@ window.switchTab = (tabId) => {
   document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
   document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
   document.getElementById(`${tabId}Tab`)?.classList.add('active');
-  const titles = { overview: 'Dashboard', pending: 'Pending Documents', approved: 'Approved Documents', rejected: 'Rejected Documents' };
+  const titles = { overview: 'Dashboard', pending: 'Pending Documents', approved: 'Approved Documents', rejected: 'Rejected Documents', paid: 'Paid Customers', 'register-agent': 'Register Agent', profile: 'My Profile' };
   if (pageTitle) pageTitle.textContent = titles[tabId] || 'My Documents';
+  if (tabId === 'paid') {
+    switchCommissionTab(currentCommissionTab || 'active');
+    renderPaidTable();
+  }
+  if (tabId === 'register-agent') {
+    loadApprovedAgents();
+  }
 };
+
+function switchCommissionTab(tab) {
+  currentCommissionTab = tab === 'cleared' ? 'cleared' : 'active';
+  if (activeCommissionSection) activeCommissionSection.style.display = currentCommissionTab === 'active' ? 'block' : 'none';
+  if (clearedCommissionSection) clearedCommissionSection.style.display = currentCommissionTab === 'cleared' ? 'block' : 'none';
+  activeCommissionTabBtn?.classList.toggle('active', currentCommissionTab === 'active');
+  clearedCommissionTabBtn?.classList.toggle('active', currentCommissionTab === 'cleared');
+
+  const showActive = currentCommissionTab === 'active';
+  if (activeTotal25Card) activeTotal25Card.style.display = showActive ? 'block' : 'none';
+  if (activeTotal1Card) activeTotal1Card.style.display = showActive ? 'block' : 'none';
+  if (clearedTotal25Card) clearedTotal25Card.style.display = showActive ? 'none' : 'block';
+  if (clearedTotal1Card) clearedTotal1Card.style.display = showActive ? 'none' : 'block';
+}
+
+function getDateFromAny(value) {
+  if (!value) return null;
+  try {
+    if (value.toDate && typeof value.toDate === 'function') return value.toDate();
+    if (value.seconds) return new Date(value.seconds * 1000);
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  } catch (_) {
+    return null;
+  }
+}
+
+function inDateRange(dateObj, startStr, endStr) {
+  if (!dateObj) return false;
+  if (!startStr && !endStr) return true;
+
+  if (startStr) {
+    const start = new Date(startStr);
+    start.setHours(0, 0, 0, 0);
+    if (dateObj < start) return false;
+  }
+  if (endStr) {
+    const end = new Date(endStr);
+    end.setHours(23, 59, 59, 999);
+    if (dateObj > end) return false;
+  }
+  return true;
+}
 
 // ==================== DRAG & DROP ====================
 function setupDragDrop(area, input, callback) {
@@ -1070,6 +1361,7 @@ function openUploadModal() {
   currentEditId = null;
   currentCustomerUploads = {};
   customerNameInput.value = '';
+  if (customerAgentSelect) customerAgentSelect.value = '';
   customerDetailsSaved = false;
   if (batchUploadBtn) batchUploadBtn.disabled = true;
   if (window.renderDocumentGridUpload) {
@@ -1865,12 +2157,19 @@ async function submitCustomer() {
         loanAmount: document.getElementById('loanAmount')?.value || ''
       };
       const submissionRef = doc(db, 'submissions', currentEditId);
+      const existingSub = allSubmissions.find((s) => s.id === currentEditId) || {};
+      const reviewerToReassign = String(existingSub.reviewedBy || existingSub.assignedTo || '').trim();
       await updateDoc(submissionRef, {
-        customerName, customerDetails, status: 'rejected', documents,
+        customerName, customerDetails, status: 'pending', documents,
         documentTypes: Object.keys(currentCustomerUploads), reuploadedAt: serverTimestamp(),
-        fixSubmitted: true, fixLocked: true, fixSubmittedAt: serverTimestamp()
+        fixSubmitted: true, fixLocked: true, fixSubmittedAt: serverTimestamp(),
+        assignedTo: reviewerToReassign || existingSub.assignedTo || '',
+        reviewedAt: null,
+        comment: ''
       });
-      showNotification('✅ Fix submitted successfully!', 'success');
+      showNotification(reviewerToReassign
+        ? '✅ Fix submitted and reassigned to the same reviewer for another review.'
+        : '✅ Fix submitted successfully!', 'success');
       closeModal(uploadModal);
       currentEditId = null;
       updateSubmitButton();
@@ -1908,15 +2207,50 @@ async function submitCustomer() {
       facilityFee: document.getElementById('facilityFee')?.value || '',
       loanAmount: document.getElementById('loanAmount')?.value || ''
     };
+    const selectedAgentId = String(customerAgentSelect?.value || '').trim();
+    const selectedAgent = approvedAgents.find((a) => a.id === selectedAgentId) || null;
+    const agentSummary = selectedAgent
+      ? `Selected agent:\n- Name: ${selectedAgent.fullName || '-'}\n- Phone: ${selectedAgent.contactNumber || '-'}`
+      : 'Selected agent: No Agent';
+    const proceed = confirm(
+      `Please confirm submission details:\n\nCustomer: ${customerName || '-'}\n${agentSummary}\n\nProceed with submission?`
+    );
+    if (!proceed) {
+      submitCustomerBtn.disabled = false;
+      submitCustomerBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Customer Documents';
+      return;
+    }
     const subRef = await addDoc(collection(db, 'submissions'), {
       customerName, customerDetails, uploadedBy: currentUser.email, uploadedAt: serverTimestamp(),
-      status: 'pending', comment: '', documents, documentTypes: Object.keys(currentCustomerUploads)
+      status: 'pending', comment: '', documents, documentTypes: Object.keys(currentCustomerUploads),
+      agentId: selectedAgent?.id || '',
+      agentName: selectedAgent?.fullName || '',
+      agentContactNumber: selectedAgent?.contactNumber || '',
+      agentAccountNumber: selectedAgent?.accountNumber || '',
+      agentAccountBank: selectedAgent?.accountBank || ''
     });
     const assignedEmail = await assignRoundRobin(subRef).catch(err => { return null; });
+    let assignmentEmailFailed = false;
     if (assignedEmail) {
-      queueViewerAssignmentEmail({ submissionId: subRef.id, viewerEmail: assignedEmail, customerName, uploaderEmail: currentUser?.email || '' }).catch(() => {});
+      const emailResult = await queueViewerAssignmentEmail({
+        submissionId: subRef.id,
+        viewerEmail: assignedEmail,
+        customerName,
+        uploaderEmail: currentUser?.email || ''
+      }).catch((emailErr) => {
+        console.warn('viewer assignment email failed:', emailErr);
+        return { queued: true, sent: false, reason: 'send-failed' };
+      });
+
+      if (emailResult?.sent === false) {
+        assignmentEmailFailed = true;
+      }
     }
-    showNotification(assignedEmail ? `✅ Submitted – assigned to ${assignedEmail}` : '✅ Customer documents submitted successfully!', 'success');
+    if (assignmentEmailFailed) {
+      showNotification(`✅ Submitted and assigned to ${assignedEmail}, but email alert failed.`, 'warning');
+    } else {
+      showNotification(assignedEmail ? `✅ Submitted – assigned to ${assignedEmail}` : '✅ Customer documents submitted successfully!', 'success');
+    }
     closeModal(uploadModal);
   } catch (error) {
     showNotification('Submission failed: ' + error.message, 'error');
@@ -2002,9 +2336,21 @@ async function submitEdit() {
     }
     if (newDocuments.length > 0) {
       const submissionRef = doc(db, 'submissions', currentEditId);
-      await updateDoc(submissionRef, { status: 'rejected', documents: arrayUnion(...newDocuments), reuploadedAt: serverTimestamp(), fixSubmitted: true, fixLocked: true, fixSubmittedAt: serverTimestamp() });
+      const existingSub = allSubmissions.find((s) => s.id === currentEditId) || {};
+      const reviewerToReassign = String(existingSub.reviewedBy || existingSub.assignedTo || '').trim();
+      await updateDoc(submissionRef, {
+        status: 'pending',
+        documents: arrayUnion(...newDocuments),
+        reuploadedAt: serverTimestamp(),
+        fixSubmitted: true,
+        fixLocked: true,
+        fixSubmittedAt: serverTimestamp(),
+        assignedTo: reviewerToReassign || existingSub.assignedTo || '',
+        reviewedAt: null,
+        comment: ''
+      });
     }
-    showNotification('✅ Documents re-uploaded successfully!', 'success');
+    showNotification('✅ Documents re-uploaded and sent back for reviewer action.', 'success');
     closeModal(editModal);
   } catch (error) {
     showNotification('Update failed: ' + error.message, 'error');
@@ -2027,7 +2373,7 @@ async function loadSubmissions() {
       if (data.assignedTo) emails.add(data.assignedTo);
     });
     try { await ensureUserFullNames(Array.from(emails)); } catch (e) { }
-    renderPendingTable(); renderApprovedTable(); renderRejectedTable(); updateDashboardCards();
+    renderPendingTable(); renderApprovedTable(); renderRejectedTable(); renderPaidTable(); updateDashboardCards();
   }, (error) => { showNotification('Error loading submissions', 'error'); });
 }
 
@@ -2057,9 +2403,28 @@ function safeFormatDate(dateValue) {
   } catch (error) { return 'Invalid date'; }
 }
 
+function normalizeWhatsAppPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('0') && digits.length === 11) return `234${digits.slice(1)}`;
+  if (digits.length === 10) return `234${digits}`;
+  if (digits.startsWith('234')) return digits;
+  return digits;
+}
+
+function renderWhatsAppLink(raw) {
+  const display = String(raw || '').trim();
+  const normalized = normalizeWhatsAppPhone(display);
+  if (!normalized) return '-';
+  return `<a href="https://wa.me/${normalized}" target="_blank" rel="noopener noreferrer">${display}</a>`;
+}
+
 function updateDashboardCards() {
   const pending = allSubmissions.filter(s => s.status === 'pending').length;
-  const approved = allSubmissions.filter(s => s.status === 'approved').length;
+  const approved = allSubmissions.filter(s => {
+    const st = String(s.status || '').toLowerCase();
+    return st === 'processing_to_pfa' || st === 'approved';
+  }).length;
   const rejected = allSubmissions.filter(s => s.status === 'rejected').length;
   document.getElementById('cardPendingCount').textContent = pending;
   document.getElementById('cardApprovedCount').textContent = approved;
@@ -2069,27 +2434,32 @@ function updateDashboardCards() {
 async function renderPendingTable() {
   if (!pendingTableBody) { return; }
   const pending = allSubmissions.filter(s => s.status === 'pending');
-  if (pending.length === 0) { pendingTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No pending documents</td></tr>'; return; }
+  if (pending.length === 0) { pendingTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No pending documents</td></tr>'; return; }
   let html = '';
   for (const sub of pending) {
     const date = safeFormatDate(sub.uploadedAt);
     const assignedName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned';
-    html += `<tr><td><strong>${sub.customerName}</strong></td><td>${assignedName}</td><td>${date}</td><td><span class="status-badge status-pending">Pending</span></td><td>${sub.comment || '-'}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    const whatsapp = renderWhatsAppLink(sub.customerDetails?.phone || sub.customerPhone || '');
+    html += `<tr><td><strong>${sub.customerName}</strong></td><td>${whatsapp}</td><td>${assignedName}</td><td>${date}</td><td><span class="status-badge status-pending">Pending</span></td><td>${sub.comment || '-'}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   pendingTableBody.innerHTML = html;
 }
 
 async function renderApprovedTable() {
   if (!approvedTableBody) { return; }
-  const approved = allSubmissions.filter(s => s.status === 'approved');
-  if (approved.length === 0) { approvedTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No approved documents</td></tr>'; return; }
+  const approved = allSubmissions.filter(s => {
+    const st = String(s.status || '').toLowerCase();
+    return st === 'processing_to_pfa' || st === 'approved';
+  });
+  if (approved.length === 0) { approvedTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No approved documents</td></tr>'; return; }
   let html = '';
   for (const sub of approved) {
     const uploadDate = safeFormatDate(sub.uploadedAt);
     const approvedDate = safeFormatDate(sub.reviewedAt);
     const approvedBy = (sub.reviewedBy && userFullNames.get(sub.reviewedBy)) ? userFullNames.get(sub.reviewedBy) : (sub.reviewedBy || '-');
     const assignedName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned';
-    html += `<tr><td><strong>${sub.customerName}</strong></td><td>${assignedName}</td><td>${uploadDate}</td><td><span class="status-badge status-approved">Approved</span></td><td>${approvedBy}</td><td>${approvedDate}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    const whatsapp = renderWhatsAppLink(sub.customerDetails?.phone || sub.customerPhone || '');
+    html += `<tr><td><strong>${sub.customerName}</strong></td><td>${whatsapp}</td><td>${assignedName}</td><td>${uploadDate}</td><td><span class="status-badge status-approved">Processing to PFA</span></td><td>${approvedBy}</td><td>${approvedDate}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   approvedTableBody.innerHTML = html;
 }
@@ -2097,7 +2467,7 @@ async function renderApprovedTable() {
 async function renderRejectedTable() {
   if (!rejectedTableBody) { return; }
   const rejected = allSubmissions.filter(s => s.status === 'rejected');
-  if (rejected.length === 0) { rejectedTableBody.innerHTML = '<tr><td colspan="10" class="no-data">No rejected documents</td></tr>'; return; }
+  if (rejected.length === 0) { rejectedTableBody.innerHTML = '<tr><td colspan="11" class="no-data">No rejected documents</td></tr>'; return; }
   let html = '';
   for (const sub of rejected) {
     const isFixLocked = !!(sub.fixSubmitted || sub.fixLocked || sub.fixSubmittedAt);
@@ -2105,9 +2475,110 @@ async function renderRejectedTable() {
     const rejectedDate = safeFormatDate(sub.reviewedAt);
     const rejectedBy = (sub.reviewedBy && userFullNames.get(sub.reviewedBy)) ? userFullNames.get(sub.reviewedBy) : (sub.reviewedBy || '-');
     const assignedName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned';
-    html += `<tr><td><strong>${sub.customerName}</strong></td><td>${assignedName}</td><td>${date}</td><td><span class="status-badge status-rejected">Rejected</span></td><td>${sub.comment || 'No reason provided'}</td><td>${rejectedBy}</td><td>${rejectedDate}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" ${isFixLocked ? 'disabled style="opacity:.6;cursor:not-allowed;" title="Already fixed and submitted"' : ''}><i class="fas fa-edit"></i> ${isFixLocked ? 'Fixed' : 'Re-upload'}</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button>`;
+    html += `<tr data-submission-id="${sub.id}"><td><strong>${sub.customerName}</strong></td><td>${chatBtn}</td><td>${assignedName}</td><td>${date}</td><td><span class="status-badge status-rejected">Rejected</span></td><td>${sub.comment || 'No reason provided'}</td><td>${rejectedBy}</td><td>${rejectedDate}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" ${isFixLocked ? 'disabled style="opacity:.6;cursor:not-allowed;" title="Already fixed and submitted"' : ''}><i class="fas fa-edit"></i> ${isFixLocked ? 'Fixed' : 'Re-upload'}</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   rejectedTableBody.innerHTML = html;
+}
+
+function renderPaidTable() {
+  if (!activeCommissionTableBody || !clearedCommissionTableBody) return;
+
+  const activeAll = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'paid');
+  const clearedAll = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'cleared');
+  const paidTabTotal = activeAll.length + clearedAll.length;
+  if (paidCountBadge) {
+    paidCountBadge.textContent = String(paidTabTotal);
+    paidCountBadge.style.display = paidTabTotal > 0 ? 'inline-flex' : 'none';
+  }
+  if (activeCommissionCountEl) activeCommissionCountEl.textContent = String(activeAll.length);
+  if (clearedCommissionCountEl) clearedCommissionCountEl.textContent = String(clearedAll.length);
+
+  // Totals are based on ACTIVE commission only.
+  let total25 = 0;
+  let total2 = 0;
+  activeAll.forEach((sub) => {
+    const { twentyFive, commission2 } = getFinancials(sub);
+    total25 += twentyFive;
+    total2 += commission2;
+  });
+  if (paidTotal25El) paidTotal25El.textContent = formatCurrency(total25);
+  if (paidTotal1El) paidTotal1El.textContent = formatCurrency(total2);
+
+  // Separate totals for CLEARED commission.
+  let clearedTotal25 = 0;
+  let clearedTotal2 = 0;
+  clearedAll.forEach((sub) => {
+    const { twentyFive, commission2 } = getFinancials(sub);
+    clearedTotal25 += twentyFive;
+    clearedTotal2 += commission2;
+  });
+  if (clearedTotal25El) clearedTotal25El.textContent = formatCurrency(clearedTotal25);
+  if (clearedTotal1El) clearedTotal1El.textContent = formatCurrency(clearedTotal2);
+
+  const activeSearch = String(activeCommissionSearch?.value || '').trim().toLowerCase();
+  const activeStart = String(activeCommissionStartDate?.value || '').trim();
+  const activeEnd = String(activeCommissionEndDate?.value || '').trim();
+  const activeFiltered = activeAll.filter((sub) => {
+    const text = `${sub.customerName || ''} ${sub.pfa || ''} ${sub.customerDetails?.pfa || ''}`.toLowerCase();
+    const paidDate = getDateFromAny(sub.paidAt || sub.updatedAt);
+    const textOk = !activeSearch || text.includes(activeSearch);
+    return textOk && inDateRange(paidDate, activeStart, activeEnd);
+  });
+
+  if (!activeFiltered.length) {
+    activeCommissionTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No active commission records</td></tr>';
+  } else {
+    activeCommissionTableBody.innerHTML = activeFiltered.map(sub => {
+      const { pfa, twentyFive, commission2 } = getFinancials(sub);
+      const paidDate = safeFormatDate(sub.paidAt || sub.updatedAt);
+      const agentName = sub.agentName || '-';
+
+      return `
+        <tr>
+          <td><strong>${sub.customerName || '-'}</strong></td>
+          <td>${pfa}</td>
+          <td>${agentName}</td>
+          <td>${formatCurrency(twentyFive)}</td>
+          <td>${formatCurrency(commission2)}</td>
+          <td><span class="status-badge status-approved">Paid</span></td>
+          <td>${paidDate}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  const clearedSearch = String(clearedCommissionSearch?.value || '').trim().toLowerCase();
+  const clearedStart = String(clearedCommissionStartDate?.value || '').trim();
+  const clearedEnd = String(clearedCommissionEndDate?.value || '').trim();
+  const clearedFiltered = clearedAll.filter((sub) => {
+    const text = `${sub.customerName || ''} ${sub.pfa || ''} ${sub.customerDetails?.pfa || ''}`.toLowerCase();
+    const clearedDate = getDateFromAny(sub.clearedAt || sub.updatedAt);
+    const textOk = !clearedSearch || text.includes(clearedSearch);
+    return textOk && inDateRange(clearedDate, clearedStart, clearedEnd);
+  });
+
+  if (!clearedFiltered.length) {
+    clearedCommissionTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No cleared commission records</td></tr>';
+  } else {
+    clearedCommissionTableBody.innerHTML = clearedFiltered.map(sub => {
+      const { pfa, twentyFive, commission2 } = getFinancials(sub);
+      const clearedDate = safeFormatDate(sub.clearedAt || sub.updatedAt);
+      const agentName = sub.agentName || '-';
+
+      return `
+        <tr>
+          <td><strong>${sub.customerName || '-'}</strong></td>
+          <td>${pfa}</td>
+          <td>${agentName}</td>
+          <td>${formatCurrency(twentyFive)}</td>
+          <td>${formatCurrency(commission2)}</td>
+          <td><span class="status-badge status-pending">Cleared</span></td>
+          <td>${clearedDate}</td>
+        </tr>
+      `;
+    }).join('');
+  }
 }
 
 function showNotification(message, type = 'info') {
@@ -2116,6 +2587,218 @@ function showNotification(message, type = 'info') {
   notification.className = `notification ${type}`;
   notification.style.display = 'block';
   setTimeout(() => { notification.style.display = 'none'; }, 3000);
+}
+
+async function loadApprovedAgents() {
+  try {
+    const currentUid = String(currentUser?.uid || '').trim();
+    const currentEmail = String(currentUser?.email || '').trim().toLowerCase();
+    let rows = [];
+
+    if (currentUid) {
+      const ownedSnap = await getDocs(query(
+        collection(db, 'agents'),
+        where('status', '==', 'approved'),
+        where('createdByUid', '==', currentUid)
+      ));
+      rows = ownedSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    } else {
+      const snap = await getDocs(query(collection(db, 'agents'), where('status', '==', 'approved')));
+      rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    }
+
+    approvedAgents = rows
+      .filter((agent) => {
+        if (currentUid && String(agent.createdByUid || '') === currentUid) return true;
+        const createdByEmail = String(agent.createdBy || '').trim().toLowerCase();
+        return !!currentEmail && createdByEmail === currentEmail;
+      })
+      .sort((a, b) => String(a.fullName || '').localeCompare(String(b.fullName || '')));
+    populateApprovedAgentSelect();
+  } catch (_) {
+    approvedAgents = [];
+    populateApprovedAgentSelect();
+  }
+}
+
+function openAgentRegistrationModal() {
+  if (!agentRegistrationModal) return;
+  agentRegistrationModal.classList.add('active');
+}
+
+function closeAgentRegistrationModal() {
+  if (!agentRegistrationModal) return;
+  agentRegistrationModal.classList.remove('active');
+}
+
+function normalizeAgentDate(value) {
+  if (!value) return '-';
+  if (value.toDate && typeof value.toDate === 'function') return safeFormatDate(value);
+  if (value.seconds) return safeFormatDate(value);
+  const asDate = new Date(value);
+  if (Number.isNaN(asDate.getTime())) return '-';
+  return safeFormatDate(asDate);
+}
+
+function statusBadgeForAgent(status) {
+  const key = String(status || 'pending').toLowerCase();
+  if (key === 'approved') return '<span class="status-badge status-approved">Approved</span>';
+  if (key === 'rejected') return '<span class="status-badge status-rejected">Rejected</span>';
+  return '<span class="status-badge status-pending">Pending</span>';
+}
+
+function escAttr(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+window.viewAgentDetails = (agentId) => {
+  const agent = registeredAgents.find((row) => row.id === agentId);
+  if (!agent) {
+    showNotification('Agent record not found', 'error');
+    return;
+  }
+  const detailsModal = document.createElement('div');
+  detailsModal.className = 'modal active';
+  detailsModal.innerHTML = `
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2><i class="fas fa-user-tie"></i> Agent Details</h2>
+        <button class="close-btn" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="customer-input-grid">
+          <div><label>Full Name</label><input type="text" readonly value="${escAttr(agent.fullName || '-')}"></div>
+          <div><label>Contact Number</label><input type="text" readonly value="${escAttr(agent.contactNumber || '-')}"></div>
+          <div><label>Account Number</label><input type="text" readonly value="${escAttr(agent.accountNumber || '-')}"></div>
+          <div><label>Account Bank</label><input type="text" readonly value="${escAttr(agent.accountBank || '-')}"></div>
+          <div><label>Status</label><input type="text" readonly value="${escAttr(String(agent.status || 'pending'))}"></div>
+          <div><label>Date Registered</label><input type="text" readonly value="${escAttr(normalizeAgentDate(agent.createdAt))}"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="cancel-btn" type="button">Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(detailsModal);
+  const close = () => detailsModal.remove();
+  detailsModal.querySelectorAll('button').forEach((btn) => btn.addEventListener('click', close));
+  detailsModal.addEventListener('click', (e) => {
+    if (e.target === detailsModal) close();
+  });
+};
+
+async function loadRegisteredAgents() {
+  if (!registeredAgentsTableBody) return;
+  registeredAgentsTableBody.innerHTML = '<tr><td colspan="7" class="loading-row"><div class="loading-spinner"></div> Loading agents...</td></tr>';
+  try {
+    const currentUid = String(currentUser?.uid || '').trim();
+    const currentEmail = String(currentUser?.email || '').trim().toLowerCase();
+    const byId = new Map();
+
+    if (currentUid) {
+      const ownSnap = await getDocs(query(collection(db, 'agents'), where('createdByUid', '==', currentUid)));
+      ownSnap.docs.forEach((row) => {
+        byId.set(row.id, { id: row.id, ...(row.data() || {}) });
+      });
+    }
+    if (currentEmail) {
+      const emailSnap = await getDocs(query(collection(db, 'agents'), where('createdBy', '==', currentEmail)));
+      emailSnap.docs.forEach((row) => {
+        if (!byId.has(row.id)) byId.set(row.id, { id: row.id, ...(row.data() || {}) });
+      });
+    }
+
+    registeredAgents = Array.from(byId.values()).sort((a, b) => {
+      const aTime = getDateFromAny(a.createdAt)?.getTime() || 0;
+      const bTime = getDateFromAny(b.createdAt)?.getTime() || 0;
+      return bTime - aTime;
+    });
+
+    if (!registeredAgents.length) {
+      registeredAgentsTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No registered agents yet</td></tr>';
+      return;
+    }
+
+    registeredAgentsTableBody.innerHTML = registeredAgents.map((agent) => `
+      <tr>
+        <td><strong>${agent.fullName || '-'}</strong></td>
+        <td>${agent.contactNumber || '-'}</td>
+        <td>${agent.accountNumber || '-'}</td>
+        <td>${agent.accountBank || '-'}</td>
+        <td>${statusBadgeForAgent(agent.status)}</td>
+        <td>${normalizeAgentDate(agent.createdAt)}</td>
+        <td><button class="action-btn view-btn-small" onclick="window.viewAgentDetails('${agent.id}')"><i class="fas fa-eye"></i> View</button></td>
+      </tr>
+    `).join('');
+  } catch (error) {
+    registeredAgents = [];
+    registeredAgentsTableBody.innerHTML = '<tr><td colspan="7" class="no-data">Unable to load agents</td></tr>';
+  }
+}
+
+function populateApprovedAgentSelect() {
+  if (!customerAgentSelect) return;
+  const current = String(customerAgentSelect.value || '');
+  customerAgentSelect.innerHTML = '<option value="">No Agent</option>' + approvedAgents.map((agent) => (
+    `<option value="${agent.id}">${agent.fullName || 'Unnamed'} - ${agent.contactNumber || '-'}</option>`
+  )).join('');
+  if (current && approvedAgents.some((a) => a.id === current)) {
+    customerAgentSelect.value = current;
+  }
+}
+
+async function handleAgentRegistration(e) {
+  e.preventDefault();
+  const fullName = String(document.getElementById('agentFullName')?.value || '').trim();
+  const contactNumber = String(document.getElementById('agentContactNumber')?.value || '').trim();
+  const accountNumber = String(document.getElementById('agentAccountNumber')?.value || '').trim();
+  const accountBank = String(document.getElementById('agentAccountBank')?.value || '').trim();
+
+  if (!fullName || !contactNumber || !accountNumber || !accountBank) {
+    showNotification('Please complete all agent fields', 'error');
+    return;
+  }
+  if (!/^\d{10,11}$/.test(contactNumber.replace(/\D/g, ''))) {
+    showNotification('Agent contact number must be 10 or 11 digits', 'error');
+    return;
+  }
+  if (!/^\d{10}$/.test(accountNumber.replace(/\D/g, ''))) {
+    showNotification('Agent account number must be exactly 10 digits', 'error');
+    return;
+  }
+
+  try {
+    if (submitAgentFormBtn) {
+      submitAgentFormBtn.disabled = true;
+      submitAgentFormBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+    }
+    await addDoc(collection(db, 'agents'), {
+      fullName,
+      contactNumber,
+      accountNumber,
+      accountBank,
+      status: 'pending',
+      createdBy: currentUser?.email || '',
+      createdByUid: currentUser?.uid || '',
+      createdAt: serverTimestamp()
+    });
+    showNotification('Agent registration submitted for admin approval', 'success');
+    agentRegistrationForm?.reset();
+    closeAgentRegistrationModal();
+    await loadRegisteredAgents();
+  } catch (err) {
+    showNotification('Failed to submit agent registration', 'error');
+  } finally {
+    if (submitAgentFormBtn) {
+      submitAgentFormBtn.disabled = false;
+      submitAgentFormBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Submit for Approval';
+    }
+  }
 }
 
 function getFileIcon(filename) {

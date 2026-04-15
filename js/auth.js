@@ -3,11 +3,13 @@ import { auth, db } from './firebase-config.js';
 import {
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
+    sendPasswordResetEmail,
     signOut
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
     collection,
-    addDoc,
+    setDoc,
+    doc,
     query,
     where,
     getDocs,
@@ -37,6 +39,11 @@ const loginForm = document.getElementById('loginForm');
 const signupForm = document.getElementById('signupForm');
 const loginFormElement = document.getElementById('loginFormElement');
 const signupFormElement = document.getElementById('signupFormElement');
+const forgotPasswordBtn = document.getElementById('forgotPasswordBtn');
+const forgotPasswordModal = document.getElementById('forgotPasswordModal');
+const forgotPasswordEmail = document.getElementById('forgotPasswordEmail');
+const forgotPasswordSendBtn = document.getElementById('forgotPasswordSendBtn');
+const forgotPasswordCancelBtn = document.getElementById('forgotPasswordCancelBtn');
 const messageModal = document.getElementById('messageModal');
 const modalSpinner = document.getElementById('modalSpinner');
 const modalIcon = document.getElementById('modalIcon');
@@ -46,6 +53,8 @@ const modalCloseBtn = document.getElementById('modalCloseBtn');
 
 // Error message elements
 const nameError = document.getElementById('nameError');
+const locationError = document.getElementById('locationError');
+const whatsappError = document.getElementById('whatsappError');
 const deptError = document.getElementById('deptError');
 const emailError = document.getElementById('emailError');
 const passwordError = document.getElementById('passwordError');
@@ -117,7 +126,74 @@ if (messageModal) {
     });
 }
 
-// Forgot password removed (per request). Admin can reset passwords from Admin dashboard.
+// ==================== FORGOT PASSWORD ====================
+function openForgotPasswordModal() {
+    if (!forgotPasswordModal) return;
+    const prefill = sanitizeInput(document.getElementById('loginEmail')?.value.trim().toLowerCase());
+    if (forgotPasswordEmail) forgotPasswordEmail.value = prefill || '';
+    forgotPasswordModal.classList.add('active');
+}
+
+function closeForgotPasswordModal() {
+    if (!forgotPasswordModal) return;
+    forgotPasswordModal.classList.remove('active');
+}
+
+if (forgotPasswordBtn) {
+    forgotPasswordBtn.addEventListener('click', openForgotPasswordModal);
+}
+
+if (forgotPasswordCancelBtn) {
+    forgotPasswordCancelBtn.addEventListener('click', closeForgotPasswordModal);
+}
+
+if (forgotPasswordModal) {
+    forgotPasswordModal.addEventListener('click', (e) => {
+        if (e.target === forgotPasswordModal) closeForgotPasswordModal();
+    });
+}
+
+if (forgotPasswordSendBtn) {
+    forgotPasswordSendBtn.addEventListener('click', async () => {
+        const email = sanitizeInput(forgotPasswordEmail?.value.trim().toLowerCase() || '');
+        if (!email) {
+            showError('Please enter your email address.');
+            return;
+        }
+
+        closeForgotPasswordModal();
+        showSpinner('Sending password reset link...');
+        try {
+            const RESET_PAGE_URL = `${window.location.origin}/reset-password.html`;
+            const actionCodeSettings = {
+                url: RESET_PAGE_URL,
+                handleCodeInApp: true
+            };
+            await sendPasswordResetEmail(auth, email, actionCodeSettings);
+            showSuccess(`Password reset link sent to ${email}. Check inbox/spam.`);
+        } catch (error) {
+            let errorMessage = 'Failed to send reset email.';
+            switch (error.code) {
+                case 'auth/invalid-email':
+                    errorMessage = 'Invalid email format.';
+                    break;
+                case 'auth/user-not-found':
+                    errorMessage = 'No account found with this email.';
+                    break;
+                case 'auth/unauthorized-continue-uri':
+                case 'auth/invalid-continue-uri':
+                    errorMessage = `Reset page URL is not authorized in Firebase. Add ${window.location.hostname} to Firebase Authorized Domains.`;
+                    break;
+                case 'auth/too-many-requests':
+                    errorMessage = 'Too many attempts. Please try again later.';
+                    break;
+                default:
+                    errorMessage = 'Failed to send reset email: ' + (error.message || 'Unknown error');
+            }
+            showError(errorMessage);
+        }
+    });
+}
 
 // ==================== VALIDATION FUNCTIONS ====================
 function validateName(name) {
@@ -125,9 +201,21 @@ function validateName(name) {
     return pattern.test(name) && name.length >= 2;
 }
 
+function validateLocation(location) {
+    const value = String(location || '').trim();
+    return value.length >= 2;
+}
+
+function validateWhatsapp(whatsapp) {
+    const value = String(whatsapp || '').trim();
+    const compact = value.replace(/[\s\-()]/g, '');
+    return /^\+?\d{10,15}$/.test(compact);
+}
+
 
 function validateEmail(email) {
-    return email.endsWith('@cmbankng.com') && email.length > 10;
+    const pattern = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+    return pattern.test(String(email || '').trim().toLowerCase());
 }
 
 function validatePassword(password) {
@@ -138,6 +226,16 @@ function capitalizeName(name) {
     return name.split(' ').map(word => 
         word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
     ).join(' ');
+}
+
+function capitalizeWords(text) {
+    return String(text || '')
+        .split(' ')
+        .map((word) => {
+            if (!word) return word;
+            return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        })
+        .join(' ');
 }
 
 function capitalizeFirst(word) {
@@ -169,6 +267,40 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const locationInput = document.getElementById('signupLocation');
+    if (locationInput) {
+        locationInput.addEventListener('input', function() {
+            if (this.value.length > 0 && !validateLocation(this.value)) {
+                locationError.textContent = 'Please enter a valid location';
+                locationError.classList.add('show');
+                this.classList.add('input-error');
+            } else {
+                locationError.textContent = '';
+                locationError.classList.remove('show');
+                this.classList.remove('input-error');
+            }
+        });
+        locationInput.addEventListener('blur', function() {
+            if (validateLocation(this.value)) this.value = capitalizeWords(this.value);
+        });
+    }
+
+    const whatsappInput = document.getElementById('signupWhatsappNumber');
+    if (whatsappInput) {
+        whatsappInput.addEventListener('input', function() {
+            this.value = String(this.value || '').replace(/\D/g, '').slice(0, 10);
+            if (this.value.length > 0 && !/^\d{10}$/.test(this.value)) {
+                whatsappError.textContent = 'Enter exactly 10 digits';
+                whatsappError.classList.add('show');
+                this.classList.add('input-error');
+            } else {
+                whatsappError.textContent = '';
+                whatsappError.classList.remove('show');
+                this.classList.remove('input-error');
+            }
+        });
+    }
+
 
     // Email validation
     const emailInput = document.getElementById('signupEmail');
@@ -176,7 +308,7 @@ document.addEventListener('DOMContentLoaded', () => {
         emailInput.addEventListener('input', function() {
             this.value = this.value.toLowerCase();
             if (this.value.length > 0 && !validateEmail(this.value)) {
-                emailError.textContent = 'Please use your @cmbankng.com email';
+                emailError.textContent = 'Please enter a valid email address';
                 emailError.classList.add('show');
                 this.classList.add('input-error');
             } else {
@@ -216,6 +348,9 @@ if (signupFormElement) {
 
         // Get and sanitize form values
         const fullName = sanitizeInput(document.getElementById('fullName')?.value.trim());
+        const location = sanitizeInput(document.getElementById('signupLocation')?.value.trim());
+        const whatsappCode = sanitizeInput(document.getElementById('signupWhatsappCode')?.value.trim());
+        const whatsappNumber = sanitizeInput(document.getElementById('signupWhatsappNumber')?.value.trim());
         // department no longer collected
         const department = '';
         const email = sanitizeInput(document.getElementById('signupEmail')?.value.trim().toLowerCase());
@@ -223,7 +358,7 @@ if (signupFormElement) {
         const confirmPassword = document.getElementById('confirmPassword')?.value;
 
         // Validate all fields exist
-        if (!fullName || !email || !password || !confirmPassword) {
+        if (!fullName || !location || !whatsappNumber || !email || !password || !confirmPassword) {
             showError('Please fill in all fields');
             return;
         }
@@ -234,10 +369,20 @@ if (signupFormElement) {
             return;
         }
 
+        if (!validateLocation(location)) {
+            showError('Please enter a valid location');
+            return;
+        }
+
+        if (!/^\d{10}$/.test(whatsappNumber)) {
+            showError('Please enter exactly 10 digits for WhatsApp number');
+            return;
+        }
+
 
         // Validate email
         if (!validateEmail(email)) {
-            showError('Please use your official @cmbankng.com email address');
+            showError('Please enter a valid email address');
             return;
         }
 
@@ -255,17 +400,35 @@ if (signupFormElement) {
 
         // Capitalize fields
         const capitalizedName = capitalizeName(fullName);
+        const normalizedLocation = capitalizeWords(location);
+        const normalizedCode = whatsappCode.startsWith('+') ? whatsappCode : `+${whatsappCode}`;
+        const normalizedWhatsapp = `${normalizedCode}${whatsappNumber}`;
         const capitalizedDept = '';
         // Show spinner
         showSpinner('Creating your account...');
 
         try {
             // Check if email already exists
-            const usersQuery = query(collection(db, 'users'), where('email', '==', email));
-            const existingUsers = await getDocs(usersQuery);
-            
-            if (!existingUsers.empty) {
+            const emailQuery = query(collection(db, 'users'), where('email', '==', email));
+            const existingEmailUsers = await getDocs(emailQuery);
+            if (!existingEmailUsers.empty) {
                 showError('An account with this email already exists.');
+                return;
+            }
+
+            // Check if WhatsApp number already exists
+            const whatsappQuery = query(collection(db, 'users'), where('whatsappNumber', '==', normalizedWhatsapp));
+            const existingWhatsappUsers = await getDocs(whatsappQuery);
+            if (!existingWhatsappUsers.empty) {
+                showError('An account with this WhatsApp number already exists.');
+                return;
+            }
+
+            // Legacy fallback: older records may store number in "phone"
+            const legacyPhoneQuery = query(collection(db, 'users'), where('phone', '==', normalizedWhatsapp));
+            const existingLegacyPhoneUsers = await getDocs(legacyPhoneQuery);
+            if (!existingLegacyPhoneUsers.empty) {
+                showError('An account with this WhatsApp number already exists.');
                 return;
             }
 
@@ -284,6 +447,11 @@ if (signupFormElement) {
                 const userData = {
                     uid: user.uid,
                     fullName: capitalizedName,
+                    location: normalizedLocation,
+                    whatsappCode: normalizedCode,
+                    whatsappLocalNumber: whatsappNumber,
+                    whatsappNumber: normalizedWhatsapp,
+                    phone: normalizedWhatsapp,
                     // department removed
                     email: email,
                     role: isFirstUser ? 'admin' : 'uploader',
@@ -294,8 +462,8 @@ if (signupFormElement) {
 
                 console.log('Saving to Firestore:', userData);
 
-                const docRef = await addDoc(collection(db, 'users'), userData);
-                console.log('User saved to Firestore with ID:', docRef.id);
+                await setDoc(doc(db, 'users', user.uid), userData, { merge: true });
+                console.log('User saved to Firestore with ID:', user.uid);
 
                 // Success message
                 if (isFirstUser) {
@@ -405,10 +573,14 @@ if (loginFormElement) {
                 showSuccess('Login successful! Redirecting...');
                 
                 setTimeout(() => {
-                    if (userData.role === 'admin') {
+                    if (userData.role === 'super_admin') {
+                        window.location.href = 'super-admin-dashboard.html';
+                    } else if (userData.role === 'admin') {
                         window.location.href = 'admin-dashboard.html';
                     } else if (userData.role === 'reviewer' || userData.role === 'viewer') {
                         window.location.href = 'reviewer-dashboard.html';
+                    } else if (userData.role === 'payment') {
+                        window.location.href = 'payment-dashboard.html';
                     } else if (userData.role === 'rsa') {
                         window.location.href = 'rsa-dashboard.html';
                     } else {
@@ -416,25 +588,9 @@ if (loginFormElement) {
                     }
                 }, 1500);
             } else {
-                // User exists in Auth but not in Firestore - create record
-                try {
-                    await addDoc(collection(db, 'users'), {
-                        uid: user.uid,
-                        email: email,
-                        fullName: email.split('@')[0],
-                        // department removed for auto-generated record
-                        role: 'uploader',
-                        status: 'active',
-                        createdAt: serverTimestamp()
-                    });
-                    showSuccess('Login successful! Redirecting...');
-                    setTimeout(() => {
-                        window.location.href = 'dashboard.html';
-                    }, 1500);
-                } catch (e) {
-                    showError('User record not found. Please contact admin.');
-                    await signOut(auth);
-                }
+                // Security hardening: never auto-provision app roles from client login.
+                showError('User record not found. Please contact admin.');
+                await signOut(auth);
             }
 
         } catch (error) {

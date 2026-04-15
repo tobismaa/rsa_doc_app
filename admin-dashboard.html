@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=0.75, maximum-scale=1.0, user-scalable=yes">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="theme-color" content="#0f3b67">
+    <link rel="manifest" href="manifest.webmanifest">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
     <title>Admin Dashboard - CMBank RSA</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -46,7 +48,7 @@
             </div>
 
             <div class="user-profile">
-                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='16'%3E👤%3C/text%3E%3C/svg%3E" alt="Admin" id="adminAvatar">
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='16'%3EAD%3C/text%3E%3C/svg%3E" alt="Admin" id="adminAvatar">
                 <div class="user-info">
                     <span id="adminName">Loading...</span>
                     <small>Administrator</small>
@@ -57,46 +59,21 @@
             </div>
 
             <nav class="nav-menu">
-                <a href="#" class="nav-item active" data-tab="users">
+                <a href="#" class="nav-item active" data-tab="user-management">
                     <i class="fas fa-users"></i>
                     <span>User Management</span>
                 </a>
-                <a href="#" class="nav-item" data-tab="pending-users">
-                    <i class="fas fa-user-clock"></i>
-                    <span>Pending Users</span>
-                    <span class="badge" id="pendingUserCount">0</span>
-                </a>
-                <a href="#" class="nav-item" data-tab="pending-docs">
-                    <i class="fas fa-clock"></i>
-                    <span>Pending Documents</span>
-                    <span class="badge" id="pendingDocCount">0</span>
-                </a>
-                <a href="#" class="nav-item" data-tab="approved-docs">
-                    <i class="fas fa-check-circle"></i>
-                    <span>Approved Documents</span>
-                </a>
-                <a href="#" class="nav-item" data-tab="track-apps">
-                    <i class="fas fa-magnifying-glass"></i>
-                    <span>Track Applications</span>
-                </a>
-                <!-- NEW: Rejected Documents Tab -->
-                <a href="#" class="nav-item" data-tab="rejected-docs">
-                    <i class="fas fa-times-circle"></i>
-                    <span>Rejected Documents</span>
-                    <span class="badge" id="rejectedDocCount" style="background:#ef4444">0</span>
+                <a href="#" class="nav-item" data-tab="application-management">
+                    <i class="fas fa-folder-tree"></i>
+                    <span>Application Management</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="round-robin">
                     <i class="fas fa-exchange-alt"></i>
                     <span>Round-Robin Monitor</span>
                 </a>
-                <a href="#" class="nav-item" data-tab="rsa-round-robin">
-                    <i class="fas fa-random"></i>
-                    <span>RSA Round-Robin</span>
-                </a>
-                <a href="#" class="nav-item" data-tab="finally-submitted">
-                    <i class="fas fa-paper-plane"></i>
-                    <span>Finally Submitted</span>
-                    <span class="badge" id="finallySubmittedCount">0</span>
+                <a href="#" class="nav-item" data-tab="profile">
+                    <i class="fas fa-user-circle"></i>
+                    <span>My Profile</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="audit">
                     <i class="fas fa-history"></i>
@@ -119,6 +96,8 @@
                     <i class="fas fa-arrows-rotate"></i> Refresh
                 </button>
             </header>
+
+            <div id="adminSubTabs" style="display:none; gap:10px; flex-wrap:wrap; margin: 0 0 16px;"></div>
 
             <!-- User Management Tab -->
             <div id="usersTab" class="tab-content active">
@@ -148,6 +127,7 @@
                             <tr>
                                 <th>Full Name</th>
                                 <th>Email</th>
+                                <th>WhatsApp</th>
                                 <th>Role</th>
                                 <th>Status</th>
                                 <th>Joined</th>
@@ -168,6 +148,46 @@
                     <p style="color: #666; margin-bottom: 20px;">Approve or reject newly registered users</p>
                     <div class="pending-grid" id="pendingUsersGrid">
                         <!-- Pending users will be inserted here -->
+                    </div>
+                </div>
+            </div>
+
+            <div id="pending-agentsTab" class="tab-content">
+                <div class="all-documents">
+                    <h2>Pending Agents</h2>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Agent Name</th>
+                                    <th>Registered By</th>
+                                    <th>Submitted At</th>
+                                    <th>View</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pendingAgentsTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="registered-agentsTab" class="tab-content">
+                <div class="all-documents">
+                    <h2>Registered Agents</h2>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Agent Name</th>
+                                    <th>Registered By</th>
+                                    <th>Approved By</th>
+                                    <th>Approved At</th>
+                                    <th>View</th>
+                                </tr>
+                            </thead>
+                            <tbody id="approvedAgentsTableBody"></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -288,7 +308,7 @@
                     </div>
 
                     <div class="table-container">
-                        <table class="documents-table">
+                        <table class="documents-table" data-no-enhance="true">
                             <thead>
                                 <tr>
                                     <th>Customer</th>
@@ -358,6 +378,26 @@
                 </div>
             </div>
 
+            <div id="profileTab" class="tab-content">
+                <div class="profile-card-wrap">
+                    <div class="profile-card">
+                        <div class="profile-card-head">
+                            <h2>My Profile</h2>
+                            <p>Administrator account information</p>
+                        </div>
+                        <div class="profile-grid">
+                            <div class="profile-item"><span class="profile-label">Full Name</span><span id="profileName" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Email</span><span id="profileEmail" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">WhatsApp</span><span id="profileWhatsapp" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Location</span><span id="profileLocation" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Role</span><span id="profileRole" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Status</span><span id="profileStatus" class="profile-value">-</span></div>
+                            <div class="profile-item profile-item-wide"><span class="profile-label">Date Registered</span><span id="profileRegisteredAt" class="profile-value">-</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Finally Submitted Tab -->
             <div id="finally-submittedTab" class="tab-content">
                 <div class="table-section">
@@ -380,6 +420,34 @@
                             <tbody id="finallySubmittedTableBody">
                                 <!-- Finally submitted entries will be inserted here -->
                             </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="paymentsTab" class="tab-content">
+                <div class="all-documents">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+                        <h2 style="margin:0;">Payments</h2>
+                        <button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.clearPaidSubmissions()">
+                            <i class="fas fa-check-double"></i> Settle Commission
+                        </button>
+                    </div>
+                    <p style="color:#64748b;margin:0 0 14px;">Mark applications as paid after PFA payment, then clear paid records once commission has been settled.</p>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>PFA</th>
+                                    <th>Agent</th>
+                                    <th>25% Balance</th>
+                                    <th>2% of 25%</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paymentsTableBody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -637,8 +705,20 @@
                     <label>Full Name
                         <input type="text" id="modalFullName" required>
                     </label>
+                    <label>Location
+                        <input type="text" id="modalLocation" placeholder="User location">
+                    </label>
                     <label>Email
                         <input type="email" id="modalEmail" required readonly>
+                    </label>
+                    <label>Department
+                        <input type="text" id="modalDepartment" placeholder="Department">
+                    </label>
+                    <label>WhatsApp Code
+                        <input type="text" id="modalWhatsappCode" placeholder="+234">
+                    </label>
+                    <label>WhatsApp Number
+                        <input type="text" id="modalWhatsappLocalNumber" placeholder="10 digits">
                     </label>
                     <label>Role
                         <select id="modalRole">
@@ -646,6 +726,7 @@
                             <option value="reviewer">Reviewer</option>
                             <option value="admin">Admin</option>
                             <option value="rsa">RSA</option>
+                            <option value="payment">Payment</option>
                         </select>
                     </label>
                     <label>Status
@@ -666,7 +747,88 @@
         </div>
     </div>
 
+    <button type="button" id="helpFab" class="sop-fab" title="Open SOP">
+        <i class="fas fa-circle-question"></i>
+        <span>SOP</span>
+    </button>
+    <div id="sopHelpModal" class="modal">
+        <div class="modal-content sop-help-modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-book-open"></i> Admin SOP</h2>
+                <button class="close-btn" id="closeSopHelpModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="sop-topics">
+                    <div class="sop-topic">
+                        <h4>1. User Management</h4>
+                        <p>Review <strong>Users</strong> daily and confirm each account has correct role, status, and contact data.</p>
+                        <p>Deactivate compromised users immediately and log reason in operational records.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>2. Pending Users</h4>
+                        <p>Approve only staff verified by management. Reject unknown registrations quickly.</p>
+                        <p>Always assign the correct role before activation to prevent access drift.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>3. Pending Agents</h4>
+                        <p>Open each agent record and verify name, phone, account number, and bank details before approval.</p>
+                        <p>Reject duplicates or suspicious records and notify the uploader to re-register correctly.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>4. Registered Agents</h4>
+                        <p>Use this tab to audit approved agents and trace who registered and who approved each profile.</p>
+                        <p>Escalate unusual account changes before financial disbursement actions.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>5. Application Management: Pending</h4>
+                        <p>Monitor newly submitted applications and ensure assignment to active reviewers.</p>
+                        <p>Use comments and audit trail to keep assignment decisions transparent.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>6. Application Management: Approved / Rejected</h4>
+                        <p>Approved means processing continues to RSA stage; rejected requires clear reason for uploader correction.</p>
+                        <p>Confirm rejected reasons are specific and actionable to reduce rework cycle time.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>7. Application Management: Track & Final Submission</h4>
+                        <p>Use Track Applications to follow handoff from uploader to reviewer to RSA to payment.</p>
+                        <p>Use Final Submission to verify records sent to PFA and investigate delayed transitions.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>8. Application Management: Payment</h4>
+                        <p>Mark records paid only after valid payment proof and reconciliation.</p>
+                        <p>Clear paid records only when commission settlement is completed and documented.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>9. Round Robin Monitor</h4>
+                        <p>Use <strong>Reviewer</strong>, <strong>RSA</strong>, and <strong>Payment</strong> sub-tabs to monitor load distribution.</p>
+                        <p>Reset counters only with authorization and capture reason in audit notes.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>10. Audit and Security Practice</h4>
+                        <p>Audit Log must be reviewed for unusual actions, frequent role changes, and mass updates.</p>
+                        <p>Keep sensitive data off console/screenshots and enforce least-privilege user access.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="closeSopHelpModalFooterBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script type="module" src="js/firebase-config.js"></script>
     <script type="module" src="js/admin.js?v=20260308"></script>
+    <script src="js/table-enhancer.js?v=20260415"></script>
+    <script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
+    <link rel="stylesheet" href="css/app-chat.css?v=20260415d">
+    <script type="module" src="js/app-chat.js?v=20260415i"></script>
+    <link rel="stylesheet" href="css/pwa-install.css">
+    <script src="js/pwa-install.js"></script>
+    <link rel="stylesheet" href="css/profile-card.css">
+    <link rel="stylesheet" href="css/sop-help.css">
+    <script src="js/sop-help.js"></script>
+    <link rel="stylesheet" href="css/developer-badge.css">
+    <script src="js/developer-badge.js"></script>
 </body>
 </html>

@@ -413,53 +413,184 @@ body {
 
 /* ==================== OVERVIEW CARDS ==================== */
 .overview-cards {
-  display: flex;
-  gap: 18px;
-  flex-wrap: wrap;
-  margin-bottom: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
 }
 
 .stat-card {
-  flex: 1;
-  min-width: 180px;
-  background: #fff;
-  padding: 18px;
-  border-radius: 12px;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.04);
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  position: relative;
+  background: linear-gradient(160deg, #ffffff 0%, #f7fbff 100%);
+  border: 1px solid #dbe7f5;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 10px 24px rgba(15, 36, 66, 0.08);
+  overflow: hidden;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.stat-card::after {
+  content: "";
+  position: absolute;
+  inset: auto -40px -40px auto;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  opacity: 0.08;
+  pointer-events: none;
+  background: #0f4d8a;
+  transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
 .stat-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+  transform: translateY(-5px);
+  border-color: #b8d0ec;
+  box-shadow: 0 18px 34px rgba(12, 40, 74, 0.16);
+}
+
+.stat-card:hover::after {
+  opacity: 0.14;
+  transform: scale(1.08);
+}
+
+.stat-card.pending {
+  border-color: #dce6f8;
+}
+
+.stat-card.approved {
+  border-color: #cfead9;
+}
+
+.stat-card.rejected {
+  border-color: #f4d2d7;
 }
 
 .stat-content {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  gap: 14px;
 }
 
 .stat-label {
+  color: #64748b;
   font-size: 12px;
-  color: #6b7280;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
 }
 
 .stat-value {
-  font-size: 28px;
-  font-weight: 700;
+  color: #0f172a;
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .stat-icon {
-  font-size: 28px;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: #ffffff;
+  background: linear-gradient(145deg, #0f4d8a, #0a3a69);
+  box-shadow: 0 10px 18px rgba(11, 58, 105, 0.3);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
 
-.stat-card.approved .stat-value,
-.stat-card.approved .stat-icon { color: #10b981; }
-.stat-card.pending .stat-value,
-.stat-card.pending .stat-icon { color: #f59e0b; }
-.stat-card.rejected .stat-value,
-.stat-card.rejected .stat-icon { color: #ef4444; }
+.stat-card.approved .stat-icon {
+  background: linear-gradient(145deg, #1f8a4d, #16653a);
+  box-shadow: 0 10px 18px rgba(22, 101, 58, 0.3);
+}
+
+.stat-card.rejected .stat-icon {
+  background: linear-gradient(145deg, #d6455d, #a92f44);
+  box-shadow: 0 10px 18px rgba(169, 47, 68, 0.3);
+}
+
+.stat-card:hover .stat-icon {
+  transform: translateY(-2px) scale(1.04);
+}
+
+/* Admin-like inner tabs (used in Paid Customers sub-tabs) */
+.admin-subtab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.admin-subtab-btn {
+  border: 1px solid #d5dfeb !important;
+  background: #eef3f9 !important;
+  color: #1e293b !important;
+  border-radius: 999px !important;
+  padding: 8px 14px !important;
+  font-size: 13px !important;
+  font-weight: 700;
+  box-shadow: 0 3px 10px rgba(2, 16, 43, 0.06);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.admin-subtab-btn:hover {
+  transform: translateY(-1px);
+  background: #e2ebf7 !important;
+  box-shadow: 0 8px 16px rgba(2, 16, 43, 0.12);
+}
+
+.admin-subtab-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, rgba(255,255,255,0), rgba(255,255,255,0.28), rgba(255,255,255,0));
+  transform: translateX(-110%);
+  transition: transform 0.35s ease;
+}
+
+.admin-subtab-btn:hover::before {
+  transform: translateX(110%);
+}
+
+.admin-subtab-btn.active {
+  background: linear-gradient(120deg, #0f3b67, #1e6cb9) !important;
+  color: #ffffff !important;
+  border-color: #0f4d8a !important;
+  box-shadow: 0 10px 18px rgba(15, 59, 103, 0.24);
+}
+
+.subtab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  margin-left: 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #dce8f7;
+  color: #0f3b67;
+  border: 1px solid #c8d9ef;
+  transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.admin-subtab-btn:hover .subtab-badge {
+  transform: scale(1.05);
+}
+
+.admin-subtab-btn.active .subtab-badge {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+}
 
 /* ==================== RECENT SECTION ==================== */
 .recent-section {
@@ -1163,6 +1294,40 @@ select:focus {
   border-radius: var(--radius-sm);
 }
 
+.sop-modal-content {
+  max-width: 640px;
+}
+
+.help-fab {
+  position: fixed;
+  right: 18px;
+  bottom: 132px;
+  z-index: 10020;
+  border: none;
+  border-radius: 999px;
+  padding: 12px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #0f3b67, #1e6cb9);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 14px 28px rgba(15, 59, 103, 0.34);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.help-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 30px rgba(15, 59, 103, 0.4);
+  filter: brightness(1.06);
+}
+
+.help-fab i {
+  font-size: 15px;
+}
+
 /* ==================== BATCH MAPPING MODAL ==================== */
 #batchMappingModal .modal-content {
   max-width: 980px;
@@ -1533,11 +1698,11 @@ body.modal-open {
   }
 
   .overview-cards {
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .stat-card {
-    min-width: 100%;
+    width: 100%;
   }
 
   .recent-header {
@@ -1755,4 +1920,13 @@ body.modal-open {
     z-index: 10000000 !important;
     position: relative !important;
     display: block !important;
+}
+
+@media screen and (max-width: 768px) {
+  .help-fab {
+    right: 12px;
+    bottom: 118px;
+    padding: 10px 12px;
+    font-size: 12px;
+  }
 }

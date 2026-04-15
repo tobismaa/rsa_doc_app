@@ -11,9 +11,6 @@ import {
     getDocs
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
-// ==================== CORS PROXY CONFIG ====================
-const CORS_PROXY = 'https://cors-proxy.naniadezz.workers.dev?url=';
-
 // ==================== DOCUMENT TYPES MAPPING ====================
 const DOCUMENT_TYPES = {
     'birth_certificate': 'Birth Certificate',
@@ -90,39 +87,21 @@ const selectedCount = document.getElementById('selectedCount');
 // ==================== ZOOM LEVEL ====================
 let currentZoom = 1.0;
 
-// ==================== CORS HELPER FUNCTION ====================
+// ==================== DOCUMENT FETCH HELPER ====================
 async function fetchWithCorsFallback(url) {
     const cleanUrl = url?.toString().trim().replace(/[\s\n\r\t]+/g, '');
     if (!cleanUrl) throw new Error('Invalid URL');
 
-zoom    // Skip direct fetch attempt for Backblaze URLs to avoid CORS console errors
-    if (cleanUrl.includes('backblazeb2.com')) {
-        const proxyUrl = `${CORS_PROXY}${encodeURIComponent(cleanUrl)}`;
-        const response = await fetch(proxyUrl);
-        if (!response.ok) throw new Error(`Proxy fetch failed: ${response.status}`);
-        return response;
-    }
-
-    // Try direct fetch first
-    try {
-        const response = await fetch(cleanUrl, {
-            mode: 'cors',
-            credentials: 'omit',
-            headers: {
-                'Accept': 'application/pdf, image/*, */*'
-            }
-        });
-        if (response.ok) return response;
-    } catch (e) {
-        console.log('Direct fetch failed, trying proxy...');
-    }
-
-    // Use proxy
-    const proxyUrl = `${CORS_PROXY}${encodeURIComponent(cleanUrl)}`;
-    const response = await fetch(proxyUrl);
+    const response = await fetch(cleanUrl, {
+        mode: 'cors',
+        credentials: 'omit',
+        headers: {
+            'Accept': 'application/pdf, image/*, */*'
+        }
+    });
 
     if (!response.ok) {
-        throw new Error(`Proxy fetch failed: ${response.status}`);
+        throw new Error(`Document fetch failed: ${response.status}`);
     }
     return response;
 }

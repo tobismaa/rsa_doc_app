@@ -432,6 +432,47 @@ body {
   background: var(--white);
 }
 
+.form-group select {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px solid var(--gray-200);
+  border-radius: var(--radius-lg);
+  font-size: 14px;
+  transition: all var(--transition-normal);
+  background: var(--white);
+  color: var(--gray-800);
+  position: relative;
+  z-index: 1;
+}
+
+.form-group select:hover {
+  border-color: var(--cm-primary);
+  background: linear-gradient(135deg, var(--white), var(--gray-50));
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px -8px rgba(0, 51, 102, 0.2);
+}
+
+.form-group select:focus {
+  outline: none;
+  border-color: var(--cm-primary);
+  box-shadow: 0 0 0 3px rgba(0, 51, 102, 0.1), 0 6px 14px -8px rgba(0, 51, 102, 0.2);
+  transform: translateY(-1px);
+  background: var(--white);
+}
+
+.phone-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.phone-input-row #signupWhatsappCode {
+  flex: 0 0 145px;
+}
+
+.phone-input-row #signupWhatsappNumber {
+  flex: 1 1 auto;
+}
+
 /* Input Icons Animation */
 .form-group:focus-within label i {
   transform: scale(1.15) rotate(8deg);
@@ -831,9 +872,18 @@ body {
     font-size: 22px;
   }
   
-  .form-group input {
+  .form-group input,
+  .form-group select {
     padding: 10px 12px;
     font-size: 13px;
+  }
+
+  .phone-input-row {
+    gap: 6px;
+  }
+
+  .phone-input-row #signupWhatsappCode {
+    flex-basis: 125px;
   }
   
   .auth-submit-btn {

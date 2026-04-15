@@ -2,6 +2,7 @@ import { auth, db } from './firebase-config.js';
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
     collection,
+    addDoc,
     doc,
     query,
     where,
@@ -9,12 +10,10 @@ import {
     onSnapshot,
     getDocs,
     updateDoc,
+    runTransaction,
     serverTimestamp
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { queueUploaderFinalSubmissionEmail } from './email-alerts.js';
-
-// ==================== CORS PROXY CONFIG ====================
-const CORS_PROXY = 'https://cors-proxy.naniadezz.workers.dev?url=';
 
 // ==================== DOCUMENT TYPES MAPPING ====================
 const DOCUMENT_TYPES = {
@@ -38,6 +37,7 @@ const DOCUMENT_TYPES = {
 };
 
 let currentUser = null;
+let currentRsaProfileData = null;
 let currentTab = 'approved';
 let allSubmissions = [];
 const userFullNameCache = new Map();
@@ -58,8 +58,33 @@ const approvedCountBadge = document.getElementById('approvedCount');
 const userNameEl = document.getElementById('userName');
 const userRoleEl = document.getElementById('userRole');
 const finalSubmitBtn = document.getElementById('finalSubmitBtn');
+const profileNameEl = document.getElementById('profileName');
+const profileRegisteredAtEl = document.getElementById('profileRegisteredAt');
+const profileEmailEl = document.getElementById('profileEmail');
+const profileWhatsappEl = document.getElementById('profileWhatsapp');
+const profileLocationEl = document.getElementById('profileLocation');
+const profileRoleEl = document.getElementById('profileRole');
+const profileStatusEl = document.getElementById('profileStatus');
 
 let currentDetailsSubmissionId = null;
+
+function renderProfileTab() {
+    if (!profileNameEl && !profileEmailEl && !profileRoleEl && !profileStatusEl) return;
+    const fullName = currentRsaProfileData?.fullName || currentRsaProfileData?.displayName || currentUser?.displayName || currentUser?.email || 'N/A';
+    const registeredAt = currentRsaProfileData?.createdAt ? formatTimestamp(currentRsaProfileData.createdAt) : '-';
+    const email = currentRsaProfileData?.email || currentUser?.email || 'N/A';
+    const whatsapp = currentRsaProfileData?.whatsappNumber || currentRsaProfileData?.phone || '-';
+    const location = currentRsaProfileData?.location || '-';
+    const role = String(currentRsaProfileData?.role || 'rsa');
+    const status = String(currentRsaProfileData?.status || 'active');
+    if (profileNameEl) profileNameEl.textContent = fullName;
+    if (profileRegisteredAtEl) profileRegisteredAtEl.textContent = registeredAt;
+    if (profileEmailEl) profileEmailEl.textContent = email;
+    if (profileWhatsappEl) profileWhatsappEl.textContent = whatsapp;
+    if (profileLocationEl) profileLocationEl.textContent = location;
+    if (profileRoleEl) profileRoleEl.textContent = role.toUpperCase();
+    if (profileStatusEl) profileStatusEl.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+}
 
 // format time helper
 function formatTimestamp(ts) {
@@ -70,9 +95,160 @@ function formatTimestamp(ts) {
     } catch(e){return 'N/A';}
 }
 
+function normalizeWhatsAppPhone(raw) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.startsWith('0') && digits.length === 11) return `234${digits.slice(1)}`;
+    if (digits.length === 10) return `234${digits}`;
+    if (digits.startsWith('234')) return digits;
+    return digits;
+}
+
+function setWhatsAppContact(containerEl, rawPhone) {
+    if (!containerEl) return;
+    const display = String(rawPhone || '').trim();
+    const normalized = normalizeWhatsAppPhone(display);
+    if (!normalized) {
+        containerEl.textContent = '-';
+        return;
+    }
+    containerEl.innerHTML = `<a href="https://wa.me/${normalized}" target="_blank" rel="noopener noreferrer">${display}</a>`;
+}
+
 function getApprovedTimestamp(sub) {
     // Reviewer approval time is typically stored as reviewedAt/approvedAt.
     return sub?.reviewedAt || sub?.approvedAt || sub?.statusUpdatedAt || sub?.updatedAt || null;
+}
+
+function normalizeEmail(email) {
+    return String(email || '').trim().toLowerCase();
+}
+
+function routingRuleDocId(uploaderEmail) {
+    return encodeURIComponent(normalizeEmail(uploaderEmail));
+}
+
+async function getUploaderRoutingRule(uploaderEmail) {
+    const normalizedUploader = normalizeEmail(uploaderEmail);
+    if (!normalizedUploader) return null;
+    try {
+        const snap = await getDoc(doc(db, 'uploaderRoutingRules', routingRuleDocId(normalizedUploader)));
+        if (!snap.exists()) return null;
+        const data = snap.data() || {};
+        if (data.enabled === false) return null;
+        return {
+            uploaderEmail: normalizedUploader,
+            reviewerEmail: normalizeEmail(data.reviewerEmail),
+            rsaEmail: normalizeEmail(data.rsaEmail),
+            paymentEmail: normalizeEmail(data.paymentEmail)
+        };
+    } catch (_) {
+        return null;
+    }
+}
+
+async function isActivePaymentUser(email) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return false;
+    try {
+        const userQuery = query(collection(db, 'users'), where('email', '==', normalized));
+        const snap = await getDocs(userQuery);
+        if (snap.empty) return false;
+        const data = snap.docs[0].data() || {};
+        const role = String(data.role || '').toLowerCase();
+        const status = String(data.status || 'active').toLowerCase();
+        return role === 'payment' && status !== 'deactivated';
+    } catch (_) {
+        return false;
+    }
+}
+
+async function getActivePaymentUsers() {
+    const paymentQuery = query(collection(db, 'users'), where('role', '==', 'payment'));
+    const snap = await getDocs(paymentQuery);
+    return snap.docs
+        .map((d) => d.data() || {})
+        .map((u) => normalizeEmail(u.email))
+        .filter(Boolean)
+        .filter((email, idx, arr) => arr.indexOf(email) === idx)
+        .sort();
+}
+
+async function assignPaymentRoundRobin(submissionId) {
+    const submissionRef = doc(db, 'submissions', submissionId);
+    let uploaderEmail = '';
+    try {
+        const subSnap = await getDoc(submissionRef);
+        if (subSnap.exists()) uploaderEmail = normalizeEmail(subSnap.data()?.uploadedBy);
+    } catch (_) { }
+
+    const routingRule = await getUploaderRoutingRule(uploaderEmail);
+    const mappedPayment = routingRule?.paymentEmail || '';
+    if (mappedPayment && await isActivePaymentUser(mappedPayment)) {
+        await updateDoc(submissionRef, {
+            assignedToPayment: mappedPayment,
+            paymentAssignedAt: serverTimestamp(),
+            paymentAssignmentMethod: 'uploader_routing'
+        });
+        return mappedPayment;
+    }
+
+    const paymentUsers = await getActivePaymentUsers();
+
+    if (!paymentUsers.length) {
+        await updateDoc(submissionRef, {
+            assignedToPayment: '',
+            paymentAssignedAt: serverTimestamp(),
+            paymentAssignmentMethod: 'unassigned'
+        });
+        return '';
+    }
+
+    const counterRef = doc(db, 'counters', 'roundRobinPayment');
+    let assignedPayment = '';
+    const today = new Date().toISOString().slice(0, 10);
+
+    try {
+        await runTransaction(db, async (tx) => {
+            const counterSnap = await tx.get(counterRef);
+            let lastIndex = -1;
+            let lastDate = '';
+
+            if (counterSnap.exists()) {
+                const data = counterSnap.data() || {};
+                lastIndex = typeof data.lastIndex === 'number' ? data.lastIndex : -1;
+                lastDate = data.lastDate || '';
+            }
+
+            if (lastDate !== today) lastIndex = -1;
+            const nextIndex = (lastIndex + 1) % paymentUsers.length;
+            assignedPayment = paymentUsers[nextIndex];
+
+            tx.set(counterRef, {
+                lastIndex: nextIndex,
+                lastDate: today,
+                lastAssignedTo: assignedPayment,
+                updatedAt: serverTimestamp()
+            }, { merge: true });
+
+            tx.update(submissionRef, {
+                assignedToPayment: assignedPayment,
+                paymentAssignedAt: serverTimestamp(),
+                paymentAssignmentMethod: 'round_robin'
+            });
+        });
+    } catch (_) {
+        assignedPayment = paymentUsers[0] || '';
+        if (assignedPayment) {
+            await updateDoc(submissionRef, {
+                assignedToPayment: assignedPayment,
+                paymentAssignedAt: serverTimestamp(),
+                paymentAssignmentMethod: 'round_robin_fallback'
+            });
+        }
+    }
+
+    return assignedPayment;
 }
 
 async function getUserFullName(email) {
@@ -109,6 +285,7 @@ async function loadCurrentRsaProfile(user) {
         const userSnapshot = await getDocs(userQuery);
         if (!userSnapshot.empty) {
             profileData = userSnapshot.docs[0].data();
+            currentRsaProfileData = profileData;
         }
     } catch (error) {
         console.error('Failed to fetch RSA user profile:', error);
@@ -117,6 +294,10 @@ async function loadCurrentRsaProfile(user) {
     const displayName = profileData?.fullName || profileData?.displayName || user.displayName || email.split('@')[0] || 'RSA User';
     if (userNameEl) userNameEl.textContent = displayName;
     if (userRoleEl) userRoleEl.textContent = 'RSA';
+    if (!currentRsaProfileData) {
+        currentRsaProfileData = { email, fullName: displayName, role: 'rsa', status: 'active' };
+    }
+    renderProfileTab();
 
     const role = String(profileData?.role || '').toLowerCase();
     if (role && role !== 'rsa') {
@@ -132,21 +313,8 @@ async function fetchWithCorsFallback(url) {
     const cleanUrl = url?.toString().trim().replace(/[\s\n\r\t]+/g, '');
     if (!cleanUrl) throw new Error('Invalid URL');
 
-    // Skip direct fetch attempt for Backblaze URLs to avoid CORS console errors
-    if (cleanUrl.includes('backblazeb2.com')) {
-        const proxyUrl = `${CORS_PROXY}${encodeURIComponent(cleanUrl)}`;
-        const response = await fetch(proxyUrl);
-        if (!response.ok) throw new Error(`Proxy fetch failed: ${response.status}`);
-        return response;
-    }
-
-    try {
-        const response = await fetch(cleanUrl, { mode: 'cors', credentials: 'omit' });
-        if (response.ok) return response;
-    } catch (e) { /* continue to proxy */ }
-    const proxyUrl = `${CORS_PROXY}${encodeURIComponent(cleanUrl)}`;
-    const response = await fetch(proxyUrl);
-    if (!response.ok) throw new Error(`Proxy fetch failed: ${response.status}`);
+    const response = await fetch(cleanUrl, { mode: 'cors', credentials: 'omit' });
+    if (!response.ok) throw new Error(`Document fetch failed: ${response.status}`);
     return response;
 }
 
@@ -768,7 +936,7 @@ function loadQueue() {
 
 function updateApprovedCount() {
     // Exclude both old and new finally submitted records from approved count
-    const cnt = allSubmissions.filter(s => s.status === 'approved' && !s.finalSubmitted && !s.rsaSubmitted).length;
+    const cnt = allSubmissions.filter(s => (String(s.status || '').toLowerCase() === 'processing_to_pfa' || String(s.status || '').toLowerCase() === 'approved') && !s.finalSubmitted && !s.rsaSubmitted).length;
     if (approvedCountBadge) {
         approvedCountBadge.textContent = cnt;
         approvedCountBadge.style.display = cnt > 0 ? 'inline' : 'none';
@@ -786,8 +954,10 @@ function switchTab(tabId) {
     console.log('Target tab element:', targetTab);
     targetTab?.classList.add('active');
     const titles = {
-        approved: 'Approved Applications',
-        'finally-submitted': 'Finally Submitted Applications'
+        approved: 'Processing to PFA',
+        'finally-submitted': 'Finally Submitted Applications',
+        profile: 'My Profile',
+        help: 'Help & SOP'
     };
     if (pageTitle) pageTitle.textContent = titles[tabId] || 'RSA Queue';
     renderCurrentTab();
@@ -814,7 +984,10 @@ function renderCurrentTab() {
             });
         }
         // Exclude both old and new finally submitted records
-        list = list.filter(s => s.status === 'approved' && !s.finalSubmitted && !s.rsaSubmitted);
+        list = list.filter(s => {
+            const status = String(s.status || '').toLowerCase();
+            return (status === 'processing_to_pfa' || status === 'approved') && !s.finalSubmitted && !s.rsaSubmitted;
+        });
         renderRsaRows(list);
     } else if (currentTab === 'finally-submitted') {
         renderFinallySubmittedTab();
@@ -875,11 +1048,12 @@ function renderFinallySubmittedTab() {
             <td>${uploadedAt}</td>
             <td>${approvedAt}</td>
             <td>${submittedAt}</td>
-            <td><span class="status-badge status-approved">Submitted</span></td>
+            <td><span class="status-badge status-approved">Sent to PFA</span></td>
             <td>
                 <button class="action-btn" onclick="window.openCustomerDetails('${sub.id}')"><i class="fas fa-eye"></i> Details</button>
                 <button class="action-btn" onclick="window.downloadAllRsa('${sub.id}')"><i class="fas fa-download"></i> Download All</button>
                 <button class="action-btn merge-btn" onclick="window.openMergeModal('${sub.id}')"><i class="fas fa-compress-alt"></i> Merge</button>
+                <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>
             </td>
         </tr>`;
     });
@@ -914,11 +1088,15 @@ function renderRsaRows(submissions) {
         const reviewer = sub.reviewedByName || sub.reviewedBy || '-';
         const uploader = sub.uploadedByName || sub.uploadedBy || '-';
         const approvedAt = formatTimestamp(getApprovedTimestamp(sub));
-        const status = sub.status || '';
+        const status = String(sub.status || '');
+        const statusLabel = (status.toLowerCase() === 'processing_to_pfa' || status.toLowerCase() === 'approved')
+            ? 'Processing to PFA'
+            : (status.charAt(0).toUpperCase() + status.slice(1));
         const actions = `
             <button class="action-btn" onclick="window.openCustomerDetails('${sub.id}')"><i class="fas fa-eye"></i> Details</button>
             <button class="action-btn" onclick="window.downloadAllRsa('${sub.id}')"><i class="fas fa-download"></i> Download All</button>
             <button class="action-btn merge-btn" onclick="window.openMergeModal('${sub.id}')"><i class="fas fa-compress-alt"></i> Merge</button>
+            <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>
             <button class="action-btn" style="background:#10b981;color:#fff;border:none;" onclick="window.finalSubmitRsa('${sub.id}')"><i class="fas fa-paper-plane"></i> Final Submit</button>
         `;
         return `<tr>
@@ -927,7 +1105,7 @@ function renderRsaRows(submissions) {
             <td>${reviewer}</td>
             <td>${formatTimestamp(sub.uploadedAt)}</td>
             <td>${approvedAt}</td>
-            <td>${status.charAt(0).toUpperCase()+status.slice(1)}</td>
+            <td>${statusLabel}</td>
             <td>${docs}</td>
             <td>${actions}</td>
         </tr>`;
@@ -938,8 +1116,9 @@ window.finalSubmitRsa = async (submissionId) => {
     const sub = allSubmissions.find(s => s.id === submissionId);
     if (!sub) return;
 
-    if ((sub.status || '').toLowerCase() !== 'approved') {
-        showNotification('Only approved applications can be finally submitted.', 'warning');
+    const currentStatus = String(sub.status || '').toLowerCase();
+    if (!(currentStatus === 'processing_to_pfa' || currentStatus === 'approved')) {
+        showNotification('Only applications in Processing to PFA can be finally submitted.', 'warning');
         return;
     }
 
@@ -950,12 +1129,27 @@ window.finalSubmitRsa = async (submissionId) => {
     try {
         showLoader('Submitting final application...');
         await updateDoc(doc(db, 'submissions', submissionId), {
-            status: 'rsa_submitted',
+            status: 'sent_to_pfa',
             rsaReady: true,
+            rsaSubmitted: true,
+            rsaSubmittedAt: serverTimestamp(),
+            rsaSubmittedBy: currentUser?.email || '',
             finalSubmitted: true,
             finalSubmittedAt: serverTimestamp(),
             finalSubmittedBy: currentUser?.email || ''
         });
+        const assignedPayment = await assignPaymentRoundRobin(submissionId);
+        if (assignedPayment) {
+            try {
+                await addDoc(collection(db, 'roundRobinAssignmentsPayment'), {
+                    submissionId,
+                    customerName: sub.customerName || '',
+                    assignedToPayment: assignedPayment,
+                    assignedBy: currentUser?.email || '',
+                    assignedAt: serverTimestamp()
+                });
+            } catch (_) {}
+        }
 
         if (sub.uploadedBy) {
             queueUploaderFinalSubmissionEmail({
@@ -973,10 +1167,14 @@ window.finalSubmitRsa = async (submissionId) => {
         if (subIndex >= 0) {
             allSubmissions[subIndex] = {
                 ...allSubmissions[subIndex],
-                status: 'rsa_submitted',
+                status: 'sent_to_pfa',
+                rsaSubmitted: true,
+                rsaSubmittedAt: new Date(),
+                rsaSubmittedBy: currentUser?.email || '',
                 finalSubmitted: true,
                 finalSubmittedAt: new Date(),
-                finalSubmittedBy: currentUser?.email || ''
+                finalSubmittedBy: currentUser?.email || '',
+                assignedToPayment: assignedPayment || ''
             };
         }
 
@@ -985,7 +1183,7 @@ window.finalSubmitRsa = async (submissionId) => {
         renderCurrentTab();
         closeCustomerDetailsModal();
 
-        showNotification('Final submission recorded.', 'success');
+        showNotification(`Final submission recorded. Status set to Sent to PFA${assignedPayment ? ` and assigned to ${assignedPayment}` : ''}.`, 'success');
     } catch (error) {
         console.error('Final submission error:', error);
         showNotification('Final submission failed: ' + (error?.message || 'Unknown error'), 'error');
@@ -1109,7 +1307,7 @@ window.openCustomerDetails = (submissionId) => {
     doc.getElementById('detailPFA').textContent = details.pfa || '-';
     doc.getElementById('detailAccountNo').textContent = details.accountNo || '-';
     doc.getElementById('detailEmail').textContent = details.email || '-';
-    doc.getElementById('detailPhone').textContent = details.phone || '-';
+    setWhatsAppContact(doc.getElementById('detailPhone'), details.phone || '');
     doc.getElementById('detailAddress').textContent = details.address || '-';
     doc.getElementById('detailEmployer').textContent = details.employer || '-';
     doc.getElementById('detailOriginatingTP').textContent = details.originatingTP || '-';

@@ -156,6 +156,12 @@ function setupTabSwitching() {
             e.preventDefault();
             const tabId = item.dataset.tab;
 
+            // Use the full uploader tab system when available.
+            if (typeof window.switchTab === 'function') {
+                window.switchTab(tabId);
+                return;
+            }
+
             document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
             item.classList.add('active');
 
@@ -167,9 +173,13 @@ function setupTabSwitching() {
                 pending: 'Pending Review',
                 overview: 'Dashboard',
                 approved: 'Approved Documents',
-                rejected: 'Rejected Submissions'
+                rejected: 'Rejected Submissions',
+                paid: 'Paid Customers',
+                'register-agent': 'Register Agent',
+                profile: 'My Profile',
+                help: 'Help & SOP'
             };
-            if (pageTitle) pageTitle.textContent = titles[tabId];
+            if (pageTitle) pageTitle.textContent = titles[tabId] || 'Dashboard';
         });
     });
 }
@@ -236,7 +246,8 @@ function setupLoanCalculator() {
 
     if (closeLoanCalcBtn) {
         closeLoanCalcBtn.addEventListener('click', function() {
-            loanCalcModal.classList.remove('active');
+            const calcResults = document.getElementById('calcResults');
+            if (calcResults) calcResults.style.display = 'none';
         });
     }
 
@@ -283,8 +294,9 @@ function calculateLoan() {
         return;
     }
     const twentyFivePercent = balance * 0.25;
-    // Round up to nearest hundred.
-    const loanAmount = Math.ceil((rule.value - twentyFivePercent) / 100) * 100;
+    // Round down to nearest thousand.
+    const rawLoanAmount = rule.value - twentyFivePercent;
+    const loanAmount = Math.max(0, Math.floor(rawLoanAmount / 1000) * 1000);
     document.getElementById('calc25Percent').textContent = formatCurrency(twentyFivePercent);
     document.getElementById('calcFacilityFee').textContent = formatCurrency(rule.fee);
     document.getElementById('calcPropertyType').textContent = rule.name;
@@ -350,7 +362,6 @@ async function displayTrackResults(results) {
         resultItem.onmouseover = () => { resultItem.style.backgroundColor = '#f8fafc'; };
         resultItem.onmouseout = () => { resultItem.style.backgroundColor = 'white'; };
         resultItem.onclick = () => {
-            globalTrackModal.classList.remove('active');
             // Use the existing showApplicationTrack from document-uploader.js
             if (typeof window.showApplicationTrack === 'function') {
                 window.showApplicationTrack(sub.id);
@@ -470,7 +481,10 @@ function safeFormatDate(dateValue) {
 
 function updateDashboardCards() {
     const pending = allSubmissions.filter(s => s.status === 'pending').length;
-    const approved = allSubmissions.filter(s => s.status === 'approved').length;
+    const approved = allSubmissions.filter(s => {
+        const st = String(s.status || '').toLowerCase();
+        return st === 'processing_to_pfa' || st === 'approved';
+    }).length;
     const rejected = allSubmissions.filter(s => s.status === 'rejected').length;
     document.getElementById('cardPendingCount') && (document.getElementById('cardPendingCount').textContent = pending);
     document.getElementById('cardApprovedCount') && (document.getElementById('cardApprovedCount').textContent = approved);
@@ -556,6 +570,30 @@ window.showApplicationTrack = async function(submissionId) {
         return;
     }
 
+    const peopleWorked = [];
+    const seenPeople = new Set();
+    const addPerson = async (label, emailLike) => {
+        const raw = String(emailLike || '').trim();
+        if (!raw) return;
+        const key = `${label}|${raw.toLowerCase()}`;
+        if (seenPeople.has(key)) return;
+        seenPeople.add(key);
+        let displayName = raw;
+        try {
+            displayName = await getUserFullName(raw);
+        } catch (_) { /* keep raw */ }
+        peopleWorked.push({ label, displayName, raw });
+    };
+
+    await addPerson('Uploaded By', sub.uploadedBy);
+    await addPerson('Reviewer Assigned', sub.assignedTo);
+    await addPerson('Reviewed By', sub.reviewedBy);
+    await addPerson('RSA Assigned', sub.assignedToRSA);
+    await addPerson('RSA Submitted By', sub.rsaSubmittedBy);
+    await addPerson('Payment Assigned', sub.assignedToPayment);
+    await addPerson('Paid By', sub.paidBy);
+    await addPerson('Cleared By', sub.clearedBy);
+
     // Create a simple tracking modal with HIGH z-index
     const modal = document.createElement('div');
     modal.className = 'modal active';
@@ -608,10 +646,15 @@ window.showApplicationTrack = async function(submissionId) {
                             <span style="color: #64748b;">Uploaded:</span>
                             <span>${safeFormatDate(sub.uploadedAt)}</span>
                         </div>
-                        ${sub.assignedTo ? `
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                                <span style="color: #64748b;">Assigned To:</span>
-                                <span>${sub.assignedTo}</span>
+                        ${peopleWorked.length ? `
+                            <div style="margin: 12px 0;">
+                                <div style="color: #64748b; margin-bottom: 8px;">People Worked On:</div>
+                                ${peopleWorked.map(p => `
+                                    <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+                                        <span style="color:#64748b;">${p.label}:</span>
+                                        <span>${p.displayName}${p.displayName !== p.raw ? ` (${p.raw})` : ''}</span>
+                                    </div>
+                                `).join('')}
                             </div>
                         ` : ''}
                         ${sub.reviewedAt ? `
@@ -646,8 +689,12 @@ window.showApplicationTrack = async function(submissionId) {
 // Simple stage determination function
 function getApplicationStageSimple(submission) {
     if (!submission) return 'Unknown';
-    if (submission.status === 'approved') return 'Approved - With RSA';
-    if (submission.status === 'rejected') return 'Rejected - Fix Required';
+    const status = String(submission.status || '').toLowerCase();
+    if (status === 'cleared') return 'Cleared';
+    if (status === 'paid') return 'Paid';
+    if (status === 'sent_to_pfa' || status === 'rsa_submitted') return 'Sent to PFA';
+    if (status === 'processing_to_pfa' || status === 'approved') return 'Processing to PFA';
+    if (status === 'rejected') return 'Rejected - Fix Required';
     if (submission.assignedTo) return `With Reviewer: ${submission.assignedTo}`;
     return 'Pending Assignment';
 }

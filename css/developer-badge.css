@@ -1,0 +1,128 @@
+.dev-credit-badge {
+  position: fixed;
+  right: 16px;
+  bottom: 14px;
+  z-index: 920;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #0a0a0a, #161616);
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+  color: #f3d47a;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  text-decoration: none;
+  max-width: min(92vw, 320px);
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.dev-credit-sidebar {
+  width: 100%;
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #0a0a0a, #161616);
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  color: #f3d47a;
+  text-decoration: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.dev-credit-sidebar:hover {
+  transform: translateY(-2px);
+  border-color: rgba(212, 175, 55, 0.65);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.dev-credit-badge:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 35px rgba(0, 0, 0, 0.32);
+  border-color: rgba(212, 175, 55, 0.7);
+}
+
+.dev-credit-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: #000;
+  border: 1px solid rgba(212, 175, 55, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.dev-credit-mark span {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  line-height: 1;
+  color: #d4af37;
+}
+
+.dev-credit-text {
+  min-width: 0;
+}
+
+.dev-credit-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: #f3d47a;
+  white-space: nowrap;
+}
+
+.dev-credit-copy {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #f7e7b3;
+  white-space: nowrap;
+}
+
+.dev-credit-meta {
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #f9e9b2;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dev-credit-meta i {
+  font-size: 11px;
+}
+
+@media (max-width: 768px) {
+  .dev-credit-badge {
+    right: 10px;
+    bottom: 10px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    max-width: min(94vw, 280px);
+  }
+
+  .dev-credit-mark {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+
+  .dev-credit-mark span {
+    font-size: 16px;
+  }
+
+  .dev-credit-title {
+    font-size: 11px;
+  }
+
+  .dev-credit-meta {
+    font-size: 10px;
+  }
+}
