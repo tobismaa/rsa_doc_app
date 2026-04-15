@@ -12,6 +12,7 @@ import {
     orderBy,
     serverTimestamp
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+import { notifyStatusChangePush } from './status-push.js';
 
 let currentUser = null;
 let currentUserData = null;
@@ -243,6 +244,13 @@ window.markSubmissionPaid = async (submissionId) => {
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         });
+        notifyStatusChangePush({
+            currentUser,
+            submissionId,
+            customerName: sub.customerName || '',
+            newStatus: 'paid',
+            statusLabel: 'Paid'
+        }).catch(() => {});
         showNotification('Marked as paid successfully', 'success');
     } catch (error) {
         showNotification('Failed to mark as paid', 'error');

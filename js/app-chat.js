@@ -41,6 +41,7 @@ const FCM_VAPID_KEY = String(window.__FCM_VAPID_KEY__ || FCM_WEB_VAPID_KEY || ''
 let pendingChatFromUrl = '';
 let pushTokenState = { status: 'idle', detail: 'Push: Not checked' };
 let pushForegroundBound = false;
+let currentChatMeta = null;
 
 function esc(text) {
   const div = document.createElement('div');
@@ -151,6 +152,40 @@ function canCurrentUserSend(submission) {
   return { ok: false, reason: 'Chat is read-only for this stage.' };
 }
 
+function canCurrentUserEscalate(submission, chatMeta) {
+  if (!currentUser || !submission) return { ok: false, reason: 'User session unavailable.' };
+  const role = normalizeRole(currentProfile?.role || '');
+  const email = String(currentUser.email || '').toLowerCase();
+
+  if (role === 'admin' || role === 'super_admin') {
+    return { ok: false, reason: 'Escalation is available to non-admin parties only.' };
+  }
+
+  const isUploader = String(submission.uploadedBy || '').toLowerCase() === email;
+  const isReviewerParty = String(submission.assignedTo || '').toLowerCase() === email
+    || String(submission.reviewedBy || '').toLowerCase() === email;
+  if (!(isUploader || isReviewerParty)) {
+    return { ok: false, reason: 'Only uploader or assigned reviewer can escalate.' };
+  }
+
+  if (chatMeta?.escalated === true || chatMeta?.escalatedAt) {
+    return { ok: false, reason: 'Escalation already used for this application.' };
+  }
+
+  const uploadedMs = tsToMillis(submission.uploadedAt);
+  if (!uploadedMs) {
+    return { ok: false, reason: 'Escalation unavailable: upload time missing.' };
+  }
+  const minMs = 48 * 60 * 60 * 1000;
+  const elapsed = Date.now() - uploadedMs;
+  if (elapsed < minMs) {
+    const remainingHours = Math.ceil((minMs - elapsed) / (60 * 60 * 1000));
+    return { ok: false, reason: `Escalation available after 48 hours (${remainingHours}h remaining).` };
+  }
+
+  return { ok: true, reason: '' };
+}
+
 function getRoleDisplay() {
   const role = normalizeRole(currentProfile?.role || '');
   if (!role) return 'User';
@@ -235,6 +270,7 @@ function closeChat() {
   }
   currentSubmission = null;
   currentChatId = '';
+  currentChatMeta = null;
 }
 
 function showModal() {
@@ -327,12 +363,18 @@ function updatePushTokenStatusUI() {
 function setReadOnlyState(submission) {
   const input = document.getElementById('appChatInput');
   const sendBtn = document.getElementById('appChatSendBtn');
+  const escBtn = document.getElementById('appChatEscalateBtn');
   const notice = document.getElementById('appChatSendNotice');
   const stageNotice = document.getElementById('appChatStageNotice');
   const { ok, reason } = canCurrentUserSend(submission);
+  const escState = canCurrentUserEscalate(submission, currentChatMeta);
 
   if (input) input.disabled = !ok;
   if (sendBtn) sendBtn.disabled = !ok;
+  if (escBtn) {
+    escBtn.disabled = !escState.ok;
+    escBtn.title = escState.ok ? 'Escalate to Admin' : escState.reason;
+  }
   if (notice) notice.textContent = ok ? '' : reason;
   if (stageNotice) stageNotice.textContent = `Status: ${String(submission?.status || '-')} | Role: ${getRoleDisplay()}`;
 }
@@ -495,7 +537,9 @@ async function loadAndWatchMessages(submissionId, submission) {
       createdAt: serverTimestamp(),
       escalated: false
     }, { merge: true });
+    currentChatMeta = { escalated: false };
   } else {
+    currentChatMeta = chatSnap.data() || {};
     await setDoc(chatRef, {
       submissionId,
       customerName: submission.customerName || '',
@@ -566,6 +610,11 @@ async function escalateToAdmin() {
   if (!currentSubmission || !currentChatId || !currentUser) return;
   const role = normalizeRole(currentProfile?.role || '');
   if (role === 'admin' || role === 'super_admin') return;
+  const escState = canCurrentUserEscalate(currentSubmission, currentChatMeta);
+  if (!escState.ok) {
+    showChatNotice(escState.reason, true);
+    return;
+  }
 
   const usersRef = collection(db, 'users');
   const adminSnap = await getDocs(query(usersRef, where('role', '==', 'admin')));
@@ -585,6 +634,12 @@ async function escalateToAdmin() {
         ...unique
       ]))
     }, { merge: true });
+    currentChatMeta = {
+      ...(currentChatMeta || {}),
+      escalated: true,
+      escalatedBy: currentUser.email || '',
+      escalatedAt: new Date()
+    };
 
     await addDoc(collection(db, 'applicationChats', currentChatId, 'messages'), {
       text: `Escalated to admin by ${currentProfile?.fullName || currentUser.email || 'User'}`,
@@ -595,6 +650,7 @@ async function escalateToAdmin() {
       createdAt: serverTimestamp()
     });
     showChatNotice('Escalated to admin successfully.');
+    setReadOnlyState(currentSubmission);
   } catch (error) {
     showChatNotice(`Escalation failed: ${error?.message || 'Unknown error'}`, true);
   }

@@ -2,6 +2,7 @@
 import { auth, db } from './firebase-config.js';
 import { BackblazeStorage } from './backblaze-storage.js';
 import { queueViewerAssignmentEmail } from './email-alerts.js';
+import { notifyStatusChangePush } from './status-push.js';
 import {
   collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, doc,
   serverTimestamp, arrayUnion, getDocs, getDoc, setDoc, runTransaction
@@ -2349,6 +2350,13 @@ async function submitEdit() {
         reviewedAt: null,
         comment: ''
       });
+      notifyStatusChangePush({
+        currentUser,
+        submissionId: currentEditId,
+        customerName: existingSub.customerName || '',
+        newStatus: 'pending',
+        statusLabel: 'Pending Review'
+      }).catch(() => {});
     }
     showNotification('✅ Documents re-uploaded and sent back for reviewer action.', 'success');
     closeModal(editModal);

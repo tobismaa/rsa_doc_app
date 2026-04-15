@@ -1,6 +1,7 @@
 ﻿// js/admin.js - COMPLETE UPDATED VERSION WITH FIXED DOWNLOAD ALL
 import { auth, db } from './firebase-config.js';
 import { ADMIN_API_BASE_URL } from './admin-api-config.js';
+import { notifyStatusChangePush } from './status-push.js';
 import {
     collection,
     addDoc,
@@ -2246,6 +2247,13 @@ window.markSubmissionPaid = async (submissionId) => {
             performedBy: currentAdmin?.email || '',
             timestamp: serverTimestamp()
         });
+        notifyStatusChangePush({
+            currentUser: auth.currentUser,
+            submissionId,
+            customerName: sub.customerName || '',
+            newStatus: 'paid',
+            statusLabel: 'Paid'
+        }).catch(() => {});
 
         showNotification('Marked as paid successfully', 'success');
     } catch (error) {

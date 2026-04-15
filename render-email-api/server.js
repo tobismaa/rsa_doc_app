@@ -51,6 +51,27 @@ function safeLowerEmail(value) {
     return normalizeEmail(value);
 }
 
+async function resolveUserMapByEmail(emails) {
+    const out = new Map();
+    for (const email of emails) {
+        const normalized = safeLowerEmail(email);
+        if (!normalized) continue;
+        const snap = await adminDb.collection('users').where('email', '==', normalized).limit(1).get();
+        if (!snap.empty) out.set(normalized, { id: snap.docs[0].id, ...(snap.docs[0].data() || {}) });
+    }
+    if (out.size < emails.length) {
+        const targets = new Set(emails.map((e) => safeLowerEmail(e)).filter(Boolean));
+        const allSnap = await adminDb.collection('users').get();
+        allSnap.docs.forEach((docSnap) => {
+            const data = docSnap.data() || {};
+            const normalized = safeLowerEmail(data.email);
+            if (!normalized || !targets.has(normalized)) return;
+            if (!out.has(normalized)) out.set(normalized, { id: docSnap.id, ...data });
+        });
+    }
+    return out;
+}
+
 function corsOptionsDelegate(req, callback) {
     if (allowedOrigins.length === 0) {
         callback(null, { origin: true });
@@ -444,6 +465,114 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
         return res.status(500).json({
             ok: false,
             error: String(err?.message || 'Failed to send chat push')
+        });
+    }
+});
+
+app.post('/api/submission/status-push', authMiddleware, async (req, res) => {
+    try {
+        const submissionId = String(req.body?.submissionId || '').trim();
+        const customerName = String(req.body?.customerName || '').trim();
+        const newStatus = String(req.body?.newStatus || '').trim().toLowerCase();
+        const statusLabel = String(req.body?.statusLabel || '').trim();
+        if (!submissionId || !newStatus) {
+            return res.status(400).json({ ok: false, error: 'submissionId and newStatus are required' });
+        }
+
+        const senderEmail = safeLowerEmail(req.user?.email);
+        if (!senderEmail) {
+            return res.status(401).json({ ok: false, error: 'Authenticated email is required' });
+        }
+
+        const subSnap = await adminDb.collection('submissions').doc(submissionId).get();
+        if (!subSnap.exists) {
+            return res.status(404).json({ ok: false, error: 'Submission not found' });
+        }
+        const sub = subSnap.data() || {};
+
+        const participantEmails = Array.from(new Set([
+            safeLowerEmail(sub.uploadedBy),
+            safeLowerEmail(sub.assignedTo),
+            safeLowerEmail(sub.assignedToRSA),
+            safeLowerEmail(sub.assignedToPayment)
+        ].filter(Boolean)));
+
+        const senderCanAccess = participantEmails.includes(senderEmail);
+        if (!senderCanAccess) {
+            const senderUserSnap = await adminDb.collection('users').where('email', '==', senderEmail).limit(1).get();
+            const senderRole = !senderUserSnap.empty ? normalizeRole(senderUserSnap.docs[0].data()?.role) : '';
+            if (!['admin'].includes(senderRole)) {
+                return res.status(403).json({ ok: false, error: 'Not permitted for this submission' });
+            }
+        }
+
+        let recipientEmails = participantEmails.filter((e) => e !== senderEmail);
+        if (recipientEmails.length === 0) {
+            return res.json({ ok: true, sent: 0, reason: 'no-recipients' });
+        }
+
+        const usersByEmail = await resolveUserMapByEmail(recipientEmails);
+        recipientEmails = recipientEmails.filter((email) => {
+            const u = usersByEmail.get(email);
+            const role = normalizeRole(u?.role);
+            const status = String(u?.status || '').toLowerCase();
+            return role !== 'super_admin' && status !== 'pending' && status !== 'deactivated';
+        });
+        if (recipientEmails.length === 0) {
+            return res.json({ ok: true, sent: 0, reason: 'no-recipients-after-role-filter' });
+        }
+
+        const tokenOwners = [];
+        for (const email of recipientEmails) {
+            const userData = usersByEmail.get(email);
+            const tokens = Array.isArray(userData?.fcmTokens) ? userData.fcmTokens : [];
+            for (const token of tokens) {
+                const t = String(token || '').trim();
+                if (t) tokenOwners.push({ email, userId: userData?.id || '', token: t });
+            }
+        }
+        const uniqueMap = new Map();
+        tokenOwners.forEach((entry) => { if (!uniqueMap.has(entry.token)) uniqueMap.set(entry.token, entry); });
+        const uniqueOwners = Array.from(uniqueMap.values());
+        const tokens = uniqueOwners.map((x) => x.token);
+        if (tokens.length === 0) {
+            return res.json({ ok: true, sent: 0, reason: 'no-device-tokens' });
+        }
+
+        const readable = statusLabel || newStatus.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
+        const title = `Status Updated - ${customerName || 'Application'}`;
+        const body = `Application status changed to ${readable}.`;
+        const clickUrl = `/dashboard.html?chat=${encodeURIComponent(submissionId)}`;
+
+        const response = await admin.messaging().sendEachForMulticast({
+            tokens,
+            notification: { title, body },
+            data: {
+                submissionId,
+                clickUrl,
+                newStatus
+            },
+            webpush: {
+                fcmOptions: { link: clickUrl },
+                notification: {
+                    title,
+                    body,
+                    icon: '/favicon.svg',
+                    badge: '/favicon.svg',
+                    data: { url: clickUrl }
+                }
+            }
+        });
+
+        return res.json({
+            ok: true,
+            sent: response.successCount,
+            failed: response.failureCount
+        });
+    } catch (err) {
+        return res.status(500).json({
+            ok: false,
+            error: String(err?.message || 'Failed to send status push')
         });
     }
 });

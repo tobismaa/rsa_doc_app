@@ -1,6 +1,7 @@
 // js/reviewer-dashboard.js - FIXED VERSION WITH DIRECT SAVE ONLY
 import { auth, db } from './firebase-config.js';
 import { queueUploaderApprovedEmail, queueUploaderRejectedEmail, queueRsaApprovalEmail } from './email-alerts.js';
+import { notifyStatusChangePush } from './status-push.js';
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
     collection,
@@ -1293,6 +1294,13 @@ async function reviewDocument(action) {
                     console.warn('uploader approval email queue failed:', emailError);
                 });
             }
+            notifyStatusChangePush({
+                currentUser,
+                submissionId: currentSubmissionId,
+                customerName,
+                newStatus: 'processing_to_pfa',
+                statusLabel: 'Processing to PFA'
+            }).catch(() => {});
             
             showNotification(`Document moved to Processing to PFA and assigned to RSA: ${rsaAssigned || 'pending'}`, 'success');
         } else {
@@ -1316,6 +1324,13 @@ async function reviewDocument(action) {
                     console.warn('uploader rejection email queue failed:', emailError);
                 });
             }
+            notifyStatusChangePush({
+                currentUser,
+                submissionId: currentSubmissionId,
+                customerName,
+                newStatus: 'rejected',
+                statusLabel: 'Rejected'
+            }).catch(() => {});
             
             showNotification('Document rejected successfully!', 'success');
         }

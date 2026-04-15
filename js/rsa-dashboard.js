@@ -14,6 +14,7 @@ import {
     serverTimestamp
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { queueUploaderFinalSubmissionEmail } from './email-alerts.js';
+import { notifyStatusChangePush } from './status-push.js';
 
 // ==================== DOCUMENT TYPES MAPPING ====================
 const DOCUMENT_TYPES = {
@@ -1161,6 +1162,13 @@ window.finalSubmitRsa = async (submissionId) => {
                 console.warn('uploader final submission email queue failed:', emailError);
             });
         }
+        notifyStatusChangePush({
+            currentUser,
+            submissionId,
+            customerName: sub.customerName || '',
+            newStatus: 'sent_to_pfa',
+            statusLabel: 'Sent to PFA'
+        }).catch(() => {});
 
         // Update the submission in allSubmissions array to reflect the change
         const subIndex = allSubmissions.findIndex(s => s.id === submissionId);
