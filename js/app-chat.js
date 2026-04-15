@@ -119,26 +119,31 @@ function canCurrentUserSend(submission) {
   const role = normalizeRole(currentProfile?.role || 'uploader');
   const email = String(currentUser.email || '').toLowerCase();
   const status = String(submission.status || '').toLowerCase();
+  const isUploader = String(submission.uploadedBy || '').toLowerCase() === email;
+  const isReviewer = String(submission.assignedTo || '').toLowerCase() === email
+    || String(submission.reviewedBy || '').toLowerCase() === email;
+  const isRSA = String(submission.assignedToRSA || '').toLowerCase() === email;
+  const isPayment = String(submission.assignedToPayment || '').toLowerCase() === email;
 
   if (role === 'admin' || role === 'super_admin') return { ok: true, reason: '' };
 
   if (status === 'pending') {
-    return String(submission.assignedTo || '').toLowerCase() === email
+    return isReviewer
       ? { ok: true, reason: '' }
       : { ok: false, reason: 'Chat closed: pending review is assigned to another reviewer.' };
   }
   if (status === 'rejected') {
-    return String(submission.uploadedBy || '').toLowerCase() === email
+    return (isUploader || isReviewer)
       ? { ok: true, reason: '' }
-      : { ok: false, reason: 'Chat closed: correction stage belongs to uploader.' };
+      : { ok: false, reason: 'Chat closed: this rejection is assigned to another team member.' };
   }
   if (status === 'processing_to_pfa' || status === 'approved') {
-    return String(submission.assignedToRSA || '').toLowerCase() === email
+    return isRSA
       ? { ok: true, reason: '' }
       : { ok: false, reason: 'Chat closed: RSA processing moved to another user.' };
   }
   if (status === 'sent_to_pfa' || status === 'rsa_submitted' || status === 'paid') {
-    return String(submission.assignedToPayment || '').toLowerCase() === email
+    return isPayment
       ? { ok: true, reason: '' }
       : { ok: false, reason: 'Chat closed: payment stage moved to another user.' };
   }
