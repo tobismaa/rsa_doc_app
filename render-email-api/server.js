@@ -265,18 +265,22 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
         }
 
         const subRef = adminDb.collection('submissions').doc(submissionId);
-        const subSnap = await subRef.get();
+        const chatRef = adminDb.collection('applicationChats').doc(submissionId);
+        const [subSnap, chatSnap] = await Promise.all([subRef.get(), chatRef.get()]);
         if (!subSnap.exists) {
             return res.status(404).json({ ok: false, error: 'Submission not found' });
         }
         const sub = subSnap.data() || {};
+        const chat = chatSnap.exists ? (chatSnap.data() || {}) : {};
 
         const participantEmails = Array.from(new Set([
             safeLowerEmail(sub.uploadedBy),
             safeLowerEmail(sub.assignedTo),
             safeLowerEmail(sub.reviewedBy),
             safeLowerEmail(sub.assignedToRSA),
-            safeLowerEmail(sub.assignedToPayment)
+            safeLowerEmail(sub.assignedToPayment),
+            ...(Array.isArray(chat.participants) ? chat.participants.map(safeLowerEmail) : []),
+            ...(Array.isArray(chat.adminParticipants) ? chat.adminParticipants.map(safeLowerEmail) : [])
         ].filter(Boolean)));
 
         const senderCanAccess = participantEmails.includes(senderEmail);
