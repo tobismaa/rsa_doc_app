@@ -1,30 +1,22 @@
 // js/backblaze-storage.js
+const sharedBackblazeState = {
+    session: null,
+    uploadUrl: null
+};
+
 export class BackblazeStorage {
     constructor() {
         this.bucketName = 'cmbank-rsa-documents';
-        const runtimeOverride = String(window.__BACKBLAZE_API_ENDPOINT__ || '').trim();
-        this.apiProxyEndpoint = runtimeOverride || this.resolveDefaultEndpoint();
+        const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname);
+        this.apiProxyEndpoint = isLocalHost
+            ? 'https://cmbankrsa.com/api/backblaze-upload.php'
+            : '/api/backblaze-upload.php';
         this.bucketId = null;
         this.authorizationToken = null;
         this.apiUrl = null;
         this.downloadUrl = null;
         this.initFailed = false;
         this.initErrorMessage = '';
-    }
-
-    resolveDefaultEndpoint() {
-        const { protocol, hostname, port, origin } = window.location;
-        const isLocal = hostname === '127.0.0.1' || hostname === 'localhost';
-        const isStaticDevServer = isLocal && (port === '5500' || protocol === 'file:');
-
-        if (isStaticDevServer) {
-            const localOrigin = protocol === 'file:'
-                ? 'http://127.0.0.1:8000'
-                : origin.replace(/:\d+$/, ':8000');
-            return `${localOrigin}/api/backblaze-upload.php`;
-        }
-
-        return '/api/backblaze-upload.php';
     }
 
     async callProxy(action, payload = null, file = null) {
@@ -53,9 +45,8 @@ export class BackblazeStorage {
                 });
             }
         } catch (error) {
-            const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
-            if (isLocal) {
-                throw new Error(`Cannot reach upload API at ${this.apiProxyEndpoint}. Start a PHP server for this project, for example: php -S 127.0.0.1:8000`);
+            if (['127.0.0.1', 'localhost'].includes(window.location.hostname)) {
+                throw new Error(`Cannot reach upload API at ${this.apiProxyEndpoint}.`);
             }
             throw error;
         }
@@ -70,7 +61,7 @@ export class BackblazeStorage {
         if (!response.ok) {
             const message = data?.error || `Request failed (${response.status})`;
             if (response.status === 405) {
-                throw new Error(`Upload API rejected POST at ${this.apiProxyEndpoint}. Use a PHP runtime or set window.__BACKBLAZE_API_ENDPOINT__ to a live server endpoint.`);
+                throw new Error('Upload API endpoint rejected POST (405).');
             }
             throw new Error(message);
         }
@@ -84,6 +75,14 @@ export class BackblazeStorage {
         }
         if (this.authorizationToken) return true;
 
+        if (sharedBackblazeState.session) {
+            this.authorizationToken = sharedBackblazeState.session.authorizationToken;
+            this.apiUrl = sharedBackblazeState.session.apiUrl;
+            this.downloadUrl = sharedBackblazeState.session.downloadUrl;
+            this.bucketId = sharedBackblazeState.session.bucketId;
+            return true;
+        }
+
         try {
             console.log('Initializing Backblaze connection via server endpoint...');
             const authData = await this.callProxy('authorize');
@@ -96,6 +95,13 @@ export class BackblazeStorage {
             if (!this.authorizationToken || !this.bucketId) {
                 throw new Error('Server did not return Backblaze authorization data.');
             }
+
+            sharedBackblazeState.session = {
+                authorizationToken: this.authorizationToken,
+                apiUrl: this.apiUrl,
+                downloadUrl: this.downloadUrl,
+                bucketId: this.bucketId
+            };
 
             console.log('Backblaze initialized successfully');
             return true;
@@ -113,27 +119,53 @@ export class BackblazeStorage {
                 await this.init();
             }
 
-            const uploadUrlData = await this.callProxy('getUploadUrl', {
-                authorizationToken: this.authorizationToken,
-                apiUrl: this.apiUrl,
-                bucketId: this.bucketId
-            });
+            let uploadUrlData = sharedBackblazeState.uploadUrl;
+            if (!uploadUrlData) {
+                uploadUrlData = await this.callProxy('getUploadUrl', {
+                    authorizationToken: this.authorizationToken,
+                    apiUrl: this.apiUrl,
+                    bucketId: this.bucketId
+                });
+                sharedBackblazeState.uploadUrl = uploadUrlData;
+            }
 
             const safeName = (str) => String(str || '').replace(/[^a-zA-Z0-9._-]/g, '_');
             const fileName = `${Date.now()}_${safeName(customerName)}_${safeName(documentType)}_${safeName(file.name)}`;
             const sha1 = await this.calculateSHA1(file);
 
-            const uploadResult = await this.callProxy(
-                'upload',
-                {
-                    uploadUrl: uploadUrlData.uploadUrl,
-                    uploadAuthToken: uploadUrlData.authorizationToken,
-                    fileName,
-                    contentType: file.type || 'application/octet-stream',
-                    sha1
-                },
-                file
-            );
+            let uploadResult;
+            try {
+                uploadResult = await this.callProxy(
+                    'upload',
+                    {
+                        uploadUrl: uploadUrlData.uploadUrl,
+                        uploadAuthToken: uploadUrlData.authorizationToken,
+                        fileName,
+                        contentType: file.type || 'application/octet-stream',
+                        sha1
+                    },
+                    file
+                );
+            } catch (error) {
+                sharedBackblazeState.uploadUrl = null;
+                uploadUrlData = await this.callProxy('getUploadUrl', {
+                    authorizationToken: this.authorizationToken,
+                    apiUrl: this.apiUrl,
+                    bucketId: this.bucketId
+                });
+                sharedBackblazeState.uploadUrl = uploadUrlData;
+                uploadResult = await this.callProxy(
+                    'upload',
+                    {
+                        uploadUrl: uploadUrlData.uploadUrl,
+                        uploadAuthToken: uploadUrlData.authorizationToken,
+                        fileName,
+                        contentType: file.type || 'application/octet-stream',
+                        sha1
+                    },
+                    file
+                );
+            }
 
             const publicUrl = `${this.downloadUrl}/file/${this.bucketName}/${encodeURIComponent(fileName)}`;
 

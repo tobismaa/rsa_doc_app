@@ -189,6 +189,20 @@
   align-items: center;
 }
 
+.app-chat-typing {
+  grid-column: 1 / -1;
+  min-height: 16px;
+  color: #0f766e;
+  font-size: 12px;
+  font-style: italic;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.app-chat-typing.active {
+  opacity: 1;
+}
+
 .app-chat-input {
   width: 100%;
   border: 1px solid #cbd5e1;

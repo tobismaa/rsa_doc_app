@@ -1,10 +1,11 @@
 import { app, auth, db } from './firebase-config.js';
-import { EMAIL_API_BASE_URL, FCM_WEB_VAPID_KEY } from './email-api-config.js';
+import * as emailApiConfig from './email-api-config.js?v=20260416a';
 import {
   onAuthStateChanged
 } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js';
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -34,14 +35,22 @@ let currentChatId = '';
 let unsubMessages = null;
 let unsubSubmission = null;
 let unsubGlobalChats = null;
+let unsubChatMeta = null;
 const messageSeenMap = new Map();
 let globalNoticeTimer = null;
 const globalChatLastSeen = new Map();
-const FCM_VAPID_KEY = String(window.__FCM_VAPID_KEY__ || FCM_WEB_VAPID_KEY || '').trim();
+const FCM_VAPID_KEY = String(window.__FCM_VAPID_KEY__ || emailApiConfig.FCM_WEB_VAPID_KEY || '').trim();
 let pendingChatFromUrl = '';
 let pushTokenState = { status: 'idle', detail: 'Push: Not checked' };
 let pushForegroundBound = false;
 let currentChatMeta = null;
+let typingHeartbeatTimer = null;
+let typingStopTimer = null;
+let typingActive = false;
+let lastTypingWriteAt = 0;
+const TYPING_STALE_MS = 7000;
+const TYPING_HEARTBEAT_MS = 2500;
+const TYPING_IDLE_MS = 2200;
 
 function esc(text) {
   const div = document.createElement('div');
@@ -68,7 +77,7 @@ function normalizeRole(role) {
 
 function getEmailApiBaseUrl() {
   const runtime = String(window.__EMAIL_API_BASE_URL__ || '').trim();
-  const configured = runtime || String(EMAIL_API_BASE_URL || '').trim();
+  const configured = runtime || String(emailApiConfig.EMAIL_API_BASE_URL || '').trim();
   if (!configured || configured.includes('YOUR-RENDER-URL')) return '';
   return configured.replace(/\/+$/, '');
 }
@@ -210,6 +219,7 @@ function ensureModal() {
         <div class="app-chat-empty">Loading chat...</div>
       </div>
       <div class="app-chat-foot">
+        <div class="app-chat-typing" id="appChatTyping"></div>
         <input type="text" id="appChatInput" class="app-chat-input" placeholder="Type a message...">
         <button type="button" class="app-chat-btn primary" id="appChatSendBtn">Send</button>
         <div class="app-chat-notice" id="appChatSendNotice"></div>
@@ -223,6 +233,10 @@ function ensureModal() {
     if (e.target === modal) closeChat();
   });
   document.getElementById('appChatSendBtn')?.addEventListener('click', sendMessage);
+  document.getElementById('appChatInput')?.addEventListener('input', handleTypingInput);
+  document.getElementById('appChatInput')?.addEventListener('blur', () => {
+    stopTypingPresence().catch(() => {});
+  });
   document.getElementById('appChatInput')?.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -250,6 +264,7 @@ function showChatNotice(text, isError = false) {
 }
 
 function closeChat() {
+  stopTypingPresence().catch(() => {});
   const modal = document.getElementById('appChatModal');
   if (modal) modal.classList.remove('active');
   if (typeof unsubMessages === 'function') {
@@ -260,9 +275,15 @@ function closeChat() {
     try { unsubSubmission(); } catch (_) {}
     unsubSubmission = null;
   }
+  if (typeof unsubChatMeta === 'function') {
+    try { unsubChatMeta(); } catch (_) {}
+    unsubChatMeta = null;
+  }
+  clearTypingTimers();
   currentSubmission = null;
   currentChatId = '';
   currentChatMeta = null;
+  renderTypingIndicator();
 }
 
 function showModal() {
@@ -369,6 +390,125 @@ function setReadOnlyState(submission) {
   }
   if (notice) notice.textContent = ok ? '' : reason;
   if (stageNotice) stageNotice.textContent = `Status: ${String(submission?.status || '-')} | Role: ${getRoleDisplay()}`;
+  if (!ok) {
+    stopTypingPresence().catch(() => {});
+  }
+}
+
+function getTypingFieldKey(email) {
+  return String(email || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'user';
+}
+
+function clearTypingTimers() {
+  if (typingHeartbeatTimer) {
+    clearInterval(typingHeartbeatTimer);
+    typingHeartbeatTimer = null;
+  }
+  if (typingStopTimer) {
+    clearTimeout(typingStopTimer);
+    typingStopTimer = null;
+  }
+  typingActive = false;
+}
+
+function getActiveTypingUsers(chatMeta) {
+  const typing = chatMeta?.typing || {};
+  const myEmail = String(currentUser?.email || '').trim().toLowerCase();
+  const now = Date.now();
+  return Object.values(typing)
+    .filter((entry) => entry && typeof entry === 'object')
+    .filter((entry) => {
+      const email = String(entry.email || '').trim().toLowerCase();
+      const updatedAt = Number(entry.updatedAt || 0);
+      return email && email !== myEmail && updatedAt && (now - updatedAt) <= TYPING_STALE_MS;
+    });
+}
+
+function renderTypingIndicator() {
+  const el = document.getElementById('appChatTyping');
+  if (!el) return;
+  const users = getActiveTypingUsers(currentChatMeta);
+  if (!users.length) {
+    el.textContent = '';
+    el.classList.remove('active');
+    return;
+  }
+  const names = users
+    .map((entry) => String(entry.name || entry.email || 'Someone').trim())
+    .filter(Boolean);
+  const label = names.length === 1
+    ? `${names[0]} is typing...`
+    : `${names.slice(0, 2).join(', ')}${names.length > 2 ? ` +${names.length - 2}` : ''} are typing...`;
+  el.textContent = label;
+  el.classList.add('active');
+}
+
+async function writeTypingPresence() {
+  if (!currentChatId || !currentUser) return;
+  const access = canCurrentUserSend(currentSubmission);
+  if (!access.ok) return;
+  const now = Date.now();
+  if (now - lastTypingWriteAt < 900) return;
+  lastTypingWriteAt = now;
+  const email = String(currentUser.email || '').trim().toLowerCase();
+  if (!email) return;
+  const key = getTypingFieldKey(email);
+  await setDoc(doc(db, 'applicationChats', currentChatId), {
+    typing: {
+      [key]: {
+        email,
+        name: currentProfile?.fullName || currentUser.email || 'User',
+        role: normalizeRole(currentProfile?.role || ''),
+        updatedAt: now
+      }
+    }
+  }, { merge: true });
+}
+
+async function stopTypingPresence() {
+  clearTypingTimers();
+  const chatId = currentChatId;
+  const email = String(currentUser?.email || '').trim().toLowerCase();
+  if (!chatId || !email) return;
+  const key = getTypingFieldKey(email);
+  try {
+    await updateDoc(doc(db, 'applicationChats', chatId), {
+      [`typing.${key}`]: deleteField()
+    });
+  } catch (_) {}
+}
+
+function scheduleTypingStop() {
+  if (typingStopTimer) clearTimeout(typingStopTimer);
+  typingStopTimer = setTimeout(() => {
+    stopTypingPresence().catch(() => {});
+  }, TYPING_IDLE_MS);
+}
+
+function ensureTypingHeartbeat() {
+  if (typingHeartbeatTimer) return;
+  typingHeartbeatTimer = setInterval(() => {
+    if (!typingActive) return;
+    writeTypingPresence().catch(() => {});
+  }, TYPING_HEARTBEAT_MS);
+}
+
+function handleTypingInput(e) {
+  const value = String(e?.target?.value || '').trim();
+  if (!value) {
+    stopTypingPresence().catch(() => {});
+    return;
+  }
+  const access = canCurrentUserSend(currentSubmission);
+  if (!access.ok) return;
+  typingActive = true;
+  ensureTypingHeartbeat();
+  scheduleTypingStop();
+  writeTypingPresence().catch(() => {});
 }
 
 function maybeNotifyMessage(submission, msg, isOwn) {
@@ -542,6 +682,18 @@ async function loadAndWatchMessages(submissionId, submission) {
   if (typeof unsubMessages === 'function') {
     try { unsubMessages(); } catch (_) {}
   }
+  if (typeof unsubChatMeta === 'function') {
+    try { unsubChatMeta(); } catch (_) {}
+  }
+  unsubChatMeta = onSnapshot(
+    chatRef,
+    (snap) => {
+      currentChatMeta = snap.exists() ? (snap.data() || {}) : {};
+      renderTypingIndicator();
+      setReadOnlyState(currentSubmission);
+    },
+    () => {}
+  );
   const msgQuery = query(
     collection(db, 'applicationChats', submissionId, 'messages'),
     orderBy('createdAt', 'asc')
@@ -572,6 +724,7 @@ async function sendMessage() {
 
   try {
     const senderEmail = String(currentUser.email || '').toLowerCase();
+    await stopTypingPresence();
     input.value = '';
     await addDoc(collection(db, 'applicationChats', currentChatId, 'messages'), {
       text,
@@ -785,6 +938,7 @@ window.openApplicationChat = async (submissionId) => {
       `;
     }
     setReadOnlyState(currentSubmission);
+    renderTypingIndicator();
 
     if (typeof unsubSubmission === 'function') {
       try { unsubSubmission(); } catch (_) {}
@@ -878,8 +1032,14 @@ onAuthStateChanged(auth, async (user) => {
 });
 
 window.addEventListener('focus', updateNotificationStatusUI);
+window.addEventListener('beforeunload', () => {
+  stopTypingPresence().catch(() => {});
+});
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') updateNotificationStatusUI();
+  if (document.visibilityState !== 'visible') {
+    stopTypingPresence().catch(() => {});
+  }
 });
 
 if ('serviceWorker' in navigator) {

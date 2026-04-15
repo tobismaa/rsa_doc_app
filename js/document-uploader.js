@@ -2160,10 +2160,11 @@ async function submitCustomer() {
       const submissionRef = doc(db, 'submissions', currentEditId);
       const existingSub = allSubmissions.find((s) => s.id === currentEditId) || {};
       const reviewerToReassign = String(existingSub.reviewedBy || existingSub.assignedTo || '').trim();
+      const nextFixCount = Number(existingSub.fixCount || 0) + 1;
       await updateDoc(submissionRef, {
         customerName, customerDetails, status: 'pending', documents,
         documentTypes: Object.keys(currentCustomerUploads), reuploadedAt: serverTimestamp(),
-        fixSubmitted: true, fixLocked: true, fixSubmittedAt: serverTimestamp(),
+        fixSubmitted: true, fixLocked: false, fixSubmittedAt: serverTimestamp(), fixCount: nextFixCount,
         assignedTo: reviewerToReassign || existingSub.assignedTo || '',
         reviewedAt: null,
         comment: ''
@@ -2283,7 +2284,6 @@ async function submitCustomer() {
 window.openEditModal = async (id) => {
   const sub = allSubmissions.find(s => s.id === id);
   if (!sub) return;
-  if (sub.fixSubmitted || sub.fixLocked || sub.fixSubmittedAt) { showNotification('This rejected application has already been fixed and submitted.', 'warning'); return; }
   currentEditId = id;
   const details = sub.customerDetails || {};
   try {
@@ -2358,13 +2358,15 @@ async function submitEdit() {
       const submissionRef = doc(db, 'submissions', currentEditId);
       const existingSub = allSubmissions.find((s) => s.id === currentEditId) || {};
       const reviewerToReassign = String(existingSub.reviewedBy || existingSub.assignedTo || '').trim();
+      const nextFixCount = Number(existingSub.fixCount || 0) + 1;
       await updateDoc(submissionRef, {
         status: 'pending',
         documents: arrayUnion(...newDocuments),
         reuploadedAt: serverTimestamp(),
         fixSubmitted: true,
-        fixLocked: true,
+        fixLocked: false,
         fixSubmittedAt: serverTimestamp(),
+        fixCount: nextFixCount,
         assignedTo: reviewerToReassign || existingSub.assignedTo || '',
         reviewedAt: null,
         comment: ''
@@ -2447,7 +2449,7 @@ function renderWhatsAppLink(raw) {
   const display = String(raw || '').trim();
   const normalized = normalizeWhatsAppPhone(display);
   if (!normalized) return '-';
-  return `<a href="https://wa.me/${normalized}" target="_blank" rel="noopener noreferrer">${display}</a>`;
+  return `<a href="https://wa.me/${normalized}" target="_blank" rel="noopener noreferrer" aria-label="Open WhatsApp chat" title="Open WhatsApp chat"><i class="fab fa-whatsapp"></i></a>`;
 }
 
 function updateDashboardCards() {
@@ -2498,16 +2500,16 @@ async function renderApprovedTable() {
 async function renderRejectedTable() {
   if (!rejectedTableBody) { return; }
   const rejected = allSubmissions.filter(s => s.status === 'rejected');
-  if (rejected.length === 0) { rejectedTableBody.innerHTML = '<tr><td colspan="11" class="no-data">No rejected documents</td></tr>'; return; }
+  if (rejected.length === 0) { rejectedTableBody.innerHTML = '<tr><td colspan="12" class="no-data">No rejected documents</td></tr>'; return; }
   let html = '';
   for (const sub of rejected) {
-    const isFixLocked = !!(sub.fixSubmitted || sub.fixLocked || sub.fixSubmittedAt);
+    const fixCount = Number(sub.fixCount || 0);
     const date = safeFormatDate(sub.uploadedAt);
     const rejectedDate = safeFormatDate(sub.reviewedAt);
     const rejectedBy = (sub.reviewedBy && userFullNames.get(sub.reviewedBy)) ? userFullNames.get(sub.reviewedBy) : (sub.reviewedBy || '-');
     const assignedName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned';
     const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button>`;
-    html += `<tr data-submission-id="${sub.id}"><td><strong>${sub.customerName}</strong></td><td>${chatBtn}</td><td>${assignedName}</td><td>${date}</td><td><span class="status-badge status-rejected">Rejected</span></td><td>${sub.comment || 'No reason provided'}</td><td>${rejectedBy}</td><td>${rejectedDate}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" ${isFixLocked ? 'disabled style="opacity:.6;cursor:not-allowed;" title="Already fixed and submitted"' : ''}><i class="fas fa-edit"></i> ${isFixLocked ? 'Fixed' : 'Re-upload'}</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    html += `<tr data-submission-id="${sub.id}"><td><strong>${sub.customerName}</strong></td><td>${chatBtn}</td><td>${fixCount}</td><td>${assignedName}</td><td>${date}</td><td><span class="status-badge status-rejected">Rejected</span></td><td>${sub.comment || 'No reason provided'}</td><td>${rejectedBy}</td><td>${rejectedDate}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-edit"></i> Re-upload</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   rejectedTableBody.innerHTML = html;
 }

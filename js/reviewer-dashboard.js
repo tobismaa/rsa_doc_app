@@ -68,7 +68,7 @@ function renderWhatsAppLink(raw) {
     const display = String(raw || '').trim();
     const normalized = normalizeWhatsAppPhone(display);
     if (!normalized) return '-';
-    return `<a href="https://wa.me/${normalized}" target="_blank" rel="noopener noreferrer">${display}</a>`;
+    return `<a href="https://wa.me/${normalized}" target="_blank" rel="noopener noreferrer" aria-label="Open WhatsApp chat" title="Open WhatsApp chat"><i class="fab fa-whatsapp"></i></a>`;
 }
 
 // Cache for user full names
