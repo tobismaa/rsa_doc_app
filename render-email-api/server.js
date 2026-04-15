@@ -475,6 +475,8 @@ app.post('/api/submission/status-push', authMiddleware, async (req, res) => {
         const customerName = String(req.body?.customerName || '').trim();
         const newStatus = String(req.body?.newStatus || '').trim().toLowerCase();
         const statusLabel = String(req.body?.statusLabel || '').trim();
+        const actionLabel = String(req.body?.actionLabel || '').trim();
+        const customMessage = String(req.body?.message || '').trim();
         if (!submissionId || !newStatus) {
             return res.status(400).json({ ok: false, error: 'submissionId and newStatus are required' });
         }
@@ -540,8 +542,9 @@ app.post('/api/submission/status-push', authMiddleware, async (req, res) => {
         }
 
         const readable = statusLabel || newStatus.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
-        const title = `Status Updated - ${customerName || 'Application'}`;
-        const body = `Application status changed to ${readable}.`;
+        const actionReadable = actionLabel || 'Status Updated';
+        const title = `${actionReadable} - ${customerName || 'Application'}`;
+        const body = customMessage || `Application status changed to ${readable}.`;
         const clickUrl = `/dashboard.html?chat=${encodeURIComponent(submissionId)}`;
 
         const response = await admin.messaging().sendEachForMulticast({
@@ -550,7 +553,8 @@ app.post('/api/submission/status-push', authMiddleware, async (req, res) => {
             data: {
                 submissionId,
                 clickUrl,
-                newStatus
+                newStatus,
+                actionLabel: actionReadable
             },
             webpush: {
                 fcmOptions: { link: clickUrl },

@@ -2252,7 +2252,9 @@ window.markSubmissionPaid = async (submissionId) => {
             submissionId,
             customerName: sub.customerName || '',
             newStatus: 'paid',
-            statusLabel: 'Paid'
+            statusLabel: 'Paid',
+            actionLabel: 'Application Marked Paid',
+            message: `Application for ${sub.customerName || 'this customer'} was marked as paid.`
         }).catch(() => {});
 
         showNotification('Marked as paid successfully', 'success');

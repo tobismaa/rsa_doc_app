@@ -2168,6 +2168,15 @@ async function submitCustomer() {
         reviewedAt: null,
         comment: ''
       });
+      notifyStatusChangePush({
+        currentUser,
+        submissionId: currentEditId,
+        customerName,
+        newStatus: 'pending',
+        statusLabel: 'Pending Review',
+        actionLabel: 'Application Re-Submitted',
+        message: `Application for ${customerName} was re-submitted and is back in pending review.`
+      }).catch(() => {});
       showNotification(reviewerToReassign
         ? '✅ Fix submitted and reassigned to the same reviewer for another review.'
         : '✅ Fix submitted successfully!', 'success');
@@ -2221,8 +2230,9 @@ async function submitCustomer() {
       submitCustomerBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Customer Documents';
       return;
     }
+    const uploaderEmail = normalizeEmail(currentUser?.email);
     const subRef = await addDoc(collection(db, 'submissions'), {
-      customerName, customerDetails, uploadedBy: currentUser.email, uploadedAt: serverTimestamp(),
+      customerName, customerDetails, uploadedBy: uploaderEmail, uploadedAt: serverTimestamp(),
       status: 'pending', comment: '', documents, documentTypes: Object.keys(currentCustomerUploads),
       agentId: selectedAgent?.id || '',
       agentName: selectedAgent?.fullName || '',
@@ -2252,6 +2262,15 @@ async function submitCustomer() {
     } else {
       showNotification(assignedEmail ? `✅ Submitted – assigned to ${assignedEmail}` : '✅ Customer documents submitted successfully!', 'success');
     }
+    notifyStatusChangePush({
+      currentUser,
+      submissionId: subRef.id,
+      customerName,
+      newStatus: 'pending',
+      statusLabel: 'Pending Review',
+      actionLabel: 'New Submission',
+      message: `A new application for ${customerName} has been submitted for review.`
+    }).catch(() => {});
     closeModal(uploadModal);
   } catch (error) {
     showNotification('Submission failed: ' + error.message, 'error');
@@ -2355,7 +2374,9 @@ async function submitEdit() {
         submissionId: currentEditId,
         customerName: existingSub.customerName || '',
         newStatus: 'pending',
-        statusLabel: 'Pending Review'
+        statusLabel: 'Pending Review',
+        actionLabel: 'Application Re-Submitted',
+        message: `Application for ${existingSub.customerName || 'this customer'} was re-submitted and is back in pending review.`
       }).catch(() => {});
     }
     showNotification('✅ Documents re-uploaded and sent back for reviewer action.', 'success');
@@ -2369,7 +2390,9 @@ async function submitEdit() {
 
 // ==================== LOAD SUBMISSIONS ====================
 async function loadSubmissions() {
-  const q = query(collection(db, 'submissions'), where('uploadedBy', '==', currentUser.email), orderBy('uploadedAt', 'desc'));
+  const uploaderEmail = normalizeEmail(currentUser?.email);
+  if (!uploaderEmail) return;
+  const q = query(collection(db, 'submissions'), where('uploadedBy', '==', uploaderEmail), orderBy('uploadedAt', 'desc'));
   onSnapshot(q, async (snapshot) => {
     allSubmissions = [];
     const emails = new Set();

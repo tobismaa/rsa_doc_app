@@ -125,31 +125,23 @@ function canCurrentUserSend(submission) {
     || String(submission.reviewedBy || '').toLowerCase() === email;
   const isRSA = String(submission.assignedToRSA || '').toLowerCase() === email;
   const isPayment = String(submission.assignedToPayment || '').toLowerCase() === email;
+  const chatParticipants = new Set([
+    ...deriveParticipantsFromSubmission(submission),
+    ...((submission.adminParticipants || []).map((v) => String(v || '').trim().toLowerCase()))
+  ]);
+  const isParticipant = chatParticipants.has(email) || isUploader || isReviewer || isRSA || isPayment;
 
   if (role === 'admin' || role === 'super_admin') return { ok: true, reason: '' };
 
-  if (status === 'pending') {
-    return isReviewer
-      ? { ok: true, reason: '' }
-      : { ok: false, reason: 'Chat closed: pending review is assigned to another reviewer.' };
-  }
-  if (status === 'rejected') {
-    return (isUploader || isReviewer)
-      ? { ok: true, reason: '' }
-      : { ok: false, reason: 'Chat closed: this rejection is assigned to another team member.' };
-  }
-  if (status === 'processing_to_pfa' || status === 'approved') {
-    return isRSA
-      ? { ok: true, reason: '' }
-      : { ok: false, reason: 'Chat closed: RSA processing moved to another user.' };
-  }
-  if (status === 'sent_to_pfa' || status === 'rsa_submitted' || status === 'paid') {
-    return isPayment
-      ? { ok: true, reason: '' }
-      : { ok: false, reason: 'Chat closed: payment stage moved to another user.' };
+  if (status === 'cleared') {
+    return { ok: false, reason: 'Chat closed: process completed successfully.' };
   }
 
-  return { ok: false, reason: 'Chat is read-only for this stage.' };
+  if (isParticipant) {
+    return { ok: true, reason: '' };
+  }
+
+  return { ok: false, reason: 'Chat is only available to users involved in this application.' };
 }
 
 function canCurrentUserEscalate(submission, chatMeta) {

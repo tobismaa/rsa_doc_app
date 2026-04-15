@@ -539,9 +539,10 @@ document.addEventListener('DOMContentLoaded', () => {
     auth.onAuthStateChanged(async (user) => {
         if (user) {
             currentUser = user;
+            const normalizedCurrentEmail = normalizeEmail(user.email);
             
             try {
-                const userQuery = query(collection(db, 'users'), where('email', '==', user.email));
+                const userQuery = query(collection(db, 'users'), where('email', '==', normalizedCurrentEmail));
                 const userSnapshot = await getDocs(userQuery);
                 
                 if (!userSnapshot.empty) {
@@ -564,7 +565,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 userAvatar.src = 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2740%27 height=%2740%27 viewBox=%270 0 40 40%27%3E%3Ccircle cx=%2720%27 cy=%2720%27 r=%2720%27 fill=%27%23003366%27/%3E%3Ctext x=%2720%27 y=%2725%27 text-anchor=%27middle%27 fill=%27%23ffffff%27 font-size=%2716%27 font-family=%27Arial%27%3ER%3C/text%3E%3C/svg%3E';
             }
 
-            const q = query(collection(db, 'users'), where('email', '==', user.email));
+            const q = query(collection(db, 'users'), where('email', '==', normalizedCurrentEmail));
             const snapshot = await getDocs(q);
 
             const role = String(snapshot.docs[0]?.data()?.role || '').toLowerCase();
@@ -682,10 +683,13 @@ function setupEventListeners() {
 
 // ==================== LOAD SUBMISSIONS ====================
 async function loadSubmissions() {
+    const reviewerEmail = normalizeEmail(currentUser?.email);
+    if (!reviewerEmail) return;
+
     // only fetch documents that were assigned to the logged-in viewer
     const q = query(
         collection(db, 'submissions'),
-        where('assignedTo', '==', currentUser.email),
+        where('assignedTo', '==', reviewerEmail),
         orderBy('uploadedAt', 'desc')
     );
 
@@ -727,9 +731,12 @@ async function loadSubmissions() {
 
 async function loadSubmissionsFallback() {
     try {
+        const reviewerEmail = normalizeEmail(currentUser?.email);
+        if (!reviewerEmail) return;
+
         const fallbackQuery = query(
             collection(db, 'submissions'),
-            where('assignedTo', '==', currentUser.email)
+            where('assignedTo', '==', reviewerEmail)
         );
         const snapshot = await getDocs(fallbackQuery);
         const docsSorted = snapshot.docs.slice().sort((a, b) => {
@@ -842,6 +849,7 @@ function renderPendingTable(submissions) {
         
         const docTypes = sub.documentTypes?.map(type => DOCUMENT_TYPES[type] || type).join(', ') || 'N/A';
         const docCount = sub.documents?.length || 0;
+        const whatsapp = renderWhatsAppLink(sub.customerDetails?.phone || sub.customerPhone || '');
         const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>`;
 
         return `
@@ -1299,7 +1307,9 @@ async function reviewDocument(action) {
                 submissionId: currentSubmissionId,
                 customerName,
                 newStatus: 'processing_to_pfa',
-                statusLabel: 'Processing to PFA'
+                statusLabel: 'Processing to PFA',
+                actionLabel: 'Application Approved',
+                message: `Application for ${customerName || 'this customer'} was approved and moved to Processing to PFA.`
             }).catch(() => {});
             
             showNotification(`Document moved to Processing to PFA and assigned to RSA: ${rsaAssigned || 'pending'}`, 'success');
@@ -1329,7 +1339,9 @@ async function reviewDocument(action) {
                 submissionId: currentSubmissionId,
                 customerName,
                 newStatus: 'rejected',
-                statusLabel: 'Rejected'
+                statusLabel: 'Rejected',
+                actionLabel: 'Application Rejected',
+                message: `Application for ${customerName || 'this customer'} was rejected and needs correction.`
             }).catch(() => {});
             
             showNotification('Document rejected successfully!', 'success');

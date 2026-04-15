@@ -1167,7 +1167,9 @@ window.finalSubmitRsa = async (submissionId) => {
             submissionId,
             customerName: sub.customerName || '',
             newStatus: 'sent_to_pfa',
-            statusLabel: 'Sent to PFA'
+            statusLabel: 'Sent to PFA',
+            actionLabel: 'Application Sent to PFA',
+            message: `Application for ${sub.customerName || 'this customer'} was finally submitted and sent to PFA.`
         }).catch(() => {});
 
         // Update the submission in allSubmissions array to reflect the change

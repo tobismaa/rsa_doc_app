@@ -12,7 +12,9 @@ export async function notifyStatusChangePush({
   submissionId,
   customerName,
   newStatus,
-  statusLabel
+  statusLabel,
+  actionLabel,
+  message
 }) {
   try {
     if (!currentUser || !submissionId || !newStatus) return;
@@ -29,9 +31,10 @@ export async function notifyStatusChangePush({
         submissionId: String(submissionId),
         customerName: String(customerName || ''),
         newStatus: String(newStatus || '').toLowerCase(),
-        statusLabel: String(statusLabel || '')
+        statusLabel: String(statusLabel || ''),
+        actionLabel: String(actionLabel || ''),
+        message: String(message || '')
       })
     });
   } catch (_) {}
 }
-

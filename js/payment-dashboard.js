@@ -249,7 +249,9 @@ window.markSubmissionPaid = async (submissionId) => {
             submissionId,
             customerName: sub.customerName || '',
             newStatus: 'paid',
-            statusLabel: 'Paid'
+            statusLabel: 'Paid',
+            actionLabel: 'Application Marked Paid',
+            message: `Application for ${sub.customerName || 'this customer'} was marked as paid.`
         }).catch(() => {});
         showNotification('Marked as paid successfully', 'success');
     } catch (error) {
@@ -281,6 +283,18 @@ window.clearPaidSubmissions = async () => {
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         });
+
+        await Promise.all(
+            paidItems.map((sub) => notifyStatusChangePush({
+                currentUser,
+                submissionId: sub.id,
+                customerName: sub.customerName || '',
+                newStatus: 'cleared',
+                statusLabel: 'Cleared',
+                actionLabel: 'Application Cleared',
+                message: `Application for ${sub.customerName || 'this customer'} was cleared successfully.`
+            }).catch(() => {}))
+        );
 
         showNotification(`Cleared ${paidItems.length} paid record(s)`, 'success');
     } catch (error) {

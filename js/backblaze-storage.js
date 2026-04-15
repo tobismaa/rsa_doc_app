@@ -3,9 +3,7 @@ export class BackblazeStorage {
     constructor() {
         this.bucketName = 'cmbank-rsa-documents';
         const runtimeOverride = String(window.__BACKBLAZE_API_ENDPOINT__ || '').trim();
-        const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname);
-        this.apiProxyEndpoint = runtimeOverride
-            || (isLocalHost ? 'https://cmbankrsa.com/api/backblaze-upload.php' : '/api/backblaze-upload.php');
+        this.apiProxyEndpoint = runtimeOverride || this.resolveDefaultEndpoint();
         this.bucketId = null;
         this.authorizationToken = null;
         this.apiUrl = null;
@@ -14,29 +12,52 @@ export class BackblazeStorage {
         this.initErrorMessage = '';
     }
 
+    resolveDefaultEndpoint() {
+        const { protocol, hostname, port, origin } = window.location;
+        const isLocal = hostname === '127.0.0.1' || hostname === 'localhost';
+        const isStaticDevServer = isLocal && (port === '5500' || protocol === 'file:');
+
+        if (isStaticDevServer) {
+            const localOrigin = protocol === 'file:'
+                ? 'http://127.0.0.1:8000'
+                : origin.replace(/:\d+$/, ':8000');
+            return `${localOrigin}/api/backblaze-upload.php`;
+        }
+
+        return '/api/backblaze-upload.php';
+    }
+
     async callProxy(action, payload = null, file = null) {
         let response;
 
-        if (file) {
-            const formData = new FormData();
-            formData.append('action', action);
-            Object.entries(payload || {}).forEach(([key, value]) => {
-                if (value !== undefined && value !== null) {
-                    formData.append(key, String(value));
-                }
-            });
-            formData.append('file', file);
+        try {
+            if (file) {
+                const formData = new FormData();
+                formData.append('action', action);
+                Object.entries(payload || {}).forEach(([key, value]) => {
+                    if (value !== undefined && value !== null) {
+                        formData.append(key, String(value));
+                    }
+                });
+                formData.append('file', file);
 
-            response = await fetch(this.apiProxyEndpoint, {
-                method: 'POST',
-                body: formData
-            });
-        } else {
-            response = await fetch(this.apiProxyEndpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action, ...(payload || {}) })
-            });
+                response = await fetch(this.apiProxyEndpoint, {
+                    method: 'POST',
+                    body: formData
+                });
+            } else {
+                response = await fetch(this.apiProxyEndpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, ...(payload || {}) })
+                });
+            }
+        } catch (error) {
+            const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
+            if (isLocal) {
+                throw new Error(`Cannot reach upload API at ${this.apiProxyEndpoint}. Start a PHP server for this project, for example: php -S 127.0.0.1:8000`);
+            }
+            throw error;
         }
 
         let data = null;
@@ -49,7 +70,7 @@ export class BackblazeStorage {
         if (!response.ok) {
             const message = data?.error || `Request failed (${response.status})`;
             if (response.status === 405) {
-                throw new Error('Upload API endpoint rejected POST (405). Use PHP runtime or set window.__BACKBLAZE_API_ENDPOINT__.');
+                throw new Error(`Upload API rejected POST at ${this.apiProxyEndpoint}. Use a PHP runtime or set window.__BACKBLAZE_API_ENDPOINT__ to a live server endpoint.`);
             }
             throw new Error(message);
         }

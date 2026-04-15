@@ -2,7 +2,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
-import { getAnalytics } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-analytics.js";
+import { getAnalytics, isSupported } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-analytics.js";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -17,8 +17,25 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
 const auth = getAuth(app);
 const db = getFirestore(app);
+let analytics = null;
+
+const isLocalDevHost =
+  window.location.hostname === "127.0.0.1" ||
+  window.location.hostname === "localhost" ||
+  window.location.protocol === "file:";
+
+if (!isLocalDevHost) {
+  isSupported()
+    .then((supported) => {
+      if (supported) {
+        analytics = getAnalytics(app);
+      }
+    })
+    .catch(() => {
+      analytics = null;
+    });
+}
 
 export { app, auth, db, analytics };
