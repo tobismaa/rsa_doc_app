@@ -2,11 +2,16 @@
 export class BackblazeStorage {
     constructor() {
         this.bucketName = 'cmbank-rsa-documents';
-        this.apiProxyEndpoint = 'api/backblaze-upload.php';
+        const runtimeOverride = String(window.__BACKBLAZE_API_ENDPOINT__ || '').trim();
+        const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname);
+        this.apiProxyEndpoint = runtimeOverride
+            || (isLocalHost ? 'https://cmbankrsa.com/api/backblaze-upload.php' : '/api/backblaze-upload.php');
         this.bucketId = null;
         this.authorizationToken = null;
         this.apiUrl = null;
         this.downloadUrl = null;
+        this.initFailed = false;
+        this.initErrorMessage = '';
     }
 
     async callProxy(action, payload = null, file = null) {
@@ -43,6 +48,9 @@ export class BackblazeStorage {
 
         if (!response.ok) {
             const message = data?.error || `Request failed (${response.status})`;
+            if (response.status === 405) {
+                throw new Error('Upload API endpoint rejected POST (405). Use PHP runtime or set window.__BACKBLAZE_API_ENDPOINT__.');
+            }
             throw new Error(message);
         }
 
@@ -50,6 +58,9 @@ export class BackblazeStorage {
     }
 
     async init() {
+        if (this.initFailed) {
+            throw new Error(this.initErrorMessage || 'Backblaze initialization previously failed.');
+        }
         if (this.authorizationToken) return true;
 
         try {
@@ -69,6 +80,8 @@ export class BackblazeStorage {
             return true;
         } catch (error) {
             console.error('Initialization Error:', error);
+            this.initFailed = true;
+            this.initErrorMessage = String(error?.message || 'Initialization failed');
             throw error;
         }
     }

@@ -3,6 +3,26 @@ declare(strict_types=1);
 
 header('Content-Type: application/json; charset=utf-8');
 
+// CORS for local dev + production domain.
+$allowedOrigins = [
+    'https://cmbankrsa.com',
+    'http://127.0.0.1:5500',
+    'http://localhost:5500',
+    'http://127.0.0.1:8000',
+    'http://localhost:8000'
+];
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin && in_array($origin, $allowedOrigins, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
 if (!function_exists('str_contains')) {
     function str_contains(string $haystack, string $needle): bool {
         return $needle !== '' && mb_strpos($haystack, $needle) !== false;
