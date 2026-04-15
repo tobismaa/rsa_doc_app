@@ -293,7 +293,18 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
         }
 
         const recipientEmails = participantEmails.filter((e) => e !== senderEmail);
-        if (recipientEmails.length === 0) return res.json({ ok: true, sent: 0, reason: 'no-recipients' });
+        if (recipientEmails.length === 0) {
+            return res.json({
+                ok: true,
+                sent: 0,
+                reason: 'no-recipients',
+                debug: {
+                    senderEmail,
+                    participantEmails,
+                    recipientEmails
+                }
+            });
+        }
 
         const usersByEmail = new Map();
         for (const email of recipientEmails) {
@@ -315,7 +326,20 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
         tokenOwners.forEach((entry) => { if (!uniqueMap.has(entry.token)) uniqueMap.set(entry.token, entry); });
         const uniqueOwners = Array.from(uniqueMap.values());
         const tokens = uniqueOwners.map((x) => x.token);
-        if (tokens.length === 0) return res.json({ ok: true, sent: 0, reason: 'no-device-tokens' });
+        if (tokens.length === 0) {
+            return res.json({
+                ok: true,
+                sent: 0,
+                reason: 'no-device-tokens',
+                debug: {
+                    senderEmail,
+                    participantEmails,
+                    recipientEmails,
+                    usersMatched: Array.from(usersByEmail.keys()),
+                    tokenOwners: uniqueOwners.map((x) => x.email)
+                }
+            });
+        }
 
         const title = `New Chat Message - ${customerName || 'Application'}`;
         const body = messageText.slice(0, 120);
@@ -367,7 +391,14 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
         return res.json({
             ok: true,
             sent: response.successCount,
-            failed: response.failureCount
+            failed: response.failureCount,
+            debug: {
+                senderEmail,
+                participantEmails,
+                recipientEmails,
+                usersMatched: Array.from(usersByEmail.keys()),
+                tokenOwners: uniqueOwners.map((x) => x.email)
+            }
         });
     } catch (err) {
         return res.status(500).json({
