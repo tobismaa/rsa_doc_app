@@ -22,6 +22,7 @@ import {
 import {
   getMessaging,
   getToken,
+  onMessage,
   isSupported as isMessagingSupported
 } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging.js';
 
@@ -39,6 +40,7 @@ const globalChatLastSeen = new Map();
 const FCM_VAPID_KEY = String(window.__FCM_VAPID_KEY__ || FCM_WEB_VAPID_KEY || '').trim();
 let pendingChatFromUrl = '';
 let pushTokenState = { status: 'idle', detail: 'Push: Not checked' };
+let pushForegroundBound = false;
 
 function esc(text) {
   const div = document.createElement('div');
@@ -87,6 +89,29 @@ function readChatFromCurrentUrl() {
   } catch (_) {
     return '';
   }
+}
+
+function bindForegroundPushNotifications(messaging) {
+  if (pushForegroundBound || !messaging) return;
+  pushForegroundBound = true;
+  try {
+    onMessage(messaging, (payload) => {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      const title = String(payload?.notification?.title || 'New Chat Message');
+      const body = String(payload?.notification?.body || 'You have a new message');
+      const clickUrl = String(payload?.data?.clickUrl || '');
+      const submissionId = String(payload?.data?.submissionId || '');
+      const n = new Notification(title, { body, tag: submissionId ? `chat-${submissionId}` : 'chat-foreground' });
+      n.onclick = () => {
+        window.focus();
+        if (submissionId) {
+          window.openApplicationChat?.(submissionId);
+          return;
+        }
+        openChatFromUrl(clickUrl);
+      };
+    });
+  } catch (_) {}
 }
 
 function canCurrentUserSend(submission) {
@@ -614,6 +639,7 @@ async function registerFcmTokenIfPossible() {
     setPushTokenState('registering', 'Push: Registering token...');
     const reg = await navigator.serviceWorker.register('/service-worker.js');
     const messaging = getMessaging(app);
+    bindForegroundPushNotifications(messaging);
     const token = await getToken(messaging, {
       vapidKey: FCM_VAPID_KEY,
       serviceWorkerRegistration: reg
@@ -663,7 +689,16 @@ async function triggerServerPush({ submissionId, customerName, messageText }) {
     const sent = Number(data?.sent || 0);
     if (sent <= 0) {
       const reason = String(data?.reason || 'no-recipient-device-token');
-      showChatNotice(`Push not delivered yet: ${reason}`, true);
+      const dbg = data?.debug || {};
+      const recipients = Array.isArray(dbg.recipientEmails) ? dbg.recipientEmails.join(', ') : '';
+      const matched = Array.isArray(dbg.usersMatched) ? dbg.usersMatched.join(', ') : '';
+      const tokenOwners = Array.isArray(dbg.tokenOwners) ? dbg.tokenOwners.join(', ') : '';
+      const failedCodes = Array.isArray(dbg.failedCodes) ? dbg.failedCodes.join(', ') : '';
+      const extra = recipients ? ` | recipients: ${recipients}` : '';
+      const found = matched ? ` | users: ${matched}` : '';
+      const owners = tokenOwners ? ` | tokens: ${tokenOwners}` : '';
+      const codes = failedCodes ? ` | fcm: ${failedCodes}` : '';
+      showChatNotice(`Push not delivered yet: ${reason}${extra}${found}${owners}${codes}`, true);
     }
   } catch (error) {
     const msg = String(error?.message || 'network/cors failure');

@@ -29,6 +29,37 @@ const ASSETS = [
   '/manifest.webmanifest'
 ];
 
+// FCM background notifications support.
+// Keep in service worker so push can display when app is minimized/background.
+try {
+  importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js');
+  importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js');
+
+  firebase.initializeApp({
+    apiKey: "AIzaSyABQ-RR3Mlot7Vz2_s06AcFp3AlHb6elmw",
+    authDomain: "rsa-doc-app.firebaseapp.com",
+    projectId: "rsa-doc-app",
+    storageBucket: "rsa-doc-app.firebasestorage.app",
+    messagingSenderId: "749343098749",
+    appId: "1:749343098749:web:ed78989a0b2c620d156e14",
+    measurementId: "G-KQHMRNDZ6X"
+  });
+
+  const messaging = firebase.messaging();
+  messaging.onBackgroundMessage((payload) => {
+    const title = String(payload?.notification?.title || 'New Chat Message');
+    const body = String(payload?.notification?.body || 'You have a new message');
+    const clickUrl = String(payload?.data?.clickUrl || payload?.fcmOptions?.link || '/dashboard.html');
+
+    self.registration.showNotification(title, {
+      body,
+      icon: '/favicon.svg',
+      badge: '/favicon.svg',
+      data: { url: clickUrl }
+    });
+  });
+} catch (_) {}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).catch(() => Promise.resolve())
