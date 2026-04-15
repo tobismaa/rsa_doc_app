@@ -312,6 +312,20 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
             if (!uSnap.empty) usersByEmail.set(email, { id: uSnap.docs[0].id, ...(uSnap.docs[0].data() || {}) });
         }
 
+        // Fallback for legacy/unclean email casing or spacing in user docs.
+        if (usersByEmail.size < recipientEmails.length) {
+            const allUsersSnap = await adminDb.collection('users').get();
+            const normalizedTarget = new Set(recipientEmails.map((e) => safeLowerEmail(e)).filter(Boolean));
+            allUsersSnap.docs.forEach((docSnap) => {
+                const data = docSnap.data() || {};
+                const normalized = safeLowerEmail(data.email);
+                if (!normalized || !normalizedTarget.has(normalized)) return;
+                if (!usersByEmail.has(normalized)) {
+                    usersByEmail.set(normalized, { id: docSnap.id, ...data });
+                }
+            });
+        }
+
         const tokenOwners = [];
         for (const email of recipientEmails) {
             const userData = usersByEmail.get(email);
