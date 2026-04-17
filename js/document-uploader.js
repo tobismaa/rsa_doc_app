@@ -4,8 +4,21 @@ import { BackblazeStorage } from './backblaze-storage.js';
 import { queueViewerAssignmentEmail } from './email-alerts.js';
 import { notifyStatusChangePush } from './status-push.js';
 import {
+  ensureUserFullNames as ensureUserFullNamesShared,
+  isActiveUserWithRole as isActiveUserWithRoleShared,
+  getUserFullName as getUserFullNameShared,
+  getUserProfileByEmail as getUserProfileByEmailShared,
+  normalizeEmail as normalizeEmailShared
+} from './shared/user-directory.js';
+import {
+  assignRoundRobin as assignRoundRobinShared,
+  getUploaderRoutingRule as getUploaderRoutingRuleShared,
+  getViewerEmails as getViewerEmailsShared,
+  routingRuleDocId as routingRuleDocIdShared
+} from './shared/uploader-routing.js';
+import {
   collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, doc,
-  serverTimestamp, arrayUnion, getDocs, getDoc, setDoc, runTransaction
+  serverTimestamp, arrayUnion, getDocs, getDoc, setDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
 // ==================== FIX JSPDF DETECTION - ADD THIS RIGHT AFTER IMPORTS ====================
@@ -362,146 +375,27 @@ function showBatchSizeWarningModal(oversizedFiles, validFiles, originalFiles) {
 
 // ==================== GET VIEWER EMAILS ====================
 async function getViewerEmails() {
-  const snap = await getDocs(collection(db, 'users'));
-  return snap.docs
-    .map(d => d.data())
-    .filter(data => {
-      const role = String(data?.role || '').toLowerCase();
-      const status = String(data?.status || 'active').toLowerCase();
-      return (role === 'reviewer' || role === 'viewer') && status !== 'deactivated';
-    })
-    .map(data => data.email)
-    .filter(Boolean)
-    .sort();
+  return getViewerEmailsShared(db);
 }
 
 function normalizeEmail(email) {
-  return String(email || '').trim().toLowerCase();
+  return normalizeEmailShared(email);
 }
 
 function routingRuleDocId(uploaderEmail) {
-  return encodeURIComponent(normalizeEmail(uploaderEmail));
+  return routingRuleDocIdShared(uploaderEmail);
 }
 
 async function getUploaderRoutingRule(uploaderEmail) {
-  const normalizedUploader = normalizeEmail(uploaderEmail);
-  if (!normalizedUploader) return null;
-  try {
-    const snap = await getDoc(doc(db, 'uploaderRoutingRules', routingRuleDocId(normalizedUploader)));
-    if (!snap.exists()) return null;
-    const data = snap.data() || {};
-    if (data.enabled === false) return null;
-    return {
-      uploaderEmail: normalizedUploader,
-      reviewerEmail: normalizeEmail(data.reviewerEmail),
-      rsaEmail: normalizeEmail(data.rsaEmail)
-    };
-  } catch (_) {
-    return null;
-  }
+  return getUploaderRoutingRuleShared(db, uploaderEmail);
 }
 
 async function isActiveUserWithRole(email, allowedRoles = []) {
-  const normalized = normalizeEmail(email);
-  if (!normalized) return false;
-  try {
-    const userQ = query(collection(db, 'users'), where('email', '==', normalized));
-    const snap = await getDocs(userQ);
-    if (snap.empty) return false;
-    const data = snap.docs[0].data() || {};
-    const role = String(data.role || '').toLowerCase();
-    const status = String(data.status || 'active').toLowerCase();
-    if (status === 'deactivated') return false;
-    return allowedRoles.includes(role);
-  } catch (_) {
-    return false;
-  }
+  return isActiveUserWithRoleShared(db, email, allowedRoles);
 }
 
 async function assignRoundRobin(subRef) {
-  let uploaderEmail = normalizeEmail(currentUser?.email);
-  if (!uploaderEmail) {
-    try {
-      const subSnap = await getDoc(subRef);
-      uploaderEmail = normalizeEmail(subSnap.exists() ? subSnap.data()?.uploadedBy : '');
-    } catch (_) { }
-  }
-
-  const routingRule = await getUploaderRoutingRule(uploaderEmail);
-  const mappedReviewer = routingRule?.reviewerEmail || '';
-  if (mappedReviewer && await isActiveUserWithRole(mappedReviewer, ['reviewer', 'viewer'])) {
-    await updateDoc(subRef, {
-      assignedTo: mappedReviewer,
-      assignmentMode: 'uploader_routing',
-      assignmentUploader: uploaderEmail || ''
-    });
-    try {
-      const subSnap = await getDoc(subRef);
-      if (subSnap.exists()) {
-        const subData = subSnap.data();
-        await addDoc(collection(db, 'roundRobinAssignments'), {
-          submissionId: subRef.id,
-          customerName: subData.customerName || 'N/A',
-          assignedTo: mappedReviewer,
-          assignedBy: currentUser?.email || 'System',
-          assignedAt: serverTimestamp(),
-          uploadedBy: subData.uploadedBy || uploaderEmail || 'N/A',
-          assignmentMethod: 'uploader_routing'
-        });
-      }
-    } catch (_) { }
-    return mappedReviewer;
-  }
-
-  const viewers = await getViewerEmails();
-  if (!viewers.length) return null;
-
-  let assigned = null;
-  try {
-    await runTransaction(db, async tx => {
-      let lastIndex = -1;
-      let lastDate = '';
-      const today = new Date().toISOString().slice(0, 10);
-      const counterSnap = await tx.get(RR_COUNTER_DOC);
-      if (counterSnap.exists()) {
-        const data = counterSnap.data();
-        lastIndex = typeof data.lastIndex === 'number' ? data.lastIndex : -1;
-        lastDate = data.lastDate || '';
-      }
-      if (lastDate !== today) lastIndex = -1;
-      const newIndex = (lastIndex + 1) % viewers.length;
-      assigned = viewers[newIndex];
-      tx.set(RR_COUNTER_DOC, { lastIndex: newIndex, lastDate: today }, { merge: true });
-      tx.update(subRef, { assignedTo: assigned, assignmentMode: 'round_robin' });
-    });
-  } catch (_) {
-    // Fallback: if counter transaction fails, still assign to keep workflow moving.
-    assigned = viewers[0] || null;
-    if (assigned) {
-      await updateDoc(subRef, { assignedTo: assigned, assignmentMode: 'round_robin_fallback' });
-    }
-  }
-
-  if (assigned) {
-    try {
-      const subSnap = await getDoc(subRef);
-      if (subSnap.exists()) {
-        const subData = subSnap.data();
-        await addDoc(collection(db, 'roundRobinAssignments'), {
-          submissionId: subRef.id,
-          customerName: subData.customerName || 'N/A',
-          assignedTo: assigned,
-          assignedBy: currentUser?.email || 'System',
-          assignedAt: serverTimestamp(),
-          uploadedBy: subData.uploadedBy || 'N/A',
-          assignmentMethod: 'round_robin'
-        });
-      }
-    } catch (e) {
-      // Silently fail
-    }
-  }
-  return assigned;
+  return assignRoundRobinShared({ db, currentUser, subRef, counterDoc: RR_COUNTER_DOC });
 }
 
 // ==================== GET APPLICATION STAGE ====================
@@ -539,23 +433,12 @@ async function getApplicationStage(submission) {
 
 // ==================== GET USER FULL NAME BY EMAIL ====================
 async function getUserFullName(email) {
-  if (!email) return 'Unknown';
-  if (userFullNames.has(email)) return userFullNames.get(email);
-  try {
-    const userQuery = query(collection(db, 'users'), where('email', '==', email));
-    const userSnapshot = await getDocs(userQuery);
-    if (!userSnapshot.empty) {
-      const userData = userSnapshot.docs[0].data();
-      const fullName = userData.fullName || userData.displayName || email.split('@')[0];
-      userFullNames.set(email, fullName);
-      return fullName;
-    }
-  } catch (err) {
-    // Silently fail
-  }
-  const fallbackName = email.split('@')[0];
-  userFullNames.set(email, fallbackName);
-  return fallbackName;
+  const normalized = normalizeEmail(email);
+  if (!normalized) return 'Unknown';
+  if (userFullNames.has(normalized)) return userFullNames.get(normalized);
+  const fullName = await getUserFullNameShared(db, normalized);
+  userFullNames.set(normalized, fullName);
+  return fullName;
 }
 
 // ==================== DOM ELEMENTS ====================
@@ -2404,6 +2287,8 @@ async function loadSubmissions() {
       if (data.uploadedBy) emails.add(data.uploadedBy);
       if (data.reviewedBy) emails.add(data.reviewedBy);
       if (data.assignedTo) emails.add(data.assignedTo);
+      if (data.assignedToRSA) emails.add(data.assignedToRSA);
+      if (data.assignedToPayment) emails.add(data.assignedToPayment);
     });
     try { await ensureUserFullNames(Array.from(emails)); } catch (e) { }
     renderPendingTable(); renderApprovedTable(); renderRejectedTable(); renderPaidTable(); updateDashboardCards();
@@ -2412,15 +2297,46 @@ async function loadSubmissions() {
 
 async function ensureUserFullNames(emails) {
   if (!emails || emails.length === 0) return;
-  for (const email of emails) {
-    if (!email || userFullNames.has(email)) continue;
-    try {
-      const q = query(collection(db, 'users'), where('email', '==', email));
-      const snap = await getDocs(q);
-      if (!snap.empty) { const d = snap.docs[0].data(); userFullNames.set(email, d.fullName || d.displayName || email.split('@')[0]); }
-      else { userFullNames.set(email, email.split('@')[0]); }
-    } catch (e) { userFullNames.set(email, email.split('@')[0]); }
-  }
+  await ensureUserFullNamesShared(db, emails);
+  await Promise.all(emails.map(async (email) => {
+    const normalized = normalizeEmail(email);
+    if (!normalized || userFullNames.has(normalized)) return;
+    const fullName = await getUserFullNameShared(db, normalized);
+    userFullNames.set(normalized, fullName);
+  }));
+}
+
+async function getUserProfileByEmail(email) {
+  return getUserProfileByEmailShared(db, email);
+}
+
+function getSubmissionStageKey(submission) {
+  const st = String(submission?.status || '').toLowerCase();
+  if (st === 'cleared') return 'closed';
+  if (st === 'sent_to_pfa' || st === 'rsa_submitted' || st === 'paid') return 'payment';
+  if (st === 'processing_to_pfa' || st === 'approved') return 'rsa';
+  return 'review';
+}
+
+function getCurrentHandlerEmail(submission) {
+  const stage = getSubmissionStageKey(submission);
+  if (stage === 'review') return normalizeEmail(submission.assignedTo || submission.reviewedBy);
+  if (stage === 'rsa') return normalizeEmail(submission.assignedToRSA);
+  if (stage === 'payment') return normalizeEmail(submission.assignedToPayment);
+  return '';
+}
+
+async function renderStageContactLink(submission) {
+  const handlerEmail = getCurrentHandlerEmail(submission);
+  if (!handlerEmail) return '-';
+  const profile = await getUserProfileByEmail(handlerEmail);
+  const raw = String(profile?.whatsappNumber || profile?.phone || '').trim();
+  return renderWhatsAppLink(raw);
+}
+
+async function getCurrentHandlerName(submission) {
+  const handlerEmail = getCurrentHandlerEmail(submission);
+  return handlerEmail ? await getUserFullName(handlerEmail) : 'Not assigned';
 }
 
 function safeFormatDate(dateValue) {
@@ -2471,9 +2387,9 @@ async function renderPendingTable() {
   let html = '';
   for (const sub of pending) {
     const date = safeFormatDate(sub.uploadedAt);
-    const assignedName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned';
-    const whatsapp = renderWhatsAppLink(sub.customerDetails?.phone || sub.customerPhone || '');
-    html += `<tr><td><strong>${sub.customerName}</strong></td><td>${whatsapp}</td><td>${assignedName}</td><td>${date}</td><td><span class="status-badge status-pending">Pending</span></td><td>${sub.comment || '-'}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    const assignedName = await getCurrentHandlerName(sub);
+    const whatsapp = await renderStageContactLink(sub);
+    html += `<tr><td><strong>${sub.customerName}</strong></td><td>${whatsapp}</td><td>${assignedName}</td><td>${date}</td><td><span class="status-badge status-pending">Pending</span></td><td>${sub.comment || '-'}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   pendingTableBody.innerHTML = html;
 }
@@ -2489,10 +2405,11 @@ async function renderApprovedTable() {
   for (const sub of approved) {
     const uploadDate = safeFormatDate(sub.uploadedAt);
     const approvedDate = safeFormatDate(sub.reviewedAt);
-    const approvedBy = (sub.reviewedBy && userFullNames.get(sub.reviewedBy)) ? userFullNames.get(sub.reviewedBy) : (sub.reviewedBy || '-');
-    const assignedName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned';
-    const whatsapp = renderWhatsAppLink(sub.customerDetails?.phone || sub.customerPhone || '');
-    html += `<tr><td><strong>${sub.customerName}</strong></td><td>${whatsapp}</td><td>${assignedName}</td><td>${uploadDate}</td><td><span class="status-badge status-approved">Processing to PFA</span></td><td>${approvedBy}</td><td>${approvedDate}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    const approvedByKey = normalizeEmail(sub.reviewedBy);
+    const approvedBy = (approvedByKey && userFullNames.get(approvedByKey)) ? userFullNames.get(approvedByKey) : (sub.reviewedBy || '-');
+    const assignedName = await getCurrentHandlerName(sub);
+    const whatsapp = await renderStageContactLink(sub);
+    html += `<tr><td><strong>${sub.customerName}</strong></td><td>${whatsapp}</td><td>${assignedName}</td><td>${uploadDate}</td><td><span class="status-badge status-approved">Processing to PFA</span></td><td>${approvedBy}</td><td>${approvedDate}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   approvedTableBody.innerHTML = html;
 }
@@ -2506,7 +2423,8 @@ async function renderRejectedTable() {
     const fixCount = Number(sub.fixCount || 0);
     const date = safeFormatDate(sub.uploadedAt);
     const rejectedDate = safeFormatDate(sub.reviewedAt);
-    const rejectedBy = (sub.reviewedBy && userFullNames.get(sub.reviewedBy)) ? userFullNames.get(sub.reviewedBy) : (sub.reviewedBy || '-');
+    const rejectedByKey = normalizeEmail(sub.reviewedBy);
+    const rejectedBy = (rejectedByKey && userFullNames.get(rejectedByKey)) ? userFullNames.get(rejectedByKey) : (sub.reviewedBy || '-');
     const assignedName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned';
     const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button>`;
     html += `<tr data-submission-id="${sub.id}"><td><strong>${sub.customerName}</strong></td><td>${chatBtn}</td><td>${fixCount}</td><td>${assignedName}</td><td>${date}</td><td><span class="status-badge status-rejected">Rejected</span></td><td>${sub.comment || 'No reason provided'}</td><td>${rejectedBy}</td><td>${rejectedDate}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-edit"></i> Re-upload</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;

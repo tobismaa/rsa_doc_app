@@ -1,5 +1,6 @@
 // js/auth.js - COMPLETE WORKING VERSION WITH DEPARTMENT FIELD
 import { auth, db } from './firebase-config.js';
+import { EMAIL_API_BASE_URL } from './email-api-config.js';
 import {
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
@@ -164,12 +165,33 @@ if (forgotPasswordSendBtn) {
         closeForgotPasswordModal();
         showSpinner('Sending password reset link...');
         try {
-            const RESET_PAGE_URL = `${window.location.origin}/reset-password.html`;
-            const actionCodeSettings = {
-                url: RESET_PAGE_URL,
-                handleCodeInApp: true
-            };
-            await sendPasswordResetEmail(auth, email, actionCodeSettings);
+            const apiBaseUrl = String(window.__EMAIL_API_BASE_URL__ || EMAIL_API_BASE_URL || '').trim().replace(/\/+$/, '');
+            const resetPageUrl = `${window.location.origin}/reset-password.html`;
+
+            if (apiBaseUrl) {
+                const response = await fetch(`${apiBaseUrl}/api/public/password-reset-request`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email,
+                        resetPageUrl
+                    })
+                });
+
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok || !result.ok) {
+                    throw new Error(result.error || `Reset email request failed (${response.status})`);
+                }
+            } else {
+                const actionCodeSettings = {
+                    url: resetPageUrl,
+                    handleCodeInApp: true
+                };
+                await sendPasswordResetEmail(auth, email, actionCodeSettings);
+            }
+
             showSuccess(`Password reset link sent to ${email}. Check inbox/spam.`);
         } catch (error) {
             let errorMessage = 'Failed to send reset email.';
@@ -436,7 +458,6 @@ if (signupFormElement) {
             const userCredential = await createUserWithEmailAndPassword(auth, email, password);
             const user = userCredential.user;
 
-            console.log('User created in Auth:', user.uid);
 
             try {
                 // Check if this is the first user
@@ -460,10 +481,7 @@ if (signupFormElement) {
                     createdBy: 'self'
                 };
 
-                console.log('Saving to Firestore:', userData);
-
                 await setDoc(doc(db, 'users', user.uid), userData, { merge: true });
-                console.log('User saved to Firestore with ID:', user.uid);
 
                 // Success message
                 if (isFirstUser) {
@@ -487,7 +505,6 @@ if (signupFormElement) {
                 // If Firestore save fails, delete the Auth user
                 try {
                     await user.delete();
-                    console.log('Auth user deleted due to Firestore error');
                 } catch (deleteError) {
                     console.error('Could not delete Auth user:', deleteError);
                 }

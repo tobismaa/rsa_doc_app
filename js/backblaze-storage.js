@@ -84,7 +84,6 @@ export class BackblazeStorage {
         }
 
         try {
-            console.log('Initializing Backblaze connection via server endpoint...');
             const authData = await this.callProxy('authorize');
 
             this.apiUrl = authData.apiUrl;
@@ -103,7 +102,6 @@ export class BackblazeStorage {
                 bucketId: this.bucketId
             };
 
-            console.log('Backblaze initialized successfully');
             return true;
         } catch (error) {
             console.error('Initialization Error:', error);
@@ -169,7 +167,6 @@ export class BackblazeStorage {
 
             const publicUrl = `${this.downloadUrl}/file/${this.bucketName}/${encodeURIComponent(fileName)}`;
 
-            console.log('File uploaded:', fileName);
             return {
                 fileId: uploadResult.fileId,
                 fileName: uploadResult.fileName || fileName,

@@ -51,6 +51,40 @@ function safeLowerEmail(value) {
     return normalizeEmail(value);
 }
 
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function resolveAllowedOrigin(req) {
+    const reqOrigin = String(req.header('Origin') || '').trim();
+    if (reqOrigin && (allowedOrigins.length === 0 || allowedOrigins.includes(reqOrigin))) {
+        return reqOrigin;
+    }
+    return allowedOrigins[0] || '';
+}
+
+function buildResetPageUrl(req, candidateUrl) {
+    const raw = String(candidateUrl || '').trim();
+    const fallbackOrigin = resolveAllowedOrigin(req);
+    const fallbackUrl = fallbackOrigin ? `${fallbackOrigin.replace(/\/+$/, '')}/reset-password.html` : '';
+
+    if (!raw) return fallbackUrl;
+
+    try {
+        const parsed = new URL(raw);
+        const parsedOrigin = parsed.origin;
+        const allowed = allowedOrigins.length === 0 || allowedOrigins.includes(parsedOrigin);
+        return allowed ? parsed.toString() : fallbackUrl;
+    } catch (_) {
+        return fallbackUrl;
+    }
+}
+
 async function resolveUserMapByEmail(emails) {
     const out = new Map();
     for (const email of emails) {
@@ -205,6 +239,108 @@ app.post('/api/send-alert', authMiddleware, async (req, res) => {
         return res.status(500).json({
             ok: false,
             error: String(err?.message || 'Failed to send alert email')
+        });
+    }
+});
+
+app.post('/api/public/password-reset-request', async (req, res) => {
+    try {
+        if (!sendgridApiKey || !defaultFromEmail) {
+            return res.status(503).json({
+                ok: false,
+                error: 'SendGrid is not configured on this service'
+            });
+        }
+
+        const email = normalizeEmail(req.body?.email);
+        const resetPageUrl = buildResetPageUrl(req, req.body?.resetPageUrl);
+
+        if (!email) {
+            return res.status(400).json({ ok: false, error: 'Valid email is required' });
+        }
+        if (!resetPageUrl) {
+            return res.status(400).json({ ok: false, error: 'Reset page URL is not configured' });
+        }
+
+        let userRecord = null;
+        try {
+            userRecord = await admin.auth().getUserByEmail(email);
+        } catch (err) {
+            if (String(err?.code || '') !== 'auth/user-not-found') {
+                throw err;
+            }
+        }
+
+        if (!userRecord) {
+            return res.json({
+                ok: true,
+                message: 'If the account exists, a reset link will be sent.'
+            });
+        }
+
+        const generatedLink = await admin.auth().generatePasswordResetLink(email);
+        const generatedUrl = new URL(generatedLink);
+        const oobCode = String(generatedUrl.searchParams.get('oobCode') || '').trim();
+        const mode = String(generatedUrl.searchParams.get('mode') || 'resetPassword').trim();
+        const apiKey = String(generatedUrl.searchParams.get('apiKey') || '').trim();
+        const lang = String(generatedUrl.searchParams.get('lang') || 'en').trim();
+
+        if (!oobCode) {
+            throw new Error('Generated password reset link is missing oobCode');
+        }
+
+        const customResetUrl = new URL(resetPageUrl);
+        customResetUrl.searchParams.set('mode', mode);
+        customResetUrl.searchParams.set('oobCode', oobCode);
+        if (apiKey) customResetUrl.searchParams.set('apiKey', apiKey);
+        if (lang) customResetUrl.searchParams.set('lang', lang);
+
+        const safeEmail = escapeHtml(email);
+        const safeResetUrl = escapeHtml(customResetUrl.toString());
+
+        await sgMail.send({
+            to: email,
+            from: defaultFromEmail,
+            subject: 'Reset your CMBank RSA password',
+            text: [
+                'We received a request to reset your CMBank RSA password.',
+                '',
+                `Open this link to continue: ${customResetUrl.toString()}`,
+                '',
+                'If you did not request this, you can ignore this email.'
+            ].join('\n'),
+            html: `
+                <div style="font-family:Segoe UI,Arial,sans-serif;background:#f5f8fc;padding:24px;">
+                    <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #dbe5f0;border-radius:18px;overflow:hidden;box-shadow:0 16px 40px rgba(0,51,102,0.12);">
+                        <div style="background:linear-gradient(135deg,#003366,#0b5cab);padding:24px;color:#ffffff;">
+                            <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;opacity:.9;">CMBank RSA Portal</div>
+                            <h1 style="margin:10px 0 0;font-size:24px;line-height:1.25;">Reset your password</h1>
+                            <p style="margin:10px 0 0;font-size:14px;line-height:1.6;color:#dbeafe;">A password reset was requested for ${safeEmail}.</p>
+                        </div>
+                        <div style="padding:24px;color:#0f172a;">
+                            <p style="margin:0 0 16px;font-size:14px;line-height:1.7;">Use the button below to open the CMBank RSA reset page and choose a new password.</p>
+                            <p style="margin:0 0 22px;">
+                                <a href="${safeResetUrl}" style="display:inline-block;background:linear-gradient(135deg,#003366,#0b5cab);color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:10px;font-size:14px;font-weight:700;">Open Reset Page</a>
+                            </p>
+                            <p style="margin:0 0 12px;font-size:13px;line-height:1.7;color:#475569;">If the button does not open, copy and paste this link into your browser:</p>
+                            <p style="margin:0;font-size:12px;line-height:1.7;word-break:break-all;color:#0b5cab;">${safeResetUrl}</p>
+                        </div>
+                        <div style="padding:18px 24px;background:#f8fbff;border-top:1px solid #e5edf6;color:#64748b;font-size:12px;line-height:1.6;">
+                            If you did not request this reset, you can safely ignore this email.
+                        </div>
+                    </div>
+                </div>
+            `
+        });
+
+        return res.json({
+            ok: true,
+            message: 'If the account exists, a reset link will be sent.'
+        });
+    } catch (err) {
+        return res.status(500).json({
+            ok: false,
+            error: String(err?.message || 'Failed to send password reset email')
         });
     }
 });
@@ -414,8 +550,8 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
                 notification: {
                     title,
                     body,
-                    icon: '/favicon.svg',
-                    badge: '/favicon.svg',
+          icon: '/favicon.png?v=20260416f',
+          badge: '/icons/icon-192.png?v=20260416f',
                     data: { url: clickUrl }
                 }
             }
@@ -561,8 +697,8 @@ app.post('/api/submission/status-push', authMiddleware, async (req, res) => {
                 notification: {
                     title,
                     body,
-                    icon: '/favicon.svg',
-                    badge: '/favicon.svg',
+          icon: '/favicon.png?v=20260416f',
+          badge: '/icons/icon-192.png?v=20260416f',
                     data: { url: clickUrl }
                 }
             }

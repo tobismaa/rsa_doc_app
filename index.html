@@ -6,9 +6,12 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="theme-color" content="#0f3b67">
     <title>CMBank RSA Document Portal</title>
-    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="manifest" href="manifest.webmanifest?v=20260416f">
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=20260416f">
+    <link rel="icon" type="image/png" href="favicon.png?v=20260416f">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=20260416f">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="css/index.css">
+    <link rel="stylesheet" href="css/index.css?v=20260416f">
     <!-- Security: DOMPurify for XSS protection -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <style>
@@ -234,6 +237,12 @@
                     <button type="submit" class="auth-submit-btn">Sign In</button>
                 </form>
 
+                <div style="margin-top:12px; text-align:center;">
+                    <button type="button" id="forgotPasswordBtn" class="modal-button" style="background:transparent; color:#0b5cab; box-shadow:none; margin-top:0; padding:0; font-size:13px; font-weight:600;">
+                        Forgot Password?
+                    </button>
+                </div>
+
                 <p class="auth-note">Only authorized CMBank personnel can access</p>
             </div>
 
@@ -327,11 +336,31 @@
         </div>
     </div>
 
-    <script type="module" src="js/firebase-config.js"></script>
-    <script type="module" src="js/auth.js?v=20260308"></script>
-    <link rel="stylesheet" href="css/pwa-install.css">
-    <script src="js/pwa-install.js"></script>
-    <link rel="stylesheet" href="css/developer-badge.css">
-    <script src="js/developer-badge.js"></script>
+    <div id="forgotPasswordModal" class="modal">
+        <div class="modal-content" style="text-align:left; max-width:420px;">
+            <h3 style="margin:0 0 8px; color:#003366;">Reset Your Password</h3>
+            <p style="margin:0 0 16px; color:#475569; font-size:14px; line-height:1.5;">
+                Enter your account email and we’ll send you a secure reset link.
+            </p>
+            <div class="form-group" style="margin-bottom:0;">
+                <label for="forgotPasswordEmail">
+                    <i class="fas fa-envelope"></i>
+                    Email
+                </label>
+                <input type="email" id="forgotPasswordEmail" placeholder="Enter your email" maxlength="100">
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:18px;">
+                <button type="button" id="forgotPasswordCancelBtn" class="modal-button" style="background:#e2e8f0; color:#0f172a; margin-top:0;">Cancel</button>
+                <button type="button" id="forgotPasswordSendBtn" class="modal-button" style="margin-top:0;">Send Link</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="js/firebase-config.js?v=20260416f"></script>
+    <script type="module" src="js/auth.js?v=20260417a"></script>
+    <link rel="stylesheet" href="css/pwa-install.css?v=20260416f">
+    <script src="js/pwa-install.js?v=20260416d"></script>
+    <link rel="stylesheet" href="css/developer-badge.css?v=20260416f">
+    <script src="js/developer-badge.js?v=20260416f"></script>
 </body>
 </html>

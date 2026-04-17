@@ -1,0 +1,251 @@
+/* ==================== SHARED DASHBOARD STYLES ==================== */
+/* Unified button, spacing, and layout styles for all dashboards */
+
+:root {
+  --cm-primary: #003366;
+  --cm-primary-dark: #002244;
+  --cm-primary-light: #004080;
+  --cm-secondary: #0066b3;
+  --cm-gold: #b8860b;
+  --cm-gold-light: #d4a017;
+  --success: #28a745;
+  --danger: #dc3545;
+  --warning: #ffc107;
+  --info: #17a2b8;
+  --white: #ffffff;
+  --bg-body: #f4f7fa;
+  --text-main: #2c3e50;
+  --border-color: #e2e8f0;
+  --radius-md: 6px;
+  --transition-normal: 0.3s ease;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+}
+
+/* ========== BUTTONS ========== */
+button,
+.action-btn,
+.modal-button,
+.sign-out-btn,
+.approve-btn,
+.reject-btn {
+  font-family: inherit;
+  font-size: 15px;
+  padding: var(--spacing-sm) var(--spacing-lg);
+  border-radius: var(--radius-md);
+  border: none;
+  outline: none;
+  cursor: pointer;
+  transition: background var(--transition-normal), color var(--transition-normal), box-shadow var(--transition-normal);
+  box-shadow: none;
+  margin: 0 4px 8px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-btn,
+.modal-button {
+  background: var(--cm-primary);
+  color: var(--white);
+}
+.action-btn:hover,
+.modal-button:hover {
+  background: var(--cm-primary-light);
+}
+
+.sign-out-btn {
+  background: var(--danger);
+  color: var(--white);
+}
+.sign-out-btn:hover {
+  background: var(--danger-dark, #b71c1c);
+}
+
+.approve-btn {
+  background: var(--success);
+  color: var(--white);
+}
+.approve-btn:hover {
+  background: #218838;
+}
+
+.reject-btn {
+  background: var(--danger);
+  color: var(--white);
+}
+.reject-btn:hover {
+  background: var(--danger-dark);
+}
+
+/* ========== UNIFIED REFRESH BUTTON STYLING ========== */
+.refresh-btn,
+.forceRefreshBtn,
+[id*="forceRefresh"] {
+  padding: 10px 14px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  border-radius: 999px !important;
+  background: linear-gradient(120deg, #0f3b67, #1e6cb9) !important;
+  color: #ffffff !important;
+  border: 1px solid #0f4d8a !important;
+  box-shadow: 0 3px 10px rgba(15, 59, 103, 0.12) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  cursor: pointer !important;
+}
+
+.refresh-btn:hover,
+.forceRefreshBtn:hover,
+[id*="forceRefresh"]:hover {
+  background: linear-gradient(120deg, #0d335b, #1b5fa4) !important;
+  box-shadow: 0 8px 18px rgba(15, 59, 103, 0.24) !important;
+  transform: translateY(-2px) !important;
+}
+
+.refresh-btn:active,
+.forceRefreshBtn:active,
+[id*="forceRefresh"]:active {
+  transform: translateY(0) !important;
+  box-shadow: 0 2px 6px rgba(15, 59, 103, 0.15) !important;
+}
+
+.refresh-btn i,
+.forceRefreshBtn i,
+[id*="forceRefresh"] i {
+  font-size: 14px !important;
+  transition: transform 0.4s linear !important;
+}
+
+.refresh-btn.loading i,
+.forceRefreshBtn.loading i,
+[id*="forceRefresh"].loading i {
+  transform: rotate(360deg) !important;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ========== UNIFIED SUB-TAB STYLING ========== */
+[id*="SubTabs"],
+.admin-subtab-strip,
+.subtab-strip {
+  display: flex !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+  margin: 0 0 14px !important;
+}
+
+[id*="SubTabs"] button,
+[id*="SubTabs"] [role="tab"],
+.admin-subtab-strip button,
+.admin-subtab-strip [role="tab"],
+.subtab-strip button,
+.subtab-strip [role="tab"],
+.admin-subtab-btn,
+.subtab-btn {
+  border: 1px solid #d5dfeb !important;
+  background: #eef3f9 !important;
+  color: #1e293b !important;
+  border-radius: 999px !important;
+  padding: 8px 14px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  box-shadow: 0 3px 10px rgba(2, 16, 43, 0.06) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease !important;
+  cursor: pointer !important;
+}
+
+[id*="SubTabs"] button:hover,
+[id*="SubTabs"] [role="tab"]:hover,
+.admin-subtab-strip button:hover,
+.admin-subtab-strip [role="tab"]:hover,
+.subtab-strip button:hover,
+.subtab-strip [role="tab"]:hover,
+.admin-subtab-btn:hover,
+.subtab-btn:hover {
+  transform: translateY(-1px) !important;
+  background: #e2ebf7 !important;
+  box-shadow: 0 8px 16px rgba(2, 16, 43, 0.12) !important;
+}
+
+[id*="SubTabs"] button.active,
+[id*="SubTabs"] [role="tab"][aria-selected="true"],
+.admin-subtab-strip button.active,
+.admin-subtab-strip [role="tab"][aria-selected="true"],
+.subtab-strip button.active,
+.subtab-strip [role="tab"][aria-selected="true"],
+.admin-subtab-btn.active,
+.subtab-btn.active {
+  background: linear-gradient(120deg, #0f3b67, #1e6cb9) !important;
+  color: #ffffff !important;
+  border-color: #0f4d8a !important;
+  box-shadow: 0 10px 18px rgba(15, 59, 103, 0.24) !important;
+}
+
+/* ========== GENERAL LAYOUT ========== */
+.app-container {
+  display: flex;
+  min-height: 100vh;
+  position: relative;
+}
+
+.sidebar {
+  width: 280px;
+  background: linear-gradient(180deg, var(--cm-primary) 0%, var(--cm-primary-dark) 100%);
+  color: white;
+  position: fixed;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s ease;
+}
+
+/* Responsive: stack on mobile */
+@media (max-width: 900px) {
+  .sidebar {
+    width: 100vw;
+    height: auto;
+    position: static;
+    box-shadow: none;
+  }
+  .app-container {
+    flex-direction: column;
+  }
+}
+
+/* ========== TABLES ========== */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+}
+th, td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+}
+th {
+  background: var(--bg-body);
+  font-weight: 600;
+}
+
+/* ========== BADGES ========== */
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--cm-secondary);
+  color: white;
+  margin-left: 6px;
+}

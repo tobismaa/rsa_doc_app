@@ -5,16 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=0.8, maximum-scale=1.0, user-scalable=yes">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="theme-color" content="#0f3b67">
-    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="manifest" href="manifest.webmanifest?v=20260416f">
     <title>Payment Dashboard - CMBank RSA</title>
-    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=20260416f">
+    <link rel="icon" type="image/png" href="favicon.png?v=20260416f">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=20260416f">
     <script src="js/console-guard.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260409">
+    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260416f">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260416f">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 </head>
 <body>
-    <script src="js/security-utils.js"></script>
+    <script src="js/security-utils.js?v=20260416f"></script>
 
     <div class="app-container">
         <aside class="sidebar admin-sidebar" id="sidebar">
@@ -29,7 +32,7 @@
                     <span id="paymentUserName">Loading...</span>
                     <small>Payment Officer</small>
                 </div>
-                <button class="sign-out-btn" onclick="window.signOutUser()" title="Sign Out">
+                <button class="sign-out-btn" id="signOutBtnSidebar" title="Sign Out">
                     <i class="fas fa-sign-out-alt"></i>
                 </button>
             </div>
@@ -184,14 +187,23 @@
     <script src="js/table-enhancer.js?v=20260412"></script>
     <script type="module" src="js/payment-dashboard.js?v=20260415e"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
-    <link rel="stylesheet" href="css/app-chat.css?v=20260416a">
-    <script type="module" src="js/app-chat.js?v=20260416b"></script>
+    <link rel="stylesheet" href="css/app-chat.css?v=20260416q">
+    <script type="module" src="js/app-chat.js?v=20260416o"></script>
     <link rel="stylesheet" href="css/pwa-install.css">
-    <script src="js/pwa-install.js"></script>
+    <script src="js/pwa-install.js?v=20260416d"></script>
     <link rel="stylesheet" href="css/profile-card.css">
     <link rel="stylesheet" href="css/sop-help.css">
     <script src="js/sop-help.js"></script>
     <link rel="stylesheet" href="css/developer-badge.css">
     <script src="js/developer-badge.js"></script>
 </body>
+<script>
+// Attach sign-out event listener after DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    const btnSidebar = document.getElementById('signOutBtnSidebar');
+    if (btnSidebar && typeof window.signOutUser === 'function') {
+        btnSidebar.addEventListener('click', window.signOutUser);
+    }
+});
+</script>
 </html>

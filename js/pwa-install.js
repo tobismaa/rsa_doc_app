@@ -1,7 +1,25 @@
 (function () {
   const DISMISS_KEY = 'pwa_install_dismissed_until';
+  const INSTALLED_KEY = 'pwa_install_completed';
   const ONE_DAY = 24 * 60 * 60 * 1000;
   let deferredPrompt = null;
+
+  function isStandalone() {
+    try {
+      return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function isInstalled() {
+    return localStorage.getItem(INSTALLED_KEY) === '1' || isStandalone();
+  }
+
+  function markInstalled() {
+    localStorage.setItem(INSTALLED_KEY, '1');
+    localStorage.setItem(DISMISS_KEY, String(Date.now() + (3650 * ONE_DAY)));
+  }
 
   function dismissed() {
     const until = Number(localStorage.getItem(DISMISS_KEY) || 0);
@@ -31,20 +49,31 @@
       setDismiss(2);
     });
     document.getElementById('pwaInstallNowBtn')?.addEventListener('click', async () => {
-      if (deferredPrompt) {
-        deferredPrompt.prompt();
-        try { await deferredPrompt.userChoice; } catch (_) {}
-        deferredPrompt = null;
+      if (isInstalled()) {
         banner.classList.remove('active');
-        setDismiss(10);
         return;
       }
-      alert('Use your browser menu and choose "Install App" to install this portal.');
+      if (!deferredPrompt) return;
+      banner.classList.remove('active');
+      deferredPrompt.prompt();
+      try {
+        const choice = await deferredPrompt.userChoice;
+        if (choice?.outcome === 'accepted') {
+          markInstalled();
+        } else {
+          setDismiss(2);
+        }
+      } catch (_) {
+        setDismiss(2);
+      }
+      deferredPrompt = null;
     });
     return banner;
   }
 
   function maybeShowBanner() {
+    if (isInstalled()) return;
+    if (!deferredPrompt) return;
     if (dismissed()) return;
     const banner = ensureBanner();
     banner.classList.add('active');
@@ -52,7 +81,7 @@
 
   function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+    navigator.serviceWorker.register('/service-worker.js?v=20260416a').catch(() => {});
   }
 
   window.addEventListener('beforeinstallprompt', (e) => {
@@ -62,7 +91,8 @@
   });
 
   window.addEventListener('appinstalled', () => {
-    setDismiss(30);
+    markInstalled();
+    deferredPrompt = null;
     const banner = document.getElementById('pwaInstallBanner');
     if (banner) banner.classList.remove('active');
   });
@@ -70,10 +100,12 @@
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       registerServiceWorker();
+      if (isStandalone()) markInstalled();
       setTimeout(maybeShowBanner, 900);
     }, { once: true });
   } else {
     registerServiceWorker();
+    if (isStandalone()) markInstalled();
     setTimeout(maybeShowBanner, 900);
   }
 })();

@@ -15,6 +15,14 @@ import {
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { queueUploaderFinalSubmissionEmail } from './email-alerts.js';
 import { notifyStatusChangePush } from './status-push.js';
+import {
+    getUserFullName as getUserFullNameShared,
+    normalizeEmail as normalizeEmailShared
+} from './shared/user-directory.js';
+import {
+    getUploaderRoutingRule as getUploaderRoutingRuleShared,
+    routingRuleDocId as routingRuleDocIdShared
+} from './shared/uploader-routing.js';
 
 // ==================== DOCUMENT TYPES MAPPING ====================
 const DOCUMENT_TYPES = {
@@ -122,30 +130,15 @@ function getApprovedTimestamp(sub) {
 }
 
 function normalizeEmail(email) {
-    return String(email || '').trim().toLowerCase();
+    return normalizeEmailShared(email);
 }
 
 function routingRuleDocId(uploaderEmail) {
-    return encodeURIComponent(normalizeEmail(uploaderEmail));
+    return routingRuleDocIdShared(uploaderEmail);
 }
 
 async function getUploaderRoutingRule(uploaderEmail) {
-    const normalizedUploader = normalizeEmail(uploaderEmail);
-    if (!normalizedUploader) return null;
-    try {
-        const snap = await getDoc(doc(db, 'uploaderRoutingRules', routingRuleDocId(normalizedUploader)));
-        if (!snap.exists()) return null;
-        const data = snap.data() || {};
-        if (data.enabled === false) return null;
-        return {
-            uploaderEmail: normalizedUploader,
-            reviewerEmail: normalizeEmail(data.reviewerEmail),
-            rsaEmail: normalizeEmail(data.rsaEmail),
-            paymentEmail: normalizeEmail(data.paymentEmail)
-        };
-    } catch (_) {
-        return null;
-    }
+    return getUploaderRoutingRuleShared(db, uploaderEmail);
 }
 
 async function isActivePaymentUser(email) {
@@ -253,26 +246,12 @@ async function assignPaymentRoundRobin(submissionId) {
 }
 
 async function getUserFullName(email) {
-    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const normalizedEmail = normalizeEmailShared(email);
     if (!normalizedEmail) return '';
     if (userFullNameCache.has(normalizedEmail)) return userFullNameCache.get(normalizedEmail);
-
-    try {
-        const userQuery = query(collection(db, 'users'), where('email', '==', normalizedEmail));
-        const userSnapshot = await getDocs(userQuery);
-        if (!userSnapshot.empty) {
-            const userData = userSnapshot.docs[0].data();
-            const fullName = userData.fullName || userData.displayName || normalizedEmail.split('@')[0];
-            userFullNameCache.set(normalizedEmail, fullName);
-            return fullName;
-        }
-    } catch (error) {
-        console.warn('Could not load user full name:', normalizedEmail, error);
-    }
-
-    const fallbackName = normalizedEmail.split('@')[0];
-    userFullNameCache.set(normalizedEmail, fallbackName);
-    return fallbackName;
+    const fullName = await getUserFullNameShared(db, normalizedEmail);
+    userFullNameCache.set(normalizedEmail, fullName);
+    return fullName;
 }
 
 async function loadCurrentRsaProfile(user) {
@@ -946,13 +925,11 @@ function updateApprovedCount() {
 }
 
 function switchTab(tabId) {
-    console.log('Switching to tab:', tabId);
     currentTab = tabId;
     document.querySelectorAll('.nav-item').forEach(nav=>nav.classList.remove('active'));
     document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
     document.querySelectorAll('.tab-content').forEach(tab=>tab.classList.remove('active'));
     const targetTab = document.getElementById(`${tabId}Tab`);
-    console.log('Target tab element:', targetTab);
     targetTab?.classList.add('active');
     const titles = {
         approved: 'Processing to PFA',
@@ -997,20 +974,15 @@ function renderCurrentTab() {
 
 function renderFinallySubmittedTab() {
     const finallySubmittedTableBody = document.getElementById('finallySubmittedTableBody');
-    console.log('finallySubmittedTableBody element:', finallySubmittedTableBody);
     if (!finallySubmittedTableBody) {
         console.error('finallySubmittedTableBody not found!');
         return;
     }
 
-    console.log('All submissions:', allSubmissions);
-    console.log('Filtering for finally submitted records');
     // Support both old structure (rsaSubmitted=true) and new structure (finalSubmitted=true)
     let list = allSubmissions.filter(s => {
-        console.log('Checking submission:', s.customerName, 'finalSubmitted:', s.finalSubmitted, 'rsaSubmitted:', s.rsaSubmitted);
         return s.finalSubmitted === true || s.rsaSubmitted === true;
     });
-    console.log('Finally submitted list after filter:', list);
 
     // Apply filters
     const finalSearch = document.getElementById('finalSearch');
@@ -1026,12 +998,10 @@ function renderFinallySubmittedTab() {
     }
 
     if (list.length === 0) {
-        console.log('No finally submitted records, showing empty message');
         finallySubmittedTableBody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:#666">No finally submitted applications</td></tr>';
         return;
     }
 
-    console.log('Rendering', list.length, 'finally submitted records');
     const htmlRows = list.map(sub => {
         const reviewer = sub.reviewedByName || sub.reviewedBy || '-';
         const uploader = sub.uploadedByName || sub.uploadedBy || '-';
@@ -1060,10 +1030,7 @@ function renderFinallySubmittedTab() {
     });
 
     const joinedHtml = htmlRows.join('');
-    console.log('Generated HTML length:', joinedHtml.length);
-    console.log('First 200 chars of HTML:', joinedHtml.substring(0, 200));
     finallySubmittedTableBody.innerHTML = joinedHtml;
-    console.log('Table body innerHTML set successfully');
 
     updateFinallySubmittedCount();
 }
@@ -1158,9 +1125,7 @@ window.finalSubmitRsa = async (submissionId) => {
                 uploaderEmail: sub.uploadedBy,
                 customerName: sub.customerName || '',
                 rsaEmail: currentUser?.email || ''
-            }).catch((emailError) => {
-                console.warn('uploader final submission email queue failed:', emailError);
-            });
+            }).catch(() => {});
         }
         notifyStatusChangePush({
             currentUser,

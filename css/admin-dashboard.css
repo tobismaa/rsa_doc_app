@@ -1,3 +1,5 @@
+@import url('shared-dashboard.css');
+
 /* ==================== ADMIN DASHBOARD CSS ==================== */
 /* Styles for CMBank RSA Admin Dashboard */
 
@@ -359,6 +361,93 @@ body {
   color: #ffffff !important;
   border-color: #0f4d8a !important;
   box-shadow: 0 10px 18px rgba(15, 59, 103, 0.24);
+}
+
+/* ==================== UNIFIED REFRESH BUTTON STYLING ==================== */
+.refresh-btn,
+#forceRefreshBtn,
+#forceRefreshBtnMobile {
+  padding: 10px 14px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  border-radius: 999px !important;
+  background: linear-gradient(120deg, #0f3b67, #1e6cb9) !important;
+  color: #ffffff !important;
+  border: 1px solid #0f4d8a !important;
+  box-shadow: 0 3px 10px rgba(15, 59, 103, 0.12) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  cursor: pointer !important;
+}
+
+.refresh-btn:hover,
+#forceRefreshBtn:hover,
+#forceRefreshBtnMobile:hover {
+  background: linear-gradient(120deg, #0d335b, #1b5fa4) !important;
+  box-shadow: 0 8px 18px rgba(15, 59, 103, 0.24) !important;
+  transform: translateY(-2px) !important;
+}
+
+.refresh-btn:active,
+#forceRefreshBtn:active,
+#forceRefreshBtnMobile:active {
+  transform: translateY(0) !important;
+  box-shadow: 0 2px 6px rgba(15, 59, 103, 0.15) !important;
+}
+
+.refresh-btn i,
+#forceRefreshBtn i,
+#forceRefreshBtnMobile i {
+  font-size: 14px !important;
+  transition: transform 0.4s linear !important;
+}
+
+.refresh-btn.loading i,
+#forceRefreshBtn.loading i,
+#forceRefreshBtnMobile.loading i {
+  transform: rotate(360deg) !important;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Ensure adminSubTabs uses correct styling */
+#adminSubTabs {
+  display: flex !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+  margin: 0 0 14px !important;
+}
+
+#adminSubTabs button {
+  border: 1px solid #d5dfeb !important;
+  background: #eef3f9 !important;
+  color: #1e293b !important;
+  border-radius: 999px !important;
+  padding: 8px 14px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  box-shadow: 0 3px 10px rgba(2, 16, 43, 0.06) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease !important;
+  cursor: pointer !important;
+}
+
+#adminSubTabs button:hover {
+  transform: translateY(-1px) !important;
+  background: #e2ebf7 !important;
+  box-shadow: 0 8px 16px rgba(2, 16, 43, 0.12) !important;
+}
+
+#adminSubTabs button.active {
+  background: linear-gradient(120deg, #0f3b67, #1e6cb9) !important;
+  color: #ffffff !important;
+  border-color: #0f4d8a !important;
+  box-shadow: 0 10px 18px rgba(15, 59, 103, 0.24) !important;
 }
 
 .report-content {
@@ -1121,6 +1210,37 @@ body {
   border: 1px solid var(--border-color);
 }
 
+.action-btn i {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.users-table .action-buttons .action-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+}
+
+.users-table .action-buttons .action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.14);
+}
+
+.users-table .action-buttons .view-btn {
+  background: #e0f2fe;
+  color: #075985;
+  border-color: #7dd3fc;
+}
+
+.users-table .action-buttons .view-btn:hover {
+  background: #0ea5e9;
+  color: #ffffff;
+  border-color: #0ea5e9;
+}
+
 .view-btn-small {
   background: #eff6ff;
   color: var(--info);
@@ -1147,6 +1267,18 @@ body {
   transform: translateY(-1px);
 }
 
+.users-table .action-buttons .edit-btn {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fbbf24;
+}
+
+.users-table .action-buttons .edit-btn:hover {
+  background: #f59e0b;
+  color: #ffffff;
+  border-color: #f59e0b;
+}
+
 .deactivate-btn {
   background: #fef2f2;
   color: var(--danger);
@@ -1158,6 +1290,30 @@ body {
   color: white;
   border-color: var(--danger);
   transform: translateY(-1px);
+}
+
+.users-table .action-buttons .activate-btn {
+  background: #dcfce7;
+  color: #166534;
+  border-color: #86efac;
+}
+
+.users-table .action-buttons .activate-btn:hover {
+  background: #16a34a;
+  color: #ffffff;
+  border-color: #16a34a;
+}
+
+.users-table .action-buttons .delete-btn {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.users-table .action-buttons .delete-btn:hover {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #dc2626;
 }
 
 /* Pending agent table action buttons */

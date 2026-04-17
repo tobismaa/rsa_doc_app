@@ -2,6 +2,11 @@
 import { auth, db } from './firebase-config.js';
 import { queueUploaderApprovedEmail, queueUploaderRejectedEmail, queueRsaApprovalEmail } from './email-alerts.js';
 import { notifyStatusChangePush } from './status-push.js';
+import {
+    getUserFullName as getUserFullNameShared,
+    normalizeEmail as normalizeEmailShared
+} from './shared/user-directory.js';
+import { getUploaderRoutingRule as getUploaderRoutingRuleShared, routingRuleDocId as routingRuleDocIdShared } from './shared/uploader-routing.js';
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
     collection,
@@ -155,29 +160,14 @@ async function fetchWithCorsFallback(url) {
 
 // ==================== GET USER FULL NAME BY EMAIL ====================
 async function getUserFullName(email) {
-    if (!email) return 'Unknown';
-    
-    if (userFullNameCache.has(email)) {
-        return userFullNameCache.get(email);
+    const normalized = normalizeEmailShared(email);
+    if (!normalized) return 'Unknown';
+    if (userFullNameCache.has(normalized)) {
+        return userFullNameCache.get(normalized);
     }
-    
-    try {
-        const userQuery = query(collection(db, 'users'), where('email', '==', email));
-        const userSnapshot = await getDocs(userQuery);
-        
-        if (!userSnapshot.empty) {
-            const userData = userSnapshot.docs[0].data();
-            const fullName = userData.fullName || userData.displayName || email.split('@')[0];
-            userFullNameCache.set(email, fullName);
-            return fullName;
-        }
-    } catch (err) {
-        console.warn('Could not fetch user name for:', email);
-    }
-    
-    const fallbackName = email.split('@')[0];
-    userFullNameCache.set(email, fallbackName);
-    return fallbackName;
+    const fullName = await getUserFullNameShared(db, normalized);
+    userFullNameCache.set(normalized, fullName);
+    return fullName;
 }
 
 // ==================== CHECK IF FILE IS PDF ====================
@@ -1077,29 +1067,15 @@ function updateViewerNavigation(currentIndex) {
 const RSA_COUNTER_DOC = doc(db, 'counters', 'roundRobinRSA');
 
 function normalizeEmail(email) {
-    return String(email || '').trim().toLowerCase();
+    return normalizeEmailShared(email);
 }
 
 function routingRuleDocId(uploaderEmail) {
-    return encodeURIComponent(normalizeEmail(uploaderEmail));
+    return routingRuleDocIdShared(uploaderEmail);
 }
 
 async function getUploaderRoutingRule(uploaderEmail) {
-    const normalizedUploader = normalizeEmail(uploaderEmail);
-    if (!normalizedUploader) return null;
-    try {
-        const snap = await getDoc(doc(db, 'uploaderRoutingRules', routingRuleDocId(normalizedUploader)));
-        if (!snap.exists()) return null;
-        const data = snap.data() || {};
-        if (data.enabled === false) return null;
-        return {
-            uploaderEmail: normalizedUploader,
-            reviewerEmail: normalizeEmail(data.reviewerEmail),
-            rsaEmail: normalizeEmail(data.rsaEmail)
-        };
-    } catch (_) {
-        return null;
-    }
+    return getUploaderRoutingRuleShared(db, uploaderEmail);
 }
 
 async function isActiveRSAUser(email) {

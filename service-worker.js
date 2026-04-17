@@ -1,4 +1,7 @@
-const CACHE_NAME = 'cmbank-rsa-v2';
+const CACHE_NAME = 'cmbank-rsa-v4';
+const BADGE_DB_NAME = 'cmbank-badge-db';
+const BADGE_STORE_NAME = 'appState';
+const BADGE_COUNT_KEY = 'unreadCount';
 const ASSETS = [
   '/',
   '/index.html',
@@ -25,9 +28,73 @@ const ASSETS = [
   '/js/super-admin.js',
   '/js/pwa-install.js',
   '/js/app-chat.js',
+  '/favicon.png',
   '/favicon.svg',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
   '/manifest.webmanifest'
 ];
+
+function openBadgeDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(BADGE_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(BADGE_STORE_NAME)) {
+        db.createObjectStore(BADGE_STORE_NAME);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function getBadgeCount() {
+  try {
+    const db = await openBadgeDb();
+    return await new Promise((resolve) => {
+      const tx = db.transaction(BADGE_STORE_NAME, 'readonly');
+      const store = tx.objectStore(BADGE_STORE_NAME);
+      const req = store.get(BADGE_COUNT_KEY);
+      req.onsuccess = () => resolve(Number(req.result || 0) || 0);
+      req.onerror = () => resolve(0);
+    });
+  } catch (_) {
+    return 0;
+  }
+}
+
+async function setBadgeCount(count) {
+  const safeCount = Math.max(0, Number(count) || 0);
+  try {
+    const db = await openBadgeDb();
+    await new Promise((resolve) => {
+      const tx = db.transaction(BADGE_STORE_NAME, 'readwrite');
+      tx.objectStore(BADGE_STORE_NAME).put(safeCount, BADGE_COUNT_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    });
+  } catch (_) {}
+  try {
+    if ('setAppBadge' in self.registration) {
+      if (safeCount > 0) {
+        await self.registration.setAppBadge(safeCount);
+      } else if ('clearAppBadge' in self.registration) {
+        await self.registration.clearAppBadge();
+      }
+    }
+  } catch (_) {}
+  const allClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+  allClients.forEach((client) => {
+    client.postMessage({ type: 'app-unread-count', count: safeCount });
+  });
+}
+
+async function incrementBadgeCount(step = 1) {
+  const current = await getBadgeCount();
+  await setBadgeCount(current + Math.max(1, Number(step) || 1));
+}
 
 // FCM background notifications support.
 // Keep in service worker so push can display when app is minimized/background.
@@ -50,11 +117,12 @@ try {
     const title = String(payload?.notification?.title || 'New Chat Message');
     const body = String(payload?.notification?.body || 'You have a new message');
     const clickUrl = String(payload?.data?.clickUrl || payload?.fcmOptions?.link || '/dashboard.html');
-
+    incrementBadgeCount(1).catch(() => {});
     self.registration.showNotification(title, {
       body,
-      icon: '/favicon.svg',
-      badge: '/favicon.svg',
+      icon: '/favicon.png?v=20260416f',
+      badge: '/icons/icon-192.png?v=20260416f',
+      requireInteraction: true,
       data: { url: clickUrl }
     });
   });
@@ -101,6 +169,7 @@ self.addEventListener('notificationclick', (event) => {
   );
 
   event.waitUntil((async () => {
+    await setBadgeCount(0);
     const allClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
     const sameClient = allClients.find((c) => {
       try { return c.url && c.url.startsWith(self.location.origin); } catch (_) { return false; }

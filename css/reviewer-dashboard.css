@@ -1,6 +1,7 @@
-/* ==================== VIEWER DASHBOARD CSS ==================== */
-/* PROFESSIONAL BANKING STYLE - FULLY RESPONSIVE MOBILE SUPPORT */
-/* Enhanced for CMBank RSA Viewer Dashboard */
+@import url('shared-dashboard.css');
+
+/* ==================== REVIEWER DASHBOARD CSS ==================== */
+/* Aligned to uploader dashboard sizing baseline */
 
 /* ==================== CSS RESET & BASE ==================== */
 * {
@@ -14,23 +15,19 @@
   --cm-primary: #003366;
   --cm-primary-dark: #002244;
   --cm-primary-light: #004080;
-  --cm-primary-rgb: 0, 51, 102;
   --cm-gold: #b8860b;
   --cm-gold-light: #d4a017;
-  --cm-gold-rgb: 184, 134, 11;
   --cm-secondary: #0066b3;
-  
+
   /* Semantic Colors */
-  --success: #10b981;
-  --success-dark: #059669;
-  --danger: #ef4444;
-  --danger-dark: #dc2626;
-  --warning: #f59e0b;
-  --warning-dark: #d97706;
-  --info: #3b82f6;
-  --info-dark: #2563eb;
-  
-  /* Neutral Colors - Banking Standard */
+  --success: #28a745;
+  --success-dark: #218838;
+  --danger: #dc3545;
+  --danger-dark: #c82333;
+  --warning: #ffc107;
+  --info: #17a2b8;
+
+  /* Neutral Colors */
   --white: #ffffff;
   --gray-50: #f8fafc;
   --gray-100: #f1f5f9;
@@ -42,35 +39,33 @@
   --gray-700: #334155;
   --gray-800: #1e293b;
   --gray-900: #0f172a;
-  
-  /* Background */
-  --bg-body: #f0f4f9;
+  --bg-body: #f4f7fa;
   --bg-card: #ffffff;
-  --bg-sidebar: #0b1e33;
-  
-  /* Shadows - Professional */
+  --text-main: #2c3e50;
+  --text-muted: #6c757d;
+
+  /* Shadows */
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
   --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
   --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   --shadow-inner: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);
   --shadow-gold: 0 10px 25px -5px rgba(184, 134, 11, 0.2);
-  
-  /* Border Radius - Professional */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
+
+  /* Border Radius */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
   --radius-xl: 12px;
   --radius-2xl: 16px;
   --radius-full: 9999px;
-  
+
   /* Transitions */
-  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
-  
-  /* Spacing - Professional */
+  --transition-fast: 0.2s ease;
+  --transition-normal: 0.3s ease;
+
+  /* Spacing */
   --spacing-xs: 4px;
   --spacing-sm: 8px;
   --spacing-md: 12px;
@@ -79,16 +74,17 @@
   --spacing-2xl: 24px;
   --spacing-3xl: 32px;
   --spacing-4xl: 40px;
+  --spacing-xxl: 24px;
+  --warning-dark: #d97706;
+  --info-dark: #2563eb;
 }
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--bg-body);
-  color: var(--gray-800);
+  color: var(--text-main);
   line-height: 1.5;
   overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ==================== APP LAYOUT ==================== */
@@ -98,61 +94,55 @@ body {
   position: relative;
 }
 
-/* ==================== SIDEBAR - Professional Banking Style ==================== */
 .sidebar {
-  width: 300px;
-  background: linear-gradient(180deg, var(--cm-primary) 0%, #002855 100%);
+  width: 280px;
+  background: linear-gradient(180deg, var(--cm-primary) 0%, var(--cm-primary-dark) 100%);
   color: white;
   position: fixed;
   height: 100vh;
   display: flex;
   flex-direction: column;
   z-index: 1000;
-  box-shadow: 4px 0 20px rgba(0, 20, 40, 0.15);
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.1);
   transition: transform 0.3s ease;
 }
 
 .sidebar .logo {
-  padding: var(--spacing-2xl) var(--spacing-xl);
+  padding: var(--spacing-xl) var(--spacing-lg);
   display: flex;
   align-items: center;
-  gap: var(--spacing-md);
+  gap: var(--spacing-sm);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .sidebar .logo i {
-  font-size: 30px;
+  font-size: 24px;
   color: var(--cm-gold);
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
 }
 
 .sidebar .logo span {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: 0.5px;
   color: var(--cm-gold);
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-/* User Profile */
 .user-profile {
-  padding: var(--spacing-xl) var(--spacing-xl);
+  padding: var(--spacing-lg);
   display: flex;
   align-items: center;
-  gap: var(--spacing-md);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
+  gap: var(--spacing-sm);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .user-profile img {
-  width: 52px;
-  height: 52px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.2);
   object-fit: cover;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
 }
 
 .user-info {
@@ -161,47 +151,39 @@ body {
 
 .user-info span {
   display: block;
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 600;
-  color: white;
-  margin-bottom: 2px;
 }
 
 .user-info small {
-  font-size: 12px;
+  font-size: 11px;
   opacity: 0.7;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--cm-gold-light);
 }
 
-/* Sign Out Button */
 .sign-out-btn {
   background: rgba(255, 255, 255, 0.1);
   border: none;
   color: white;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.3s ease;
-  backdrop-filter: blur(5px);
 }
 
 .sign-out-btn:hover {
   background: var(--danger);
-  transform: rotate(90deg) scale(1.1);
-  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+  transform: rotate(90deg);
 }
 
-/* Navigation Menu */
 .nav-menu {
+  padding: var(--spacing-lg);
   flex: 1;
-  padding: var(--spacing-xl) var(--spacing-lg);
-  overflow-y: auto;
 }
 
 .nav-item {
@@ -211,33 +193,29 @@ body {
   padding: var(--spacing-md) var(--spacing-lg);
   color: rgba(255, 255, 255, 0.7);
   text-decoration: none;
-  border-radius: var(--radius-lg);
-  margin-bottom: 4px;
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-xs);
   transition: all 0.3s ease;
   font-weight: 500;
-  font-size: 15px;
-  position: relative;
-  border: 1px solid transparent;
+  font-size: 14px;
 }
 
 .nav-item:hover {
   background: rgba(255, 255, 255, 0.1);
   color: white;
   transform: translateX(4px);
-  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .nav-item.active {
   background: var(--cm-gold);
   color: white;
   box-shadow: 0 4px 12px rgba(184, 134, 11, 0.3);
-  border-color: transparent;
 }
 
 .nav-item i {
-  width: 24px;
+  width: 20px;
   text-align: center;
-  font-size: 18px;
+  font-size: 16px;
 }
 
 /* Dashboard stat cards */
@@ -2254,6 +2232,16 @@ body {
   
   .merge-list-container {
     max-height: 200px;
+  }
+  
+  .merge-btn {
+    width: 100%;
+    padding: 12px;
+    min-width: auto;
+  }
+  
+  .merge-action-buttons {
+    flex-direction: column;
   }
   
   /* Comment modal */
