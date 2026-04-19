@@ -2133,7 +2133,6 @@ async function submitCustomer() {
         customerName,
         uploaderEmail: currentUser?.email || ''
       }).catch((emailErr) => {
-        console.warn('viewer assignment email failed:', emailErr);
         return { queued: true, sent: false, reason: 'send-failed' };
       });
 

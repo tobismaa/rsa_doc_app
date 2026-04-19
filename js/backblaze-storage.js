@@ -104,7 +104,6 @@ export class BackblazeStorage {
 
             return true;
         } catch (error) {
-            console.error('Initialization Error:', error);
             this.initFailed = true;
             this.initErrorMessage = String(error?.message || 'Initialization failed');
             throw error;
@@ -174,7 +173,6 @@ export class BackblazeStorage {
                 timestamp: Date.now()
             };
         } catch (error) {
-            console.error('Upload Error:', error);
             throw error;
         }
     }

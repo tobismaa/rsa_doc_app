@@ -223,7 +223,6 @@ async function queueEmailNotification({ eventKey, to, subject, textLines, htmlLi
 
         return { queued: true, sent: true };
     } catch (err) {
-        console.error('Email send failed:', err);
         await updateDoc(guardRef, {
             status: 'failed',
             lastError: String(err?.message || err || 'unknown-error'),

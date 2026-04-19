@@ -221,7 +221,6 @@ async function imageToPdf(imageBlob, imageName) {
                 }
             }
         } catch (embedError) {
-            console.error('Embed error:', embedError);
             throw new Error(`Failed to embed image: ${embedError.message}`);
         }
         
@@ -240,7 +239,6 @@ async function imageToPdf(imageBlob, imageName) {
         
         return await pdfDoc.save();
     } catch (error) {
-        console.error('Image to PDF conversion error:', error);
         throw new Error(`Failed to convert image to PDF: ${error.message}`);
     }
 }
@@ -273,7 +271,6 @@ async function saveFileWithLocationPicker(blob, defaultFileName) {
         if (error.name === 'AbortError') {
             showNotification('Save cancelled', 'info');
         } else {
-            console.error('Save error:', error);
             showNotification('Save failed: ' + error.message, 'error');
             
             // Fallback to direct download
@@ -311,7 +308,6 @@ async function saveBlobToFolderPicker(blob, defaultFileName, customerName = 'Cus
         if (error.name === 'AbortError') {
             showNotification('Save cancelled', 'info');
         } else {
-            console.error('Save error (folder picker):', error);
             showNotification('Save failed: ' + error.message, 'error');
             // As a last resort try the save-file picker
             await saveFileWithLocationPicker(blob, defaultFileName);
@@ -390,7 +386,6 @@ window.downloadAll = async (submissionId) => {
                 await writable.write(blob);
                 await writable.close();
             } catch (err) {
-                console.error(`Failed to download ${docTypeLabel}:`, err);
                 showNotification(`ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â Failed: ${docTypeLabel}`, 'warning');
             }
         }
@@ -401,7 +396,6 @@ window.downloadAll = async (submissionId) => {
         if (error.name === 'AbortError') {
             showNotification('Download cancelled', 'info');
         } else {
-            console.error('Download error:', error);
             showNotification('Download failed: ' + error.message, 'error');
         }
     } finally {
@@ -543,7 +537,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     userName.textContent = user.displayName || user.email.split('@')[0];
                 }
             } catch (err) {
-                console.error('Error fetching user data:', err);
                 currentUserData = { email: user.email, fullName: user.displayName || user.email, role: 'reviewer', status: 'active' };
                 userName.textContent = user.displayName || user.email.split('@')[0];
             }
@@ -710,11 +703,9 @@ async function loadSubmissions() {
 
     try {
         onSnapshot(q, processSnapshot, async (error) => {
-            console.error('live query failed, falling back to one-time load:', error);
             await loadSubmissionsFallback();
         });
     } catch (error) {
-        console.error('onSnapshot failed, falling back:', error);
         await loadSubmissionsFallback();
     }
 }
@@ -758,7 +749,6 @@ async function loadSubmissionsFallback() {
         if (typeof renderRecentReviews === 'function') renderRecentReviews();
         showNotification('Live updates unavailable. Showing latest data.', 'info');
     } catch (error) {
-        console.error('Fallback load failed:', error);
         showNotification('Could not load submissions: ' + error.message, 'error');
     }
 }
@@ -1183,10 +1173,8 @@ async function assignRoundRobinRSA(submissionRef) {
                     reviewedBy: subData.reviewedBy || 'N/A',
                     assignmentMethod
                 });
-                console.log(`ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ RSA Assignment tracked: ${subData.customerName} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ${assigned}`);
             }
         } catch (e) {
-            console.warn('Could not track RSA assignment in history:', e);
         }
     }
     
@@ -1263,7 +1251,6 @@ async function reviewDocument(action) {
                     reviewerEmail: currentUser?.email || '',
                     uploaderEmail
                 }).catch((emailError) => {
-                    console.warn('RSA approval email queue failed:', emailError);
                 });
             }
 
@@ -1275,7 +1262,6 @@ async function reviewDocument(action) {
                     reviewerEmail: currentUser?.email || '',
                     rsaEmail: rsaAssigned || ''
                 }).catch((emailError) => {
-                    console.warn('uploader approval email queue failed:', emailError);
                 });
             }
             notifyStatusChangePush({
@@ -1307,7 +1293,6 @@ async function reviewDocument(action) {
                     reviewerEmail: currentUser?.email || '',
                     rejectionReason: comment || ''
                 }).catch((emailError) => {
-                    console.warn('uploader rejection email queue failed:', emailError);
                 });
             }
             notifyStatusChangePush({
@@ -1326,7 +1311,6 @@ async function reviewDocument(action) {
         closeModal(commentModal);
 
     } catch (error) {
-        console.error('Review error:', error);
         showNotification('Failed to update status: ' + error.message, 'error');
     }
 }
@@ -1403,7 +1387,6 @@ async function saveCurrentDocumentWithPicker() {
         // prompt folder and save inside customer subfolder
         await saveBlobToFolderPicker(blob, cleanFileName, customerName);
     } catch (error) {
-        console.error('Save error:', error);
         showNotification('Save failed: ' + error.message, 'error');
     } finally {
         hideLoader();

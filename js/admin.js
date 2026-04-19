@@ -347,7 +347,6 @@ async function saveBlobToFolderPicker(blob, defaultFileName, customerName = 'Cus
         if (error.name === 'AbortError') {
             showNotification('Save cancelled', 'info');
         } else {
-            console.error('Save error (folder picker):', error);
             showNotification('Save failed: ' + error.message, 'error');
             downloadBlobAsFile(blob, defaultFileName);
         }
@@ -1608,7 +1607,6 @@ window.downloadAllSubmission = async (submissionId) => {
                     setTimeout(() => progressModal.remove(), 300);
                     return;
                 }
-                console.log('Folder picker not supported or cancelled, falling back to individual downloads');
             }
         }
 
@@ -1692,7 +1690,6 @@ window.downloadAllSubmission = async (submissionId) => {
                 updateProgress(i + 1, docs.length, `Completed ${i + 1} of ${docs.length}`, '');
 
             } catch (docError) {
-                console.error(`Error downloading document ${i + 1}:`, docError);
                 failedCount++;
                 updateProgress(i + 1, docs.length, `Failed document ${i + 1}`, docItem.name || 'Unknown');
                 showNotification(`Failed to download: ${docItem.name}`, 'error');
@@ -1719,7 +1716,6 @@ window.downloadAllSubmission = async (submissionId) => {
         if (error?.name === 'AbortError') {
             showNotification('Download cancelled', 'info');
         } else {
-            console.error('Download all error:', error);
             showNotification('Download failed: ' + (error?.message || 'Unknown error'), 'error');
         }
 

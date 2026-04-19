@@ -9,6 +9,16 @@ const REQUIRED_FIELDS = [
   { key: 'whatsappLocalNumber', label: 'WhatsApp Number' }
 ];
 
+const WHATSAPP_COUNTRY_CODES = [
+  { code: '+234', label: 'Nigeria', flag: '🇳🇬' },
+  { code: '+233', label: 'Ghana', flag: '🇬🇭' },
+  { code: '+254', label: 'Kenya', flag: '🇰🇪' },
+  { code: '+27', label: 'South Africa', flag: '🇿🇦' },
+  { code: '+1', label: 'United States', flag: '🇺🇸' },
+  { code: '+44', label: 'United Kingdom', flag: '🇬🇧' },
+  { code: '+971', label: 'United Arab Emirates', flag: '🇦🇪' }
+];
+
 function normalizeText(value) {
   return String(value || '').trim();
 }
@@ -74,6 +84,15 @@ function buildModal(missing = [], existing = {}) {
       border-radius: 8px;
       font-size: 14px;
     }
+    .profile-guard-grid select {
+      width: 100%;
+      margin-top: 6px;
+      padding: 10px 11px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 14px;
+      background: #fff;
+    }
     .profile-guard-grid .span-2 {
       grid-column: span 2;
     }
@@ -112,6 +131,10 @@ function buildModal(missing = [], existing = {}) {
   backdrop.id = 'profileGuardModal';
   backdrop.className = 'profile-guard-backdrop';
   const missingList = missing.map((f) => `<li>${f.label}</li>`).join('');
+  const selectedCode = normalizeText(existing.whatsappCode || '+234');
+  const countryCodeOptions = WHATSAPP_COUNTRY_CODES.map((item) => `
+    <option value="${item.code}" ${item.code === selectedCode ? 'selected' : ''}>${item.flag} ${item.code} ${item.label}</option>
+  `).join('');
   backdrop.innerHTML = `
     <div class="profile-guard-modal" role="dialog" aria-modal="true" aria-labelledby="profileGuardTitle">
       <div id="profileGuardTitle" class="profile-guard-head">Complete Your Profile</div>
@@ -126,7 +149,7 @@ function buildModal(missing = [], existing = {}) {
             <input id="pgLocation" type="text" value="${normalizeText(existing.location)}" placeholder="Enter location">
           </label>
           <label>WhatsApp Country Code
-            <input id="pgWhatsappCode" type="text" value="${normalizeText(existing.whatsappCode || '+234')}" placeholder="+234">
+            <select id="pgWhatsappCode">${countryCodeOptions}</select>
           </label>
           <label>WhatsApp Number
             <input id="pgWhatsappLocal" type="text" value="${normalizeText(existing.whatsappLocalNumber)}" placeholder="10 digits">

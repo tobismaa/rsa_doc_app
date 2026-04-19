@@ -268,7 +268,6 @@ async function loadCurrentRsaProfile(user) {
             currentRsaProfileData = profileData;
         }
     } catch (error) {
-        console.error('Failed to fetch RSA user profile:', error);
     }
 
     const displayName = profileData?.fullName || profileData?.displayName || user.displayName || email.split('@')[0] || 'RSA User';
@@ -340,7 +339,6 @@ async function imageToPdf(imageBlob, imageName) {
         const pdfBytes = await pdfDoc.save();
         return pdfBytes;
     } catch (e) {
-        console.error('imageToPdf error',e);
         throw e;
     }
 }
@@ -391,7 +389,6 @@ async function saveBlobToFolderPicker(blob, defaultFileName, customerName='Custo
         if (error.name === 'AbortError') {
             showNotification('Save cancelled','info');
         } else {
-            console.error('Save error (folder picker):',error);
             showNotification('Save failed: '+error.message,'error');
             await saveFileWithLocationPicker(blob, defaultFileName);
         }
@@ -675,7 +672,6 @@ async function handleMergeDocuments() {
                     try {
                         response = await fetchWithCorsFallback(doc.fileUrl);
                     } catch (fetchError) {
-                        console.error('Fetch error:',fetchError);
                         showNotification(`⚠️ Could not fetch document ${processedCount}, skipping...`,'warning');
                         continue;
                     }
@@ -698,7 +694,6 @@ async function handleMergeDocuments() {
                             copiedPages.forEach(page=>mergedPdf.addPage(page));
                             successCount++;
                         } catch (pdfError) {
-                            console.error('PDF load error:',pdfError);
                             if (isImageFile(fileName)) {
                                 showNotification(`🔄 Attempting to convert as image...`,'info');
                                 try {
@@ -746,7 +741,6 @@ async function handleMergeDocuments() {
                             copiedPages.forEach(page=>mergedPdf.addPage(page));
                             successCount++;
                         } catch (pdfError) {
-                            console.error('PDF load error:',pdfError);
                             throw new Error(`Invalid PDF file: ${file.name}`);
                         }
                     } else if (fileName.match(/\.(jpg|jpeg|png|gif|bmp|webp)$/)) {
@@ -765,7 +759,6 @@ async function handleMergeDocuments() {
                     }
                 }
             } catch (itemError) {
-                console.error('Error processing item:',itemError);
                 showNotification(`⚠️ Error processing item ${processedCount}: ${itemError.message}`,'warning');
             }
         }
@@ -798,7 +791,6 @@ async function handleMergeDocuments() {
             document.getElementById('saveMergedPdf')?.addEventListener('click', saveMergedPDFWithPicker);
         }
     } catch (error) {
-        console.error('Merge error:',error);
         showNotification('Failed to merge: ' + error.message,'error');
     } finally {
         mergeInProgress = false;
@@ -909,7 +901,6 @@ function loadQueue() {
         updateApprovedCount();
         renderCurrentTab();
     }, (err) => {
-        console.error('loadQueue error', err);
         showNotification('Could not load approved applications: ' + err.message, 'error');
     });
 }
@@ -975,7 +966,6 @@ function renderCurrentTab() {
 function renderFinallySubmittedTab() {
     const finallySubmittedTableBody = document.getElementById('finallySubmittedTableBody');
     if (!finallySubmittedTableBody) {
-        console.error('finallySubmittedTableBody not found!');
         return;
     }
 
@@ -1160,7 +1150,6 @@ window.finalSubmitRsa = async (submissionId) => {
 
         showNotification(`Final submission recorded. Status set to Sent to PFA${assignedPayment ? ` and assigned to ${assignedPayment}` : ''}.`, 'success');
     } catch (error) {
-        console.error('Final submission error:', error);
         showNotification('Final submission failed: ' + (error?.message || 'Unknown error'), 'error');
     } finally {
         hideLoader();
@@ -1385,7 +1374,6 @@ window.downloadDocumentRSA = async (submissionId, docIndex) => {
         downloadBlobAsFile(blob, doc.name);
         showNotification('✅ Download started', 'success');
     } catch (error) {
-        console.error('Download error:', error);
         showNotification('Download failed: ' + error.message, 'error');
     } finally {
         hideLoader();
@@ -1440,7 +1428,6 @@ window.downloadAllRsa = async (submissionId) => {
         if (error?.name === 'AbortError') {
             showNotification('Download cancelled', 'info');
         } else {
-            console.error('Download all error:', error);
             showNotification('Download failed: ' + (error?.message || 'Unknown error'), 'error');
         }
     } finally {

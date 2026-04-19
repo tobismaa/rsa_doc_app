@@ -717,6 +717,4 @@ app.post('/api/submission/status-push', authMiddleware, async (req, res) => {
     }
 });
 
-app.listen(port, () => {
-    console.log(`RSA email API running on port ${port}`);
-});
+app.listen(port);

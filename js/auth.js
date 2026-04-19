@@ -500,13 +500,11 @@ if (signupFormElement) {
                 }, 2000);
 
             } catch (firestoreError) {
-                console.error('Firestore error:', firestoreError);
                 
                 // If Firestore save fails, delete the Auth user
                 try {
                     await user.delete();
                 } catch (deleteError) {
-                    console.error('Could not delete Auth user:', deleteError);
                 }
                 
                 if (firestoreError.code === 'permission-denied') {
@@ -517,7 +515,6 @@ if (signupFormElement) {
             }
 
         } catch (authError) {
-            console.error('Auth error details:', authError);
             
             // Handle specific Firebase errors
             let errorMessage = '';
@@ -611,7 +608,6 @@ if (loginFormElement) {
             }
 
         } catch (error) {
-            console.error('Login error:', error);
             
             let errorMessage = '';
             
@@ -646,7 +642,6 @@ window.signOutUser = async () => {
         await signOut(auth);
         window.location.href = 'index.html';
     } catch (error) {
-        console.error('Sign out error:', error);
         showError('Error signing out');
     }
 };
