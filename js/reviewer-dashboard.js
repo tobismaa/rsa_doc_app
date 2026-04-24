@@ -5,8 +5,8 @@ import { notifyStatusChangePush } from './status-push.js';
 import {
     getUserFullName as getUserFullNameShared,
     normalizeEmail as normalizeEmailShared
-} from './shared/user-directory.js';
-import { getUploaderRoutingRule as getUploaderRoutingRuleShared, routingRuleDocId as routingRuleDocIdShared } from './shared/uploader-routing.js';
+} from './shared/user-directory.js?v=20260423b';
+import { getUploaderRoutingRule as getUploaderRoutingRuleShared, routingRuleDocId as routingRuleDocIdShared } from './shared/uploader-routing.js?v=20260423c';
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
     collection,
@@ -104,6 +104,8 @@ const viewerContextBox = document.getElementById('viewerContextBox');
 const notification = document.getElementById('notification');
 const pageTitle = document.getElementById('pageTitle');
 const pendingCountBadge = document.getElementById('pendingCount');
+const approvedCountBadge = document.getElementById('approvedCount');
+const rejectedCountBadge = document.getElementById('rejectedCount');
 const zoomInBtn = document.getElementById('zoomInBtn');
 const zoomOutBtn = document.getElementById('zoomOutBtn');
 const zoomResetBtn = document.getElementById('zoomResetBtn');
@@ -125,7 +127,7 @@ function renderProfileTab() {
     const whatsapp = currentUserData?.whatsappNumber || currentUserData?.phone || '-';
     const location = currentUserData?.location || '-';
     const role = String(currentUserData?.role || 'reviewer');
-    const normalizedRole = role === 'viewer' ? 'reviewer' : role;
+    const normalizedRole = role;
     const status = String(currentUserData?.status || 'active');
     if (profileNameEl) profileNameEl.textContent = fullName;
     if (profileRegisteredAtEl) profileRegisteredAtEl.textContent = registeredAt;
@@ -144,18 +146,42 @@ async function fetchWithCorsFallback(url) {
     const cleanUrl = url?.toString().trim().replace(/[\s\n\r\t]+/g, '');
     if (!cleanUrl) throw new Error('Invalid URL');
 
-    const response = await fetch(cleanUrl, {
-        mode: 'cors',
-        credentials: 'omit',
-        headers: {
-            'Accept': 'application/pdf, image/*, */*'
+    try {
+        const response = await fetch(cleanUrl, {
+            mode: 'cors',
+            credentials: 'omit',
+            headers: {
+                'Accept': 'application/pdf, image/*, */*'
+            }
+        });
+        if (!response.ok) {
+            throw new Error(`Document fetch failed: ${response.status}`);
         }
-    });
+        return response;
+    } catch (error) {
+        const proxyUrl = getBackblazeDownloadProxyUrl(cleanUrl);
+        if (!proxyUrl) {
+            error.corsBlocked = true;
+            throw error;
+        }
 
-    if (!response.ok) {
-        throw new Error(`Document fetch failed: ${response.status}`);
+        const proxyResponse = await fetch(proxyUrl, { credentials: 'same-origin' });
+        if (!proxyResponse.ok) {
+            throw new Error(`Document proxy failed: ${proxyResponse.status}`);
+        }
+        return proxyResponse;
     }
-    return response;
+}
+
+function getBackblazeDownloadProxyUrl(cleanUrl) {
+    try {
+        const parsed = new URL(cleanUrl);
+        const isBackblaze = parsed.protocol === 'https:' && /\.backblazeb2\.com$/i.test(parsed.hostname);
+        if (!isBackblaze || !parsed.pathname.startsWith('/file/cmbank-rsa-documents/')) return '';
+        return `/api/backblaze-download.php?url=${encodeURIComponent(cleanUrl)}`;
+    } catch (error) {
+        return '';
+    }
 }
 
 // ==================== GET USER FULL NAME BY EMAIL ====================
@@ -329,6 +355,21 @@ function downloadBlobAsFile(blob, fileName) {
     showNotification('ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Download started', 'success');
 }
 
+function openDirectDocumentDownload(fileUrl, fileName = 'document.pdf') {
+    const cleanUrl = fileUrl?.toString().trim().replace(/[\s\n\r\t]+/g, '');
+    if (!cleanUrl) return false;
+
+    const link = document.createElement('a');
+    link.href = cleanUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.download = (fileName || 'document.pdf').replace(/[\\/:*?"<>|]/g, '_');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    return true;
+}
+
 // ==================== DOWNLOAD ALL TO FOLDER (folder picker) ====================
 window.downloadAll = async (submissionId) => {
     const sub = allSubmissions.find(s => s.id === submissionId);
@@ -367,6 +408,9 @@ window.downloadAll = async (submissionId) => {
         const safeCustomerName = sub.customerName.replace(/[^a-zA-Z0-9\s_-]/g, '_').trim();
         const customerFolder = await dirHandle.getDirectoryHandle(safeCustomerName, { create: true });
         const totalDocs = sub.documents.length;
+        let savedCount = 0;
+        let directOpenedCount = 0;
+        let failedCount = 0;
 
         for (const [index, doc] of sub.documents.entries()) {
             const docTypeLabel = DOCUMENT_TYPES[doc.documentType] || doc.documentType || 'Document';
@@ -385,12 +429,23 @@ window.downloadAll = async (submissionId) => {
                 const writable = await fileHandle.createWritable();
                 await writable.write(blob);
                 await writable.close();
+                savedCount++;
             } catch (err) {
+                if (openDirectDocumentDownload(fileUrl, outputFileName)) {
+                    directOpenedCount++;
+                    showNotification(`Storage blocked secure save for ${docTypeLabel}; opened directly.`, 'warning');
+                    continue;
+                }
+                failedCount++;
                 showNotification(`ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â Failed: ${docTypeLabel}`, 'warning');
             }
         }
 
         showLoader('Finalizing...');
+        if (failedCount > 0 || directOpenedCount > 0) {
+            showNotification(`Saved ${savedCount}, opened ${directOpenedCount} directly, ${failedCount} failed`, 'warning');
+            return;
+        }
         showNotification(`ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ All documents saved to: ${safeCustomerName}/`, 'success');
     } catch (error) {
         if (error.name === 'AbortError') {
@@ -552,7 +607,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const snapshot = await getDocs(q);
 
             const role = String(snapshot.docs[0]?.data()?.role || '').toLowerCase();
-            if (!snapshot.empty && (role === 'reviewer' || role === 'viewer')) {
+            if (!snapshot.empty && role === 'reviewer') {
                 renderProfileTab();
                 loadSubmissions();
             } else {
@@ -755,10 +810,23 @@ async function loadSubmissionsFallback() {
 
 // ==================== UPDATE PENDING COUNT ====================
 function updatePendingCount() {
+    updateNavCounts();
+}
+
+function updateNavCounts() {
     const pendingSubmissions = allSubmissions.filter(sub => sub.status === 'pending').length;
-    if (pendingCountBadge) {
-        pendingCountBadge.textContent = pendingSubmissions;
-    }
+    const approvedSubmissions = allSubmissions.filter(sub => isRsaProcessingStatus(sub.status) && sub.reviewedBy === currentUser?.email).length;
+    const rejectedSubmissions = allSubmissions.filter(sub => sub.status === 'rejected' && sub.reviewedBy === currentUser?.email).length;
+    [
+        [pendingCountBadge, pendingSubmissions],
+        [approvedCountBadge, approvedSubmissions],
+        [rejectedCountBadge, rejectedSubmissions]
+    ].forEach(([badge, count]) => {
+        if (badge) {
+            badge.textContent = String(count);
+            badge.style.display = 'inline-block';
+        }
+    });
 }
 
 // --- DASHBOARD HELPERS ---
@@ -769,6 +837,7 @@ function updateDashboardCards() {
     document.getElementById('vCardApprovedCount') && (document.getElementById('vCardApprovedCount').textContent = approved);
     document.getElementById('vCardPendingCount') && (document.getElementById('vCardPendingCount').textContent = pending);
     document.getElementById('vCardRejectedCount') && (document.getElementById('vCardRejectedCount').textContent = rejected);
+    updateNavCounts();
 }
 
 function renderRecentReviews() {
@@ -1078,7 +1147,8 @@ async function isActiveRSAUser(email) {
         const data = snap.docs[0].data() || {};
         const role = String(data.role || '').toLowerCase();
         const status = String(data.status || 'active').toLowerCase();
-        return role === 'rsa' && status !== 'deactivated';
+        const leaveStatus = String(data.leaveStatus || '').toLowerCase();
+        return role === 'rsa' && status !== 'deactivated' && leaveStatus !== 'on_leave';
     } catch (_) {
         return false;
     }
@@ -1089,7 +1159,7 @@ async function getRSAEmails() {
     const snap = await getDocs(q);
     return snap.docs
         .map(d => d.data() || {})
-        .filter((u) => String(u.status || 'active').toLowerCase() !== 'deactivated')
+        .filter((u) => String(u.status || 'active').toLowerCase() !== 'deactivated' && String(u.leaveStatus || '').toLowerCase() !== 'on_leave')
         .map(u => u.email)
         .filter(Boolean)
         .sort(); // alphabetical so order is deterministic
@@ -1387,7 +1457,13 @@ async function saveCurrentDocumentWithPicker() {
         // prompt folder and save inside customer subfolder
         await saveBlobToFolderPicker(blob, cleanFileName, customerName);
     } catch (error) {
-        showNotification('Save failed: ' + error.message, 'error');
+        const safeCustomerName = customerName.replace(/[^a-zA-Z0-9\s_-]/g, '_').trim() || 'Customer';
+        const cleanFileName = `${safeCustomerName}_${docType}.pdf`.replace(/[\\/:*?"<>|]/g, '_');
+        if (openDirectDocumentDownload(fileUrl, cleanFileName || originalName)) {
+            showNotification('Storage blocked secure save, so the document opened directly.', 'warning');
+        } else {
+            showNotification('Save failed: ' + error.message, 'error');
+        }
     } finally {
         hideLoader();
     }

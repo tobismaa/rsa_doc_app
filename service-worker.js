@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cmbank-rsa-v4';
+const CACHE_NAME = 'cmbank-rsa-v15';
 const BADGE_DB_NAME = 'cmbank-badge-db';
 const BADGE_STORE_NAME = 'appState';
 const BADGE_COUNT_KEY = 'unreadCount';
@@ -146,6 +146,28 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin !== self.location.origin) return;
+
+  const isHtmlRequest =
+    event.request.mode === 'navigate' ||
+    requestUrl.pathname.endsWith('.html') ||
+    requestUrl.pathname === '/' ||
+    requestUrl.pathname === '';
+
+  if (isHtmlRequest) {
+    event.respondWith(
+      fetch(event.request)
+        .then((resp) => {
+          const copy = resp.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
+          return resp;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || Response.error()))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
@@ -155,7 +177,7 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
           return resp;
         })
-        .catch(() => cached);
+        .catch(() => cached || Response.error());
     })
   );
 });
@@ -169,7 +191,6 @@ self.addEventListener('notificationclick', (event) => {
   );
 
   event.waitUntil((async () => {
-    await setBadgeCount(0);
     const allClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
     const sameClient = allClients.find((c) => {
       try { return c.url && c.url.startsWith(self.location.origin); } catch (_) { return false; }

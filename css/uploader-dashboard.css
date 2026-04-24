@@ -690,6 +690,7 @@ body {
 
 .action-btn {
   background: transparent;
+  color: var(--text-main);
   border: 1px solid #e2e8f0;
   padding: 6px 12px;
   border-radius: 6px;
@@ -706,6 +707,42 @@ body {
 .action-btn.track-btn:hover { background: var(--cm-gold-light); }
 .action-btn.edit-btn { background: var(--warning); color: #333; border: none; }
 .action-btn.edit-btn:hover:not(:disabled) { background: #e0a800; }
+
+/* Keep table action buttons isolated from shared dashboard button styles */
+.customers-table td .action-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  min-width: 34px;
+  min-height: 32px;
+  padding: 6px 10px;
+  line-height: 1;
+  justify-content: center;
+  vertical-align: middle;
+  background-image: none;
+  box-shadow: none;
+  background-clip: padding-box;
+}
+
+.customers-table td .action-btn + .action-btn {
+  margin-left: 6px;
+}
+
+.customers-table td .action-btn i {
+  display: block;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.customers-table td .action-btn:not(.view-btn-small):not(.track-btn):not(.edit-btn) {
+  background: var(--cm-primary);
+  color: #fff;
+  border: none;
+}
+
+.customers-table td .action-btn:not(.view-btn-small):not(.track-btn):not(.edit-btn):hover {
+  background: var(--cm-primary-light);
+}
 
 .loading-row {
   text-align: center;

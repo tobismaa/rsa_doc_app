@@ -293,10 +293,9 @@ function calculateLoan() {
         showNotification('RSA balance outside property range', 'error');
         return;
     }
-    const twentyFivePercent = balance * 0.25;
-    // Round down to nearest thousand.
-    const rawLoanAmount = rule.value - twentyFivePercent;
-    const loanAmount = Math.max(0, Math.floor(rawLoanAmount / 1000) * 1000);
+    const twentyFivePercent = Math.max(0, Math.floor((balance * 0.25) / 1000) * 1000);
+    // Both 25% contribution and loan amount stay in thousands.
+    const loanAmount = Math.max(0, Math.ceil((rule.value - twentyFivePercent) / 1000) * 1000);
     document.getElementById('calc25Percent').textContent = formatCurrency(twentyFivePercent);
     document.getElementById('calcFacilityFee').textContent = formatCurrency(rule.fee);
     document.getElementById('calcPropertyType').textContent = rule.name;
@@ -486,9 +485,21 @@ function updateDashboardCards() {
         return st === 'processing_to_pfa' || st === 'approved';
     }).length;
     const rejected = allSubmissions.filter(s => s.status === 'rejected').length;
+    const paid = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'paid').length;
     document.getElementById('cardPendingCount') && (document.getElementById('cardPendingCount').textContent = pending);
     document.getElementById('cardApprovedCount') && (document.getElementById('cardApprovedCount').textContent = approved);
     document.getElementById('cardRejectedCount') && (document.getElementById('cardRejectedCount').textContent = rejected);
+    const setBadge = (id, count) => {
+        const badge = document.getElementById(id);
+        if (badge) {
+            badge.textContent = String(count);
+            badge.style.display = 'inline-block';
+        }
+    };
+    setBadge('pendingCount', pending);
+    setBadge('approvedCount', approved);
+    setBadge('rejectedCount', rejected);
+    setBadge('paidCount', paid);
 }
 
 function renderRecentTable() {

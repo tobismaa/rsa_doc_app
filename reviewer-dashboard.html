@@ -12,8 +12,8 @@
     <title>CMBank RSA - Reviewer Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260416f">
-    <link rel="stylesheet" href="css/reviewer-dashboard.css?v=20260416f">
+    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
+    <link rel="stylesheet" href="css/reviewer-dashboard.css?v=20260423b">
     <!-- PDF-Lib for client-side PDF merging -->
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     </head>
@@ -74,14 +74,20 @@
                 <a href="#" class="nav-item" data-tab="approved">
                     <i class="fas fa-check-circle"></i>
                     <span>Approved</span>
+                    <span class="badge" id="approvedCount">0</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="rejected">
                     <i class="fas fa-times-circle"></i>
                     <span>Rejected</span>
+                    <span class="badge" id="rejectedCount">0</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="profile">
                     <i class="fas fa-user-circle"></i>
                     <span>My Profile</span>
+                </a>
+                <a href="dashboard.html?view=uploader" class="nav-item" title="Switch to uploader dashboard">
+                    <i class="fas fa-right-left"></i>
+                    <span>Switch to Uploader</span>
                 </a>
             </nav>
             
@@ -575,7 +581,7 @@
     </div>
 
     <script type="module" src="js/firebase-config.js?v=20260415b"></script>
-    <script type="module" src="js/reviewer-dashboard.js?v=20260415f"></script>
+    <script type="module" src="js/reviewer-dashboard.js?v=20260423f"></script>
     
     <script>
         // Mobile sidebar functionality
@@ -677,9 +683,9 @@
     <script src="js/table-enhancer.js?v=20260415"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260416q">
-    <script type="module" src="js/app-chat.js?v=20260416o"></script>
+    <script type="module" src="js/app-chat.js?v=20260423a"></script>
     <link rel="stylesheet" href="css/pwa-install.css">
-    <script src="js/pwa-install.js?v=20260416d"></script>
+    <script src="js/pwa-install.js?v=20260423a"></script>
     <link rel="stylesheet" href="css/profile-card.css">
     <link rel="stylesheet" href="css/sop-help.css">
     <script src="js/sop-help.js"></script>

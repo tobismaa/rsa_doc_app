@@ -1,4 +1,4 @@
-﻿﻿// js/document-uploader.js - COMPLETE FIXED VERSION WITH WORKING FILE SIZE MODALS AND CALCULATIONS
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// js/document-uploader.js - COMPLETE FIXED VERSION WITH WORKING FILE SIZE MODALS AND CALCULATIONS
 import { auth, db } from './firebase-config.js';
 import { BackblazeStorage } from './backblaze-storage.js';
 import { queueViewerAssignmentEmail } from './email-alerts.js';
@@ -9,13 +9,13 @@ import {
   getUserFullName as getUserFullNameShared,
   getUserProfileByEmail as getUserProfileByEmailShared,
   normalizeEmail as normalizeEmailShared
-} from './shared/user-directory.js';
+} from './shared/user-directory.js?v=20260423b';
 import {
   assignRoundRobin as assignRoundRobinShared,
   getUploaderRoutingRule as getUploaderRoutingRuleShared,
   getViewerEmails as getViewerEmailsShared,
   routingRuleDocId as routingRuleDocIdShared
-} from './shared/uploader-routing.js';
+} from './shared/uploader-routing.js?v=20260423c';
 import {
   collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, doc,
   serverTimestamp, arrayUnion, getDocs, getDoc, setDoc
@@ -42,6 +42,12 @@ import {
                 throw new Error('jsPDF library not loaded. Please add: <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>');
             }
         };
+    }
+})();
+
+(function configurePdfJs() {
+    if (window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
     }
 })();
 
@@ -84,7 +90,16 @@ function formatCurrency(value) {
 
 function roundDownToNearestThousand(value) {
   const num = Number(value || 0);
-  return Math.floor(num / 1000) * 1000;
+  return Math.max(0, Math.floor(num / 1000) * 1000);
+}
+
+function roundUpToNearestThousand(value) {
+  const num = Number(value || 0);
+  return Math.max(0, Math.ceil(num / 1000) * 1000);
+}
+
+function calculateRoundedRsa25(rsaBalance) {
+  return roundDownToNearestThousand((Number(rsaBalance) || 0) * 0.25);
 }
 
 function parseMoney(value) {
@@ -93,11 +108,18 @@ function parseMoney(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
+function normalizeLoanAmountValue(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  return roundUpToNearestThousand(parseMoney(raw));
+}
+
 function getFinancials(submission) {
   const details = submission?.customerDetails || {};
   const rsaBalance = parseMoney(details.rsaBalance || submission?.rsaBalance || 0);
-  const computed25 = rsaBalance * 0.25;
-  const twentyFive = parseMoney(details.rsa25Percent || submission?.rsa25Percent || computed25);
+  const computed25 = calculateRoundedRsa25(rsaBalance);
+  const stored25 = parseMoney(details.rsa25Percent || submission?.rsa25Percent || 0);
+  const twentyFive = stored25 ? roundDownToNearestThousand(stored25) : computed25;
   const commission2 = twentyFive * 0.02;
   const pfa = String(details.pfa || submission?.pfa || '').trim() || '-';
   return { pfa, twentyFive, commission2 };
@@ -310,12 +332,12 @@ function showBatchSizeWarningModal(oversizedFiles, validFiles, originalFiles) {
     <div style="padding: 25px; max-height: 60vh; overflow-y: auto;">
       <p style="font-size: 16px; color: #1e293b; margin-bottom: 20px; text-align: center;">
         <strong>${oversizedFiles.length}</strong> file(s) exceed the 1.5MB limit.
-        <strong>${validFiles.length}</strong> file(s) are within limit.
+        <strong>${validFiles.length}</strong> file(s) are already within limit.
       </p>
       ${oversizedFiles.length > 0 ? `
         <div style="margin-bottom: 25px;">
           <h3 style="font-size: 16px; font-weight: 600; color: #991b1b; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-            <i class="fas fa-times-circle"></i> Files Exceeding 1.5MB (will be skipped)
+            <i class="fas fa-compress-alt"></i> Files Exceeding 1.5MB
           </h3>
           <div style="border: 1px solid #fecaca; border-radius: 8px; overflow: hidden;">
             ${oversizedListHtml}
@@ -337,6 +359,11 @@ function showBatchSizeWarningModal(oversizedFiles, validFiles, originalFiles) {
       <button id="cancelBtn" style="background: white; border: 1px solid #cbd5e1; color: #475569; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 8px;">
         <i class="fas fa-times"></i> Cancel All
       </button>
+      ${oversizedFiles.length > 0 ? `
+        <button id="compressProceedBtn" style="background: #003366; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+          <i class="fas fa-compress-alt"></i> Compress Oversized and Continue
+        </button>
+      ` : ''}
       ${validFiles.length > 0 ? `
         <button id="proceedBtn" style="background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px;">
           <i class="fas fa-upload"></i> Upload ${validFiles.length} Valid File(s)
@@ -357,6 +384,7 @@ function showBatchSizeWarningModal(oversizedFiles, validFiles, originalFiles) {
   const closeBtn = document.getElementById('batchSizeWarningCloseBtn');
   const cancelBtn = document.getElementById('cancelBtn');
   const proceedBtn = document.getElementById('proceedBtn');
+  const compressProceedBtn = document.getElementById('compressProceedBtn');
 
   if (closeBtn) closeBtn.addEventListener('click', () => { modal.remove(); });
   if (cancelBtn) cancelBtn.addEventListener('click', () => { modal.remove(); });
@@ -365,6 +393,39 @@ function showBatchSizeWarningModal(oversizedFiles, validFiles, originalFiles) {
     proceedBtn.addEventListener('click', () => {
       modal.remove();
       if (validFiles.length > 0) prepareBatchForMapping(validFiles);
+    });
+  }
+
+  if (compressProceedBtn) {
+    compressProceedBtn.addEventListener('click', async () => {
+      modal.remove();
+      const filesToUpload = [...validFiles];
+      const failedFiles = [];
+      if (window.showLoader) window.showLoader('Compressing oversized files...');
+      try {
+        for (const file of oversizedFiles) {
+          try {
+            const compressed = await compressFileToUploadLimit(file);
+            if (compressed.size <= MAX_PDF_SIZE_BYTES) {
+              filesToUpload.push(compressed);
+            } else {
+              failedFiles.push(file.name);
+            }
+          } catch (error) {
+            failedFiles.push(file.name);
+          }
+        }
+      } finally {
+        hideLoader();
+      }
+      if (failedFiles.length > 0) {
+        showNotification(`Some files could not be compressed enough: ${failedFiles.join(', ')}`, 'warning');
+      }
+      if (filesToUpload.length > 0) {
+        prepareBatchForMapping(filesToUpload);
+      } else {
+        showNotification('No files are ready for upload after compression.', 'error');
+      }
     });
   }
 
@@ -470,6 +531,8 @@ const uploadModalTitle = document.getElementById('uploadModalTitle');
 const uploadDocType = document.getElementById('uploadDocType');
 const confirmSingleUpload = document.getElementById('confirmSingleUpload');
 const pageTitle = document.getElementById('pageTitle');
+const switchBackRoleLink = document.getElementById('switchBackRoleLink');
+const switchBackRoleText = document.getElementById('switchBackRoleText');
 const pendingTableBody = document.getElementById('pendingTableBody');
 const approvedTableBody = document.getElementById('approvedTableBody');
 const rejectedTableBody = document.getElementById('rejectedTableBody');
@@ -552,6 +615,136 @@ function renderProfileTab() {
   setProfileField(profileLocationEl, location);
   setProfileField(profileRoleEl, role.charAt(0).toUpperCase() + role.slice(1));
   setProfileField(profileStatusEl, status.charAt(0).toUpperCase() + status.slice(1));
+  syncOriginatingTpField();
+}
+
+function updateRoleSwitchBackLink() {
+  if (!switchBackRoleLink || !switchBackRoleText) return;
+  const role = String(currentUserProfile?.role || '').trim().toLowerCase();
+  const roleTargets = {
+    reviewer: { href: 'reviewer-dashboard.html', label: 'Switch to Reviewer' },
+    rsa: { href: 'rsa-dashboard.html', label: 'Switch to RSA' }
+  };
+  const target = roleTargets[role];
+  if (!target) {
+    switchBackRoleLink.style.display = 'none';
+    switchBackRoleLink.removeAttribute('href');
+    return;
+  }
+  switchBackRoleLink.href = target.href;
+  switchBackRoleText.textContent = target.label;
+  switchBackRoleLink.style.display = 'flex';
+}
+
+function showCompressionPromptModal(file) {
+  return new Promise((resolve) => {
+    const existingModal = document.getElementById('compressionPromptModal');
+    if (existingModal) existingModal.remove();
+
+    const formatSize = (bytes) => (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    const isPdf = (file?.type === 'application/pdf') || String(file?.name || '').toLowerCase().endsWith('.pdf');
+    const fileKind = isPdf ? 'PDF' : 'image';
+
+    const modal = document.createElement('div');
+    modal.className = 'modal file-size-warning';
+    modal.id = 'compressionPromptModal';
+    modal.style.cssText = `
+      display: flex !important;
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      background: rgba(0, 0, 0, 0.5) !important;
+      z-index: 999999 !important;
+      align-items: center !important;
+      justify-content: center !important;
+      opacity: 1 !important;
+    `;
+
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+      background: white !important;
+      border-radius: 12px !important;
+      max-width: 520px !important;
+      width: 92% !important;
+      max-height: 90vh !important;
+      overflow-y: auto !important;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
+      animation: modalSlideIn 0.3s ease !important;
+    `;
+
+    modalContent.innerHTML = `
+      <div style="padding: 20px; border-bottom: 1px solid #e2e8f0; background: #eff6ff; border-radius: 12px 12px 0 0; display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0; color: #1d4ed8; font-size: 20px; display: flex; align-items: center; gap: 10px;">
+          <i class="fas fa-file-zipper"></i> Compress File
+        </h2>
+        <button id="compressionPromptCloseBtn" style="background: transparent; border: none; font-size: 28px; color: #1d4ed8; cursor: pointer; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%;">&times;</button>
+      </div>
+      <div style="padding: 24px;">
+        <p style="font-size: 16px; color: #1e293b; margin-bottom: 16px; text-align: center;">
+          This ${fileKind} is larger than the 1.5MB upload limit.
+        </p>
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; margin-bottom: 16px;">
+          <div style="font-weight: 700; color: #0f172a; margin-bottom: 6px;">${file.name}</div>
+          <div style="color: #475569;">Current size: <strong>${formatSize(file.size)}</strong></div>
+          <div style="color: #475569;">Target size: <strong>1.50 MB or less</strong></div>
+        </div>
+        <div style="background: #fefce8; border-radius: 8px; padding: 14px; color: #854d0e; font-size: 13px; line-height: 1.5;">
+          Compression keeps the upload inside the system limit. If the file cannot be reduced enough without breaking readability, we will let you know.
+        </div>
+      </div>
+      <div style="padding: 20px; border-top: 1px solid #e2e8f0; display: flex; gap: 10px; justify-content: flex-end; background: #f8fafc; border-radius: 0 0 12px 12px;">
+        <button id="compressionPromptCancelBtn" style="background: white; border: 1px solid #cbd5e1; color: #475569; padding: 10px 18px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer;">
+          Cancel
+        </button>
+        <button id="compressionPromptConfirmBtn" style="background: #003366; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; display:flex; align-items:center; gap:8px;">
+          <i class="fas fa-compress-alt"></i> Compress and Continue
+        </button>
+      </div>
+    `;
+
+    modal.appendChild(modalContent);
+    (document.body || document.documentElement)?.appendChild(modal);
+
+    const close = (result) => {
+      modal.remove();
+      resolve(result);
+    };
+
+    document.getElementById('compressionPromptCloseBtn')?.addEventListener('click', () => close(false));
+    document.getElementById('compressionPromptCancelBtn')?.addEventListener('click', () => close(false));
+    document.getElementById('compressionPromptConfirmBtn')?.addEventListener('click', () => close(true));
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) close(false);
+    });
+  });
+}
+
+function getDefaultDashboardForRole(role) {
+  const normalized = String(role || '').trim().toLowerCase();
+  if (normalized === 'reviewer') return 'reviewer-dashboard.html';
+  if (normalized === 'rsa') return 'rsa-dashboard.html';
+  if (normalized === 'payment') return 'payment-dashboard.html';
+  if (normalized === 'admin') return 'admin-dashboard.html';
+  if (normalized === 'super_admin') return 'super-admin-dashboard.html';
+  return '';
+}
+
+function isExplicitUploaderSwitch() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('view') === 'uploader' || params.get('switch') === 'uploader';
+}
+
+function syncOriginatingTpField() {
+  const originatingTpEl = document.getElementById('originatingTP');
+  if (!originatingTpEl) return;
+  originatingTpEl.value = String(currentUserProfile?.location || '').trim();
+  originatingTpEl.readOnly = true;
+  originatingTpEl.setAttribute('readonly', 'readonly');
+  originatingTpEl.setAttribute('aria-readonly', 'true');
+  originatingTpEl.style.backgroundColor = '#f8fafc';
+  originatingTpEl.style.cursor = 'not-allowed';
 }
 
 // ==================== INITIALIZATION ====================
@@ -574,8 +767,14 @@ document.addEventListener('DOMContentLoaded', () => {
         currentUserProfile = { email: user.email, fullName: user.displayName || user.email, role: 'uploader', status: 'active' };
         userName.textContent = user.displayName || user.email;
       }
+      const defaultDashboard = getDefaultDashboardForRole(currentUserProfile?.role);
+      if (defaultDashboard && !isExplicitUploaderSwitch()) {
+        window.location.href = defaultDashboard;
+        return;
+      }
       userAvatar.src = user.photoURL || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'40\' height=\'40\' viewBox=\'0 0 40 40\'%3E%3Ccircle cx=\'20\' cy=\'20\' r=\'20\' fill=\'%23003366\'/%3E%3Ctext x=\'20\' y=\'25\' text-anchor=\'middle\' fill=\'%23ffffff\' font-size=\'16\'%3E👤%3C/text%3E%3C/svg%3E';
       renderProfileTab();
+      updateRoleSwitchBackLink();
       totalCountSpan.textContent = DOCUMENT_TYPES.length;
       await loadRegisteredAgents();
       await loadApprovedAgents();
@@ -635,12 +834,12 @@ function setPropertyByRsaAndUpdate(rsaAmount) {
     if (feeEl) feeEl.value = rule.fee;
     if (feeFmt) feeFmt.textContent = formatCurrency(rule.fee);
 
-    // Calculate exact 25% of RSA (no rounding)
+    // Calculate 25% of RSA rounded down to the nearest thousand.
     const rsaBalance = parseFloat(rsaAmount) || 0;
-    const rsa25Exact = rsaBalance * 0.25;
+    const rsa25Rounded = calculateRoundedRsa25(rsaBalance);
 
-    // Calculate loan amount and round DOWN to nearest thousand
-    const loanAmount = roundDownToNearestThousand(rule.value - rsa25Exact);
+    // Property value must equal loan amount + rounded 25% contribution.
+    const loanAmount = roundUpToNearestThousand(rule.value - rsa25Rounded);
 
     // Set loan amount
     if (loanEl) loanEl.value = loanAmount;
@@ -656,12 +855,12 @@ function setPropertyByRsaAndUpdate(rsaAmount) {
     // Also update the 25% display
     const rsa25FormattedEl = document.getElementById('rsa25Formatted');
     if (rsa25FormattedEl) {
-      rsa25FormattedEl.textContent = formatCurrency(rsa25Exact);
+      rsa25FormattedEl.textContent = formatCurrency(rsa25Rounded);
     }
 
     const rsa25PercentEl = document.getElementById('rsa25Percent');
     if (rsa25PercentEl) {
-      rsa25PercentEl.value = rsa25Exact;
+      rsa25PercentEl.value = rsa25Rounded;
     }
 
   } else {
@@ -729,13 +928,13 @@ function calculateAndDisplayCustomerInfo() {
   // Calculate years to retirement (assuming retirement at 60)
   const yearsToRetirement = Math.max(0, 60 - age);
 
-  // Get exact 25% of RSA (no rounding)
-  const rsa25Exact = rsaBalance * 0.25;
+  // Get 25% of RSA rounded down to the nearest thousand.
+  const rsa25Rounded = calculateRoundedRsa25(rsaBalance);
 
   // Get property rule
   const rule = determinePropertyByRsa(rsaBalance);
   const propertyValue = rule ? rule.value : 0;
-  const loanAmount = roundDownToNearestThousand(propertyValue - rsa25Exact);
+  const loanAmount = roundUpToNearestThousand(propertyValue - rsa25Rounded);
 
   // Find or create results container
   let resultsContainer = document.getElementById('customerInfoResults');
@@ -779,7 +978,7 @@ function calculateAndDisplayCustomerInfo() {
       </div>
       <div style="background: white; padding: 10px; border-radius: 6px;">
         <div style="font-size: 12px; color: #64748b;">25% of RSA</div>
-        <div style="font-size: 18px; font-weight: 700; color: #003366;">${formatCurrency(rsa25Exact)}</div>
+        <div style="font-size: 18px; font-weight: 700; color: #003366;">${formatCurrency(rsa25Rounded)}</div>
       </div>
       <div style="background: white; padding: 10px; border-radius: 6px;">
         <div style="font-size: 12px; color: #64748b;">Loan Amount</div>
@@ -797,7 +996,7 @@ function saveCustomerDetails() {
   const requiredFields = [
     'customerName', 'customerDob', 'customerEmail', 'customerPhone',
     'customerNIN', 'customerAddress', 'accountNo', 'employer',
-    'originatingTP', 'pfa', 'penNo', 'rsaStatementDate', 'rsaBalance'
+    'originatingTP', 'mortgageLoanApplicationFormDate', 'pfa', 'penNo', 'rsaStatementDate', 'rsaBalance'
   ];
 
   const missingFields = [];
@@ -827,19 +1026,19 @@ function saveCustomerDetails() {
 
   const rsaBalance = parseFloat(document.getElementById('rsaBalance')?.value || 0);
 
-  // Calculate exact 25% (no rounding)
-  const rsa25Exact = rsaBalance * 0.25;
+  // Calculate 25% rounded down to the nearest thousand.
+  const rsa25Rounded = calculateRoundedRsa25(rsaBalance);
 
-  // Update RSA 25% display with exact value
+  // Update RSA 25% display with rounded value.
   const rsa25FormattedEl = document.getElementById('rsa25Formatted');
   if (rsa25FormattedEl) {
-    rsa25FormattedEl.textContent = formatCurrency(rsa25Exact);
+    rsa25FormattedEl.textContent = formatCurrency(rsa25Rounded);
   }
 
-  // Store exact value in hidden input
+  // Store rounded value in hidden input.
   const rsa25PercentEl = document.getElementById('rsa25Percent');
   if (rsa25PercentEl) {
-    rsa25PercentEl.value = rsa25Exact;
+    rsa25PercentEl.value = rsa25Rounded;
   }
 
   // Call property update function
@@ -887,7 +1086,7 @@ function resetCustomerDetails() {
   const fields = [
     'customerName', 'customerDob', 'customerEmail', 'customerPhone',
     'customerNIN', 'customerAddress', 'accountNo', 'employer',
-    'originatingTP', 'pfa', 'penNo', 'rsaStatementDate', 'rsaBalance',
+    'originatingTP', 'mortgageLoanApplicationFormDate', 'pfa', 'penNo', 'rsaStatementDate', 'rsaBalance',
     'propertyType', 'tenor'
   ];
 
@@ -896,6 +1095,8 @@ function resetCustomerDetails() {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
+
+  syncOriginatingTpField();
 
   // Reset RSA 25% fields with null checks
   const rsa25PercentEl = document.getElementById('rsa25Percent');
@@ -1025,16 +1226,8 @@ function setupEventListeners() {
     batchFileInput.addEventListener('change', (e) => {
       const files = Array.from(e.target.files);
       if (files.length > 0) {
-        // Only enforce the 1.5MB limit at selection time for PDFs.
-        // Images can be larger because we compress them before converting/uploading.
-        const oversizedFiles = files.filter((file) => {
-          const isPdf = (file?.type === 'application/pdf') || String(file?.name || '').toLowerCase().endsWith('.pdf');
-          return isPdf && file.size > MAX_PDF_SIZE_BYTES;
-        });
-        const validFiles = files.filter((file) => {
-          const isPdf = (file?.type === 'application/pdf') || String(file?.name || '').toLowerCase().endsWith('.pdf');
-          return !isPdf || file.size <= MAX_PDF_SIZE_BYTES;
-        });
+        const oversizedFiles = files.filter((file) => file.size > MAX_PDF_SIZE_BYTES);
+        const validFiles = files.filter((file) => file.size <= MAX_PDF_SIZE_BYTES);
         if (oversizedFiles.length > 0) {
           showBatchSizeWarningModal(oversizedFiles, validFiles, files);
         } else {
@@ -1077,19 +1270,19 @@ function setupEventListeners() {
     const rawStr = String(e.target.value).replace(/[^0-9.\-]+/g, '');
     const raw = parseFloat(rawStr) || 0;
 
-    // Calculate exact 25% (no rounding)
-    const rsa25Exact = raw * 0.25;
+    // Calculate 25% rounded down to the nearest thousand.
+    const rsa25Rounded = calculateRoundedRsa25(raw);
 
     // Update RSA 25% display immediately
     const rsa25FormattedEl = document.getElementById('rsa25Formatted');
     if (rsa25FormattedEl) {
-      rsa25FormattedEl.textContent = formatCurrency(rsa25Exact);
+      rsa25FormattedEl.textContent = formatCurrency(rsa25Rounded);
     }
 
-    // Store exact value in hidden input
+    // Store rounded value in hidden input.
     const rsa25PercentEl = document.getElementById('rsa25Percent');
     if (rsa25PercentEl) {
-      rsa25PercentEl.value = rsa25Exact;
+      rsa25PercentEl.value = rsa25Rounded;
     }
 
     // Call property update function to auto-fill all property fields
@@ -1244,9 +1437,52 @@ function setupDragDrop(area, input, callback) {
 function openUploadModal() {
   currentEditId = null;
   currentCustomerUploads = {};
-  customerNameInput.value = '';
+  currentDocType = null;
+  currentFile = null;
+
+  if (singleFileInput) singleFileInput.value = '';
+  if (confirmSingleUpload) {
+    confirmSingleUpload.disabled = true;
+    confirmSingleUpload.innerHTML = 'Upload Document';
+  }
+  clearSingleFilePreview();
+
+  const fieldsToClear = [
+    'customerName', 'customerDob', 'customerEmail', 'customerPhone',
+    'customerNIN', 'customerAddress', 'accountNo', 'employer',
+    'originatingTP', 'mortgageLoanApplicationFormDate', 'pfa', 'penNo',
+    'rsaStatementDate', 'rsaBalance', 'propertyType', 'propertyValue',
+    'facilityFee', 'loanAmount', 'tenor'
+  ];
+
+  fieldsToClear.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+
+  const rsa25PercentEl = document.getElementById('rsa25Percent');
+  if (rsa25PercentEl) rsa25PercentEl.value = '';
+
+  const rsa25FormattedEl = document.getElementById('rsa25Formatted');
+  if (rsa25FormattedEl) rsa25FormattedEl.textContent = '';
+
+  const propertyValueFormattedEl = document.getElementById('propertyValueFormatted');
+  if (propertyValueFormattedEl) propertyValueFormattedEl.textContent = '';
+
+  const facilityFeeFormattedEl = document.getElementById('facilityFeeFormatted');
+  if (facilityFeeFormattedEl) facilityFeeFormattedEl.textContent = '';
+
+  const loanAmountFormattedEl = document.getElementById('loanAmountFormatted');
+  if (loanAmountFormattedEl) loanAmountFormattedEl.textContent = '';
+
+  const resultsContainer = document.getElementById('customerInfoResults');
+  if (resultsContainer) resultsContainer.style.display = 'none';
+
   if (customerAgentSelect) customerAgentSelect.value = '';
   customerDetailsSaved = false;
+
+  syncOriginatingTpField();
+
   if (batchUploadBtn) batchUploadBtn.disabled = true;
   if (window.renderDocumentGridUpload) {
     window.renderDocumentGridUpload(documentGrid, REQUIRED_DOC_TYPES, currentCustomerUploads, 'upload');
@@ -1379,6 +1615,129 @@ async function compressImageTo200KB(file, targetBytes = MAX_IMAGE_UPLOAD_BYTES) 
   throw new Error(`Could not reduce image below ${targetMb}MB. Please retake at a lower resolution.`);
 }
 
+async function compressPdfUnderLimit(file, targetBytes = MAX_PDF_SIZE_BYTES) {
+  if (!window.pdfjsLib) {
+    throw new Error('PDF compression library is not available. Please refresh and try again.');
+  }
+
+  let jsPDFConstructor = null;
+  if (window.jspdf && window.jspdf.jsPDF) {
+    jsPDFConstructor = window.jspdf.jsPDF;
+  } else if (window.jsPDF && typeof window.jsPDF === 'function') {
+    jsPDFConstructor = window.jsPDF;
+  } else if (typeof jspdf !== 'undefined' && jspdf.jsPDF) {
+    jsPDFConstructor = jspdf.jsPDF;
+  }
+  if (!jsPDFConstructor) {
+    throw new Error('PDF compression is not available right now. Please refresh and try again.');
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdfDoc = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const attempts = [
+    { scale: 1.15, quality: 0.7 },
+    { scale: 1.0, quality: 0.58 },
+    { scale: 0.9, quality: 0.5 },
+    { scale: 0.8, quality: 0.42 },
+    { scale: 0.7, quality: 0.36 }
+  ];
+  let bestBlob = null;
+
+  for (const attempt of attempts) {
+    const pdf = new jsPDFConstructor({ orientation: 'portrait', unit: 'pt', format: 'a4', compress: true });
+    let firstPage = true;
+
+    for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber++) {
+      const page = await pdfDoc.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: attempt.scale });
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d', { alpha: false });
+      if (!context) throw new Error('Canvas is not available for PDF compression.');
+      canvas.width = Math.max(1, Math.floor(viewport.width));
+      canvas.height = Math.max(1, Math.floor(viewport.height));
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: context, viewport }).promise;
+
+      const imageBlob = await canvasToJpegBlob(canvas, attempt.quality);
+      if (!imageBlob) throw new Error('Could not compress PDF page image.');
+      const imageDataUrl = await fileToDataURL(new File([imageBlob], `page-${pageNumber}.jpg`, { type: 'image/jpeg' }));
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const ratio = Math.min(pageWidth / canvas.width, pageHeight / canvas.height);
+      const drawWidth = canvas.width * ratio;
+      const drawHeight = canvas.height * ratio;
+      const x = (pageWidth - drawWidth) / 2;
+      const y = (pageHeight - drawHeight) / 2;
+
+      if (!firstPage) pdf.addPage();
+      firstPage = false;
+      pdf.addImage(imageDataUrl, 'JPEG', x, y, drawWidth, drawHeight, undefined, 'FAST');
+    }
+
+    const compressedBlob = pdf.output('blob');
+    if (!bestBlob || compressedBlob.size < bestBlob.size) bestBlob = compressedBlob;
+    if (compressedBlob.size <= targetBytes) {
+      const baseName = (file.name || 'document').replace(/\.[^/.]+$/, '');
+      return new File([compressedBlob], `${baseName}.pdf`, { type: 'application/pdf' });
+    }
+  }
+
+  if (bestBlob && bestBlob.size <= targetBytes) {
+    const baseName = (file.name || 'document').replace(/\.[^/.]+$/, '');
+    return new File([bestBlob], `${baseName}.pdf`, { type: 'application/pdf' });
+  }
+
+  throw new Error('Could not reduce PDF below 1.5MB. Please upload a smaller scan.');
+}
+
+async function compressFileToUploadLimit(file) {
+  const isImage = Boolean(file?.type && file.type.startsWith('image/'));
+  const isPdf = (file?.type === 'application/pdf') || String(file?.name || '').toLowerCase().endsWith('.pdf');
+
+  if (isImage) {
+    const compressedImage = file.size > MAX_IMAGE_UPLOAD_BYTES
+      ? await compressImageTo200KB(file, MAX_IMAGE_UPLOAD_BYTES)
+      : file;
+    let pdfBlob = await convertImageToPdf(compressedImage);
+    if (pdfBlob.size > MAX_PDF_SIZE_BYTES) {
+      const converted = await convertImageToPdfUnderLimit(file);
+      pdfBlob = converted.pdfBlob;
+    }
+    const baseName = (file.name || 'image').replace(/\.[^/.]+$/, '');
+    return new File([pdfBlob], `${baseName}.pdf`, { type: 'application/pdf' });
+  }
+
+  if (isPdf) {
+    if (file.size <= MAX_PDF_SIZE_BYTES) return file;
+    return compressPdfUnderLimit(file, MAX_PDF_SIZE_BYTES);
+  }
+
+  throw new Error('Only PDF files and images can be compressed for upload.');
+}
+
+async function maybeCompressOversizedFile(file) {
+  const isImage = Boolean(file?.type && file.type.startsWith('image/'));
+  const isPdf = (file?.type === 'application/pdf') || String(file?.name || '').toLowerCase().endsWith('.pdf');
+  const exceedsLimit = file.size > MAX_PDF_SIZE_BYTES;
+
+  if (!exceedsLimit) return file;
+  if (!isImage && !isPdf) {
+    throw new Error('Unsupported file type. Please upload images or PDFs only.');
+  }
+
+  const proceed = await showCompressionPromptModal(file);
+  if (!proceed) return null;
+
+  showNotification(`Compressing ${file.name}...`, 'info');
+  const compressed = await compressFileToUploadLimit(file);
+  if (compressed.size > MAX_PDF_SIZE_BYTES) {
+    throw new Error('Compressed file is still above 1.5MB. Please use a smaller file.');
+  }
+  showNotification(`Compression complete: ${file.name} is now ${formatFileSize(compressed.size)}`, 'success');
+  return compressed;
+}
+
 async function handleSingleFileSelection(file) {
 
   // FIX: Don't exit early if confirmSingleUpload is missing - still show modal
@@ -1389,32 +1748,25 @@ async function handleSingleFileSelection(file) {
   const isImage = Boolean(file?.type && file.type.startsWith('image/'));
   const isPdf = (file?.type === 'application/pdf') || (String(file?.name || '').toLowerCase().endsWith('.pdf'));
 
-  // PDFs (and unknown files) must obey the 1.5MB cap; images can be larger because we compress them.
-  if (!isImage && file.size > MAX_PDF_SIZE_BYTES) {
-    showFileSizeWarningModal(file);
-    currentFile = null;
-    if (confirmSingleUpload) confirmSingleUpload.disabled = true;
-    clearSingleFilePreview();
-    return;
-  }
-  if (isPdf && file.size > MAX_PDF_SIZE_BYTES) {
-    showFileSizeWarningModal(file);
-    currentFile = null;
-    if (confirmSingleUpload) confirmSingleUpload.disabled = true;
-    clearSingleFilePreview();
-    return;
-  }
-
   if (confirmSingleUpload) confirmSingleUpload.disabled = true;
   clearSingleFilePreview();
 
   try {
     let preparedFile = file;
+    if (file.size > MAX_PDF_SIZE_BYTES) {
+      const compressedFile = await maybeCompressOversizedFile(file);
+      if (!compressedFile) {
+        currentFile = null;
+        clearSingleFilePreview();
+        return;
+      }
+      preparedFile = compressedFile;
+    }
     if (isImage) {
       // Requirement: on mobile camera snap, compress only when the photo is > 1MB.
-      if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
+      if (preparedFile.type.startsWith('image/') && preparedFile.size > MAX_IMAGE_UPLOAD_BYTES) {
         showNotification('Optimizing photo to 1MB for upload...', 'info');
-        preparedFile = await compressImageTo200KB(file, MAX_IMAGE_UPLOAD_BYTES);
+        preparedFile = await compressImageTo200KB(preparedFile, MAX_IMAGE_UPLOAD_BYTES);
         if (preparedFile.size > MAX_IMAGE_UPLOAD_BYTES) throw new Error('Photo must be 1MB or less after compression.');
       }
     }
@@ -1586,17 +1938,6 @@ async function handleBatchFiles(files) {
 
       const isImage = Boolean(file?.type && file.type.startsWith('image/'));
       const isPdf = (file?.type === 'application/pdf') || (String(file?.name || '').toLowerCase().endsWith('.pdf'));
-      if (isPdf && file.size > MAX_PDF_SIZE_BYTES) {
-        showNotification(`⚠️ ${file.name} exceeds 1.5MB, skipping.`, 'warning');
-        failCount++;
-        continue;
-      }
-      // Images can be larger because we compress before converting to PDF.
-      if (!isImage && !isPdf && file.size > MAX_PDF_SIZE_BYTES) {
-        showNotification(`⚠️ ${file.name} exceeds 1.5MB, skipping.`, 'warning');
-        failCount++;
-        continue;
-      }
 
       let targetType = mappedType || findMatchingDocTypeByName(file.name, Array.from(usedTypes));
       if (!targetType) {
@@ -1617,6 +1958,9 @@ async function handleBatchFiles(files) {
 
       let fileToSend = file;
       try {
+        if (fileToSend.size > MAX_PDF_SIZE_BYTES) {
+          fileToSend = await compressFileToUploadLimit(fileToSend);
+        }
         if (isImage) {
           // Check jsPDF first
           if (!window.jspdf || (!window.jspdf.jsPDF && !window.jsPDF)) {
@@ -1773,7 +2117,17 @@ function refreshBatchSelectOptions() {
 async function uploadSingleDocument() {
   if (!currentFile || !currentDocType) return;
   if (!customerDetailsSaved && !currentEditId) { showNotification('Please save customer details first', 'error'); return; }
-  if (currentFile.size > MAX_PDF_SIZE_BYTES) { showFileSizeWarningModal(currentFile); return; }
+  if (currentFile.size > MAX_PDF_SIZE_BYTES) {
+    try {
+      const compressed = await maybeCompressOversizedFile(currentFile);
+      if (!compressed) return;
+      currentFile = compressed;
+      previewSingleFile(currentFile);
+    } catch (error) {
+      showNotification(error.message || 'Could not compress the selected file.', 'error');
+      return;
+    }
+  }
   if (window.__uploadInProgress) { return; }
   window.__uploadInProgress = true;
   if (confirmSingleUpload) {
@@ -1977,7 +2331,7 @@ function getMissingRequiredSubmissionFields() {
     { id: 'customerEmail', label: 'Email' }, { id: 'customerPhone', label: 'Phone' },
     { id: 'customerNIN', label: 'NIN' }, { id: 'customerAddress', label: 'Address' },
     { id: 'accountNo', label: 'Account Number' }, { id: 'employer', label: 'Employer' },
-    { id: 'originatingTP', label: 'Originating Transfer Pin' }, { id: 'pfa', label: 'PFA' },
+    { id: 'originatingTP', label: 'Originating Transfer Pin' }, { id: 'mortgageLoanApplicationFormDate', label: 'Mortgage Loan Application Form Date' }, { id: 'pfa', label: 'PFA' },
     { id: 'penNo', label: 'PEN Number' }, { id: 'rsaStatementDate', label: 'RSA Statement Date' },
     { id: 'rsaBalance', label: 'RSA Balance' }, { id: 'propertyType', label: 'Property Type' },
     { id: 'propertyValue', label: 'Property Value' }, { id: 'loanAmount', label: 'Loan Amount' },
@@ -2029,6 +2383,7 @@ async function submitCustomer() {
         accountNo: document.getElementById('accountNo')?.value?.trim() || '',
         employer: document.getElementById('employer')?.value?.trim() || '',
         originatingTP: document.getElementById('originatingTP')?.value?.trim() || '',
+        mortgageLoanApplicationFormDate: document.getElementById('mortgageLoanApplicationFormDate')?.value || '',
         pfa: document.getElementById('pfa')?.value?.trim() || '',
         penNo: document.getElementById('penNo')?.value?.trim() || '',
         rsaStatementDate: document.getElementById('rsaStatementDate')?.value || '',
@@ -2038,11 +2393,12 @@ async function submitCustomer() {
         tenor: document.getElementById('tenor')?.value || '',
         propertyValue: document.getElementById('propertyValue')?.value || '',
         facilityFee: document.getElementById('facilityFee')?.value || '',
-        loanAmount: document.getElementById('loanAmount')?.value || ''
+        loanAmount: normalizeLoanAmountValue(document.getElementById('loanAmount')?.value || '')
       };
       const submissionRef = doc(db, 'submissions', currentEditId);
       const existingSub = allSubmissions.find((s) => s.id === currentEditId) || {};
-      const reviewerToReassign = String(existingSub.reviewedBy || existingSub.assignedTo || '').trim();
+      const reviewerCandidate = String(existingSub.reviewedBy || existingSub.assignedTo || '').trim();
+      const reviewerToReassign = await isActiveUserWithRole(reviewerCandidate, ['reviewer']) ? reviewerCandidate : '';
       const nextFixCount = Number(existingSub.fixCount || 0) + 1;
       await updateDoc(submissionRef, {
         customerName, customerDetails, status: 'pending', documents,
@@ -2052,6 +2408,9 @@ async function submitCustomer() {
         reviewedAt: null,
         comment: ''
       });
+      if (!reviewerToReassign) {
+        await assignRoundRobin(submissionRef);
+      }
       notifyStatusChangePush({
         currentUser,
         submissionId: currentEditId,
@@ -2090,6 +2449,7 @@ async function submitCustomer() {
       accountNo: document.getElementById('accountNo')?.value?.trim() || '',
       employer: document.getElementById('employer')?.value?.trim() || '',
       originatingTP: document.getElementById('originatingTP')?.value?.trim() || '',
+      mortgageLoanApplicationFormDate: document.getElementById('mortgageLoanApplicationFormDate')?.value || '',
       pfa: document.getElementById('pfa')?.value?.trim() || '',
       penNo: document.getElementById('penNo')?.value?.trim() || '',
       rsaStatementDate: document.getElementById('rsaStatementDate')?.value || '',
@@ -2099,7 +2459,7 @@ async function submitCustomer() {
       tenor: document.getElementById('tenor')?.value || '',
       propertyValue: document.getElementById('propertyValue')?.value || '',
       facilityFee: document.getElementById('facilityFee')?.value || '',
-      loanAmount: document.getElementById('loanAmount')?.value || ''
+      loanAmount: normalizeLoanAmountValue(document.getElementById('loanAmount')?.value || '')
     };
     const selectedAgentId = String(customerAgentSelect?.value || '').trim();
     const selectedAgent = approvedAgents.find((a) => a.id === selectedAgentId) || null;
@@ -2188,6 +2548,7 @@ window.openEditModal = async (id) => {
       { id: 'accountNo', keys: ['accountNo'], fallback: '', label: 'Account Number' },
       { id: 'employer', keys: ['employer'], fallback: '', label: 'Employer' },
       { id: 'originatingTP', keys: ['originatingTP'], fallback: '', label: 'Originating Transfer Pin' },
+      { id: 'mortgageLoanApplicationFormDate', keys: ['mortgageLoanApplicationFormDate'], fallback: '', label: 'Mortgage Loan Application Form Date' },
       { id: 'pfa', keys: ['pfa', 'pfaName'], fallback: '', label: 'PFA' },
       { id: 'penNo', keys: ['penNo'], fallback: '', label: 'PEN Number' },
       { id: 'rsaStatementDate', keys: ['rsaStatementDate'], fallback: '', label: 'RSA Statement Date' },
@@ -2200,11 +2561,13 @@ window.openEditModal = async (id) => {
     fieldMap.forEach((field) => {
       const el = document.getElementById(field.id);
       if (!el) return;
-      const value = pick(field.keys, field.fallback);
+      const rawValue = pick(field.keys, field.fallback);
+      const value = field.id === 'loanAmount' ? normalizeLoanAmountValue(rawValue) : rawValue;
       el.value = value;
       if (!String(value || '').trim()) missingFields.push(field.label);
     });
     if (missingFields.length > 0) showNotification('Some saved fields are missing: ' + missingFields.join(', '), 'warning');
+    syncOriginatingTpField();
     customerDetailsSaved = true;
   } catch (e) { }
   const existingUploads = {};
@@ -2239,7 +2602,8 @@ async function submitEdit() {
     if (newDocuments.length > 0) {
       const submissionRef = doc(db, 'submissions', currentEditId);
       const existingSub = allSubmissions.find((s) => s.id === currentEditId) || {};
-      const reviewerToReassign = String(existingSub.reviewedBy || existingSub.assignedTo || '').trim();
+      const reviewerCandidate = String(existingSub.reviewedBy || existingSub.assignedTo || '').trim();
+      const reviewerToReassign = await isActiveUserWithRole(reviewerCandidate, ['reviewer']) ? reviewerCandidate : '';
       const nextFixCount = Number(existingSub.fixCount || 0) + 1;
       await updateDoc(submissionRef, {
         status: 'pending',
@@ -2253,6 +2617,9 @@ async function submitEdit() {
         reviewedAt: null,
         comment: ''
       });
+      if (!reviewerToReassign) {
+        await assignRoundRobin(submissionRef);
+      }
       notifyStatusChangePush({
         currentUser,
         submissionId: currentEditId,
@@ -2374,9 +2741,21 @@ function updateDashboardCards() {
     return st === 'processing_to_pfa' || st === 'approved';
   }).length;
   const rejected = allSubmissions.filter(s => s.status === 'rejected').length;
+  const paid = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'paid').length;
   document.getElementById('cardPendingCount').textContent = pending;
   document.getElementById('cardApprovedCount').textContent = approved;
   document.getElementById('cardRejectedCount').textContent = rejected;
+  const setBadge = (id, count) => {
+    const badge = document.getElementById(id);
+    if (badge) {
+      badge.textContent = String(count);
+      badge.style.display = 'inline-block';
+    }
+  };
+  setBadge('pendingCount', pending);
+  setBadge('approvedCount', approved);
+  setBadge('rejectedCount', rejected);
+  setBadge('paidCount', paid);
 }
 
 async function renderPendingTable() {
@@ -2434,15 +2813,95 @@ async function renderRejectedTable() {
 function renderPaidTable() {
   if (!activeCommissionTableBody || !clearedCommissionTableBody) return;
 
+  const toSafeDomId = (value) => String(value || '').replace(/[^a-zA-Z0-9_-]+/g, '_');
+  const getAgentCommissionKey = (sub) => {
+    const agentId = String(sub?.agentId || '').trim();
+    if (agentId) return `agent:${agentId}`;
+    const agentName = String(sub?.agentName || '').trim().toLowerCase();
+    const uploaderEmail = normalizeEmail(sub?.uploadedBy);
+    return `fallback:${uploaderEmail}::${agentName || 'no-agent'}`;
+  };
+
+  const buildAgentCommissionGroups = (items) => {
+    const groups = new Map();
+    items.forEach((sub) => {
+      const key = getAgentCommissionKey(sub);
+      const current = groups.get(key) || {
+        key,
+        agentName: String(sub?.agentName || '').trim() || 'No Agent',
+        customerNames: new Set(),
+        total25: 0,
+        totalCommission: 0,
+        latestAt: 0
+      };
+      const { twentyFive, commission2 } = getFinancials(sub);
+      current.customerNames.add(String(sub?.customerName || 'Unknown'));
+      current.total25 += twentyFive;
+      current.totalCommission += commission2;
+      const stamp = getDateFromAny(sub.paidAt || sub.clearedAt || sub.updatedAt);
+      const millis = stamp ? stamp.getTime() : 0;
+      if (millis > current.latestAt) current.latestAt = millis;
+      groups.set(key, current);
+    });
+    return Array.from(groups.values()).map((group) => ({
+      ...group,
+      customerCount: group.customerNames.size
+    })).sort((a, b) => b.latestAt - a.latestAt);
+  };
+
+  const renderBreakdownPanel = (group, mode = 'paid') => {
+    const sourceItems = mode === 'cleared' ? clearedAll : activeAll;
+    const groupItems = sourceItems.filter((sub) => getAgentCommissionKey(sub) === group.key);
+    const rows = groupItems.map((sub) => {
+      const { pfa, twentyFive, commission2 } = getFinancials(sub);
+      const dateValue = mode === 'cleared' ? safeFormatDate(sub.clearedAt || sub.updatedAt) : safeFormatDate(sub.paidAt || sub.updatedAt);
+      return `
+        <tr>
+          <td><strong>${sub.customerName || '-'}</strong></td>
+          <td>${pfa}</td>
+          <td>${formatCurrency(twentyFive)}</td>
+          <td>${formatCurrency(commission2)}</td>
+          <td>${dateValue}</td>
+        </tr>
+      `;
+    }).join('');
+
+    return `
+      <div class="agent-breakdown-panel">
+        <div class="agent-breakdown-meta">
+          <strong>${group.agentName || '-'}</strong>
+          <span>${group.customerCount} customer(s)</span>
+          <span>${formatCurrency(group.totalCommission)} commission</span>
+        </div>
+        <div class="table-container">
+          <table class="customers-table agent-breakdown-table">
+            <thead>
+              <tr>
+                <th>Customer</th>
+                <th>PFA</th>
+                <th>25% RSA</th>
+                <th>2% Commission</th>
+                <th>${mode === 'cleared' ? 'Cleared Date' : 'Paid Date'}</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  };
+
   const activeAll = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'paid');
   const clearedAll = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'cleared');
-  const paidTabTotal = activeAll.length + clearedAll.length;
+  const activeGroups = buildAgentCommissionGroups(activeAll);
+  const clearedGroups = buildAgentCommissionGroups(clearedAll);
+  const paidTabTotal = activeGroups.length + clearedGroups.length;
   if (paidCountBadge) {
     paidCountBadge.textContent = String(paidTabTotal);
-    paidCountBadge.style.display = paidTabTotal > 0 ? 'inline-flex' : 'none';
+    paidCountBadge.style.display = 'inline-block';
   }
-  if (activeCommissionCountEl) activeCommissionCountEl.textContent = String(activeAll.length);
-  if (clearedCommissionCountEl) clearedCommissionCountEl.textContent = String(clearedAll.length);
+  if (activeCommissionCountEl) activeCommissionCountEl.textContent = String(activeGroups.length);
+  if (clearedCommissionCountEl) clearedCommissionCountEl.textContent = String(clearedGroups.length);
 
   // Totals are based on ACTIVE commission only.
   let total25 = 0;
@@ -2469,30 +2928,31 @@ function renderPaidTable() {
   const activeSearch = String(activeCommissionSearch?.value || '').trim().toLowerCase();
   const activeStart = String(activeCommissionStartDate?.value || '').trim();
   const activeEnd = String(activeCommissionEndDate?.value || '').trim();
-  const activeFiltered = activeAll.filter((sub) => {
-    const text = `${sub.customerName || ''} ${sub.pfa || ''} ${sub.customerDetails?.pfa || ''}`.toLowerCase();
-    const paidDate = getDateFromAny(sub.paidAt || sub.updatedAt);
+  const activeFiltered = activeGroups.filter((group) => {
+    const text = `${group.agentName || ''} ${Array.from(group.customerNames).join(' ')}`.toLowerCase();
+    const paidDate = group.latestAt ? new Date(group.latestAt) : null;
     const textOk = !activeSearch || text.includes(activeSearch);
     return textOk && inDateRange(paidDate, activeStart, activeEnd);
   });
 
   if (!activeFiltered.length) {
-    activeCommissionTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No active commission records</td></tr>';
+    activeCommissionTableBody.innerHTML = '<tr><td colspan="6" class="no-data">No active commission records</td></tr>';
   } else {
-    activeCommissionTableBody.innerHTML = activeFiltered.map(sub => {
-      const { pfa, twentyFive, commission2 } = getFinancials(sub);
-      const paidDate = safeFormatDate(sub.paidAt || sub.updatedAt);
-      const agentName = sub.agentName || '-';
+    activeCommissionTableBody.innerHTML = activeFiltered.map(group => {
+      const breakdownId = `uploader-active-breakdown-${toSafeDomId(group.key)}`;
+      const paidDate = safeFormatDate(group.latestAt ? new Date(group.latestAt) : null);
 
       return `
         <tr>
-          <td><strong>${sub.customerName || '-'}</strong></td>
-          <td>${pfa}</td>
-          <td>${agentName}</td>
-          <td>${formatCurrency(twentyFive)}</td>
-          <td>${formatCurrency(commission2)}</td>
+          <td><strong>${group.agentName || '-'}</strong></td>
+          <td>${group.customerCount}</td>
+          <td>${formatCurrency(group.total25)}</td>
+          <td>${formatCurrency(group.totalCommission)}</td>
           <td><span class="status-badge status-approved">Paid</span></td>
-          <td>${paidDate}</td>
+          <td>${paidDate}<div style="margin-top:8px;"><button class="action-btn agent-breakdown-toggle" onclick="window.toggleUploaderAgentBreakdown('${breakdownId}', this)"><i class="fas fa-chevron-down"></i> Breakdown</button></div></td>
+        </tr>
+        <tr id="${breakdownId}" class="agent-breakdown-row" style="display:none;">
+          <td colspan="6">${renderBreakdownPanel(group, 'paid')}</td>
         </tr>
       `;
     }).join('');
@@ -2501,35 +2961,49 @@ function renderPaidTable() {
   const clearedSearch = String(clearedCommissionSearch?.value || '').trim().toLowerCase();
   const clearedStart = String(clearedCommissionStartDate?.value || '').trim();
   const clearedEnd = String(clearedCommissionEndDate?.value || '').trim();
-  const clearedFiltered = clearedAll.filter((sub) => {
-    const text = `${sub.customerName || ''} ${sub.pfa || ''} ${sub.customerDetails?.pfa || ''}`.toLowerCase();
-    const clearedDate = getDateFromAny(sub.clearedAt || sub.updatedAt);
+  const clearedFiltered = clearedGroups.filter((group) => {
+    const text = `${group.agentName || ''} ${Array.from(group.customerNames).join(' ')}`.toLowerCase();
+    const clearedDate = group.latestAt ? new Date(group.latestAt) : null;
     const textOk = !clearedSearch || text.includes(clearedSearch);
     return textOk && inDateRange(clearedDate, clearedStart, clearedEnd);
   });
 
   if (!clearedFiltered.length) {
-    clearedCommissionTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No cleared commission records</td></tr>';
+    clearedCommissionTableBody.innerHTML = '<tr><td colspan="6" class="no-data">No cleared commission records</td></tr>';
   } else {
-    clearedCommissionTableBody.innerHTML = clearedFiltered.map(sub => {
-      const { pfa, twentyFive, commission2 } = getFinancials(sub);
-      const clearedDate = safeFormatDate(sub.clearedAt || sub.updatedAt);
-      const agentName = sub.agentName || '-';
+    clearedCommissionTableBody.innerHTML = clearedFiltered.map(group => {
+      const breakdownId = `uploader-cleared-breakdown-${toSafeDomId(group.key)}`;
+      const clearedDate = safeFormatDate(group.latestAt ? new Date(group.latestAt) : null);
 
       return `
         <tr>
-          <td><strong>${sub.customerName || '-'}</strong></td>
-          <td>${pfa}</td>
-          <td>${agentName}</td>
-          <td>${formatCurrency(twentyFive)}</td>
-          <td>${formatCurrency(commission2)}</td>
+          <td><strong>${group.agentName || '-'}</strong></td>
+          <td>${group.customerCount}</td>
+          <td>${formatCurrency(group.total25)}</td>
+          <td>${formatCurrency(group.totalCommission)}</td>
           <td><span class="status-badge status-pending">Cleared</span></td>
-          <td>${clearedDate}</td>
+          <td>${clearedDate}<div style="margin-top:8px;"><button class="action-btn agent-breakdown-toggle" onclick="window.toggleUploaderAgentBreakdown('${breakdownId}', this)"><i class="fas fa-chevron-down"></i> Breakdown</button></div></td>
+        </tr>
+        <tr id="${breakdownId}" class="agent-breakdown-row" style="display:none;">
+          <td colspan="6">${renderBreakdownPanel(group, 'cleared')}</td>
         </tr>
       `;
     }).join('');
   }
 }
+
+window.toggleUploaderAgentBreakdown = (rowId, btn) => {
+  const row = document.getElementById(rowId);
+  if (!row) return;
+  const isOpen = row.style.display !== 'none';
+  row.style.display = isOpen ? 'none' : 'table-row';
+  if (btn) {
+    const icon = btn.querySelector('i');
+    if (icon) icon.className = isOpen ? 'fas fa-chevron-down' : 'fas fa-chevron-up';
+    const textNode = Array.from(btn.childNodes).find((node) => node.nodeType === Node.TEXT_NODE);
+    if (textNode) textNode.textContent = isOpen ? ' Breakdown' : ' Hide';
+  }
+};
 
 function showNotification(message, type = 'info') {
   if (!notification) return;

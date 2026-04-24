@@ -42,9 +42,7 @@ function normalizeEmail(value) {
 }
 
 function normalizeRole(value) {
-    const v = String(value || '').trim().toLowerCase();
-    if (v === 'viewer') return 'reviewer';
-    return v;
+    return String(value || '').trim().toLowerCase();
 }
 
 function safeLowerEmail(value) {

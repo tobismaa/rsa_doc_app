@@ -9,7 +9,7 @@ import {
   setDoc,
   updateDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
-import { isActiveUserWithRole, normalizeEmail } from "./user-directory.js";
+import { isActiveUserWithRole, normalizeEmail } from "./user-directory.js?v=20260423b";
 
 export function routingRuleDocId(uploaderEmail) {
   return encodeURIComponent(normalizeEmail(uploaderEmail));
@@ -42,12 +42,13 @@ export async function getUsersByRoles(db, roles = []) {
     .filter((data) => {
       const role = String(data.role || '').toLowerCase();
       const status = String(data.status || 'active').toLowerCase();
-      return allowed.has(role) && status !== 'deactivated';
+      const leaveStatus = String(data.leaveStatus || '').toLowerCase();
+      return allowed.has(role) && status !== 'deactivated' && leaveStatus !== 'on_leave';
     });
 }
 
 export async function getViewerEmails(db) {
-  return (await getUsersByRoles(db, ['reviewer', 'viewer']))
+  return (await getUsersByRoles(db, ['reviewer']))
     .map((data) => data.email)
     .filter(Boolean)
     .sort();
@@ -64,7 +65,7 @@ export async function assignRoundRobin({ db, currentUser, subRef, counterDoc }) 
 
   const routingRule = await getUploaderRoutingRule(db, uploaderEmail);
   const mappedReviewer = routingRule?.reviewerEmail || '';
-  if (mappedReviewer && await isActiveUserWithRole(db, mappedReviewer, ['reviewer', 'viewer'])) {
+  if (mappedReviewer && await isActiveUserWithRole(db, mappedReviewer, ['reviewer'])) {
     await updateDoc(subRef, {
       assignedTo: mappedReviewer,
       assignmentMode: 'uploader_routing',

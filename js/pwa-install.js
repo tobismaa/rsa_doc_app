@@ -81,7 +81,7 @@
 
   function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.register('/service-worker.js?v=20260416a').catch(() => {});
+    navigator.serviceWorker.register('/service-worker.js?v=20260423c').catch(() => {});
   }
 
   window.addEventListener('beforeinstallprompt', (e) => {

@@ -12,8 +12,8 @@
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
     <title>Admin Dashboard - CMBank RSA</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260416f">
-    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260416f">
+    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
     <!-- Security: DOMPurify for XSS protection -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 </head>
@@ -66,10 +66,12 @@
                 <a href="#" class="nav-item active" data-tab="user-management">
                     <i class="fas fa-users"></i>
                     <span>User Management</span>
+                    <span class="badge" id="userManagementCount">0</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="application-management">
                     <i class="fas fa-folder-tree"></i>
                     <span>Application Management</span>
+                    <span class="badge" id="applicationManagementCount">0</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="round-robin">
                     <i class="fas fa-exchange-alt"></i>
@@ -115,6 +117,8 @@
                         <option value="all">All Roles</option>
                         <option value="uploader">Uploader</option>
                         <option value="reviewer">Reviewer</option>
+                        <option value="rsa">RSA</option>
+                        <option value="payment">Payment</option>
                         <option value="admin">Admin</option>
                     </select>
                     <select id="userStatusFilter" aria-label="Filter by status">
@@ -433,11 +437,8 @@
                 <div class="all-documents">
                     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
                         <h2 style="margin:0;">Payments</h2>
-                        <button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.clearPaidSubmissions()">
-                            <i class="fas fa-check-double"></i> Settle Commission
-                        </button>
                     </div>
-                    <p style="color:#64748b;margin:0 0 14px;">Mark applications as paid after PFA payment, then clear paid records once commission has been settled.</p>
+                    <p style="color:#64748b;margin:0 0 14px;">Read-only payment queue for applications submitted to PFA and paid records.</p>
                     <div class="table-container">
                         <table class="customers-table">
                             <thead>
@@ -642,7 +643,6 @@
                 <!-- User details will be inserted here -->
             </div>
             <div class="modal-footer">
-                <button class="edit-user-btn" id="editFromViewBtn">Edit User</button>
                 <button class="deactivate-user-btn" id="deactivateFromViewBtn">Deactivate</button>
             </div>
         </div>
@@ -751,6 +751,39 @@
         </div>
     </div>
 
+    <!-- Leave Management Modal -->
+    <div id="leaveModal" class="modal" role="dialog" aria-modal="true">
+        <div class="modal-content small leave-modal-content">
+            <div class="modal-header">
+                <h2 id="leaveModalTitle"><i class="fas fa-person-walking-luggage"></i> Activate Leave</h2>
+                <button id="closeLeaveModalBtn" class="close-btn" aria-label="Close leave modal">&times;</button>
+            </div>
+            <div class="leave-modal-body">
+                <div class="leave-modal-hero">
+                    <div class="leave-modal-icon">
+                        <i class="fas fa-user-clock"></i>
+                    </div>
+                    <p id="leaveModalSummary"></p>
+                </div>
+                <label class="leave-field-label" for="leaveRelieverSelect">Reliever</label>
+                <div class="leave-select-wrap">
+                    <i class="fas fa-user-shield"></i>
+                    <select id="leaveRelieverSelect"></select>
+                </div>
+                <div class="leave-note">
+                    <i class="fas fa-circle-info"></i>
+                    <span>Active applications at this user's current stage will move to the reliever immediately. On resumption, unfinished applications return to the original user.</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelLeaveModalBtn" type="button" class="cancel-btn">Cancel</button>
+                <button id="confirmLeaveBtn" type="button" class="confirm-btn">
+                    <i class="fas fa-person-walking-luggage"></i> Activate Leave
+                </button>
+            </div>
+        </div>
+    </div>
+
     <button type="button" id="helpFab" class="sop-fab" title="Open SOP">
         <i class="fas fa-circle-question"></i>
         <span>SOP</span>
@@ -822,13 +855,13 @@
     </div>
 
     <script type="module" src="js/firebase-config.js"></script>
-    <script type="module" src="js/admin.js?v=20260415e"></script>
+    <script type="module" src="js/admin.js?v=20260423f"></script>
     <script src="js/table-enhancer.js?v=20260415"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260416q">
-    <script type="module" src="js/app-chat.js?v=20260416o"></script>
+    <script type="module" src="js/app-chat.js?v=20260423a"></script>
     <link rel="stylesheet" href="css/pwa-install.css">
-    <script src="js/pwa-install.js?v=20260416d"></script>
+    <script src="js/pwa-install.js?v=20260423a"></script>
     <link rel="stylesheet" href="css/profile-card.css">
     <link rel="stylesheet" href="css/sop-help.css">
     <script src="js/sop-help.js"></script>

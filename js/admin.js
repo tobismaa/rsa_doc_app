@@ -1,7 +1,6 @@
 ﻿// js/admin.js - COMPLETE UPDATED VERSION WITH FIXED DOWNLOAD ALL
 import { auth, db } from './firebase-config.js';
 import { ADMIN_API_BASE_URL } from './admin-api-config.js';
-import { notifyStatusChangePush } from './status-push.js';
 import {
     collection,
     addDoc,
@@ -62,6 +61,7 @@ let allAudits = [];
 let allSubmissions = [];
 let allPendingAgents = [];
 let allApprovedAgents = [];
+let allPendingUsers = [];
 let adminNames = {};
 let uploaderNames = {};
 let userIdNameCache = new Map();
@@ -70,6 +70,7 @@ const TRACK_PAGE_SIZE = 10;
 let trackAppsPage = 1;
 let currentParentTab = 'user-management';
 let currentLeafTab = 'users';
+let selectedLeaveUserId = '';
 
 const TAB_GROUPS = {
     'user-management': ['users', 'pending-users', 'pending-agents', 'registered-agents'],
@@ -89,7 +90,41 @@ const TAB_LABELS = {
     payments: 'Payment'
 };
 
-const REVIEWER_ROLE_ALIASES = new Set(['reviewer', 'viewer']);
+function setCountBadge(id, count) {
+    const badge = document.getElementById(id);
+    if (!badge) return;
+    badge.textContent = String(count);
+    badge.style.display = 'inline-block';
+}
+
+function getAdminSubTabCount(tabId) {
+    if (tabId === 'users') return allUsers.length;
+    if (tabId === 'pending-users') return allPendingUsers.length;
+    if (tabId === 'pending-agents') return allPendingAgents.length;
+    if (tabId === 'registered-agents') return allApprovedAgents.length;
+    if (tabId === 'pending-docs') return allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'pending').length;
+    if (tabId === 'approved-docs') return allSubmissions.filter((s) => {
+        const status = String(s.status || '').toLowerCase();
+        return status === 'processing_to_pfa' || status === 'approved';
+    }).length;
+    if (tabId === 'rejected-docs') return allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'rejected').length;
+    if (tabId === 'track-apps') return allSubmissions.length;
+    if (tabId === 'finally-submitted') return allSubmissions.filter((s) => s.finalSubmitted === true || s.rsaSubmitted === true).length;
+    if (tabId === 'payments') return allSubmissions.filter((s) => {
+        const status = String(s.status || '').toLowerCase();
+        return status === 'sent_to_pfa' || status === 'rsa_submitted';
+    }).length;
+    return 0;
+}
+
+function updateAdminNavigationCounts() {
+    const userManagementCount = getAdminSubTabCount('users') + getAdminSubTabCount('pending-users') + getAdminSubTabCount('pending-agents') + getAdminSubTabCount('registered-agents');
+    const applicationManagementCount = getAdminSubTabCount('track-apps');
+    setCountBadge('userManagementCount', userManagementCount);
+    setCountBadge('applicationManagementCount', applicationManagementCount);
+}
+
+const REVIEWER_ROLE_ALIASES = new Set(['reviewer']);
 const SUPER_ADMIN_ONLY_ACTIONS = new Set([
     'admin_management_updated',
     'application_redirected',
@@ -111,6 +146,60 @@ function getRoleLabel(role) {
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
+async function ensureCurrentUserProfileAtUid(user, profileDocSnap) {
+    if (!user?.uid || !profileDocSnap?.exists()) return profileDocSnap;
+    if (profileDocSnap.id === user.uid) return profileDocSnap;
+
+    const profileData = profileDocSnap.data() || {};
+    const normalizedEmail = String(user.email || '').trim().toLowerCase();
+    const profileEmail = String(profileData.email || '').trim().toLowerCase();
+
+    if (!normalizedEmail || profileEmail !== normalizedEmail) return profileDocSnap;
+    if (String(profileData.uid || '').trim() !== user.uid) return profileDocSnap;
+
+    const uidRef = doc(db, 'users', user.uid);
+    const uidSnap = await getDoc(uidRef);
+    if (uidSnap.exists()) return uidSnap;
+
+    await setDoc(uidRef, {
+        ...profileData,
+        uid: user.uid,
+        email: normalizedEmail,
+        updatedAt: serverTimestamp(),
+        migratedFromDocId: profileDocSnap.id
+    }, { merge: true });
+
+    return await getDoc(uidRef);
+}
+
+async function ensureCurrentAdminWritableProfile() {
+    if (!currentAdmin?.uid || !currentAdmin?.email) return null;
+
+    const uidRef = doc(db, 'users', currentAdmin.uid);
+    const uidSnap = await getDoc(uidRef);
+    if (uidSnap.exists()) return uidSnap;
+
+    const normalizedEmail = String(currentAdmin.email || '').trim().toLowerCase();
+    const normalizedRole = normalizeUserRole(currentAdminProfileData?.role || 'admin');
+    const normalizedStatus = String(currentAdminProfileData?.status || 'active').trim().toLowerCase();
+    const allowedRoles = new Set(['uploader', 'admin', 'super_admin', 'reviewer', 'rsa', 'payment']);
+    const allowedStatuses = new Set(['pending', 'active', 'deactivated']);
+
+    await setDoc(uidRef, {
+        ...(currentAdminProfileData || {}),
+        uid: currentAdmin.uid,
+        email: normalizedEmail,
+        role: allowedRoles.has(normalizedRole) ? normalizedRole : 'admin',
+        status: allowedStatuses.has(normalizedStatus) ? normalizedStatus : 'active',
+        updatedAt: serverTimestamp(),
+        migratedFromDocId: currentAdminProfileData?.uid && currentAdminProfileData.uid !== currentAdmin.uid
+            ? currentAdminProfileData.uid
+            : (currentAdminProfileData?.migratedFromDocId || '')
+    }, { merge: true });
+
+    return await getDoc(uidRef);
+}
+
 async function getReviewerUsersForRoundRobin() {
     const usersSnap = await getDocs(collection(db, 'users'));
     return usersSnap.docs
@@ -120,10 +209,12 @@ async function getReviewerUsersForRoundRobin() {
                 id: d.id,
                 email: data.email,
                 fullName: data.fullName || data.email || 'Unknown',
-                role: normalizeUserRole(data.role)
+                role: normalizeUserRole(data.role),
+                status: String(data.status || 'active').toLowerCase(),
+                leaveStatus: String(data.leaveStatus || '').toLowerCase()
             };
         })
-        .filter((u) => u.email && u.role === 'reviewer')
+        .filter((u) => u.email && u.role === 'reviewer' && u.status !== 'deactivated' && u.leaveStatus !== 'on_leave')
         .sort((a, b) => a.email.localeCompare(b.email));
 }
 
@@ -136,10 +227,12 @@ async function getPaymentUsersForRoundRobin() {
                 id: d.id,
                 email: data.email,
                 fullName: data.fullName || data.email || 'Unknown',
-                role: normalizeUserRole(data.role)
+                role: normalizeUserRole(data.role),
+                status: String(data.status || 'active').toLowerCase(),
+                leaveStatus: String(data.leaveStatus || '').toLowerCase()
             };
         })
-        .filter((u) => u.email && u.role === 'payment')
+        .filter((u) => u.email && u.role === 'payment' && u.status !== 'deactivated' && u.leaveStatus !== 'on_leave')
         .sort((a, b) => a.email.localeCompare(b.email));
 }
 
@@ -167,6 +260,7 @@ const trackJumpPageInput = document.getElementById('trackJumpPageInput');
 const trackJumpPageBtn = document.getElementById('trackJumpPageBtn');
 const auditTableBody = document.getElementById('auditTableBody');
 const notification = document.getElementById('notification');
+let notificationTimer = null;
 const viewerModal = document.getElementById('viewerModal');
 const viewerFileName = document.getElementById('viewerFileName');
 const documentViewer = document.getElementById('documentViewer');
@@ -286,15 +380,75 @@ async function fetchWithCorsFallback(url) {
     const cleanUrl = url?.toString().trim().replace(/[\s\n\r\t]+/g, '');
     if (!cleanUrl) throw new Error('Invalid URL');
 
-    const response = await fetch(cleanUrl, { mode: 'cors', credentials: 'omit' });
-    if (!response.ok) {
-        throw new Error(`Document fetch failed: ${response.status}`);
+    try {
+        const response = await fetch(cleanUrl, { mode: 'cors', credentials: 'omit' });
+        if (!response.ok) {
+            throw new Error(`Document fetch failed: ${response.status}`);
+        }
+        return response;
+    } catch (error) {
+        const proxyUrl = getBackblazeDownloadProxyUrl(cleanUrl);
+        if (!proxyUrl) {
+            error.corsBlocked = true;
+            throw error;
+        }
+
+        const proxyResponse = await fetch(proxyUrl, { credentials: 'same-origin' });
+        if (!proxyResponse.ok) {
+            throw new Error(`Document proxy failed: ${proxyResponse.status}`);
+        }
+        return proxyResponse;
     }
-    return response;
+}
+
+function getBackblazeDownloadProxyUrl(cleanUrl) {
+    try {
+        const parsed = new URL(cleanUrl);
+        const isBackblaze = parsed.protocol === 'https:' && /\.backblazeb2\.com$/i.test(parsed.hostname);
+        if (!isBackblaze || !parsed.pathname.startsWith('/file/cmbank-rsa-documents/')) return '';
+        return `/api/backblaze-download.php?url=${encodeURIComponent(cleanUrl)}`;
+    } catch (error) {
+        return '';
+    }
 }
 
 // ==================== DOWNLOAD HELPER FUNCTIONS ====================
-function downloadBlobAsFile(blob, fileName) {
+async function saveFileWithLocationPicker(blob, defaultFileName) {
+    if (!('showSaveFilePicker' in window)) {
+        triggerDirectDownload(blob, defaultFileName);
+        return true;
+    }
+
+    try {
+        const extension = String(defaultFileName || '').includes('.')
+            ? `.${String(defaultFileName).split('.').pop().toLowerCase()}`
+            : '.bin';
+        const fileHandle = await window.showSaveFilePicker({
+            suggestedName: defaultFileName,
+            types: [{
+                description: 'Download',
+                accept: {
+                    [blob.type || 'application/octet-stream']: [extension]
+                }
+            }]
+        });
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        showNotification(`Saved: ${defaultFileName}`, 'success');
+        return true;
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            showNotification('Save cancelled', 'info');
+        } else {
+            showNotification('Save failed: ' + error.message, 'error');
+            triggerDirectDownload(blob, defaultFileName);
+        }
+        return false;
+    }
+}
+
+function triggerDirectDownload(blob, fileName) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -303,6 +457,25 @@ function downloadBlobAsFile(blob, fileName) {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+}
+
+async function downloadBlobAsFile(blob, fileName) {
+    return saveFileWithLocationPicker(blob, fileName);
+}
+
+function openDirectDocumentDownload(fileUrl, fileName = 'document.pdf') {
+    const cleanUrl = fileUrl?.toString().trim().replace(/[\s\n\r\t]+/g, '');
+    if (!cleanUrl) return false;
+
+    const link = document.createElement('a');
+    link.href = cleanUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.download = (fileName || 'document.pdf').replace(/[\\/:*?"<>|]/g, '_');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    return true;
 }
 
 function showLoader(msg) {
@@ -326,7 +499,7 @@ function hideLoader() {
 async function saveBlobToFolderPicker(blob, defaultFileName, customerName = 'Customer') {
     if (!('showDirectoryPicker' in window)) {
         showNotification('Folder picker not supported. Falling back to save dialog...', 'info');
-        downloadBlobAsFile(blob, defaultFileName);
+        await saveFileWithLocationPicker(blob, defaultFileName);
         return true;
     }
     try {
@@ -348,7 +521,7 @@ async function saveBlobToFolderPicker(blob, defaultFileName, customerName = 'Cus
             showNotification('Save cancelled', 'info');
         } else {
             showNotification('Save failed: ' + error.message, 'error');
-            downloadBlobAsFile(blob, defaultFileName);
+            await saveFileWithLocationPicker(blob, defaultFileName);
         }
         return false;
     }
@@ -416,17 +589,20 @@ async function checkAdminAuth() {
 
         try {
             let userData = null;
+            let userProfileDoc = null;
             const userByUid = query(collection(db, 'users'), where('uid', '==', user.uid));
             const uidSnapshot = await getDocs(userByUid);
 
             if (!uidSnapshot.empty) {
-                userData = uidSnapshot.docs[0].data();
+                userProfileDoc = uidSnapshot.docs[0];
+                userData = userProfileDoc.data();
             } else if (user.email) {
                 const normalizedEmail = user.email.toLowerCase();
                 const userByEmail = query(collection(db, 'users'), where('email', '==', normalizedEmail));
                 const emailSnapshot = await getDocs(userByEmail);
                 if (!emailSnapshot.empty) {
-                    userData = emailSnapshot.docs[0].data();
+                    userProfileDoc = emailSnapshot.docs[0];
+                    userData = userProfileDoc.data();
                 } else {
                     const allUsersSnapshot = await getDocs(collection(db, 'users'));
                     const matchedDoc = allUsersSnapshot.docs.find((docSnap) => {
@@ -437,6 +613,7 @@ async function checkAdminAuth() {
                         );
                     });
                     if (matchedDoc) {
+                        userProfileDoc = matchedDoc;
                         userData = matchedDoc.data();
                     }
                 }
@@ -446,6 +623,11 @@ async function checkAdminAuth() {
                 showNotification('User profile not found in database.', 'error');
                 window.location.href = 'index.html';
                 return;
+            }
+
+            if (userProfileDoc) {
+                userProfileDoc = await ensureCurrentUserProfileAtUid(user, userProfileDoc);
+                userData = userProfileDoc.data() || userData;
             }
 
             if (userData.role === 'super_admin') {
@@ -588,16 +770,12 @@ function setupEventListeners() {
     document.getElementById('closeViewUserModal')?.addEventListener('click', closeViewUserModal);
     document.getElementById('closeViewAgentModal')?.addEventListener('click', closeViewAgentModal);
     document.getElementById('closeAgentDetailsBtn')?.addEventListener('click', closeViewAgentModal);
-    document.getElementById('editFromViewBtn')?.addEventListener('click', () => {
-        if (selectedUserId) {
-            window.editUser(selectedUserId);
-        } else {
-            showNotification('No user selected', 'error');
-        }
-    });
     document.getElementById('userForm')?.addEventListener('submit', saveUser);
     document.getElementById('closeUserModalBtn')?.addEventListener('click', closeUserModal);
     document.getElementById('cancelUserModalBtn')?.addEventListener('click', closeUserModal);
+    document.getElementById('closeLeaveModalBtn')?.addEventListener('click', closeLeaveModal);
+    document.getElementById('cancelLeaveModalBtn')?.addEventListener('click', closeLeaveModal);
+    document.getElementById('confirmLeaveBtn')?.addEventListener('click', confirmActivateLeave);
 
     document.getElementById('closeConfirmModal')?.addEventListener('click', closeConfirmModal);
     document.getElementById('cancelConfirm')?.addEventListener('click', closeConfirmModal);
@@ -652,6 +830,8 @@ function setupEventListeners() {
         if (e.target === viewerModal) closeViewerModal();
         const userModal = document.getElementById('userModal');
         if (e.target === userModal) closeUserModal();
+        const leaveModal = document.getElementById('leaveModal');
+        if (e.target === leaveModal) closeLeaveModal();
         const testResultModal = document.getElementById('testResultModal');
         if (e.target === testResultModal) closeTestResultModal();
     });
@@ -691,12 +871,14 @@ function renderAdminSubTabs(parentTabId) {
     host.innerHTML = leaves.map((leaf) => {
         const active = leaf === currentLeafTab;
         const label = TAB_LABELS[leaf] || leaf;
+        const count = getAdminSubTabCount(leaf);
+        const badgeId = `${leaf.replace(/[^a-zA-Z0-9]+/g, '-')}Count`;
         return `
             <button
                 type="button"
                 class="action-btn admin-subtab-btn ${active ? 'active' : ''}"
                 data-subtab="${leaf}"
-            >${label}</button>
+            >${label}<span class="badge" id="${badgeId}">${count}</span></button>
         `;
     }).join('');
 
@@ -828,6 +1010,8 @@ function loadUsers() {
         });
         renderUsersTable(users);
         allUsers = users;
+        updateAdminNavigationCounts();
+        renderAdminSubTabs(currentParentTab);
         if (Array.isArray(allAudits) && allAudits.length > 0) {
             renderAuditTable(allAudits);
         }
@@ -847,6 +1031,7 @@ function loadPendingUsers() {
             if (normalizeUserRole(data.role) === 'super_admin') return;
             pendingUsers.push({ id: doc.id, ...data });
         });
+        allPendingUsers = pendingUsers;
         renderPendingUsersGrid(pendingUsers);
         updatePendingUserCount(pendingUsers);
     }, (error) => {
@@ -861,8 +1046,13 @@ function loadPendingAgents() {
     onSnapshot(q, (snapshot) => {
         allPendingAgents = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
         renderPendingAgentsTable(allPendingAgents);
+        updateAdminNavigationCounts();
+        renderAdminSubTabs(currentParentTab);
     }, () => {
+        allPendingAgents = [];
         renderPendingAgentsTable([]);
+        updateAdminNavigationCounts();
+        renderAdminSubTabs(currentParentTab);
     });
 }
 
@@ -871,8 +1061,13 @@ function loadApprovedAgents() {
     onSnapshot(q, (snapshot) => {
         allApprovedAgents = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
         renderApprovedAgentsTable(allApprovedAgents);
+        updateAdminNavigationCounts();
+        renderAdminSubTabs(currentParentTab);
     }, () => {
+        allApprovedAgents = [];
         renderApprovedAgentsTable([]);
+        updateAdminNavigationCounts();
+        renderAdminSubTabs(currentParentTab);
     });
 }
 
@@ -957,6 +1152,7 @@ async function loadPendingUsersFallback() {
         }
     });
 
+    allPendingUsers = pendingUsers;
     renderPendingUsersGrid(pendingUsers);
     updatePendingUserCount(pendingUsers);
 }
@@ -1031,21 +1227,30 @@ function renderUsersTable(users) {
         const fullName = user.fullName || user.email?.split('@')[0] || 'Unknown';
         const normalizedRole = normalizeUserRole(user.role);
         const roleLabel = getRoleLabel(user.role);
+        const leaveStage = getLeaveStageForRole(user.role);
+        const leaveActive = isUserOnLeave(user);
+        const leaveReliever = leaveActive ? normalizeEmailValue(user.leaveRelieverEmail) : '';
+        const leaveStatusHtml = leaveActive
+            ? `<span class="status-badge pending">On Leave${leaveReliever ? ` -> ${escapeHtml(getDisplayNameByEmail(leaveReliever))}` : ''}</span>`
+            : `<span class="status-badge ${user.status || 'active'}">${user.status || 'active'}</span>`;
+        const canManageLeave = leaveStage && String(user.status || 'active').toLowerCase() === 'active';
+        const leaveButtonHtml = canManageLeave
+            ? (leaveActive
+                ? `<button class="action-btn activate-btn" onclick="window.resumeUserFromLeave('${user.id}')" title="Resume from leave"><i class="fas fa-person-walking-arrow-right"></i></button>`
+                : `<button class="action-btn leave-btn" onclick="window.openLeaveModal('${user.id}')" title="Activate leave"><i class="fas fa-person-walking-luggage"></i></button>`)
+            : '';
         return `
             <tr data-user-id="${user.id}">
                 <td><strong>${fullName}</strong></td>
                 <td>${user.email}</td>
                 <td>${renderWhatsAppContactCell(user)}</td>
                 <td><span class="role-badge ${normalizedRole}">${roleLabel}</span></td>
-                <td><span class="status-badge ${user.status || 'active'}">${user.status || 'active'}</span></td>
+                <td>${leaveStatusHtml}</td>
                 <td>${formatDate(user.createdAt)}</td>
                 <td>
                     <div class="action-buttons">
                         <button class="action-btn view-btn" onclick="window.viewUser('${user.id}')" title="View">
                             <i class="fas fa-eye"></i>
-                        </button>
-                        <button class="action-btn edit-btn" onclick="window.editUser('${user.id}')" title="Edit">
-                            <i class="fas fa-edit"></i>
                         </button>
                         ${user.status === 'active' ?
                             `<button class="action-btn deactivate-btn" onclick="window.deactivateUser('${user.id}')" title="Deactivate">
@@ -1056,6 +1261,7 @@ function renderUsersTable(users) {
                                 <i class="fas fa-check-circle"></i>
                             </button>` : ''
                         }
+                        ${leaveButtonHtml}
                         <button class="action-btn delete-btn" onclick="window.deleteUser('${user.id}')" title="Delete">
                             <i class="fas fa-trash"></i>
                         </button>
@@ -1086,6 +1292,8 @@ function loadSubmissions() {
         updateRejectedDocCount(allSubmissions.filter(s => s.status === 'rejected'));
         updateFinallySubmittedCount();
         updatePaymentPendingCount();
+        updateAdminNavigationCounts();
+        renderAdminSubTabs(currentParentTab);
     }, (error) => {
         // Silent fail
     });
@@ -1094,26 +1302,24 @@ function loadSubmissions() {
 // ==================== UPDATE COUNTS ====================
 function updatePendingUserCount(users) {
     const pendingCount = users.length;
-    if (pendingUserCountBadge) {
-        pendingUserCountBadge.textContent = pendingCount;
-        pendingUserCountBadge.style.display = pendingCount > 0 ? 'inline' : 'none';
-    }
+    setCountBadge('pendingUserCount', pendingCount);
+    setCountBadge('pending-usersCount', pendingCount);
+    updateAdminNavigationCounts();
+    renderAdminSubTabs(currentParentTab);
 }
 
 function updatePendingDocCount(items) {
     const pendingCount = Array.isArray(items) ? items.filter(u => u.status === 'pending').length : 0;
-    if (pendingDocCountBadge) {
-        pendingDocCountBadge.textContent = pendingCount;
-        pendingDocCountBadge.style.display = pendingCount > 0 ? 'inline' : 'none';
-    }
+    setCountBadge('pendingDocCount', pendingCount);
+    setCountBadge('pending-docsCount', pendingCount);
+    updateAdminNavigationCounts();
 }
 
 function updateRejectedDocCount(items) {
     const rejectedCount = Array.isArray(items) ? items.filter(u => u.status === 'rejected').length : 0;
-    if (rejectedDocCountBadge) {
-        rejectedDocCountBadge.textContent = rejectedCount;
-        rejectedDocCountBadge.style.display = rejectedCount > 0 ? 'inline' : 'none';
-    }
+    setCountBadge('rejectedDocCount', rejectedCount);
+    setCountBadge('rejected-docsCount', rejectedCount);
+    updateAdminNavigationCounts();
 }
 
 // ==================== RENDER PENDING DOCUMENTS ====================
@@ -1325,9 +1531,6 @@ function renderPaymentQueue() {
         const status = String(sub.status || '').toLowerCase();
         const isPaid = status === 'paid';
         const statusLabel = isPaid ? 'Paid' : 'Sent to PFA';
-        const actionHtml = isPaid
-            ? '<button class="action-btn" style="opacity:.65;cursor:not-allowed;" disabled><i class="fas fa-check"></i> Paid</button>'
-            : `<button class="action-btn" style="background:#16a34a;color:#fff;border:none;" onclick="window.markSubmissionPaid('${sub.id}')"><i class="fas fa-check-circle"></i> Paid</button>`;
 
         return `
             <tr>
@@ -1337,7 +1540,7 @@ function renderPaymentQueue() {
                 <td>${formatCurrency(twentyFive)}</td>
                 <td>${formatCurrency(commission2)}</td>
                 <td><span class="status-badge status-approved">${statusLabel}</span></td>
-                <td>${actionHtml} <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button></td>
+                <td><span style="color:#64748b;font-size:12px;font-weight:700;">Read only</span></td>
             </tr>
         `;
     }).join('');
@@ -1349,8 +1552,10 @@ function updateFinallySubmittedCount() {
     const badge = document.getElementById('finallySubmittedCount');
     if (badge) {
         badge.textContent = cnt;
-        badge.style.display = cnt > 0 ? 'inline' : 'none';
+        badge.style.display = 'inline-block';
     }
+    setCountBadge('finally-submittedCount', cnt);
+    updateAdminNavigationCounts();
 }
 
 function updatePaymentPendingCount() {
@@ -1358,16 +1563,20 @@ function updatePaymentPendingCount() {
         const status = String(s.status || '').toLowerCase();
         return status === 'sent_to_pfa' || status === 'rsa_submitted';
     }).length;
-    if (paymentPendingCountBadge) {
-        paymentPendingCountBadge.textContent = cnt;
-        paymentPendingCountBadge.style.display = cnt > 0 ? 'inline' : 'none';
-    }
+    setCountBadge('paymentPendingCount', cnt);
+    setCountBadge('paymentsCount', cnt);
+    updateAdminNavigationCounts();
 }
 
 function parseMoney(value) {
     const raw = String(value ?? '').replace(/[^0-9.\-]/g, '');
     const num = Number(raw);
     return Number.isFinite(num) ? num : 0;
+}
+
+function roundDownToNearestThousand(value) {
+    const num = Number(value || 0);
+    return Math.max(0, Math.floor(num / 1000) * 1000);
 }
 
 function formatCurrency(value) {
@@ -1382,8 +1591,9 @@ function formatCurrency(value) {
 function getSubmissionFinancials(sub) {
     const details = sub?.customerDetails || {};
     const rsaBalance = parseMoney(details.rsaBalance || sub?.rsaBalance || 0);
-    const computed25 = Math.ceil((rsaBalance * 0.25) / 100) * 100;
-    const twentyFive = parseMoney(details.rsa25Percent || sub?.rsa25Percent || computed25);
+    const computed25 = roundDownToNearestThousand(rsaBalance * 0.25);
+    const stored25 = parseMoney(details.rsa25Percent || sub?.rsa25Percent || 0);
+    const twentyFive = stored25 ? roundDownToNearestThousand(stored25) : computed25;
     const commission2 = twentyFive * 0.02;
     const pfa = String(details.pfa || sub?.pfa || '').trim() || '-';
     return { pfa, twentyFive, commission2 };
@@ -1433,6 +1643,70 @@ function renderWhatsAppContactCell(user = {}) {
     const digits = raw.replace(/\D/g, '');
     if (!digits) return '-';
     return `<a href="https://wa.me/${digits}" target="_blank" rel="noopener noreferrer">${escapeHtml(raw)}</a>`;
+}
+
+function normalizeEmailValue(email) {
+    return String(email || '').trim().toLowerCase();
+}
+
+function getLeaveStageForRole(role) {
+    const normalizedRole = normalizeUserRole(role);
+    if (normalizedRole === 'reviewer') {
+        return { key: 'reviewer', label: 'Reviewer', assignmentField: 'assignedTo', relieverRoles: ['reviewer'] };
+    }
+    if (normalizedRole === 'rsa') {
+        return { key: 'rsa', label: 'RSA', assignmentField: 'assignedToRSA', relieverRoles: ['rsa'] };
+    }
+    if (normalizedRole === 'payment') {
+        return { key: 'payment', label: 'Payment', assignmentField: 'assignedToPayment', relieverRoles: ['payment'] };
+    }
+    return null;
+}
+
+function isUserOnLeave(user = {}) {
+    return String(user.leaveStatus || '').toLowerCase() === 'on_leave';
+}
+
+function getEligibleRelievers(user = {}) {
+    const stage = getLeaveStageForRole(user.role);
+    const userEmail = normalizeEmailValue(user.email);
+    if (!stage || !userEmail) return [];
+    const allowedRoles = new Set(stage.relieverRoles);
+    return allUsers
+        .filter((candidate) => {
+            const role = normalizeUserRole(candidate.role);
+            const email = normalizeEmailValue(candidate.email);
+            const status = String(candidate.status || 'active').toLowerCase();
+            return allowedRoles.has(role) && email && email !== userEmail && status !== 'deactivated' && !isUserOnLeave(candidate);
+        })
+        .sort((a, b) => normalizeEmailValue(a.email).localeCompare(normalizeEmailValue(b.email)));
+}
+
+function isSubmissionFinalizedForLeave(stageKey, sub = {}) {
+    const status = String(sub.status || '').toLowerCase();
+    if (stageKey === 'reviewer') return status !== 'pending';
+    if (stageKey === 'rsa') return Boolean(sub.finalSubmitted || sub.rsaSubmitted) || ['sent_to_pfa', 'rsa_submitted', 'paid', 'cleared'].includes(status);
+    if (stageKey === 'payment') return ['paid', 'cleared'].includes(status);
+    return true;
+}
+
+function isSubmissionActiveForLeave(stageKey, sub = {}, userEmail = '') {
+    if (!stageKey || !userEmail) return false;
+    if (stageKey === 'reviewer') return normalizeEmailValue(sub.assignedTo) === userEmail && String(sub.status || '').toLowerCase() === 'pending';
+    if (stageKey === 'rsa') {
+        const status = String(sub.status || '').toLowerCase();
+        return normalizeEmailValue(sub.assignedToRSA) === userEmail && ['processing_to_pfa', 'approved'].includes(status) && !sub.finalSubmitted && !sub.rsaSubmitted;
+    }
+    if (stageKey === 'payment') {
+        const status = String(sub.status || '').toLowerCase();
+        return normalizeEmailValue(sub.assignedToPayment) === userEmail && ['sent_to_pfa', 'rsa_submitted'].includes(status);
+    }
+    return false;
+}
+
+function getLeaveActionLabel(user = {}) {
+    if (!getLeaveStageForRole(user.role)) return '';
+    return isUserOnLeave(user) ? 'Resume from Leave' : 'Activate Leave';
 }
 
 // ==================== VIEW ALL DOCUMENTS FOR A SUBMISSION ====================
@@ -1612,6 +1886,7 @@ window.downloadAllSubmission = async (submissionId) => {
 
         let successCount = 0;
         let failedCount = 0;
+        let directOpenedCount = 0;
 
         // Download each document
         for (let i = 0; i < docs.length; i++) {
@@ -1682,7 +1957,7 @@ window.downloadAllSubmission = async (submissionId) => {
                         await writable.write(blob);
                         await writable.close();
                     } else {
-                        downloadBlobAsFile(blob, fileName);
+                        await downloadBlobAsFile(blob, fileName);
                     }
                 }
 
@@ -1690,9 +1965,18 @@ window.downloadAllSubmission = async (submissionId) => {
                 updateProgress(i + 1, docs.length, `Completed ${i + 1} of ${docs.length}`, '');
 
             } catch (docError) {
-                failedCount++;
-                updateProgress(i + 1, docs.length, `Failed document ${i + 1}`, docItem.name || 'Unknown');
-                showNotification(`Failed to download: ${docItem.name}`, 'error');
+                const docType = DOCUMENT_TYPES[docItem.documentType] || docItem.documentType || 'document';
+                const fileExt = (docItem.name || '').split('.').pop() || 'pdf';
+                const fileName = `${safeCustomerName}_${docType}.${fileExt}`.replace(/[\\/:*?"<>|]/g, '_');
+
+                if (openDirectDocumentDownload(docItem.fileUrl, fileName)) {
+                    directOpenedCount++;
+                    updateProgress(i + 1, docs.length, `Opened document ${i + 1} directly`, docItem.name || fileName);
+                } else {
+                    failedCount++;
+                    updateProgress(i + 1, docs.length, `Failed document ${i + 1}`, docItem.name || 'Unknown');
+                    showNotification(`Failed to download: ${docItem.name}`, 'error');
+                }
             }
         }
 
@@ -1702,13 +1986,16 @@ window.downloadAllSubmission = async (submissionId) => {
 
         if (!cancelled) {
             if (failedCount === 0) {
+                if (directOpenedCount > 0) {
+                    showNotification(`Downloaded ${successCount}, opened ${directOpenedCount} directly because storage blocked secure fetch`, 'warning');
+                } else
                 if (useFolderPicker) {
                     showNotification(`✅ All ${successCount} documents saved to folder: ${safeCustomerName}`, 'success');
                 } else {
                     showNotification(`✅ All ${successCount} documents downloaded successfully`, 'success');
                 }
             } else {
-                showNotification(`⚠️ Downloaded ${successCount} documents, ${failedCount} failed`, 'warning');
+                showNotification(`Downloaded ${successCount}, opened ${directOpenedCount} directly, ${failedCount} failed`, 'warning');
             }
         }
 
@@ -2096,12 +2383,8 @@ window.viewUser = async (userId) => {
 };
 
 window.editUser = async (userId) => {
-    selectedUserId = userId;
-    await loadUserForEdit(userId);
-    const modalTitle = document.getElementById('modalTitle');
-    if (modalTitle) modalTitle.textContent = 'Edit User';
-    closeViewUserModal();
-    document.getElementById('userModal')?.classList.add('active');
+    selectedUserId = '';
+    showNotification('User editing is only available in the Super Admin dashboard', 'warning');
 };
 
 async function loadUserForEdit(userId) {
@@ -2220,73 +2503,172 @@ function renderTrackApplications() {
 }
 
 window.markSubmissionPaid = async (submissionId) => {
-    const sub = allSubmissions.find((s) => s.id === submissionId);
-    if (!sub) {
-        showNotification('Submission not found', 'error');
-        return;
-    }
-
-    const confirmed = confirm(`Mark ${sub.customerName || 'this customer'} as PAID?`);
-    if (!confirmed) return;
-
-    try {
-        await updateDoc(doc(db, 'submissions', submissionId), {
-            status: 'paid',
-            paidAt: serverTimestamp(),
-            paidBy: currentAdmin?.email || ''
-        });
-
-        await addDoc(collection(db, 'audit'), {
-            action: 'submission_paid',
-            submissionId,
-            customerName: sub.customerName || '',
-            performedBy: currentAdmin?.email || '',
-            timestamp: serverTimestamp()
-        });
-        notifyStatusChangePush({
-            currentUser: auth.currentUser,
-            submissionId,
-            customerName: sub.customerName || '',
-            newStatus: 'paid',
-            statusLabel: 'Paid',
-            actionLabel: 'Application Marked Paid',
-            message: `Application for ${sub.customerName || 'this customer'} was marked as paid.`
-        }).catch(() => {});
-
-        showNotification('Marked as paid successfully', 'success');
-    } catch (error) {
-        showNotification('Failed to mark paid: ' + (error?.message || 'Unknown error'), 'error');
-    }
+    showNotification('Admin payment tab is read-only', 'warning');
 };
 
 window.clearPaidSubmissions = async () => {
-    const paidItems = allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'paid');
-    if (paidItems.length === 0) {
-        showNotification('No paid records to clear', 'info');
-        return;
+    showNotification('Admin payment tab is read-only', 'warning');
+};
+
+window.openLeaveModal = (userId) => {
+    const user = allUsers.find((u) => u.id === userId);
+    if (!user) return showNotification('User not found', 'error');
+    const stage = getLeaveStageForRole(user.role);
+    if (!stage) return showNotification('Leave reassignment is only available for reviewer, RSA, and payment users.', 'warning');
+    if (isUserOnLeave(user)) return showNotification('User is already on leave', 'info');
+
+    const relievers = getEligibleRelievers(user);
+    const select = document.getElementById('leaveRelieverSelect');
+    const summary = document.getElementById('leaveModalSummary');
+    const title = document.getElementById('leaveModalTitle');
+    const confirmBtn = document.getElementById('confirmLeaveBtn');
+
+    selectedLeaveUserId = userId;
+    if (title) title.textContent = `Activate ${stage.label} Leave`;
+    if (summary) {
+        summary.textContent = `${user.fullName || user.email || 'This user'} will stop receiving ${stage.label.toLowerCase()} assignments until resumed.`;
+    }
+    if (select) {
+        select.innerHTML = relievers.length
+            ? '<option value="">Select reliever...</option>' + relievers.map((r) => {
+                const email = normalizeEmailValue(r.email);
+                const label = `${r.fullName || r.displayName || email} (${email})`;
+                return `<option value="${escapeHtml(email)}">${escapeHtml(label)}</option>`;
+            }).join('')
+            : '<option value="">No eligible reliever found</option>';
+        select.disabled = !relievers.length;
+    }
+    if (confirmBtn) {
+        confirmBtn.disabled = !relievers.length;
+        confirmBtn.innerHTML = '<i class="fas fa-person-walking-luggage"></i> Activate Leave';
+    }
+    document.getElementById('leaveModal')?.classList.add('active');
+};
+
+async function confirmActivateLeave() {
+    const user = allUsers.find((u) => u.id === selectedLeaveUserId);
+    if (!user) return showNotification('User not found', 'error');
+    const stage = getLeaveStageForRole(user.role);
+    const userEmail = normalizeEmailValue(user.email);
+    const relieverEmail = normalizeEmailValue(document.getElementById('leaveRelieverSelect')?.value);
+    if (!stage || !userEmail) return showNotification('Invalid leave user', 'error');
+    if (!relieverEmail) return showNotification('Please select a reliever', 'warning');
+    if (relieverEmail === userEmail) return showNotification('Reliever cannot be the same user', 'warning');
+
+    if (!getEligibleRelievers(user).some((u) => normalizeEmailValue(u.email) === relieverEmail)) {
+        return showNotification('Selected reliever is not eligible or is already on leave', 'error');
     }
 
-    const confirmed = confirm(`Clear ${paidItems.length} paid record(s)?\nThis will change their status to Cleared.`);
-    if (!confirmed) return;
+    const confirmBtn = document.getElementById('confirmLeaveBtn');
+    const previousHtml = confirmBtn?.innerHTML;
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Activating...';
+    }
 
     try {
-        await Promise.all(paidItems.map((sub) => updateDoc(doc(db, 'submissions', sub.id), {
-            status: 'cleared',
-            clearedAt: serverTimestamp(),
-            clearedBy: currentAdmin?.email || ''
+        const submissionsSnap = await getDocs(collection(db, 'submissions'));
+        const activeDocs = submissionsSnap.docs.filter((docSnap) => isSubmissionActiveForLeave(stage.key, docSnap.data() || {}, userEmail));
+
+        await updateDoc(doc(db, 'users', user.id), {
+            leaveStatus: 'on_leave',
+            leaveStage: stage.key,
+            leaveRelieverEmail: relieverEmail,
+            leaveStartedAt: serverTimestamp(),
+            leaveStartedBy: currentAdmin?.email || ''
+        });
+
+        await Promise.all(activeDocs.map((docSnap) => updateDoc(doc(db, 'submissions', docSnap.id), {
+            [stage.assignmentField]: relieverEmail,
+            leaveCoverActive: true,
+            leaveCoverStage: stage.key,
+            leaveCoverOriginalEmail: userEmail,
+            leaveCoverRelieverEmail: relieverEmail,
+            leaveCoverStartedAt: serverTimestamp(),
+            leaveCoverStartedBy: currentAdmin?.email || ''
         })));
 
         await addDoc(collection(db, 'audit'), {
-            action: 'paid_records_cleared',
-            count: paidItems.length,
+            action: 'user_leave_activated',
+            userId: user.id,
+            userEmail,
+            relieverEmail,
+            stage: stage.key,
+            movedCount: activeDocs.length,
             performedBy: currentAdmin?.email || '',
             timestamp: serverTimestamp()
         });
 
-        showNotification(`Cleared ${paidItems.length} paid record(s)`, 'success');
+        showNotification(`Leave activated. ${activeDocs.length} active application(s) moved to reliever.`, 'success');
+        closeLeaveModal();
     } catch (error) {
-        showNotification('Failed to clear paid records: ' + (error?.message || 'Unknown error'), 'error');
+        showNotification('Failed to activate leave: ' + (error?.message || 'Unknown error'), 'error');
+    } finally {
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = previousHtml || '<i class="fas fa-person-walking-luggage"></i> Activate Leave';
+        }
     }
+}
+
+window.resumeUserFromLeave = (userId) => {
+    const user = allUsers.find((u) => u.id === userId);
+    if (!user) return showNotification('User not found', 'error');
+    if (!isUserOnLeave(user)) return showNotification('User is not currently on leave', 'info');
+    const stage = getLeaveStageForRole(user.role);
+    if (!stage) return showNotification('Invalid leave stage', 'error');
+
+    showConfirmModal('Resume User from Leave', 'Unfinished applications covered by the reliever will return to this user. Finalized applications will remain completed.', async () => {
+        closeConfirmModal();
+        try {
+            const userEmail = normalizeEmailValue(user.email);
+            const submissionsSnap = await getDocs(collection(db, 'submissions'));
+            const coveredDocs = submissionsSnap.docs.filter((docSnap) => {
+                const data = docSnap.data() || {};
+                return data.leaveCoverActive === true &&
+                    data.leaveCoverStage === stage.key &&
+                    normalizeEmailValue(data.leaveCoverOriginalEmail) === userEmail;
+            });
+            const returnDocs = coveredDocs.filter((docSnap) => !isSubmissionFinalizedForLeave(stage.key, docSnap.data() || {}));
+            const finalizedDocs = coveredDocs.filter((docSnap) => isSubmissionFinalizedForLeave(stage.key, docSnap.data() || {}));
+
+            await Promise.all(returnDocs.map((docSnap) => updateDoc(doc(db, 'submissions', docSnap.id), {
+                [stage.assignmentField]: userEmail,
+                leaveCoverActive: false,
+                leaveCoverReturnedAt: serverTimestamp(),
+                leaveCoverReturnedBy: currentAdmin?.email || ''
+            })));
+
+            await Promise.all(finalizedDocs.map((docSnap) => updateDoc(doc(db, 'submissions', docSnap.id), {
+                leaveCoverActive: false,
+                leaveCoverFinalizedAt: serverTimestamp(),
+                leaveCoverFinalizedBy: currentAdmin?.email || ''
+            })));
+
+            await updateDoc(doc(db, 'users', user.id), {
+                leaveStatus: '',
+                leaveEndedAt: serverTimestamp(),
+                leaveEndedBy: currentAdmin?.email || '',
+                leavePreviousRelieverEmail: user.leaveRelieverEmail || '',
+                leaveRelieverEmail: ''
+            });
+
+            await addDoc(collection(db, 'audit'), {
+                action: 'user_leave_resumed',
+                userId: user.id,
+                userEmail,
+                stage: stage.key,
+                returnedCount: returnDocs.length,
+                finalizedCount: finalizedDocs.length,
+                performedBy: currentAdmin?.email || '',
+                timestamp: serverTimestamp()
+            });
+
+            showNotification(`User resumed. ${returnDocs.length} unfinished application(s) returned; ${finalizedDocs.length} finalized application(s) left closed.`, 'success');
+        } catch (error) {
+            showNotification('Failed to resume user: ' + (error?.message || 'Unknown error'), 'error');
+        }
+    });
 };
 
 window.deactivateUser = (userId) => {
@@ -2528,7 +2910,7 @@ async function saveUser(e) {
         const emailDupSnap = await getDocs(query(collection(db, 'users'), where('email', '==', userData.email)));
         const emailDuplicate = emailDupSnap.docs.find((d) => d.id !== selectedUserId);
         if (emailDuplicate) {
-            showNotification('Another user already has this email address', 'error');
+            showSaveUserErrorToast('Cannot save user. Another user already has this email address.');
             return;
         }
 
@@ -2536,20 +2918,26 @@ async function saveUser(e) {
             const waDupSnap = await getDocs(query(collection(db, 'users'), where('whatsappNumber', '==', userData.whatsappNumber)));
             const waDuplicate = waDupSnap.docs.find((d) => d.id !== selectedUserId);
             if (waDuplicate) {
-                showNotification('Another user already has this WhatsApp number', 'error');
+                showSaveUserErrorToast('Cannot save user. Another user already has this WhatsApp number.');
                 return;
             }
 
             const legacyPhoneDupSnap = await getDocs(query(collection(db, 'users'), where('phone', '==', userData.whatsappNumber)));
             const phoneDuplicate = legacyPhoneDupSnap.docs.find((d) => d.id !== selectedUserId);
             if (phoneDuplicate) {
-                showNotification('Another user already has this WhatsApp number', 'error');
+                showSaveUserErrorToast('Cannot save user. Another user already has this WhatsApp number.');
                 return;
             }
         }
 
         if (selectedUserId) {
-            await updateDoc(doc(db, 'users', selectedUserId), userData);
+            try {
+                await updateDoc(doc(db, 'users', selectedUserId), userData);
+            } catch (error) {
+                if (error?.code !== 'permission-denied') throw error;
+                await ensureCurrentAdminWritableProfile();
+                await updateDoc(doc(db, 'users', selectedUserId), userData);
+            }
 
             await addDoc(collection(db, 'audit'), {
                 action: 'user_updated',
@@ -2563,13 +2951,14 @@ async function saveUser(e) {
             showNotification('User updated successfully', 'success');
         } else {
             const userCredential = await createUserWithEmailAndPassword(getAuth(), userData.email, 'CMBank@123');
+            const createdUser = userCredential.user;
 
-            await addDoc(collection(db, 'users'), {
+            await setDoc(doc(db, 'users', createdUser.uid), {
                 ...userData,
-                uid: userCredential.user.uid,
+                uid: createdUser.uid,
                 createdAt: serverTimestamp(),
                 createdBy: currentAdmin?.email
-            });
+            }, { merge: true });
 
             await addDoc(collection(db, 'audit'), {
                 action: 'user_created',
@@ -2583,7 +2972,19 @@ async function saveUser(e) {
 
         closeUserModal();
     } catch (error) {
-        showNotification('Failed to save user: ' + error.message, 'error');
+        if (error?.code === 'already-exists') {
+            showSaveUserErrorToast('Cannot save user. A duplicate record already exists.');
+            return;
+        }
+        if (String(error?.message || '').toLowerCase().includes('email already')) {
+            showSaveUserErrorToast('Cannot save user. Another user already has this email address.');
+            return;
+        }
+        if (String(error?.message || '').toLowerCase().includes('whatsapp') || String(error?.message || '').toLowerCase().includes('phone')) {
+            showSaveUserErrorToast('Cannot save user. Another user already has this WhatsApp number.');
+            return;
+        }
+        showSaveUserErrorToast('Failed to save user: ' + (error?.message || 'Unknown error'));
     } finally {
         if (saveBtn) {
             saveBtn.disabled = false;
@@ -2797,6 +3198,11 @@ function closeUserModal() {
     document.getElementById('userModal').classList.remove('active');
 }
 
+function closeLeaveModal() {
+    selectedLeaveUserId = '';
+    document.getElementById('leaveModal')?.classList.remove('active');
+}
+
 function closeViewUserModal() {
     document.getElementById('viewUserModal').classList.remove('active');
 }
@@ -2911,10 +3317,28 @@ function showNotification(message, type = 'info') {
     notification.textContent = message;
     notification.className = `notification ${type}`;
     notification.style.display = 'block';
+    notification.offsetHeight;
+    notification.classList.add('show');
 
-    setTimeout(() => {
-        notification.style.display = 'none';
-    }, 3000);
+    if (notificationTimer) {
+        clearTimeout(notificationTimer);
+    }
+
+    notificationTimer = setTimeout(() => {
+        notification.classList.remove('show');
+        window.setTimeout(() => {
+            notification.style.display = 'none';
+        }, 400);
+        notificationTimer = null;
+    }, 3500);
+}
+
+function showToast(message, type = 'info') {
+    showNotification(message, type);
+}
+
+function showSaveUserErrorToast(message) {
+    showToast(message, 'error');
 }
 
 // ==================== ROUND-ROBIN MONITORING ====================
@@ -3555,6 +3979,8 @@ function formatAuditDescription(audit) {
         case 'user_updated': return `User details updated: ${audit.userFullName || resolveName(audit.userEmail || audit.userId)}`;
         case 'user_deactivated': return `User account deactivated`;
         case 'user_activated': return `User account activated`;
+        case 'user_leave_activated': return `${resolveName(audit.userEmail || audit.userId)} placed on leave; ${audit.movedCount || 0} application(s) moved to ${resolveName(audit.relieverEmail)}`;
+        case 'user_leave_resumed': return `${resolveName(audit.userEmail || audit.userId)} resumed; ${audit.returnedCount || 0} application(s) returned and ${audit.finalizedCount || 0} finalized`;
         case 'user_deleted': return `User permanently deleted: ${resolveName(audit.userEmail || audit.userId)}`;
         case 'document_uploaded': return `Document uploaded`;
         case 'document_approved': return `Document approved`;

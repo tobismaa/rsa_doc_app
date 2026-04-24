@@ -57,11 +57,16 @@ export async function isActiveUserWithRole(db, email, allowedRoles = []) {
   const normalized = normalizeEmail(email);
   if (!normalized) return false;
   try {
-    const profile = await getUserProfileByEmail(db, normalized);
+    const userQuery = query(collection(db, 'users'), where('email', '==', normalized), limit(1));
+    const snapshot = await getDocs(userQuery);
+    const profile = snapshot.empty ? null : (snapshot.docs[0].data() || null);
+    userProfileCache.set(normalized, profile);
     if (!profile) return false;
     const role = String(profile.role || '').toLowerCase();
     const status = String(profile.status || 'active').toLowerCase();
+    const leaveStatus = String(profile.leaveStatus || '').toLowerCase();
     if (status === 'deactivated') return false;
+    if (leaveStatus === 'on_leave') return false;
     return allowedRoles.includes(role);
   } catch (_) {
     return false;

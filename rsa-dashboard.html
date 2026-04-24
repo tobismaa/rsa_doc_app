@@ -11,8 +11,8 @@
     <link rel="apple-touch-icon" href="icons/icon-192.png?v=20260416f">
     <title>CMBank RSA - RSA Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260416f">
-    <link rel="stylesheet" href="css/reviewer-dashboard.css?v=20260416f">
+    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
+    <link rel="stylesheet" href="css/reviewer-dashboard.css?v=20260423b">
     <!-- Security: DOMPurify for XSS protection -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <!-- PDF-Lib needed for merging documents -->
@@ -77,6 +77,10 @@
                     <i class="fas fa-user-circle"></i>
                     <span>My Profile</span>
                 </a>
+                <a href="dashboard.html?view=uploader" class="nav-item" title="Switch to uploader dashboard">
+                    <i class="fas fa-right-left"></i>
+                    <span>Switch to Uploader</span>
+                </a>
             </nav>
             
             <!-- Mobile Close Button -->
@@ -89,9 +93,11 @@
         <main class="main-content">
             <header class="content-header">
                 <h1 id="pageTitle">Processing to PFA</h1>
-                <button id="forceRefreshBtn" class="action-btn" style="padding: 10px 14px; font-size: 13px;" title="Refresh">
-                    <i class="fas fa-arrows-rotate"></i> Refresh
-                </button>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+                    <button id="forceRefreshBtn" class="action-btn" style="padding: 10px 14px; font-size: 13px;" title="Refresh">
+                        <i class="fas fa-arrows-rotate"></i> Refresh
+                    </button>
+                </div>
             </header>
 
             <div id="approvedTab" class="tab-content active">
@@ -102,10 +108,24 @@
                         <input type="date" id="rsaEndDate" style="padding:8px; border-radius:8px; border:1px solid #e5e7eb;">
                         <button id="rsaFilterBtn" class="action-btn" style="padding:6px 12px;">Filter</button>
                     </div>
+                    <div class="excel-export-bar" style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:0 0 12px;padding:12px 14px;border:1px solid #dbeafe;background:#eff6ff;border-radius:12px;">
+                        <div style="color:#1e3a8a;font-weight:700;">
+                            <i class="fas fa-file-excel"></i> Processing to PFA Excel extraction
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button id="exportRsaAllExcelBtn" class="action-btn export-rsa-all-excel" style="background:#15803d;color:#fff;border:none;">
+                                <i class="fas fa-file-export"></i> Generate Excel for All
+                            </button>
+                            <button id="exportRsaSelectedExcelBtn" class="action-btn export-rsa-selected-excel" style="background:#0f766e;color:#fff;border:none;">
+                                <i class="fas fa-check-square"></i> Generate Excel for Selected
+                            </button>
+                        </div>
+                    </div>
                     <div class="table-container">
                         <table class="customers-table" id="rsaTable" style="min-width:800px;">
                             <thead>
                                 <tr>
+                                    <th style="width:44px;"><input type="checkbox" id="rsaSelectAllRows" title="Select all shown"></th>
                                     <th>Customer</th>
                                     <th>Uploader</th>
                                     <th>Reviewer</th>
@@ -228,6 +248,10 @@
                         <div>
                             <label style="font-weight: 600; font-size: 12px; color: #999;">Originating TP</label>
                             <div id="detailOriginatingTP" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px; color: #999;">Mortgage Loan Application Form Date</label>
+                            <div id="detailMortgageLoanApplicationFormDate" style="font-size: 16px; color: #333; margin-top: 5px;">-</div>
                         </div>
                         <div>
                             <label style="font-weight: 600; font-size: 12px; color: #999;">PFA</label>
@@ -435,14 +459,15 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script type="module" src="js/firebase-config.js"></script>
-    <script type="module" src="js/rsa-dashboard.js?v=20260415e"></script>
+    <script type="module" src="js/rsa-dashboard.js?v=20260423k"></script>
     <script src="js/table-enhancer.js?v=20260415"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260416q">
-    <script type="module" src="js/app-chat.js?v=20260416o"></script>
+    <script type="module" src="js/app-chat.js?v=20260423a"></script>
     <link rel="stylesheet" href="css/pwa-install.css">
-    <script src="js/pwa-install.js?v=20260416d"></script>
+    <script src="js/pwa-install.js?v=20260423a"></script>
     <link rel="stylesheet" href="css/profile-card.css">
     <link rel="stylesheet" href="css/sop-help.css">
     <script src="js/sop-help.js"></script>

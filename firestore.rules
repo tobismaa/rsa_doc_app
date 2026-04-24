@@ -84,7 +84,7 @@ service cloud.firestore {
       allow create: if isOwnUserDoc(userId)
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == myEmail()
-        && request.resource.data.role in ['uploader', 'admin', 'super_admin', 'reviewer', 'viewer', 'rsa', 'payment']
+        && request.resource.data.role in ['uploader', 'admin', 'super_admin', 'reviewer', 'rsa', 'payment']
         && request.resource.data.status in ['pending', 'active', 'deactivated'];
       allow update: if isOwnUserDoc(userId) || isAdminLike();
       allow delete: if isAdminLike();
@@ -117,13 +117,13 @@ service cloud.firestore {
 
     match /audit/{docId} {
       allow read: if isAdminLike();
-      allow create: if signedIn() && isAnyRole(['admin', 'super_admin', 'payment', 'rsa', 'reviewer', 'viewer']);
+      allow create: if signedIn() && isAnyRole(['admin', 'super_admin', 'payment', 'rsa', 'reviewer']);
       allow update, delete: if false;
     }
 
     match /counters/{docId} {
       allow read: if signedIn();
-      allow write: if isAnyRole(['admin', 'super_admin', 'uploader', 'reviewer', 'viewer', 'rsa']);
+      allow write: if isAnyRole(['admin', 'super_admin', 'uploader', 'reviewer', 'rsa']);
     }
 
     match /roundRobinAssignments/{docId} {
@@ -133,7 +133,7 @@ service cloud.firestore {
 
     match /roundRobinAssignmentsRSA/{docId} {
       allow read: if signedIn();
-      allow write: if isAnyRole(['admin', 'super_admin', 'reviewer', 'viewer']);
+      allow write: if isAnyRole(['admin', 'super_admin', 'reviewer']);
     }
 
     match /roundRobinAssignmentsPayment/{docId} {

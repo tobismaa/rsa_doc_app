@@ -8,9 +8,9 @@ Your RSA Document App now has a complete round-robin distribution system with ad
 ## 1. HOW THE SYSTEM WORKS
 
 ### Distribution Logic
-- Each time a customer submits documents (uploader), the system assigns them to viewers in a rotating manner
-- Viewers are ordered alphabetically by email for deterministic distribution
-- Each day at midnight, the counter resets and starts fresh with the first viewer
+- Each time a customer submits documents (uploader), the system assigns them to reviewers in a rotating manner
+- Reviewers are ordered alphabetically by email for deterministic distribution
+- Each day at midnight, the counter resets and starts fresh with the first reviewer
 
 **Example:**
 ```
@@ -143,9 +143,9 @@ Test Status: ✅ PASSED
 
 ## 6. TROUBLESHOOTING
 
-### Problem: "No viewers found" error
+### Problem: "No reviewers found" error
 **Solution:**
-- Make sure at least one user with role "viewer" is created in User Management
+- Make sure at least one user with role "reviewer" is created in User Management
 - Refresh the page
 
 ### Problem: "Assigned Today" count stuck at 0

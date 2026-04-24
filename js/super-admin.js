@@ -23,10 +23,31 @@ let allSubmissions = [];
 let allAudits = [];
 let allRoutingRules = [];
 let currentTab = 'global';
+let selectedSuperUserId = '';
 
 const superAdminName = document.getElementById('superAdminName');
 const pageTitle = document.getElementById('pageTitle');
 const notification = document.getElementById('notification');
+
+function setCountBadge(id, count) {
+    const badge = document.getElementById(id);
+    if (!badge) return;
+    badge.textContent = String(count);
+    badge.style.display = 'inline-block';
+}
+
+function updateNavigationCounts() {
+    const securityUsers = allUsers.filter((u) => {
+        const role = String(u.role || '').toLowerCase();
+        const status = String(u.status || 'active').toLowerCase();
+        return ['super_admin', 'admin', 'reviewer', 'rsa', 'payment'].includes(role) && status !== 'active';
+    }).length;
+    setCountBadge('globalNavCount', allSubmissions.length);
+    setCountBadge('adminsNavCount', allUsers.length);
+    setCountBadge('routingRulesNavCount', allRoutingRules.length);
+    setCountBadge('auditNavCount', allAudits.length);
+    setCountBadge('securityNavCount', securityUsers);
+}
 
 function showNotification(message, type = 'info') {
     if (!notification) return;
@@ -47,6 +68,85 @@ function normalizeEmail(email) {
     return String(email || '').trim().toLowerCase();
 }
 
+function getRoleLabel(role) {
+    const normalized = String(role || 'uploader').toLowerCase();
+    if (normalized === 'super_admin') return 'Super Admin';
+    if (normalized === 'admin') return 'Admin';
+    if (normalized === 'reviewer' || normalized === 'viewer') return 'Reviewer';
+    if (normalized === 'rsa') return 'RSA';
+    if (normalized === 'payment') return 'Payment';
+    return 'Uploader';
+}
+
+function getUserWhatsApp(user = {}) {
+    return String(user.whatsappNumber || user.whatsapp || user.phone || user.phoneNumber || '').trim();
+}
+
+function splitWhatsApp(user = {}) {
+    const code = String(user.whatsappCode || '').trim();
+    const local = String(user.whatsappLocalNumber || '').replace(/\D/g, '');
+    if (code || local) return { code, local };
+
+    const whatsapp = getUserWhatsApp(user);
+    if (!whatsapp) return { code: '+234', local: '' };
+    const digits = whatsapp.replace(/\D/g, '');
+    return {
+        code: whatsapp.startsWith('+') && digits.length > 10 ? `+${digits.slice(0, digits.length - 10)}` : '+234',
+        local: digits.slice(-10)
+    };
+}
+
+async function ensureCurrentUserProfileAtUid(user, profileDocSnap) {
+    if (!user?.uid || !profileDocSnap?.exists()) return profileDocSnap;
+    if (profileDocSnap.id === user.uid) return profileDocSnap;
+
+    const profileData = profileDocSnap.data() || {};
+    const normalizedEmail = normalizeEmail(user.email);
+    const profileEmail = normalizeEmail(profileData.email);
+
+    if (!normalizedEmail || profileEmail !== normalizedEmail) return profileDocSnap;
+    if (String(profileData.uid || '').trim() !== user.uid) return profileDocSnap;
+
+    const uidRef = doc(db, 'users', user.uid);
+    const uidSnap = await getDoc(uidRef);
+    if (uidSnap.exists()) return uidSnap;
+
+    await setDoc(uidRef, {
+        ...profileData,
+        uid: user.uid,
+        email: normalizedEmail,
+        updatedAt: serverTimestamp(),
+        migratedFromDocId: profileDocSnap.id
+    }, { merge: true });
+
+    return await getDoc(uidRef);
+}
+
+async function ensureCurrentSuperAdminWritableProfile() {
+    if (!currentUser?.uid || !currentUser?.email) return null;
+
+    const uidRef = doc(db, 'users', currentUser.uid);
+    const uidSnap = await getDoc(uidRef);
+    if (uidSnap.exists()) return uidSnap;
+
+    const normalizedEmail = normalizeEmail(currentUser.email);
+    const normalizedRole = String(currentUserData?.role || 'super_admin').trim().toLowerCase();
+    const normalizedStatus = String(currentUserData?.status || 'active').trim().toLowerCase();
+    const allowedRoles = new Set(['uploader', 'admin', 'super_admin', 'reviewer', 'rsa', 'payment']);
+    const allowedStatuses = new Set(['pending', 'active', 'deactivated']);
+
+    await setDoc(uidRef, {
+        ...(currentUserData || {}),
+        uid: currentUser.uid,
+        email: normalizedEmail,
+        role: allowedRoles.has(normalizedRole) ? normalizedRole : 'super_admin',
+        status: allowedStatuses.has(normalizedStatus) ? normalizedStatus : 'active',
+        updatedAt: serverTimestamp()
+    }, { merge: true });
+
+    return await getDoc(uidRef);
+}
+
 function formatDate(ts) {
     if (!ts) return '-';
     try {
@@ -61,7 +161,7 @@ function roleHome(role) {
     const r = String(role || '').toLowerCase();
     if (r === 'super_admin') return 'super-admin-dashboard.html';
     if (r === 'admin') return 'admin-dashboard.html';
-    if (r === 'reviewer' || r === 'viewer') return 'reviewer-dashboard.html';
+    if (r === 'reviewer') return 'reviewer-dashboard.html';
     if (r === 'rsa') return 'rsa-dashboard.html';
     if (r === 'payment') return 'payment-dashboard.html';
     return 'dashboard.html';
@@ -76,7 +176,7 @@ function switchTab(tabId) {
 
     const titles = {
         global: 'Global View',
-        admins: 'Admin Management',
+        admins: 'User Management',
         'routing-rules': 'Uploader Routing',
         audit: 'Audit',
         security: 'Security',
@@ -116,34 +216,69 @@ function renderGlobalView() {
 function renderAdminManagement() {
     const body = document.getElementById('adminManagersTableBody');
     if (!body) return;
-    const adminUsers = allUsers.filter((u) => ['admin', 'super_admin'].includes(String(u.role || '').toLowerCase()));
-    if (!adminUsers.length) {
-        body.innerHTML = '<tr><td colspan="5" class="no-data">No admin users found</td></tr>';
+
+    const search = String(document.getElementById('superUserSearch')?.value || '').trim().toLowerCase();
+    const roleFilter = String(document.getElementById('superUserRoleFilter')?.value || '').trim().toLowerCase();
+    const statusFilter = String(document.getElementById('superUserStatusFilter')?.value || '').trim().toLowerCase();
+
+    const filteredUsers = allUsers
+        .filter((u) => {
+            const role = String(u.role || 'uploader').toLowerCase();
+            const status = String(u.status || 'active').toLowerCase();
+            const whatsapp = getUserWhatsApp(u);
+            const searchable = [
+                u.fullName || '',
+                u.displayName || '',
+                u.email || '',
+                whatsapp,
+                getRoleLabel(role),
+                status
+            ].join(' ').toLowerCase();
+            return (!search || searchable.includes(search))
+                && (!roleFilter || role === roleFilter)
+                && (!statusFilter || status === statusFilter);
+        })
+        .sort((a, b) => String(a.fullName || a.email || '').localeCompare(String(b.fullName || b.email || '')));
+
+    if (!filteredUsers.length) {
+        body.innerHTML = '<tr><td colspan="7" class="no-data">No users found</td></tr>';
         return;
     }
 
-    body.innerHTML = adminUsers.map((u) => {
-        const role = String(u.role || 'admin').toLowerCase();
+    body.innerHTML = filteredUsers.map((u) => {
+        const storedRole = String(u.role || 'uploader').toLowerCase();
+        const role = storedRole === 'viewer' ? 'reviewer' : storedRole;
         const status = String(u.status || 'active').toLowerCase();
+        const whatsapp = getUserWhatsApp(u);
         return `
-            <tr>
+            <tr data-search="${escapeHtml([u.fullName || '', u.email || '', whatsapp, role, status].join(' '))}">
                 <td><strong>${escapeHtml(u.fullName || u.email || 'Unknown')}</strong></td>
                 <td>${escapeHtml(u.email || '-')}</td>
+                <td>${escapeHtml(whatsapp || '-')}</td>
                 <td>
                     <select id="sa-role-${u.id}" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
-                        <option value="super_admin" ${role === 'super_admin' ? 'selected' : ''}>Super Admin</option>
+                        <option value="uploader" ${role === 'uploader' ? 'selected' : ''}>Uploader</option>
+                        <option value="reviewer" ${role === 'reviewer' ? 'selected' : ''}>Reviewer</option>
+                        <option value="rsa" ${role === 'rsa' ? 'selected' : ''}>RSA</option>
+                        <option value="payment" ${role === 'payment' ? 'selected' : ''}>Payment</option>
                         <option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option>
+                        <option value="super_admin" ${role === 'super_admin' ? 'selected' : ''}>Super Admin</option>
                     </select>
                 </td>
                 <td>
                     <select id="sa-status-${u.id}" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
                         <option value="active" ${status === 'active' ? 'selected' : ''}>Active</option>
+                        <option value="pending" ${status === 'pending' ? 'selected' : ''}>Pending</option>
                         <option value="deactivated" ${status === 'deactivated' ? 'selected' : ''}>Deactivated</option>
                     </select>
                 </td>
+                <td>${formatDate(u.createdAt)}</td>
                 <td>
                     <button class="action-btn" style="background:#003366;color:#fff;border:none;" onclick="window.saveAdminManager('${u.id}')">
                         <i class="fas fa-save"></i> Save
+                    </button>
+                    <button class="action-btn edit-btn" onclick="window.editSuperUser('${u.id}')" title="Edit user">
+                        <i class="fas fa-edit"></i> Edit
                     </button>
                 </td>
             </tr>
@@ -153,7 +288,24 @@ function renderAdminManagement() {
 
 function getUsersByRole(role) {
     const r = String(role || '').toLowerCase();
-    return allUsers.filter((u) => String(u.role || '').toLowerCase() === r && String(u.status || 'active').toLowerCase() !== 'deactivated');
+    return allUsers.filter((u) => {
+        const userRole = String(u.role || '').toLowerCase();
+        const status = String(u.status || 'active').toLowerCase();
+        const leaveStatus = String(u.leaveStatus || '').toLowerCase();
+        return userRole === r && status !== 'deactivated' && leaveStatus !== 'on_leave';
+    });
+}
+
+function getRoutingUploaderUsers() {
+    const uploadCapableRoles = new Set(['uploader', 'reviewer', 'rsa']);
+    return allUsers
+        .filter((u) => {
+            const role = String(u.role || '').toLowerCase();
+            const status = String(u.status || 'active').toLowerCase();
+            const leaveStatus = String(u.leaveStatus || '').toLowerCase();
+            return uploadCapableRoles.has(role) && status !== 'deactivated' && leaveStatus !== 'on_leave' && normalizeEmail(u.email);
+        })
+        .sort((a, b) => normalizeEmail(a.email).localeCompare(normalizeEmail(b.email)));
 }
 
 function getActiveUsersByRoles(roles = []) {
@@ -161,7 +313,8 @@ function getActiveUsersByRoles(roles = []) {
     return allUsers.filter((u) => {
         const role = String(u.role || '').toLowerCase();
         const status = String(u.status || 'active').toLowerCase();
-        return set.has(role) && status !== 'deactivated';
+        const leaveStatus = String(u.leaveStatus || '').toLowerCase();
+        return set.has(role) && status !== 'deactivated' && leaveStatus !== 'on_leave';
     });
 }
 
@@ -179,6 +332,13 @@ function optionsForUsers(users, currentValue) {
         opts.push(`<option value="${escapeHtml(email)}" ${email === current ? 'selected' : ''}>${escapeHtml(label)}</option>`);
     }
     return opts.join('');
+}
+
+function getUserSearchText(email) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return '';
+    const user = allUsers.find((u) => normalizeEmail(u.email) === normalized);
+    return [normalized, user?.fullName || '', user?.displayName || '', user?.role || ''].join(' ');
 }
 
 function renderRedirectTable() {
@@ -211,27 +371,41 @@ function renderRoutingRules() {
     const body = document.getElementById('routingRulesTableBody');
     if (!body) return;
 
-    const uploaderUsers = getUsersByRole('uploader');
-    const reviewerUsers = getActiveUsersByRoles(['reviewer', 'viewer']);
+    const uploaderUsers = getRoutingUploaderUsers();
+    const reviewerUsers = getActiveUsersByRoles(['reviewer']);
     const rsaUsers = getUsersByRole('rsa');
     const paymentUsers = getUsersByRole('payment');
 
     if (!uploaderUsers.length) {
-        body.innerHTML = '<tr><td colspan="7" class="no-data">No uploader users found</td></tr>';
+        body.innerHTML = '<tr><td colspan="7" class="no-data">No upload-capable users found</td></tr>';
         return;
     }
 
     body.innerHTML = uploaderUsers.map((uploader) => {
         const uploaderEmail = normalizeEmail(uploader.email);
+        const uploaderRole = String(uploader.role || 'uploader').toLowerCase();
         const rule = findRoutingRuleForUploader(uploaderEmail) || {};
         const selectedReviewer = normalizeEmail(rule.reviewerEmail);
         const selectedRsa = normalizeEmail(rule.rsaEmail);
         const selectedPayment = normalizeEmail(rule.paymentEmail);
         const updatedAt = formatDate(rule.updatedAt || rule.createdAt);
+        const searchableText = [
+            uploader.fullName || '',
+            uploader.displayName || '',
+            uploaderEmail,
+            uploaderRole,
+            getUserSearchText(selectedReviewer),
+            getUserSearchText(selectedRsa),
+            getUserSearchText(selectedPayment),
+            updatedAt
+        ].join(' ');
 
         return `
-            <tr>
-                <td><strong>${escapeHtml(uploader.fullName || uploaderEmail || 'Unknown')}</strong></td>
+            <tr data-search="${escapeHtml(searchableText)}">
+                <td>
+                    <strong>${escapeHtml(uploader.fullName || uploaderEmail || 'Unknown')}</strong>
+                    <div style="font-size:12px;color:#64748b;margin-top:4px;">Primary role: ${escapeHtml(uploaderRole)}</div>
+                </td>
                 <td>${escapeHtml(uploaderEmail || '-')}</td>
                 <td>
                     <select id="route-reviewer-${uploader.id}" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;width:100%;">
@@ -387,6 +561,95 @@ window.saveUploaderRoutingRule = async (uploaderUserId) => {
     }
 };
 
+function closeSuperUserModal() {
+    document.getElementById('superUserModal')?.classList.remove('active');
+}
+
+window.editSuperUser = async (userId) => {
+    selectedSuperUserId = userId;
+    const user = allUsers.find((u) => u.id === userId);
+    if (!user) return showNotification('User not found', 'error');
+
+    const whatsapp = splitWhatsApp(user);
+    document.getElementById('superModalFullName').value = user.fullName || '';
+    document.getElementById('superModalLocation').value = user.location || '';
+    document.getElementById('superModalEmail').value = normalizeEmail(user.email);
+    document.getElementById('superModalDepartment').value = user.department || '';
+    document.getElementById('superModalWhatsappCode').value = whatsapp.code || '+234';
+    document.getElementById('superModalWhatsappLocalNumber').value = whatsapp.local || '';
+    const modalRole = String(user.role || 'uploader').toLowerCase();
+    document.getElementById('superModalRole').value = modalRole === 'viewer' ? 'reviewer' : modalRole;
+    document.getElementById('superModalStatus').value = String(user.status || 'active').toLowerCase();
+    document.getElementById('superUserModal')?.classList.add('active');
+};
+
+async function saveSuperUser(e) {
+    e.preventDefault();
+    if (!selectedSuperUserId) return showNotification('No user selected', 'error');
+
+    const saveBtn = document.getElementById('saveSuperUserModalBtn');
+    const originalHtml = saveBtn?.innerHTML || '';
+    const whatsappCodeRaw = String(document.getElementById('superModalWhatsappCode')?.value || '').trim();
+    const whatsappLocalDigits = String(document.getElementById('superModalWhatsappLocalNumber')?.value || '').replace(/\D/g, '');
+    const whatsappCode = whatsappCodeRaw ? (whatsappCodeRaw.startsWith('+') ? whatsappCodeRaw : `+${whatsappCodeRaw}`) : '';
+    const whatsappNumber = whatsappCode && whatsappLocalDigits ? `${whatsappCode}${whatsappLocalDigits}` : '';
+
+    if (whatsappCode && !/^\+\d{1,4}$/.test(whatsappCode)) {
+        showNotification('WhatsApp country code is invalid', 'error');
+        return;
+    }
+    if (whatsappLocalDigits && !/^\d{10}$/.test(whatsappLocalDigits)) {
+        showNotification('WhatsApp number must be exactly 10 digits', 'error');
+        return;
+    }
+
+    const userData = {
+        fullName: String(document.getElementById('superModalFullName')?.value || '').trim(),
+        location: String(document.getElementById('superModalLocation')?.value || '').trim(),
+        email: normalizeEmail(document.getElementById('superModalEmail')?.value),
+        department: String(document.getElementById('superModalDepartment')?.value || '').trim(),
+        whatsappCode,
+        whatsappLocalNumber: whatsappLocalDigits,
+        whatsappNumber,
+        phone: whatsappNumber || whatsappLocalDigits || '',
+        role: String(document.getElementById('superModalRole')?.value || 'uploader').trim(),
+        status: String(document.getElementById('superModalStatus')?.value || 'active').trim(),
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUser?.email || ''
+    };
+
+    if (!userData.fullName || !userData.email) {
+        showNotification('Full name and email are required', 'error');
+        return;
+    }
+
+    try {
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        }
+
+        await updateDoc(doc(db, 'users', selectedSuperUserId), userData);
+        await addDoc(collection(db, 'audit'), {
+            action: 'user_updated',
+            userId: selectedSuperUserId,
+            userEmail: userData.email,
+            userFullName: userData.fullName,
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        });
+        closeSuperUserModal();
+        showNotification('User details updated successfully', 'success');
+    } catch (error) {
+        showNotification('Failed to update user details', 'error');
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalHtml;
+        }
+    }
+}
+
 window.saveAdminManager = async (userId) => {
     const roleEl = document.getElementById(`sa-role-${userId}`);
     const statusEl = document.getElementById(`sa-status-${userId}`);
@@ -395,23 +658,34 @@ window.saveAdminManager = async (userId) => {
     if (!role) return showNotification('Role is required', 'error');
 
     try {
-        await updateDoc(doc(db, 'users', userId), {
-            role,
-            status,
-            updatedAt: serverTimestamp(),
-            updatedBy: currentUser?.email || ''
-        });
+        try {
+            await updateDoc(doc(db, 'users', userId), {
+                role,
+                status,
+                updatedAt: serverTimestamp(),
+                updatedBy: currentUser?.email || ''
+            });
+        } catch (error) {
+            if (error?.code !== 'permission-denied') throw error;
+            await ensureCurrentSuperAdminWritableProfile();
+            await updateDoc(doc(db, 'users', userId), {
+                role,
+                status,
+                updatedAt: serverTimestamp(),
+                updatedBy: currentUser?.email || ''
+            });
+        }
         await addDoc(collection(db, 'audit'), {
-            action: 'admin_management_updated',
+            action: 'user_management_updated',
             userId,
             newRole: role,
             newStatus: status,
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         });
-        showNotification('Admin updated successfully', 'success');
+        showNotification('User updated successfully', 'success');
     } catch (error) {
-        showNotification('Failed to update admin user', 'error');
+        showNotification('Failed to update user', 'error');
     }
 };
 
@@ -509,23 +783,27 @@ window.signOutUser = async () => {
 function setupRealtimeData() {
     onSnapshot(query(collection(db, 'users')), (snap) => {
         allUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        updateNavigationCounts();
         renderCurrentTab();
         if (currentTab !== 'global') renderGlobalView();
     });
 
     onSnapshot(query(collection(db, 'submissions'), orderBy('uploadedAt', 'desc')), (snap) => {
         allSubmissions = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        updateNavigationCounts();
         renderCurrentTab();
         if (currentTab !== 'global') renderGlobalView();
     });
 
     onSnapshot(query(collection(db, 'audit'), orderBy('timestamp', 'desc'), limit(200)), (snap) => {
         allAudits = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        updateNavigationCounts();
         if (currentTab === 'audit') renderAudit();
     });
 
     onSnapshot(query(collection(db, 'uploaderRoutingRules')), (snap) => {
         allRoutingRules = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        updateNavigationCounts();
         if (currentTab === 'routing-rules') renderRoutingRules();
     });
 }
@@ -536,6 +814,13 @@ document.querySelectorAll('.nav-item[data-tab]').forEach((item) => {
         switchTab(item.dataset.tab);
     });
 });
+
+document.getElementById('superUserSearch')?.addEventListener('input', renderAdminManagement);
+document.getElementById('superUserRoleFilter')?.addEventListener('change', renderAdminManagement);
+document.getElementById('superUserStatusFilter')?.addEventListener('change', renderAdminManagement);
+document.getElementById('superUserForm')?.addEventListener('submit', saveSuperUser);
+document.getElementById('closeSuperUserModalBtn')?.addEventListener('click', closeSuperUserModal);
+document.getElementById('cancelSuperUserModalBtn')?.addEventListener('click', closeSuperUserModal);
 
 document.getElementById('forceRefreshBtn')?.addEventListener('click', (e) => {
     e.preventDefault();
@@ -557,7 +842,9 @@ auth.onAuthStateChanged(async (user) => {
         }
         if (snap.empty) return void (window.location.href = 'index.html');
 
-        currentUserData = snap.docs[0].data() || {};
+        let currentUserDoc = snap.docs[0];
+        currentUserDoc = await ensureCurrentUserProfileAtUid(user, currentUserDoc);
+        currentUserData = currentUserDoc.data() || {};
         const role = String(currentUserData.role || '').toLowerCase();
         if (role !== 'super_admin') {
             window.location.href = roleHome(role);

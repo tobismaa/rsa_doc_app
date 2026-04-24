@@ -12,8 +12,8 @@
     <link rel="apple-touch-icon" href="icons/icon-192.png?v=20260416f">
     <script src="js/console-guard.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260416f">
-    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260416f">
+    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 </head>
 <body>
@@ -34,11 +34,11 @@
             <button class="sign-out-btn" id="signOutBtnSidebar" title="Sign Out"><i class="fas fa-sign-out-alt"></i></button>
         </div>
         <nav class="nav-menu">
-            <a href="#" class="nav-item active" data-tab="global"><i class="fas fa-chart-line"></i><span>Global View</span></a>
-            <a href="#" class="nav-item" data-tab="admins"><i class="fas fa-users-cog"></i><span>Admin Management</span></a>
-            <a href="#" class="nav-item" data-tab="routing-rules"><i class="fas fa-route"></i><span>Uploader Routing</span></a>
-            <a href="#" class="nav-item" data-tab="audit"><i class="fas fa-file-shield"></i><span>Audit</span></a>
-            <a href="#" class="nav-item" data-tab="security"><i class="fas fa-lock"></i><span>Security</span></a>
+            <a href="#" class="nav-item active" data-tab="global"><i class="fas fa-chart-line"></i><span>Global View</span><span class="badge" id="globalNavCount">0</span></a>
+            <a href="#" class="nav-item" data-tab="admins"><i class="fas fa-users-cog"></i><span>User Management</span><span class="badge" id="adminsNavCount">0</span></a>
+            <a href="#" class="nav-item" data-tab="routing-rules"><i class="fas fa-route"></i><span>Uploader Routing</span><span class="badge" id="routingRulesNavCount">0</span></a>
+            <a href="#" class="nav-item" data-tab="audit"><i class="fas fa-file-shield"></i><span>Audit</span><span class="badge" id="auditNavCount">0</span></a>
+            <a href="#" class="nav-item" data-tab="security"><i class="fas fa-lock"></i><span>Security</span><span class="badge" id="securityNavCount">0</span></a>
             <a href="#" class="nav-item" data-tab="round-robin"><i class="fas fa-rotate"></i><span>Round Robin</span></a>
             <a href="#" class="nav-item" data-tab="settings"><i class="fas fa-sliders"></i><span>Settings</span></a>
         </nav>
@@ -70,10 +70,29 @@
 
         <div id="adminsTab" class="tab-content">
             <div class="table-section">
-                <h2>Admin Management</h2>
+                <h2>User Management</h2>
+                <p style="color:#64748b;margin:0 0 12px;">Edit user roles and account status. Admin dashboard keeps read-only user details.</p>
+                <div class="filters" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+                    <input type="text" id="superUserSearch" placeholder="Search users..." style="min-width:240px;flex:1;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
+                    <select id="superUserRoleFilter" style="padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
+                        <option value="">All Roles</option>
+                        <option value="uploader">Uploader</option>
+                        <option value="reviewer">Reviewer</option>
+                        <option value="rsa">RSA</option>
+                        <option value="payment">Payment</option>
+                        <option value="admin">Admin</option>
+                        <option value="super_admin">Super Admin</option>
+                    </select>
+                    <select id="superUserStatusFilter" style="padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
+                        <option value="">All Status</option>
+                        <option value="active">Active</option>
+                        <option value="pending">Pending</option>
+                        <option value="deactivated">Deactivated</option>
+                    </select>
+                </div>
                 <div class="table-container">
                     <table class="documents-table">
-                        <thead><tr><th>Full Name</th><th>Email</th><th>Role</th><th>Status</th><th>Action</th></tr></thead>
+                        <thead><tr><th>Full Name</th><th>Email</th><th>WhatsApp</th><th>Role</th><th>Status</th><th>Joined</th><th>Action</th></tr></thead>
                         <tbody id="adminManagersTableBody"></tbody>
                     </table>
                 </div>
@@ -83,7 +102,7 @@
         <div id="routing-rulesTab" class="tab-content">
             <div class="table-section">
                 <h2>Uploader Permanent Routing Rules</h2>
-                <p style="color:#64748b;margin:0 0 12px;">Set default reviewer, RSA and payment assignment per uploader. System will use this mapping before round robin.</p>
+                <p style="color:#64748b;margin:0 0 12px;">Set default reviewer, RSA and payment assignment per uploader or staff member using uploader switch. System will use this mapping before round robin.</p>
                 <div class="table-container">
                     <table class="documents-table">
                         <thead>
@@ -187,8 +206,8 @@
                     <p>Escalate anomalies when stage counts diverge from expected operational flow.</p>
                 </div>
                 <div class="sop-topic">
-                    <h4>2. Admin Management</h4>
-                    <p>Approve/deactivate privileged accounts based on governance policy and role separation.</p>
+                    <h4>2. User Management</h4>
+                    <p>Update user roles and account status based on governance policy and role separation.</p>
                     <p>Never assign elevated roles without documented authorization trail.</p>
                 </div>
                 <div class="sop-topic">
@@ -209,12 +228,66 @@
     </div>
 </div>
 
+<div id="superUserModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content small">
+        <div class="modal-header">
+            <h2>Edit User</h2>
+            <button id="closeSuperUserModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <form id="superUserForm">
+            <div class="form-grid">
+                <label>Full Name
+                    <input type="text" id="superModalFullName" required>
+                </label>
+                <label>Location
+                    <input type="text" id="superModalLocation" placeholder="User location">
+                </label>
+                <label>Email
+                    <input type="email" id="superModalEmail" required readonly>
+                </label>
+                <label>Department
+                    <input type="text" id="superModalDepartment" placeholder="Department">
+                </label>
+                <label>WhatsApp Code
+                    <input type="text" id="superModalWhatsappCode" placeholder="+234">
+                </label>
+                <label>WhatsApp Number
+                    <input type="text" id="superModalWhatsappLocalNumber" placeholder="10 digits">
+                </label>
+                <label>Role
+                    <select id="superModalRole">
+                        <option value="uploader">Uploader</option>
+                        <option value="reviewer">Reviewer</option>
+                        <option value="rsa">RSA</option>
+                        <option value="payment">Payment</option>
+                        <option value="admin">Admin</option>
+                        <option value="super_admin">Super Admin</option>
+                    </select>
+                </label>
+                <label>Status
+                    <select id="superModalStatus">
+                        <option value="active">Active</option>
+                        <option value="pending">Pending</option>
+                        <option value="deactivated">Deactivated</option>
+                    </select>
+                </label>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelSuperUserModalBtn" type="button" class="cancel-btn">Cancel</button>
+                <button id="saveSuperUserModalBtn" type="submit" class="confirm-btn">
+                    <i class="fas fa-save"></i> Save User
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
-<script src="js/table-enhancer.js?v=20260412"></script>
-<script type="module" src="js/super-admin.js?v=20260423"></script>
+<script src="js/table-enhancer.js?v=20260423a"></script>
+<script type="module" src="js/super-admin.js?v=20260423e"></script>
 <script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
 <link rel="stylesheet" href="css/pwa-install.css">
-    <script src="js/pwa-install.js?v=20260416d"></script>
+    <script src="js/pwa-install.js?v=20260423a"></script>
 <link rel="stylesheet" href="css/sop-help.css">
 <script src="js/sop-help.js"></script>
 <link rel="stylesheet" href="css/developer-badge.css">

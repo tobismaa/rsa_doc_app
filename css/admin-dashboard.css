@@ -172,7 +172,8 @@ body {
 }
 
 /* user management modal tweaks */
-#userModal .modal-content {
+#userModal .modal-content,
+#superUserModal .modal-content {
   max-width: 720px;
   width: min(92vw, 720px);
   border-radius: 16px;
@@ -181,41 +182,48 @@ body {
   overflow: hidden;
 }
 
-#userModal .modal-header {
+#userModal .modal-header,
+#superUserModal .modal-header {
   background: linear-gradient(120deg, #0f2d52 0%, #144b86 55%, #1e6cb9 100%);
   border-bottom: none;
   padding: 18px 22px;
 }
 
-#userModal .modal-header h2 {
+#userModal .modal-header h2,
+#superUserModal .modal-header h2 {
   color: #ffffff;
   font-size: 20px;
   font-weight: 700;
   letter-spacing: 0.2px;
 }
 
-#userModal .close-btn {
+#userModal .close-btn,
+#superUserModal .close-btn {
   color: #f1f5f9;
   background: rgba(255, 255, 255, 0.12);
 }
 
-#userModal .close-btn:hover {
+#userModal .close-btn:hover,
+#superUserModal .close-btn:hover {
   color: #ffffff;
   background: rgba(255, 255, 255, 0.24);
 }
 
-#userModal #userForm {
+#userModal #userForm,
+#superUserModal #superUserForm {
   padding: 20px 22px 18px;
   background: linear-gradient(180deg, #f8fbff 0%, #ffffff 40%);
 }
 
-#userModal .form-grid {
+#userModal .form-grid,
+#superUserModal .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px 16px;
 }
 
-#userModal .form-grid label {
+#userModal .form-grid label,
+#superUserModal .form-grid label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -226,7 +234,9 @@ body {
 }
 
 #userModal .form-grid input,
-#userModal .form-grid select {
+#userModal .form-grid select,
+#superUserModal .form-grid input,
+#superUserModal .form-grid select {
   width: 100%;
   min-height: 44px;
   border: 1px solid #c7d5e3;
@@ -239,19 +249,23 @@ body {
 }
 
 #userModal .form-grid input:focus,
-#userModal .form-grid select:focus {
+#userModal .form-grid select:focus,
+#superUserModal .form-grid input:focus,
+#superUserModal .form-grid select:focus {
   outline: none;
   border-color: #1e6cb9;
   box-shadow: 0 0 0 4px rgba(30, 108, 185, 0.18);
 }
 
-#userModal .form-grid input[readonly] {
+#userModal .form-grid input[readonly],
+#superUserModal .form-grid input[readonly] {
   background: #edf2f7;
   color: #475569;
   cursor: not-allowed;
 }
 
-#userModal .modal-footer {
+#userModal .modal-footer,
+#superUserModal .modal-footer {
   margin-top: 16px;
   padding: 14px 0 0;
   border-top: 1px solid #e5edf6;
@@ -274,43 +288,230 @@ body {
   color: #334155;
 }
 
-#userModal .cancel-btn:hover {
+#userModal .cancel-btn:hover,
+#superUserModal .cancel-btn:hover {
   background: #f1f5f9;
 }
 
-#userModal .confirm-btn {
+#userModal .confirm-btn,
+#superUserModal .confirm-btn {
   background: linear-gradient(120deg, #0e3a67 0%, #1e6cb9 100%);
 }
 
-#userModal .confirm-btn:hover {
+#userModal .confirm-btn:hover,
+#superUserModal .confirm-btn:hover {
   background: linear-gradient(120deg, #0d335b 0%, #1b5fa4 100%);
 }
 
-#userModal .confirm-btn.loading {
+#userModal .confirm-btn.loading,
+#superUserModal .confirm-btn.loading {
   opacity: 0.85;
   cursor: wait;
   pointer-events: none;
 }
 
+#leaveModal .leave-modal-content {
+  max-width: 520px;
+  width: min(94vw, 520px);
+  border-radius: 20px;
+  border: 1px solid rgba(203, 213, 225, 0.9);
+  box-shadow: 0 34px 80px rgba(15, 23, 42, 0.34);
+  overflow: hidden;
+}
+
+#leaveModal .modal-header {
+  background:
+    radial-gradient(circle at top right, rgba(250, 204, 21, 0.25), transparent 34%),
+    linear-gradient(120deg, #78350f 0%, #b45309 52%, #f59e0b 100%);
+  border-bottom: none;
+  padding: 20px 24px;
+  position: relative;
+}
+
+#leaveModal .modal-header h2 {
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+#leaveModal .close-btn {
+  color: #fff7ed;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+#leaveModal .close-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.26);
+}
+
+#leaveModal .leave-modal-body {
+  padding: 22px 24px 18px;
+  background:
+    linear-gradient(180deg, #fff7ed 0%, #ffffff 44%),
+    #ffffff;
+}
+
+#leaveModal .leave-modal-hero {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid #fed7aa;
+  border-radius: 16px;
+  background: rgba(255, 247, 237, 0.9);
+  margin-bottom: 18px;
+}
+
+#leaveModal .leave-modal-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #92400e;
+  background: linear-gradient(135deg, #fde68a, #fdba74);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+#leaveModal #leaveModalSummary {
+  margin: 0;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+#leaveModal .leave-field-label {
+  display: block;
+  color: #1e293b;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.25px;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+#leaveModal .leave-select-wrap {
+  position: relative;
+}
+
+#leaveModal .leave-select-wrap i {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #b45309;
+  pointer-events: none;
+}
+
+#leaveModal #leaveRelieverSelect {
+  width: 100%;
+  min-height: 48px;
+  padding: 11px 14px 11px 42px;
+  border: 1px solid #fdba74;
+  border-radius: 14px;
+  color: #0f172a;
+  background: #ffffff;
+  font-size: 14px;
+  font-weight: 650;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+}
+
+#leaveModal #leaveRelieverSelect:focus {
+  outline: none;
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18);
+}
+
+#leaveModal #leaveRelieverSelect:disabled {
+  background: #f8fafc;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+#leaveModal .leave-note {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+#leaveModal .leave-note i {
+  color: #0f766e;
+  margin-top: 2px;
+}
+
+#leaveModal .modal-footer {
+  padding: 16px 24px 22px;
+  background: #ffffff;
+  border-top: 1px solid #ffedd5;
+  gap: 10px;
+}
+
+#leaveModal .confirm-btn {
+  background: linear-gradient(120deg, #b45309 0%, #f59e0b 100%);
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(180, 83, 9, 0.2);
+}
+
+#leaveModal .confirm-btn:hover {
+  background: linear-gradient(120deg, #92400e 0%, #d97706 100%);
+}
+
+#leaveModal .confirm-btn:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 @media screen and (max-width: 768px) {
-  #userModal #userForm {
+  #userModal #userForm,
+  #superUserModal #superUserForm {
     padding: 16px;
   }
 
-  #userModal .form-grid {
+  #userModal .form-grid,
+  #superUserModal .form-grid {
     grid-template-columns: 1fr;
     gap: 12px;
   }
 
-  #userModal .modal-footer {
+  #userModal .modal-footer,
+  #superUserModal .modal-footer {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
   }
 
   #userModal .cancel-btn,
-  #userModal .confirm-btn {
+  #userModal .confirm-btn,
+  #superUserModal .cancel-btn,
+  #superUserModal .confirm-btn {
     min-width: 0;
+    width: 100%;
+  }
+
+  #leaveModal .leave-modal-body {
+    padding: 18px 16px 14px;
+  }
+
+  #leaveModal .modal-footer {
+    display: grid;
+    grid-template-columns: 1fr;
+    padding: 14px 16px 18px;
+  }
+
+  #leaveModal .modal-footer button {
     width: 100%;
   }
 }
@@ -318,6 +519,7 @@ body {
 .subtab-btn {
   padding: 6px 12px;
   background: var(--bg-card);
+  color: #1e293b;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -1012,11 +1214,6 @@ body {
   color: white;
 }
 
-.role-badge.viewer {
-  background: var(--info);
-  color: white;
-}
-
 .role-badge.reviewer {
   background: var(--info);
   color: white;
@@ -1207,6 +1404,7 @@ body {
   gap: 4px;
   transition: all 0.3s;
   background: var(--white);
+  color: #1e293b;
   border: 1px solid var(--border-color);
 }
 
@@ -1314,6 +1512,18 @@ body {
   background: #dc2626;
   color: #ffffff;
   border-color: #dc2626;
+}
+
+.users-table .action-buttons .leave-btn {
+  background: #f0f9ff;
+  color: #0369a1;
+  border-color: #7dd3fc;
+}
+
+.users-table .action-buttons .leave-btn:hover {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
 }
 
 /* Pending agent table action buttons */

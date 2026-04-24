@@ -114,6 +114,74 @@ function hideModal() {
     }
 }
 
+async function checkIfAuthEmailExists(email) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail || !validateEmail(normalizedEmail)) return null;
+
+    try {
+        const apiKey = auth?.app?.options?.apiKey;
+        if (!apiKey) return null;
+
+        const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=${encodeURIComponent(apiKey)}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                identifier: normalizedEmail,
+                continueUri: window.location.origin
+            })
+        });
+
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) return null;
+        if (typeof result.registered === 'boolean') return result.registered;
+        if (Array.isArray(result.signinMethods)) return result.signinMethods.length > 0;
+        return null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function getReadableLoginErrorMessage(error, emailExists = null) {
+    switch (error?.code) {
+        case 'auth/user-not-found':
+            return 'No account found with this email.';
+        case 'auth/wrong-password':
+            return 'Incorrect password. Please try again.';
+        case 'auth/invalid-email':
+            return 'Invalid email format.';
+        case 'auth/user-disabled':
+            return 'This account has been disabled.';
+        case 'auth/too-many-requests':
+            return 'Too many failed attempts. Please try again later.';
+        case 'auth/invalid-credential':
+        case 'auth/invalid-login-credentials':
+            if (emailExists === false) return 'No account found with this email.';
+            if (emailExists === true) return 'Incorrect password. Please try again.';
+            return 'Incorrect email or password. Please try again.';
+        default:
+            return 'Login failed: ' + (error?.message || 'Unknown error');
+    }
+}
+
+function getReadableResetErrorMessage(error, emailExists = null) {
+    switch (error?.code) {
+        case 'auth/invalid-email':
+            return 'Invalid email format.';
+        case 'auth/user-not-found':
+            return 'No account found with this email.';
+        case 'auth/unauthorized-continue-uri':
+        case 'auth/invalid-continue-uri':
+            return `Reset page URL is not authorized in Firebase. Add ${window.location.hostname} to Firebase Authorized Domains.`;
+        case 'auth/too-many-requests':
+            return 'Too many attempts. Please try again later.';
+        default:
+            if (emailExists === false) return 'No account found with this email.';
+            return 'Failed to send reset email: ' + (error?.message || 'Unknown error');
+    }
+}
+
 // Close modal when clicking close button or outside
 if (modalCloseBtn) {
     modalCloseBtn.addEventListener('click', hideModal);
@@ -165,6 +233,12 @@ if (forgotPasswordSendBtn) {
         closeForgotPasswordModal();
         showSpinner('Sending password reset link...');
         try {
+            const emailExists = await checkIfAuthEmailExists(email);
+            if (emailExists === false) {
+                showError('No account found with this email.');
+                return;
+            }
+
             const apiBaseUrl = String(window.__EMAIL_API_BASE_URL__ || EMAIL_API_BASE_URL || '').trim().replace(/\/+$/, '');
             const resetPageUrl = `${window.location.origin}/reset-password.html`;
 
@@ -194,25 +268,8 @@ if (forgotPasswordSendBtn) {
 
             showSuccess(`Password reset link sent to ${email}. Check inbox/spam.`);
         } catch (error) {
-            let errorMessage = 'Failed to send reset email.';
-            switch (error.code) {
-                case 'auth/invalid-email':
-                    errorMessage = 'Invalid email format.';
-                    break;
-                case 'auth/user-not-found':
-                    errorMessage = 'No account found with this email.';
-                    break;
-                case 'auth/unauthorized-continue-uri':
-                case 'auth/invalid-continue-uri':
-                    errorMessage = `Reset page URL is not authorized in Firebase. Add ${window.location.hostname} to Firebase Authorized Domains.`;
-                    break;
-                case 'auth/too-many-requests':
-                    errorMessage = 'Too many attempts. Please try again later.';
-                    break;
-                default:
-                    errorMessage = 'Failed to send reset email: ' + (error.message || 'Unknown error');
-            }
-            showError(errorMessage);
+            const emailExists = await checkIfAuthEmailExists(email);
+            showError(getReadableResetErrorMessage(error, emailExists));
         }
     });
 }
@@ -591,7 +648,7 @@ if (loginFormElement) {
                         window.location.href = 'super-admin-dashboard.html';
                     } else if (userData.role === 'admin') {
                         window.location.href = 'admin-dashboard.html';
-                    } else if (userData.role === 'reviewer' || userData.role === 'viewer') {
+                } else if (userData.role === 'reviewer') {
                         window.location.href = 'reviewer-dashboard.html';
                     } else if (userData.role === 'payment') {
                         window.location.href = 'payment-dashboard.html';
@@ -608,30 +665,8 @@ if (loginFormElement) {
             }
 
         } catch (error) {
-            
-            let errorMessage = '';
-            
-            switch (error.code) {
-                case 'auth/user-not-found':
-                    errorMessage = 'No account found with this email.';
-                    break;
-                case 'auth/wrong-password':
-                    errorMessage = 'Incorrect password.';
-                    break;
-                case 'auth/invalid-email':
-                    errorMessage = 'Invalid email format.';
-                    break;
-                case 'auth/user-disabled':
-                    errorMessage = 'This account has been disabled.';
-                    break;
-                case 'auth/too-many-requests':
-                    errorMessage = 'Too many failed attempts. Please try again later.';
-                    break;
-                default:
-                    errorMessage = 'Login failed: ' + error.message;
-            }
-            
-            showError(errorMessage);
+            const emailExists = await checkIfAuthEmailExists(email);
+            showError(getReadableLoginErrorMessage(error, emailExists));
         }
     });
 }

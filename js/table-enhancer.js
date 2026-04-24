@@ -133,7 +133,8 @@
 
     const filteredRows = allRows.filter((tr) => {
       if (!query) return true;
-      return tr.textContent.toLowerCase().includes(query);
+      const haystack = String(tr.dataset.search || tr.textContent || '').toLowerCase();
+      return haystack.includes(query);
     });
 
     const totalPages = Math.max(1, Math.ceil(filteredRows.length / ROWS_PER_PAGE));

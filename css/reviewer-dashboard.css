@@ -660,6 +660,7 @@ body {
   gap: 6px;
   transition: all 0.2s ease;
   background: var(--white);
+  color: var(--gray-800);
   border: 1px solid var(--gray-200);
   box-shadow: var(--shadow-sm);
 }

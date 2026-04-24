@@ -18,11 +18,11 @@ import { notifyStatusChangePush } from './status-push.js';
 import {
     getUserFullName as getUserFullNameShared,
     normalizeEmail as normalizeEmailShared
-} from './shared/user-directory.js';
+} from './shared/user-directory.js?v=20260423b';
 import {
     getUploaderRoutingRule as getUploaderRoutingRuleShared,
     routingRuleDocId as routingRuleDocIdShared
-} from './shared/uploader-routing.js';
+} from './shared/uploader-routing.js?v=20260423c';
 
 // ==================== DOCUMENT TYPES MAPPING ====================
 const DOCUMENT_TYPES = {
@@ -49,6 +49,7 @@ let currentUser = null;
 let currentRsaProfileData = null;
 let currentTab = 'approved';
 let allSubmissions = [];
+let currentRsaDisplayedSubmissions = [];
 const userFullNameCache = new Map();
 let unsubscribeQueue = null;
 let queueLoadSeq = 0;
@@ -74,6 +75,7 @@ const profileWhatsappEl = document.getElementById('profileWhatsapp');
 const profileLocationEl = document.getElementById('profileLocation');
 const profileRoleEl = document.getElementById('profileRole');
 const profileStatusEl = document.getElementById('profileStatus');
+const rsaSelectAllRows = document.getElementById('rsaSelectAllRows');
 
 let currentDetailsSubmissionId = null;
 
@@ -151,7 +153,8 @@ async function isActivePaymentUser(email) {
         const data = snap.docs[0].data() || {};
         const role = String(data.role || '').toLowerCase();
         const status = String(data.status || 'active').toLowerCase();
-        return role === 'payment' && status !== 'deactivated';
+        const leaveStatus = String(data.leaveStatus || '').toLowerCase();
+        return role === 'payment' && status !== 'deactivated' && leaveStatus !== 'on_leave';
     } catch (_) {
         return false;
     }
@@ -162,6 +165,7 @@ async function getActivePaymentUsers() {
     const snap = await getDocs(paymentQuery);
     return snap.docs
         .map((d) => d.data() || {})
+        .filter((u) => String(u.status || 'active').toLowerCase() !== 'deactivated' && String(u.leaveStatus || '').toLowerCase() !== 'on_leave')
         .map((u) => normalizeEmail(u.email))
         .filter(Boolean)
         .filter((email, idx, arr) => arr.indexOf(email) === idx)
@@ -292,9 +296,47 @@ async function fetchWithCorsFallback(url) {
     const cleanUrl = url?.toString().trim().replace(/[\s\n\r\t]+/g, '');
     if (!cleanUrl) throw new Error('Invalid URL');
 
-    const response = await fetch(cleanUrl, { mode: 'cors', credentials: 'omit' });
-    if (!response.ok) throw new Error(`Document fetch failed: ${response.status}`);
-    return response;
+    const proxyUrl = getBackblazeDownloadProxyUrl(cleanUrl);
+    if (proxyUrl) {
+        const proxyResponse = await fetch(proxyUrl, { credentials: 'same-origin' });
+        if (!proxyResponse.ok) throw new Error(`Document proxy failed: ${proxyResponse.status}`);
+        return proxyResponse;
+    }
+
+    try {
+        const response = await fetch(cleanUrl, { mode: 'cors', credentials: 'omit' });
+        if (!response.ok) throw new Error(`Document fetch failed: ${response.status}`);
+        return response;
+    } catch (error) {
+        error.corsBlocked = true;
+        throw error;
+    }
+}
+
+function getBackblazeDownloadProxyUrl(cleanUrl) {
+    try {
+        const parsed = new URL(cleanUrl);
+        const isBackblaze = parsed.protocol === 'https:' && /\.backblazeb2\.com$/i.test(parsed.hostname);
+        if (!isBackblaze || !parsed.pathname.startsWith('/file/cmbank-rsa-documents/')) return '';
+        return `/api/backblaze-download.php?url=${encodeURIComponent(cleanUrl)}`;
+    } catch (error) {
+        return '';
+    }
+}
+
+function openDirectDocumentDownload(fileUrl, fileName = 'document.pdf') {
+    const cleanUrl = fileUrl?.toString().trim().replace(/[\s\n\r\t]+/g, '');
+    if (!cleanUrl) return false;
+
+    const link = document.createElement('a');
+    link.href = getBackblazeDownloadProxyUrl(cleanUrl) || cleanUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.download = (fileName || 'document.pdf').replace(/[\\/:*?"<>|]/g, '_');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    return true;
 }
 
 // PDF/image helpers
@@ -396,7 +438,42 @@ async function saveBlobToFolderPicker(blob, defaultFileName, customerName='Custo
     }
 }
 
-function downloadBlobAsFile(blob, fileName) {
+async function saveFileWithLocationPicker(blob, defaultFileName) {
+    if (!('showSaveFilePicker' in window)) {
+        triggerDirectDownload(blob, defaultFileName);
+        return true;
+    }
+
+    try {
+        const extension = String(defaultFileName || '').includes('.')
+            ? `.${String(defaultFileName).split('.').pop().toLowerCase()}`
+            : '.bin';
+        const fileHandle = await window.showSaveFilePicker({
+            suggestedName: defaultFileName,
+            types: [{
+                description: 'Download',
+                accept: {
+                    [blob.type || 'application/octet-stream']: [extension]
+                }
+            }]
+        });
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        showNotification(`Saved: ${defaultFileName}`, 'success');
+        return true;
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            showNotification('Save cancelled', 'info');
+        } else {
+            showNotification('Save failed: ' + error.message, 'error');
+            triggerDirectDownload(blob, defaultFileName);
+        }
+        return false;
+    }
+}
+
+function triggerDirectDownload(blob, fileName) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -406,6 +483,190 @@ function downloadBlobAsFile(blob, fileName) {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     showNotification('✅ Download started','success');
+}
+
+async function downloadBlobAsFile(blob, fileName) {
+    return saveFileWithLocationPicker(blob, fileName);
+}
+
+function parseMoneyValue(value) {
+    const raw = String(value ?? '').replace(/[^0-9.\-]/g, '');
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : '';
+}
+
+function formatMoneyForExcel(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num.toFixed(2) : '';
+}
+
+function roundDownToThousand(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '';
+    return Math.floor(num / 1000) * 1000;
+}
+
+function roundUpToThousand(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '';
+    return Math.ceil(num / 1000) * 1000;
+}
+
+function toTitleCaseWords(value) {
+    const text = String(value ?? '').trim().toLowerCase();
+    if (!text) return '';
+    return text.replace(/\b([a-z])([a-z']*)/g, (_, first, rest) => `${first.toUpperCase()}${rest}`);
+}
+
+function toPenCodeCase(value) {
+    const text = String(value ?? '').trim().toLowerCase();
+    if (!text) return '';
+    return text.replace(/[a-z]/, (match) => match.toUpperCase());
+}
+
+function getYearOfBirth(dob) {
+    const value = String(dob || '').trim();
+    if (!value) return '';
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) return String(date.getFullYear());
+    const match = value.match(/\b(19|20)\d{2}\b/);
+    return match ? match[0] : '';
+}
+
+function getRsaExcelRows(submissions) {
+    return submissions.map((sub, index) => {
+        const details = sub.customerDetails || {};
+        const propertyValue = parseMoneyValue(details.propertyValue);
+        const loanAmount = roundUpToThousand(parseMoneyValue(details.loanAmount));
+        const rsaBalance = parseMoneyValue(details.rsaBalance);
+        const expected25 = Number.isFinite(Number(rsaBalance)) ? Number(rsaBalance) * 0.25 : '';
+        const equityValue = expected25 === '' ? '' : roundDownToThousand(expected25);
+
+        return [
+            index + 1,
+            details.accountNo || '',
+            toTitleCaseWords(sub.customerName || details.name || ''),
+            toTitleCaseWords(details.originatingTP || ''),
+            toTitleCaseWords(details.pfa || ''),
+            toPenCodeCase(details.penNo || ''),
+            details.rsaStatementDate || '',
+            rsaBalance === '' ? '' : Number(formatMoneyForExcel(rsaBalance)),
+            expected25 === '' ? '' : Number(formatMoneyForExcel(expected25)),
+            details.propertyType || '',
+            toTitleCaseWords(details.originatingTP || ''),
+            '',
+            propertyValue === '' ? '' : Number(formatMoneyForExcel(propertyValue)),
+            equityValue === '' ? '' : Number(formatMoneyForExcel(equityValue)),
+            loanAmount === '' ? '' : Number(formatMoneyForExcel(loanAmount)),
+            toTitleCaseWords(details.address || ''),
+            getYearOfBirth(details.dob),
+            details.mortgageLoanApplicationFormDate || ''
+        ];
+    });
+}
+
+async function downloadRsaExcel(submissions, scopeLabel = 'selected') {
+    if (!submissions.length) {
+        showNotification('No Processing to PFA applications available for Excel export', 'warning');
+        return;
+    }
+    if (!window.ExcelJS) {
+        showNotification('Excel export library is not available. Please refresh and try again.', 'error');
+        return;
+    }
+
+    const headers = [
+        'S/N',
+        'account No',
+        'Full Name (Surname First)',
+        'Originating Contact Centre',
+        'Name of PFA',
+        'PEN CODE NUMBER',
+        'RSA STATEMENT DATE',
+        'RSA BALANCE (NGN)',
+        'EXPECTED 25 %RSA (NGN)',
+        'PROPERTY TYPE',
+        'LOCATION',
+        'HOUSE NUMBER',
+        'PROPERTY VALUE',
+        'EQUITY VALUE',
+        'LOAN AMOUNT',
+        'CUSTOMER ADDRESS',
+        'YEAR OF BIRTH',
+        'MORTGAGE LOAN APPLICATION FORM DATE'
+    ];
+    const rows = getRsaExcelRows(submissions);
+    const workbook = new window.ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('RSA Export');
+    worksheet.addRow(headers);
+    rows.forEach((row) => worksheet.addRow(row));
+
+    worksheet.columns = [
+        { width: 8 },
+        { width: 18 },
+        { width: 30 },
+        { width: 28 },
+        { width: 24 },
+        { width: 20 },
+        { width: 18 },
+        { width: 18 },
+        { width: 20 },
+        { width: 22 },
+        { width: 24 },
+        { width: 16 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 36 },
+        { width: 14 },
+        { width: 28 }
+    ];
+
+    worksheet.eachRow((row, rowNumber) => {
+        row.eachCell((cell, colNumber) => {
+            cell.font = { name: 'Calibri', size: 11, bold: rowNumber === 1, color: { argb: 'FF000000' } };
+            cell.alignment = { vertical: 'middle', wrapText: true };
+            cell.border = {
+                top: { style: 'thin', color: { argb: 'FF999999' } },
+                left: { style: 'thin', color: { argb: 'FF999999' } },
+                bottom: { style: 'thin', color: { argb: 'FF999999' } },
+                right: { style: 'thin', color: { argb: 'FF999999' } }
+            };
+            if (rowNumber === 1) {
+                cell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFD9EAD3' }
+                };
+            }
+            const numberColumns = new Set([1, 8, 9, 13, 14, 15, 17]);
+            if (rowNumber > 1 && numberColumns.has(colNumber) && typeof cell.value === 'number') {
+                cell.numFmt = colNumber === 1 || colNumber === 17 ? '0' : '0.00';
+            }
+        });
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    await saveFileWithLocationPicker(blob, `rsa_processing_to_pfa_${scopeLabel}_${stamp}.xlsx`);
+}
+
+function getSelectedRsaSubmissions() {
+    const selectedIds = Array.from(document.querySelectorAll('.rsa-export-select:checked'))
+        .map((input) => input.value)
+        .filter(Boolean);
+    return currentRsaDisplayedSubmissions.filter((sub) => selectedIds.includes(sub.id));
+}
+
+function updateRsaSelectAllState() {
+    if (!rsaSelectAllRows) return;
+    const rowChecks = Array.from(document.querySelectorAll('.rsa-export-select'));
+    const checked = rowChecks.filter((input) => input.checked);
+    rsaSelectAllRows.checked = rowChecks.length > 0 && checked.length === rowChecks.length;
+    rsaSelectAllRows.indeterminate = checked.length > 0 && checked.length < rowChecks.length;
 }
 
 // ==================== MERGE FUNCTIONS COPY START ====================
@@ -910,7 +1171,7 @@ function updateApprovedCount() {
     const cnt = allSubmissions.filter(s => (String(s.status || '').toLowerCase() === 'processing_to_pfa' || String(s.status || '').toLowerCase() === 'approved') && !s.finalSubmitted && !s.rsaSubmitted).length;
     if (approvedCountBadge) {
         approvedCountBadge.textContent = cnt;
-        approvedCountBadge.style.display = cnt > 0 ? 'inline' : 'none';
+        approvedCountBadge.style.display = 'inline-block';
     }
     updateFinallySubmittedCount();
 }
@@ -957,6 +1218,7 @@ function renderCurrentTab() {
             const status = String(s.status || '').toLowerCase();
             return (status === 'processing_to_pfa' || status === 'approved') && !s.finalSubmitted && !s.rsaSubmitted;
         });
+        currentRsaDisplayedSubmissions = list;
         renderRsaRows(list);
     } else if (currentTab === 'finally-submitted') {
         renderFinallySubmittedTab();
@@ -1031,14 +1293,19 @@ function updateFinallySubmittedCount() {
     const badge = document.getElementById('finallySubmittedCount');
     if (badge) {
         badge.textContent = cnt;
-        badge.style.display = cnt > 0 ? 'inline' : 'none';
+        badge.style.display = 'inline-block';
     }
 }
 
 function renderRsaRows(submissions) {
     if (!rsaTableBody) return;
+    currentRsaDisplayedSubmissions = submissions;
+    if (rsaSelectAllRows) {
+        rsaSelectAllRows.checked = false;
+        rsaSelectAllRows.indeterminate = false;
+    }
     if (submissions.length === 0) {
-        rsaTableBody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:#666">No records</td></tr>';
+        rsaTableBody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#666">No records</td></tr>';
         return;
     }
     rsaTableBody.innerHTML = submissions.map(sub=>{
@@ -1058,6 +1325,7 @@ function renderRsaRows(submissions) {
             <button class="action-btn" style="background:#10b981;color:#fff;border:none;" onclick="window.finalSubmitRsa('${sub.id}')"><i class="fas fa-paper-plane"></i> Final Submit</button>
         `;
         return `<tr>
+            <td><input type="checkbox" class="rsa-export-select" value="${sub.id}" title="Select ${sub.customerName || 'customer'} for Excel"></td>
             <td>${sub.customerName||'-'}</td>
             <td>${uploader}</td>
             <td>${reviewer}</td>
@@ -1161,6 +1429,26 @@ rsaFilterBtn?.addEventListener('click', renderCurrentTab);
 
 // search triggers
 rsaSearch && rsaSearch.addEventListener('input', renderCurrentTab);
+rsaSelectAllRows?.addEventListener('change', () => {
+    document.querySelectorAll('.rsa-export-select').forEach((input) => {
+        input.checked = rsaSelectAllRows.checked;
+    });
+    updateRsaSelectAllState();
+});
+rsaTableBody?.addEventListener('change', (e) => {
+    if (e.target?.classList?.contains('rsa-export-select')) updateRsaSelectAllState();
+});
+document.querySelectorAll('.export-rsa-all-excel').forEach((btn) => btn.addEventListener('click', () => {
+    downloadRsaExcel(currentRsaDisplayedSubmissions, 'all');
+}));
+document.querySelectorAll('.export-rsa-selected-excel').forEach((btn) => btn.addEventListener('click', () => {
+    const selected = getSelectedRsaSubmissions();
+    if (!selected.length) {
+        showNotification('Select at least one customer first', 'warning');
+        return;
+    }
+    downloadRsaExcel(selected, 'selected');
+}));
 
 // Finally Submitted tab filters
 const finalFilterBtn = document.getElementById('finalFilterBtn');
@@ -1275,6 +1563,7 @@ window.openCustomerDetails = (submissionId) => {
     doc.getElementById('detailAddress').textContent = details.address || '-';
     doc.getElementById('detailEmployer').textContent = details.employer || '-';
     doc.getElementById('detailOriginatingTP').textContent = details.originatingTP || '-';
+    doc.getElementById('detailMortgageLoanApplicationFormDate').textContent = details.mortgageLoanApplicationFormDate || '-';
     doc.getElementById('detailPenNo').textContent = details.penNo || '-';
     
     // Populate RSA information
@@ -1287,7 +1576,7 @@ window.openCustomerDetails = (submissionId) => {
     doc.getElementById('detailTenor').textContent = details.tenor ? `${details.tenor}` : '-';
     doc.getElementById('detailPropertyValue').textContent = details.propertyValue ? formatCurrency(details.propertyValue) : '-';
     doc.getElementById('detailFacilityFee').textContent = details.facilityFee ? formatCurrency(details.facilityFee) : '-';
-    doc.getElementById('detailLoanAmount').textContent = details.loanAmount ? formatCurrency(details.loanAmount) : '-';
+    doc.getElementById('detailLoanAmount').textContent = details.loanAmount ? formatCurrency(roundUpToThousand(parseMoneyValue(details.loanAmount))) : '-';
     
     // Populate submission information
     doc.getElementById('detailUploadedBy').textContent = sub.uploadedBy || '-';
@@ -1371,10 +1660,14 @@ window.downloadDocumentRSA = async (submissionId, docIndex) => {
         showLoader('Downloading document...');
         const response = await fetchWithCorsFallback(doc.fileUrl);
         const blob = await response.blob();
-        downloadBlobAsFile(blob, doc.name);
+        await downloadBlobAsFile(blob, doc.name);
         showNotification('✅ Download started', 'success');
     } catch (error) {
-        showNotification('Download failed: ' + error.message, 'error');
+        if (openDirectDocumentDownload(doc.fileUrl, doc.name)) {
+            showNotification('Storage blocked secure download, so the document opened directly.', 'warning');
+        } else {
+            showNotification('Download failed: ' + error.message, 'error');
+        }
     } finally {
         hideLoader();
     }
@@ -1397,6 +1690,9 @@ window.downloadAllRsa = async (submissionId) => {
     try {
         showLoader('Preparing document download...');
         let customerFolder = null;
+        let successCount = 0;
+        let directOpenedCount = 0;
+        let failedCount = 0;
 
         if ('showDirectoryPicker' in window) {
             showNotification('Select a destination folder to save all documents', 'info');
@@ -1409,21 +1705,37 @@ window.downloadAllRsa = async (submissionId) => {
             if (!docItem?.fileUrl) continue;
 
             showLoader(`Downloading ${i + 1} of ${docs.length}...`);
-            const response = await fetchWithCorsFallback(docItem.fileUrl);
-            const blob = await response.blob();
             const fileName = (docItem.name || `${safeCustomerName}_document_${i + 1}.pdf`).replace(/[\\/:*?"<>|]/g, '_');
 
-            if (customerFolder) {
-                const fileHandle = await customerFolder.getFileHandle(fileName, { create: true });
-                const writable = await fileHandle.createWritable();
-                await writable.write(blob);
-                await writable.close();
-            } else {
-                downloadBlobAsFile(blob, fileName);
+            try {
+                const response = await fetchWithCorsFallback(docItem.fileUrl);
+                const blob = await response.blob();
+
+                if (customerFolder) {
+                    const fileHandle = await customerFolder.getFileHandle(fileName, { create: true });
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(blob);
+                    await writable.close();
+                } else {
+                    await downloadBlobAsFile(blob, fileName);
+                }
+                successCount++;
+            } catch (docError) {
+                if (openDirectDocumentDownload(docItem.fileUrl, fileName)) {
+                    directOpenedCount++;
+                } else {
+                    failedCount++;
+                }
             }
         }
 
-        showNotification('All documents downloaded successfully', 'success');
+        if (failedCount > 0) {
+            showNotification(`Downloaded ${successCount}, opened ${directOpenedCount} directly, ${failedCount} failed`, 'warning');
+        } else if (directOpenedCount > 0) {
+            showNotification(`Storage blocked secure download for ${directOpenedCount} document(s), so they opened directly.`, 'warning');
+        } else {
+            showNotification('All documents downloaded successfully', 'success');
+        }
     } catch (error) {
         if (error?.name === 'AbortError') {
             showNotification('Download cancelled', 'info');

@@ -12,8 +12,8 @@
     <link rel="apple-touch-icon" href="icons/icon-192.png?v=20260416f">
     <script src="js/console-guard.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260416f">
-    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260416f">
+    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 </head>
 <body>
@@ -45,7 +45,7 @@
                 </a>
                 <a href="#" class="nav-item" data-tab="paid-customers">
                     <i class="fas fa-circle-check"></i>
-                    <span>Paid Customers</span>
+                    <span>Paid Agents</span>
                     <span class="badge" id="paidCustomerCount">0</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="profile">
@@ -71,16 +71,16 @@
                             <i class="fas fa-check-double"></i> Settle Commission
                         </button>
                     </div>
-                    <p style="color:#64748b;margin:0 0 14px;">Mark applications as paid after PFA payment, then clear paid records once commission has been settled.</p>
+                    <p style="color:#64748b;margin:0 0 14px;">Treat commission per agent. Each row below represents one agent batch, even when one uploader manages multiple agents.</p>
                     <div class="table-container">
                         <table class="customers-table">
                             <thead>
                                 <tr>
-                                    <th>Customer</th>
-                                    <th>PFA</th>
                                     <th>Agent</th>
-                                    <th>25% Balance</th>
-                                    <th>2% of 25%</th>
+                                    <th>Uploader</th>
+                                    <th>Customers</th>
+                                    <th>Total 25% Balance</th>
+                                    <th>Total 2% Commission</th>
                                     <th>Status</th>
                                     <th>Action</th>
                                 </tr>
@@ -94,21 +94,21 @@
             <div id="paid-customersTab" class="tab-content">
                 <div class="table-section">
                     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-                        <h2 style="margin:0;">Paid Customers</h2>
+                        <h2 style="margin:0;">Paid Agents</h2>
                         <button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.clearPaidSubmissions()">
                             <i class="fas fa-check-double"></i> Settle Commission
                         </button>
                     </div>
-                    <p style="color:#64748b;margin:0 0 14px;">Customers marked as paid await commission settlement and final clearing.</p>
+                    <p style="color:#64748b;margin:0 0 14px;">Paid agent batches waiting for final commission settlement and clearing.</p>
                     <div class="table-container">
                         <table class="customers-table">
                             <thead>
                                 <tr>
-                                    <th>Customer</th>
-                                    <th>PFA</th>
                                     <th>Agent</th>
-                                    <th>25% Balance</th>
-                                    <th>2% of 25%</th>
+                                    <th>Uploader</th>
+                                    <th>Customers</th>
+                                    <th>Total 25% Balance</th>
+                                    <th>Total 2% Commission</th>
                                     <th>Status</th>
                                     <th>Action</th>
                                 </tr>
@@ -166,7 +166,7 @@
                     </div>
                     <div class="sop-topic">
                         <h4>3. Paid Customers</h4>
-                        <p>Use <strong>Paid Customers</strong> tab to audit all paid records and identify items pending settlement.</p>
+                        <p>Use <strong>Paid Agents</strong> tab to audit each paid agent batch and identify items pending settlement.</p>
                         <p>Use filters/search to support reconciliation with external payment reports.</p>
                     </div>
                     <div class="sop-topic">
@@ -185,12 +185,12 @@
     <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
 
     <script src="js/table-enhancer.js?v=20260412"></script>
-    <script type="module" src="js/payment-dashboard.js?v=20260415e"></script>
+    <script type="module" src="js/payment-dashboard.js?v=20260423b"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260416q">
-    <script type="module" src="js/app-chat.js?v=20260416o"></script>
+    <script type="module" src="js/app-chat.js?v=20260423a"></script>
     <link rel="stylesheet" href="css/pwa-install.css">
-    <script src="js/pwa-install.js?v=20260416d"></script>
+    <script src="js/pwa-install.js?v=20260423a"></script>
     <link rel="stylesheet" href="css/profile-card.css">
     <link rel="stylesheet" href="css/sop-help.css">
     <script src="js/sop-help.js"></script>
