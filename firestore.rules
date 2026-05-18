@@ -33,8 +33,45 @@ service cloud.firestore {
       return isAnyRole(['admin', 'super_admin']);
     }
 
+    function systemSettingsPath() {
+      return /databases/$(database)/documents/settings/system;
+    }
+
+    function maintenanceModeEnabled() {
+      return exists(systemSettingsPath()) && get(systemSettingsPath()).data.maintenanceMode == true;
+    }
+
+    function maintenanceWriteAllowed() {
+      return !maintenanceModeEnabled() || isRole('super_admin');
+    }
+
     function isOwnUserDoc(userId) {
       return signedIn() && request.auth.uid == userId;
+    }
+
+    function uniqueKeyPath(keyId) {
+      return /databases/$(database)/documents/userUniqueKeys/$(keyId);
+    }
+
+    function emailKeyId(email) {
+      return 'email:' + email;
+    }
+
+    function whatsappKeyId(number) {
+      return 'whatsapp:' + number;
+    }
+
+    function hasMatchingUniqueKeyAfter(type, value, userId) {
+      return !(value is string) || value == '' || (
+        existsAfter(uniqueKeyPath(type == 'email' ? emailKeyId(value) : whatsappKeyId(value))) &&
+        getAfter(uniqueKeyPath(type == 'email' ? emailKeyId(value) : whatsappKeyId(value))).data.userId == userId &&
+        getAfter(uniqueKeyPath(type == 'email' ? emailKeyId(value) : whatsappKeyId(value))).data.type == type &&
+        getAfter(uniqueKeyPath(type == 'email' ? emailKeyId(value) : whatsappKeyId(value))).data.value == value
+      );
+    }
+
+    function isChangingField(field) {
+      return !(field in resource.data) || !(field in request.resource.data) || resource.data[field] != request.resource.data[field];
     }
 
     function submissionDocPath(submissionId) {
@@ -82,32 +119,68 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if signedIn();
       allow create: if isOwnUserDoc(userId)
+        && maintenanceWriteAllowed()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == myEmail()
         && request.resource.data.role in ['uploader', 'admin', 'super_admin', 'reviewer', 'rsa', 'payment']
-        && request.resource.data.status in ['pending', 'active', 'deactivated'];
-      allow update: if isOwnUserDoc(userId) || isAdminLike();
-      allow delete: if isAdminLike();
+        && request.resource.data.status in ['pending', 'active', 'deactivated']
+        && hasMatchingUniqueKeyAfter('email', request.resource.data.email, userId)
+        && hasMatchingUniqueKeyAfter('whatsapp', request.resource.data.whatsappNumber, userId);
+      allow update: if maintenanceWriteAllowed()
+        && (isOwnUserDoc(userId) || isAdminLike())
+        && (!isChangingField('email') || hasMatchingUniqueKeyAfter('email', request.resource.data.email, userId))
+        && (!isChangingField('whatsappNumber') || hasMatchingUniqueKeyAfter('whatsapp', request.resource.data.whatsappNumber, userId));
+      allow delete: if maintenanceWriteAllowed() && isAdminLike();
+    }
+
+    match /userUniqueKeys/{keyId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && maintenanceWriteAllowed()
+        && request.resource.data.type in ['email', 'whatsapp']
+        && request.resource.data.value is string
+        && request.resource.data.value.size() > 0
+        && request.resource.data.userId is string
+        && (
+          request.resource.data.userId == request.auth.uid ||
+          isAdminLike()
+        );
+      allow update: if signedIn()
+        && maintenanceWriteAllowed()
+        && request.resource.data.type in ['email', 'whatsapp']
+        && request.resource.data.value is string
+        && request.resource.data.value.size() > 0
+        && request.resource.data.userId is string
+        && (
+          resource.data.userId == request.auth.uid ||
+          request.resource.data.userId == request.auth.uid ||
+          isAdminLike()
+        );
+      allow delete: if signedIn() && maintenanceWriteAllowed() && (
+        resource.data.userId == request.auth.uid ||
+        isAdminLike()
+      );
     }
 
     match /submissions/{submissionId} {
       allow read: if canReadSubmission();
       allow create: if signedIn()
+        && maintenanceWriteAllowed()
         && isAnyRole(['uploader', 'admin', 'super_admin'])
         && request.resource.data.uploadedBy == myEmail();
-      allow update: if signedIn() && (
+      allow update: if signedIn() && maintenanceWriteAllowed() && (
         isAdminLike() ||
         resource.data.uploadedBy == myEmail() ||
         resource.data.assignedTo == myEmail() ||
         resource.data.assignedToRSA == myEmail() ||
         resource.data.assignedToPayment == myEmail()
       );
-      allow delete: if isAdminLike();
+      allow delete: if maintenanceWriteAllowed() && isAdminLike();
     }
 
     match /uploaderRoutingRules/{docId} {
       allow read: if signedIn();
-      allow write: if isAdminLike();
+      allow write: if maintenanceWriteAllowed() && isAdminLike();
     }
 
     match /settings/{docId} {
@@ -117,33 +190,33 @@ service cloud.firestore {
 
     match /audit/{docId} {
       allow read: if isAdminLike();
-      allow create: if signedIn() && isAnyRole(['admin', 'super_admin', 'payment', 'rsa', 'reviewer']);
+      allow create: if signedIn() && maintenanceWriteAllowed() && isAnyRole(['admin', 'super_admin', 'payment', 'rsa', 'reviewer']);
       allow update, delete: if false;
     }
 
     match /counters/{docId} {
       allow read: if signedIn();
-      allow write: if isAnyRole(['admin', 'super_admin', 'uploader', 'reviewer', 'rsa']);
+      allow write: if maintenanceWriteAllowed() && isAnyRole(['admin', 'super_admin', 'uploader', 'reviewer', 'rsa']);
     }
 
     match /roundRobinAssignments/{docId} {
       allow read: if signedIn();
-      allow write: if isAnyRole(['admin', 'super_admin', 'uploader']);
+      allow write: if maintenanceWriteAllowed() && isAnyRole(['admin', 'super_admin', 'uploader']);
     }
 
     match /roundRobinAssignmentsRSA/{docId} {
       allow read: if signedIn();
-      allow write: if isAnyRole(['admin', 'super_admin', 'reviewer']);
+      allow write: if maintenanceWriteAllowed() && isAnyRole(['admin', 'super_admin', 'reviewer']);
     }
 
     match /roundRobinAssignmentsPayment/{docId} {
       allow read: if signedIn();
-      allow write: if isAnyRole(['admin', 'super_admin', 'rsa']);
+      allow write: if maintenanceWriteAllowed() && isAnyRole(['admin', 'super_admin', 'rsa']);
     }
 
     match /emailNotificationEvents/{docId} {
       allow read: if isAdminLike();
-      allow create, update: if signedIn();
+      allow create, update: if signedIn() && maintenanceWriteAllowed();
       allow delete: if false;
     }
 
@@ -153,11 +226,12 @@ service cloud.firestore {
         isAdminLike()
       );
       allow create: if signedIn()
+        && maintenanceWriteAllowed()
         && isAnyRole(['uploader', 'admin', 'super_admin'])
         && request.resource.data.status == 'pending'
         && request.resource.data.createdBy == myEmail();
-      allow update: if isAdminLike();
-      allow delete: if isAdminLike();
+      allow update: if maintenanceWriteAllowed() && isAdminLike();
+      allow delete: if maintenanceWriteAllowed() && isAdminLike();
     }
 
     match /applicationChats/{chatId} {
@@ -167,17 +241,20 @@ service cloud.firestore {
         canAccessSubmissionById(chatId)
       );
       allow create: if signedIn() && (
-        chatDataHasParticipant(request.resource.data) ||
-        (request.resource.data.submissionId is string && canAccessSubmissionById(request.resource.data.submissionId)) ||
-        canAccessSubmissionById(chatId)
+        maintenanceWriteAllowed()
+        && (
+          chatDataHasParticipant(request.resource.data) ||
+          (request.resource.data.submissionId is string && canAccessSubmissionById(request.resource.data.submissionId)) ||
+          canAccessSubmissionById(chatId)
+        )
       );
-      allow update: if signedIn() && (
+      allow update: if signedIn() && maintenanceWriteAllowed() && (
         chatDataHasParticipant(resource.data) ||
         chatDataHasParticipant(request.resource.data) ||
         (resource.data.submissionId is string && canAccessSubmissionById(resource.data.submissionId)) ||
         canAccessSubmissionById(chatId)
       );
-      allow delete: if isAdminLike();
+      allow delete: if maintenanceWriteAllowed() && isAdminLike();
 
       match /messages/{messageId} {
         allow read: if signedIn() && (
@@ -185,6 +262,7 @@ service cloud.firestore {
           canAccessChatByParticipants(chatId)
         );
         allow create: if signedIn()
+          && maintenanceWriteAllowed()
           && (
             canAccessSubmissionById(chatId) ||
             canAccessChatByParticipants(chatId)

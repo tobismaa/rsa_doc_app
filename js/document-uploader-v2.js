@@ -3,6 +3,8 @@ import { auth, db } from './firebase-config.js';
 import { BackblazeStorage } from './backblaze-storage.js';
 import { queueViewerAssignmentEmail } from './email-alerts.js';
 import { notifyStatusChangePush } from './status-push.js';
+import { notifyAdminPushEvent } from './push-alerts.js';
+import { formatAppDateTime, getTrustedDateKey, getTrustedNowIso } from './shared/app-time.js';
 import {
   getCurrentUserProfile as getCurrentUserProfileShared,
   ensureUserFullNames as ensureUserFullNamesShared,
@@ -18,8 +20,16 @@ import {
   routingRuleDocId as routingRuleDocIdShared
 } from './shared/uploader-routing.js?v=20260427e';
 import {
+  buildSubmissionCommissionFields,
+  formatCommissionRateLabel,
+  getCommissionSettings,
+  getSubmissionCommissionAmount,
+  resolveSubmissionCommissionRate
+} from './shared/commission-config.js?v=20260507a';
+import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260508a';
+import {
   collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, doc,
-  serverTimestamp, arrayUnion, getDocs, getDoc, setDoc, runTransaction
+  serverTimestamp, arrayUnion, getDocs, getDoc, setDoc, runTransaction, deleteDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
 // ==================== FIX JSPDF DETECTION - ADD THIS RIGHT AFTER IMPORTS ====================
@@ -53,7 +63,7 @@ import {
 })();
 
 // ==================== DOCUMENT TYPES ====================
-const DOCUMENT_TYPES = [
+const DEFAULT_DOCUMENT_TYPES = [
   { id: 'birth_certificate', name: 'Birth Certificate / Age Declaration', icon: 'fa-id-card', required: true },
   { id: 'nin', name: 'National Identification Number (NIN)', icon: 'fa-id-card', required: true },
   { id: 'bvn', name: 'BVN', icon: 'fa-id-badge', required: true },
@@ -70,12 +80,14 @@ const DOCUMENT_TYPES = [
   { id: 'offer_letter_last_page', name: 'Offer Letter Last Page', icon: 'fa-file-pdf', required: true },
   { id: 'pmi_soa', name: 'PMI SOA', icon: 'fa-file-pdf', required: true },
   { id: 'benefit_application_form', name: 'Benefit Application Form', icon: 'fa-file-alt', required: false },
-  { id: 'data_recapture', name: 'Data Recapture', icon: 'fa-file-alt', required: false }
+  { id: 'data_recapture', name: 'Data Recapture', icon: 'fa-file-alt', required: false },
+  { id: 'credit_life', name: 'Credit Life', icon: 'fa-file-medical', required: false }
 ];
 
 // Make document types globally available
-const REQUIRED_DOC_TYPES = DOCUMENT_TYPES.filter(d => d.required !== false);
-const OPTIONAL_DOC_TYPES = DOCUMENT_TYPES.filter(d => d.required === false);
+let DOCUMENT_TYPES = [...DEFAULT_DOCUMENT_TYPES];
+let REQUIRED_DOC_TYPES = DOCUMENT_TYPES.filter(d => d.required !== false);
+let OPTIONAL_DOC_TYPES = DOCUMENT_TYPES.filter(d => d.required === false);
 
 window.REQUIRED_DOC_TYPES = REQUIRED_DOC_TYPES;
 window.OPTIONAL_DOC_TYPES = OPTIONAL_DOC_TYPES;
@@ -121,9 +133,10 @@ function getFinancials(submission) {
   const computed25 = calculateRoundedRsa25(rsaBalance);
   const stored25 = parseMoney(details.rsa25Percent || submission?.rsa25Percent || 0);
   const twentyFive = stored25 ? roundDownToNearestThousand(stored25) : computed25;
-  const commission2 = twentyFive * 0.02;
+  const commissionRate = resolveSubmissionCommissionRate(submission);
+  const commission2 = getSubmissionCommissionAmount(submission, twentyFive);
   const pfa = String(details.pfa || submission?.pfa || '').trim() || '-';
-  return { pfa, twentyFive, commission2 };
+  return { pfa, twentyFive, commission2, commissionRate, commissionRateLabel: formatCommissionRateLabel(commissionRate) };
 }
 
 // ==================== GLOBAL VARIABLES ====================
@@ -137,104 +150,115 @@ let currentHouseNumberReserved = false;
 let currentDocType = null;
 let currentFile = null;
 let approvedAgents = [];
+let currentSubmissionAgentFallback = null;
 let singlePreviewObjectUrl = null;
+let currentDocumentRequirementRoles = { ...(getDefaultSystemSettings().documentRequirementRoles || {}) };
 let trustedNowCache = { value: null, fetchedAt: 0 };
 // Mobile camera photos can be large; compress only when needed.
-const MAX_IMAGE_UPLOAD_BYTES = 1024 * 1024; // 1MB
-const MAX_PDF_SIZE_BYTES = 1.5 * 1024 * 1024; // 1.5MB
+let MAX_IMAGE_UPLOAD_BYTES = 1024 * 1024; // 1MB
+let MAX_PDF_SIZE_BYTES = 1.5 * 1024 * 1024; // 1.5MB
 const userFullNames = new Map();
 let customerDetailsSaved = false;
 const RR_COUNTER_DOC = doc(db, 'counters', 'roundRobin');
 
-function getTimestampMsSafe(value) {
-  if (!value) return 0;
+function formatUploadLimitLabel(bytes) {
+  const mb = Number(bytes || 0) / (1024 * 1024);
+  if (!Number.isFinite(mb) || mb <= 0) return '0 MB';
+  return `${mb.toFixed(mb >= 10 ? 0 : 2).replace(/\.00$/, '')}MB`;
+}
+
+function getImageUploadLimitLabel() {
+  return formatUploadLimitLabel(MAX_IMAGE_UPLOAD_BYTES);
+}
+
+function getPdfUploadLimitLabel() {
+  return formatUploadLimitLabel(MAX_PDF_SIZE_BYTES);
+}
+
+async function applyUploadSystemSettings() {
   try {
-    if (typeof value?.toMillis === 'function') return value.toMillis();
-    if (typeof value?.toDate === 'function') return value.toDate().getTime();
-    const parsed = new Date(value).getTime();
-    return Number.isFinite(parsed) ? parsed : 0;
+    const settings = await getSystemSettings(db);
+    MAX_IMAGE_UPLOAD_BYTES = Math.max(0.1, Number(settings.maxImageUploadMb || 1)) * 1024 * 1024;
+    MAX_PDF_SIZE_BYTES = Math.max(0.1, Number(settings.maxPdfUploadMb || 1.5)) * 1024 * 1024;
   } catch (_) {
-    return 0;
+    MAX_IMAGE_UPLOAD_BYTES = 1024 * 1024;
+    MAX_PDF_SIZE_BYTES = 1.5 * 1024 * 1024;
   }
 }
 
-function getEffectiveSubmissionDocuments(submission = null) {
-  const rawDocs = Array.isArray(submission?.documents) ? submission.documents : [];
-  if (rawDocs.length <= 1) return rawDocs;
+async function populateAgentBankOptions({ force = false } = {}) {
+  if (!agentAccountBankSelect) return;
 
-  const latestByType = new Map();
-  rawDocs.forEach((docItem, index) => {
-    const type = String(docItem?.documentType || '').trim();
-    const key = type || `__index_${index}`;
-    const previous = latestByType.get(key);
-    const currentScore = Math.max(
-      getTimestampMsSafe(docItem?.uploadedAt),
-      Number(docItem?.localAddedAt || 0)
-    );
-    const previousScore = previous
-      ? Math.max(
-        getTimestampMsSafe(previous?.uploadedAt),
-        Number(previous?.localAddedAt || 0)
-      )
-      : -1;
-
-    if (!previous || currentScore >= previousScore) {
-      latestByType.set(key, docItem);
-    }
-  });
-
-  const orderedTypes = Array.isArray(submission?.documentTypes) ? submission.documentTypes : [];
-  const normalizedOrder = orderedTypes
-    .map((type) => latestByType.get(String(type || '').trim()))
-    .filter(Boolean);
-
-  const alreadyIncluded = new Set(normalizedOrder);
-  const remainder = Array.from(latestByType.values()).filter((docItem) => !alreadyIncluded.has(docItem));
-  return [...normalizedOrder, ...remainder];
-}
-
-async function getLatestSubmissionById(submissionId) {
-  const normalizedId = String(submissionId || '').trim();
-  if (!normalizedId) return null;
-
-  const cached = allSubmissions.find((s) => s.id === normalizedId) || null;
-
+  const currentValue = String(agentAccountBankSelect.value || '').trim();
+  let bankOptions = [];
   try {
-    const snap = await getDoc(doc(db, 'submissions', normalizedId));
-    if (!snap.exists()) return cached;
-
-    const fresh = { id: snap.id, ...snap.data() };
-    const existingIndex = allSubmissions.findIndex((s) => s.id === normalizedId);
-    if (existingIndex >= 0) {
-      allSubmissions[existingIndex] = fresh;
-    } else {
-      allSubmissions.push(fresh);
-    }
-    return fresh;
+    const settings = await getSystemSettings(db, { force });
+    bankOptions = Array.isArray(settings.agentBankOptions)
+      ? settings.agentBankOptions.filter((bank) => bank?.active && String(bank?.name || '').trim())
+      : [];
   } catch (_) {
-    return cached;
+    bankOptions = [];
+  }
+
+  agentAccountBankSelect.innerHTML = '<option value="">Select Bank</option>' + bankOptions.map((bank) => (
+    `<option value="${escapeHtml(bank.name)}">${escapeHtml(bank.name)}</option>`
+  )).join('');
+
+  if (currentValue && bankOptions.some((bank) => bank.name === currentValue)) {
+    agentAccountBankSelect.value = currentValue;
   }
 }
 
-function buildViewerDocumentUrl(fileUrl, submission = null, docIndex = 0) {
-  const cleanUrl = String(fileUrl || '').trim();
-  if (!cleanUrl) return '';
+function applyDocumentRequirements(documentRequirements = []) {
+  const activeDocs = Array.isArray(documentRequirements) && documentRequirements.length
+    ? documentRequirements.filter((doc) => doc?.active !== false)
+    : DEFAULT_DOCUMENT_TYPES;
 
-  try {
-    const url = new URL(cleanUrl, window.location.origin);
-    const versionSeed = Math.max(
-      getTimestampMsSafe(submission?.reuploadedAt),
-      getTimestampMsSafe(submission?.finalSubmittedAt),
-      getTimestampMsSafe(submission?.rsaSubmittedAt),
-      getTimestampMsSafe(submission?.fixSubmittedAt),
-      getTimestampMsSafe(submission?.uploadedAt)
-    ) || Date.now();
-    url.searchParams.set('_v', `${versionSeed}-${docIndex}`);
-    return url.toString();
-  } catch (_) {
-    const joiner = cleanUrl.includes('?') ? '&' : '?';
-    return `${cleanUrl}${joiner}_v=${Date.now()}-${docIndex}`;
+  DOCUMENT_TYPES = activeDocs.map((doc) => ({
+    id: String(doc.id || '').trim(),
+    name: String(doc.name || '').trim(),
+    icon: String(doc.icon || 'fa-file-alt').trim(),
+    required: doc.required !== false
+  })).filter((doc) => doc.id && doc.name);
+
+  REQUIRED_DOC_TYPES = DOCUMENT_TYPES.filter((doc) => doc.required !== false);
+  OPTIONAL_DOC_TYPES = DOCUMENT_TYPES.filter((doc) => doc.required === false);
+  window.REQUIRED_DOC_TYPES = REQUIRED_DOC_TYPES;
+  window.OPTIONAL_DOC_TYPES = OPTIONAL_DOC_TYPES;
+  if (totalCountSpan) totalCountSpan.textContent = String(DOCUMENT_TYPES.length);
+}
+
+function populatePfaOptions(pfaOptions = []) {
+  if (!pfaOptionsList) return;
+  const options = Array.isArray(pfaOptions) && pfaOptions.length ? pfaOptions : [];
+  pfaOptionsList.innerHTML = options.map((pfa) => `<option value="${escapeHtml(pfa)}"></option>`).join('');
+  if (pfaInput && !pfaInput.getAttribute('list')) {
+    pfaInput.setAttribute('list', 'pfaOptionsList');
   }
+}
+
+async function applyWorkflowSystemSettings({ force = false } = {}) {
+  try {
+    const settings = await getSystemSettings(db, { force });
+    applyDocumentRequirements(settings.documentRequirements);
+    currentDocumentRequirementRoles = {
+      ...(getDefaultSystemSettings().documentRequirementRoles || {}),
+      ...(settings.documentRequirementRoles || {})
+    };
+    populatePfaOptions(settings.pfaOptions);
+    PROPERTY_RULES = Array.isArray(settings.propertyRules) && settings.propertyRules.length ? [...settings.propertyRules] : [...DEFAULT_PROPERTY_RULES];
+    HOUSE_NUMBER_RULES = settings.houseNumberRules && typeof settings.houseNumberRules === 'object'
+      ? { ...settings.houseNumberRules }
+      : { ...DEFAULT_HOUSE_NUMBER_RULES };
+  } catch (_) {
+    applyDocumentRequirements(DEFAULT_DOCUMENT_TYPES);
+    currentDocumentRequirementRoles = { ...(getDefaultSystemSettings().documentRequirementRoles || {}) };
+    populatePfaOptions([]);
+    PROPERTY_RULES = [...DEFAULT_PROPERTY_RULES];
+    HOUSE_NUMBER_RULES = { ...DEFAULT_HOUSE_NUMBER_RULES };
+  }
+  syncUploadRequirementUi();
+  updateSubmitButton();
 }
 
 // ==================== INJECT MODAL ANIMATIONS (GLOBAL) ====================
@@ -307,7 +331,7 @@ function showFileSizeWarningModal(file) {
         <i class="fas fa-file-pdf" style="font-size: 50px; color: #ef4444;"></i>
       </div>
       <p style="font-size: 16px; color: #1e293b; margin-bottom: 15px; text-align: center;">
-        <strong>Maximum file size allowed is 1.5MB</strong>
+        <strong>Maximum file size allowed is ${getPdfUploadLimitLabel()}</strong>
       </p>
       <div style="background: #f8fafc; border-radius: 8px; padding: 20px; margin-bottom: 20px; text-align: center;">
         <p style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 10px;">${file.name}</p>
@@ -425,13 +449,13 @@ function showBatchSizeWarningModal(oversizedFiles, validFiles, originalFiles) {
     </div>
     <div style="padding: 25px; max-height: 60vh; overflow-y: auto;">
       <p style="font-size: 16px; color: #1e293b; margin-bottom: 20px; text-align: center;">
-        <strong>${oversizedFiles.length}</strong> file(s) exceed the 1.5MB limit.
+        <strong>${oversizedFiles.length}</strong> file(s) exceed the ${getPdfUploadLimitLabel()} limit.
         <strong>${validFiles.length}</strong> file(s) are already within limit.
       </p>
       ${oversizedFiles.length > 0 ? `
         <div style="margin-bottom: 25px;">
           <h3 style="font-size: 16px; font-weight: 600; color: #991b1b; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-            <i class="fas fa-compress-alt"></i> Files Exceeding 1.5MB
+            <i class="fas fa-compress-alt"></i> Files Exceeding ${getPdfUploadLimitLabel()}
           </h3>
           <div style="border: 1px solid #fecaca; border-radius: 8px; overflow: hidden;">
             ${oversizedListHtml}
@@ -554,15 +578,31 @@ async function assignRoundRobin(subRef) {
 }
 
 async function isActiveRSAUser(email) {
-  return isActiveUserWithRole(email, ['rsa']);
+  const normalized = normalizeEmail(email);
+  if (!normalized) return false;
+  try {
+    const data = await getUserProfileByEmailShared(db, normalized);
+    if (!data) return false;
+    const role = String(data.role || '').trim().toLowerCase();
+    const status = String(data.status || 'active').toLowerCase();
+    const leaveStatus = String(data.leaveStatus || '').toLowerCase();
+    return role === 'rsa'
+      && status !== 'deactivated'
+      && leaveStatus !== 'on_leave'
+      && data?.skipRsaRoundRobin !== true;
+  } catch (_) {
+    return false;
+  }
 }
 
 async function getRSAEmails() {
-  const q = query(collection(db, 'users'), where('role', '==', 'rsa'));
-  const snap = await getDocs(q);
+  const snap = await getDocs(collection(db, 'users'));
   return snap.docs
     .map((d) => d.data() || {})
-    .filter((u) => String(u.status || 'active').toLowerCase() !== 'deactivated' && String(u.leaveStatus || '').toLowerCase() !== 'on_leave')
+    .filter((u) => String(u.role || '').trim().toLowerCase() === 'rsa')
+    .filter((u) => String(u.status || 'active').toLowerCase() !== 'deactivated'
+      && String(u.leaveStatus || '').toLowerCase() !== 'on_leave'
+      && u?.skipRsaRoundRobin !== true)
     .map((u) => normalizeEmail(u.email))
     .filter(Boolean)
     .sort();
@@ -589,21 +629,18 @@ async function assignDirectToRSA(subRef, uploaderEmail = '') {
 
   const counterRef = doc(db, 'counters', 'roundRobinRSA');
   let assigned = '';
+  const trustedDateKey = await getTrustedDateKey();
   try {
     await runTransaction(db, async (tx) => {
       let lastIndex = -1;
-      let lastDate = '';
-      const today = new Date().toISOString().slice(0, 10);
       const counterSnap = await tx.get(counterRef);
       if (counterSnap.exists()) {
         const data = counterSnap.data() || {};
         lastIndex = typeof data.lastIndex === 'number' ? data.lastIndex : -1;
-        lastDate = data.lastDate || '';
       }
-      if (lastDate !== today) lastIndex = -1;
       const newIndex = (lastIndex + 1) % rsaUsers.length;
       assigned = rsaUsers[newIndex];
-      tx.set(counterRef, { lastIndex: newIndex, lastDate: today }, { merge: true });
+      tx.set(counterRef, { lastIndex: newIndex, lastDate: trustedDateKey }, { merge: true });
       tx.update(subRef, {
         assignedTo: '',
         assignedToRSA: assigned,
@@ -641,6 +678,7 @@ async function getApplicationStage(submission) {
     if (status === 'sent_to_pfa' || status === 'rsa_submitted') return 'Sent to PFA';
     if (status === 'processing_to_pfa' || status === 'approved') return 'Processing to PFA';
     if (status === 'rejected') return 'Rejected - Fix Required';
+    if (status === 'rejected_by_rsa') return 'Rejected by RSA - Fix Required';
     if (submission.assignedTo) {
       const reviewerName = await getUserFullName(submission.assignedTo);
       return `With Reviewer: ${reviewerName}`;
@@ -697,7 +735,10 @@ const saveDraftBtn = document.getElementById('saveDraftBtn');
 const submitEditBtn = document.getElementById('submitEditBtn');
 const uploadedCountSpan = document.getElementById('uploadedCount');
 const totalCountSpan = document.getElementById('totalCount');
+const uploadProgressText = document.getElementById('uploadProgressText');
 const notification = document.getElementById('notification');
+const requiredDocumentsHeading = document.getElementById('requiredDocumentsHeading');
+const batchUploadHint = document.getElementById('batchUploadHint');
 const errorDetailModal = document.getElementById('errorDetailModal');
 const errorDetailMessage = document.getElementById('errorDetailMessage');
 const closeErrorDetailModalBtn = document.getElementById('closeErrorDetailModalBtn');
@@ -772,6 +813,9 @@ const profileRoleEl = document.getElementById('profileRole');
 const profileStatusEl = document.getElementById('profileStatus');
 const registeredAgentsTableBody = document.getElementById('registeredAgentsTableBody');
 const customerAgentSelect = document.getElementById('customerAgent');
+const agentAccountBankSelect = document.getElementById('agentAccountBank');
+const pfaInput = document.getElementById('pfa');
+const pfaOptionsList = document.getElementById('pfaOptionsList');
 const uploadModalHeading = uploadModal?.querySelector('.modal-header h2');
 const agentRegistrationForm = document.getElementById('agentRegistrationForm');
 const agentRegistrationModal = document.getElementById('agentRegistrationModal');
@@ -780,7 +824,7 @@ const closeAgentRegistrationModalBtn = document.getElementById('closeAgentRegist
 const resetAgentFormBtn = document.getElementById('resetAgentFormBtn');
 const submitAgentFormBtn = document.getElementById('submitAgentFormBtn');
 let __batchFilesBuffer = [];
-let currentCommissionTab = 'active';
+let currentCommissionTab = 'sent_to_pfa';
 let registeredAgents = [];
 
 function renderProfileTab() {
@@ -967,6 +1011,63 @@ function collectSubmissionDocuments() {
   return documents;
 }
 
+function getStoredAgentSelectionValue(submission = {}) {
+  const storedAgentId = String(submission?.agentId || '').trim();
+  if (storedAgentId) return storedAgentId;
+  if (String(submission?.agentName || '').trim()) return '__stored_agent__';
+  return '';
+}
+
+function syncCurrentSubmissionAgentFallbackFromSubmission(submission = {}) {
+  const selectionValue = getStoredAgentSelectionValue(submission);
+  currentSubmissionAgentFallback = selectionValue
+    ? {
+        value: selectionValue,
+        id: String(submission?.agentId || '').trim(),
+        fullName: String(submission?.agentName || '').trim(),
+        contactNumber: String(submission?.agentContactNumber || '').trim(),
+        accountNumber: String(submission?.agentAccountNumber || '').trim(),
+        accountBank: String(submission?.agentAccountBank || '').trim()
+      }
+    : null;
+}
+
+function getSelectedAgentPayload() {
+  const selectedAgentId = String(customerAgentSelect?.value || '').trim();
+  const selectedAgent = approvedAgents.find((agent) => agent.id === selectedAgentId) || null;
+  if (selectedAgent) {
+    return {
+      selectedAgentId,
+      selectedAgent,
+      agentId: selectedAgent.id || '',
+      agentName: selectedAgent.fullName || '',
+      agentContactNumber: selectedAgent.contactNumber || '',
+      agentAccountNumber: selectedAgent.accountNumber || '',
+      agentAccountBank: selectedAgent.accountBank || ''
+    };
+  }
+  if (currentSubmissionAgentFallback && selectedAgentId === currentSubmissionAgentFallback.value) {
+    return {
+      selectedAgentId,
+      selectedAgent: null,
+      agentId: currentSubmissionAgentFallback.id || '',
+      agentName: currentSubmissionAgentFallback.fullName || '',
+      agentContactNumber: currentSubmissionAgentFallback.contactNumber || '',
+      agentAccountNumber: currentSubmissionAgentFallback.accountNumber || '',
+      agentAccountBank: currentSubmissionAgentFallback.accountBank || ''
+    };
+  }
+  return {
+    selectedAgentId,
+    selectedAgent: null,
+    agentId: '',
+    agentName: '',
+    agentContactNumber: '',
+    agentAccountNumber: '',
+    agentAccountBank: ''
+  };
+}
+
 function setUploadedDocForType(docType, docEntry) {
   if (!docType || !docEntry) return;
   currentCustomerUploads[docType] = [docEntry];
@@ -1090,11 +1191,14 @@ async function persistCurrentDraft({ silent = false, source = 'manual' } = {}) {
   }
 
   const customerDetails = collectDraftableCustomerDetails();
+  if (!String(customerDetails.name || '').trim()) {
+    if (!silent) showNotification('Customer name is required before saving a draft.', 'error');
+    return null;
+  }
   const storedCustomerDetails = await ensureStoredHouseNumber(customerDetails);
   const documents = collectSubmissionDocuments();
   const documentTypes = Object.keys(currentCustomerUploads || {}).filter((id) => Array.isArray(currentCustomerUploads[id]) && currentCustomerUploads[id].length > 0);
-  const selectedAgentId = String(customerAgentSelect?.value || '').trim();
-  const selectedAgent = approvedAgents.find((agent) => agent.id === selectedAgentId) || null;
+  const agentPayload = getSelectedAgentPayload();
   const payload = {
     customerName: storedCustomerDetails.name || 'Untitled Draft',
     customerDetails: storedCustomerDetails,
@@ -1104,11 +1208,11 @@ async function persistCurrentDraft({ silent = false, source = 'manual' } = {}) {
     documents,
     documentTypes,
     houseNumber: storedCustomerDetails.houseNumber || '',
-    agentId: selectedAgent?.id || '',
-    agentName: selectedAgent?.fullName || '',
-    agentContactNumber: selectedAgent?.contactNumber || '',
-    agentAccountNumber: selectedAgent?.accountNumber || '',
-    agentAccountBank: selectedAgent?.accountBank || '',
+    agentId: agentPayload.agentId,
+    agentName: agentPayload.agentName,
+    agentContactNumber: agentPayload.agentContactNumber,
+    agentAccountNumber: agentPayload.agentAccountNumber,
+    agentAccountBank: agentPayload.agentAccountBank,
     draftSource: source,
     draftSavedAt: serverTimestamp()
   };
@@ -1238,12 +1342,12 @@ function showCompressionPromptModal(file) {
       </div>
       <div style="padding: 24px;">
         <p style="font-size: 16px; color: #1e293b; margin-bottom: 16px; text-align: center;">
-          This ${fileKind} is larger than the 1.5MB upload limit.
+          This ${fileKind} is larger than the ${getPdfUploadLimitLabel()} upload limit.
         </p>
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; margin-bottom: 16px;">
           <div style="font-weight: 700; color: #0f172a; margin-bottom: 6px;">${file.name}</div>
           <div style="color: #475569;">Current size: <strong>${formatSize(file.size)}</strong></div>
-          <div style="color: #475569;">Target size: <strong>1.50 MB or less</strong></div>
+          <div style="color: #475569;">Target size: <strong>${getPdfUploadLimitLabel()} or less</strong></div>
         </div>
         <div style="background: #fefce8; border-radius: 8px; padding: 14px; color: #854d0e; font-size: 13px; line-height: 1.5;">
           Compression keeps the upload inside the system limit. If the file cannot be reduced enough without breaking readability, we will let you know.
@@ -1302,6 +1406,50 @@ function syncOriginatingTpField() {
   originatingTpEl.style.cursor = 'not-allowed';
 }
 
+function isCurrentUserRsa() {
+  return String(currentUserProfile?.role || '').trim().toLowerCase() === 'rsa';
+}
+
+function getCurrentUserRoleLevel() {
+  const rawLevel = currentUserProfile?.roleLevel ?? currentUserProfile?.accessLevel ?? 1;
+  const normalized = String(rawLevel || '').trim().toLowerCase();
+  if (Number(rawLevel) === 2 || normalized === '2' || normalized === 'level 2' || normalized === 'level2') {
+    return 2;
+  }
+  return 1;
+}
+
+function canCurrentUserSubmitWithoutDocuments() {
+  const role = String(currentUserProfile?.role || '').trim().toLowerCase();
+  const level = getCurrentUserRoleLevel();
+  if (!role) return false;
+  const levelAwareKey = (role === 'uploader' || role === 'rsa') ? `${role}_level_${level}` : role;
+  if (Object.prototype.hasOwnProperty.call(currentDocumentRequirementRoles, levelAwareKey)) {
+    return currentDocumentRequirementRoles[levelAwareKey] === false;
+  }
+  return currentDocumentRequirementRoles[role] === false;
+}
+
+function syncUploadRequirementUi() {
+  const pdfLimit = getPdfUploadLimitLabel();
+  if (requiredDocumentsHeading) {
+    requiredDocumentsHeading.textContent = canCurrentUserSubmitWithoutDocuments() ? 'Documents' : 'Required Documents';
+  }
+  if (batchUploadHint) {
+    batchUploadHint.textContent = canCurrentUserSubmitWithoutDocuments()
+      ? `Documents are optional for your role. Save details first to enable batch upload (Max ${pdfLimit} per file)`
+      : `Save details first to enable batch upload (Max ${pdfLimit} per file)`;
+  }
+  if (uploadProgressText) {
+    uploadProgressText.textContent = canCurrentUserSubmitWithoutDocuments() ? ' optional for this role' : '';
+  }
+  if (submitCustomerBtn) {
+    submitCustomerBtn.innerHTML = canCurrentUserSubmitWithoutDocuments()
+      ? '<i class="fas fa-check-circle"></i> Submit Application'
+      : '<i class="fas fa-check-circle"></i> Submit All Documents';
+  }
+}
+
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', () => {
   auth.onAuthStateChanged(async (user) => {
@@ -1328,7 +1476,10 @@ document.addEventListener('DOMContentLoaded', () => {
       userAvatar.src = user.photoURL || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'40\' height=\'40\' viewBox=\'0 0 40 40\'%3E%3Ccircle cx=\'20\' cy=\'20\' r=\'20\' fill=\'%23003366\'/%3E%3Ctext x=\'20\' y=\'25\' text-anchor=\'middle\' fill=\'%23ffffff\' font-size=\'16\'%3E👤%3C/text%3E%3C/svg%3E';
       renderProfileTab();
       updateRoleSwitchBackLink();
-      totalCountSpan.textContent = DOCUMENT_TYPES.length;
+      await applyUploadSystemSettings();
+      await applyWorkflowSystemSettings({ force: true });
+      await populateAgentBankOptions({ force: true });
+      syncUploadRequirementUi();
       await loadRegisteredAgents();
       await loadApprovedAgents();
       await loadSubmissions();
@@ -1340,7 +1491,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ==================== PROPERTY RULES ====================
-const PROPERTY_RULES = [
+const DEFAULT_PROPERTY_RULES = [
   { name: '1 BEDROOM 8 IN 1 FLAT', value: 6000000, fee: 2000, min: 4000000, max: 6499999 },
   { name: '1 BEDROOM 4 IN 1 BUNGALOW', value: 6500000, fee: 2000, min: 6500000, max: 6999999 },
   { name: '1 BEDROOM 2 IN 1 BUNGALOW', value: 7000000, fee: 2000, min: 7000000, max: 9999999 },
@@ -1355,7 +1506,7 @@ const PROPERTY_RULES = [
   { name: '8 BEDROOM TERRACE DUPLEX', value: 250000000, fee: 50000, min: 250000000, max: 299999999 }
 ];
 
-const HOUSE_NUMBER_RULES = {
+const DEFAULT_HOUSE_NUMBER_RULES = {
   '1 BEDROOM 8 IN 1 FLAT': { mode: 'alpha_suffix', prefix: 'C', startNumber: 12, startLetter: 'M' },
   '1 BEDROOM 2 IN 1 BUNGALOW': { mode: 'alpha_suffix', prefix: 'J', startNumber: 55, startLetter: 'A' },
   '1 BEDROOM 4 IN 1 BUNGALOW': { mode: 'alpha_suffix', prefix: 'J', startNumber: 50, startLetter: 'M' },
@@ -1365,6 +1516,8 @@ const HOUSE_NUMBER_RULES = {
   '4 BEDROOM DETACHED LUXURY BUNGALOW': { mode: 'block_100', startPrefix: 'P', startNumber: 26 },
   '4 BEDROOM TERRACE DUPLEX': { mode: 'house_infinite', startNumber: 20 }
 };
+let PROPERTY_RULES = [...DEFAULT_PROPERTY_RULES];
+let HOUSE_NUMBER_RULES = { ...DEFAULT_HOUSE_NUMBER_RULES };
 
 const HOUSE_COUNTER_COLLECTION = 'houseNumberCounters';
 const HOUSE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -1787,6 +1940,9 @@ async function saveCustomerDetails() {
     saveDetailsBtn.innerHTML = '<i class="fas fa-check"></i> Details Saved';
   }
 
+  updateSubmitButton();
+  syncUploadRequirementUi();
+
   const firstDocumentSection = document.querySelector('.document-grid-section');
   if (firstDocumentSection) {
     firstDocumentSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2091,23 +2247,6 @@ function setupEventListeners() {
     }
   } catch (e) { }
 
-  activeCommissionTabBtn?.addEventListener('click', (e) => {
-    e.preventDefault();
-    switchCommissionTab('active');
-  });
-  clearedCommissionTabBtn?.addEventListener('click', (e) => {
-    e.preventDefault();
-    switchCommissionTab('cleared');
-  });
-
-  [activeCommissionSearch, activeCommissionStartDate, activeCommissionEndDate].forEach((el) => {
-    el?.addEventListener('input', () => renderPaidTable());
-    el?.addEventListener('change', () => renderPaidTable());
-  });
-  [clearedCommissionSearch, clearedCommissionStartDate, clearedCommissionEndDate].forEach((el) => {
-    el?.addEventListener('input', () => renderPaidTable());
-    el?.addEventListener('change', () => renderPaidTable());
-  });
 }
 
 // ==================== TAB SWITCHING ====================
@@ -2116,10 +2255,9 @@ window.switchTab = (tabId) => {
   document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
   document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
   document.getElementById(`${tabId}Tab`)?.classList.add('active');
-  const titles = { overview: 'Dashboard', draft: 'Draft Submissions', pending: 'Pending Documents', approved: 'Approved Documents', rejected: 'Rejected Documents', paid: 'Paid Customers', 'register-agent': 'Register Agent', profile: 'My Profile' };
+  const titles = { overview: 'Dashboard', draft: 'Draft Submissions', pending: 'Pending Documents', approved: 'Approved Documents', rejected: 'Rejected Documents', paid: 'Agent Commission', 'register-agent': 'Register Agent', profile: 'My Profile' };
   if (pageTitle) pageTitle.textContent = titles[tabId] || 'My Documents';
   if (tabId === 'paid') {
-    switchCommissionTab(currentCommissionTab || 'active');
     renderPaidTable();
   }
   if (tabId === 'register-agent') {
@@ -2128,17 +2266,11 @@ window.switchTab = (tabId) => {
 };
 
 function switchCommissionTab(tab) {
-  currentCommissionTab = tab === 'cleared' ? 'cleared' : 'active';
-  if (activeCommissionSection) activeCommissionSection.style.display = currentCommissionTab === 'active' ? 'block' : 'none';
-  if (clearedCommissionSection) clearedCommissionSection.style.display = currentCommissionTab === 'cleared' ? 'block' : 'none';
-  activeCommissionTabBtn?.classList.toggle('active', currentCommissionTab === 'active');
-  clearedCommissionTabBtn?.classList.toggle('active', currentCommissionTab === 'cleared');
-
-  const showActive = currentCommissionTab === 'active';
-  if (activeTotal25Card) activeTotal25Card.style.display = showActive ? 'block' : 'none';
-  if (activeTotal1Card) activeTotal1Card.style.display = showActive ? 'block' : 'none';
-  if (clearedTotal25Card) clearedTotal25Card.style.display = showActive ? 'none' : 'block';
-  if (clearedTotal1Card) clearedTotal1Card.style.display = showActive ? 'none' : 'block';
+  currentCommissionTab = tab === 'cleared' ? 'cleared' : tab === 'active' ? 'active' : 'sent_to_pfa';
+  document.getElementById('uploaderAgentCommissionSentTabBtn')?.classList.toggle('active', currentCommissionTab === 'sent_to_pfa');
+  document.getElementById('uploaderAgentCommissionActiveTabBtn')?.classList.toggle('active', currentCommissionTab === 'active');
+  document.getElementById('uploaderAgentCommissionClearedTabBtn')?.classList.toggle('active', currentCommissionTab === 'cleared');
+  renderUploaderAgentCommissionBreakdown(currentCommissionTab);
 }
 
 function getDateFromAny(value) {
@@ -2229,6 +2361,7 @@ function openUploadModal() {
   const resultsContainer = document.getElementById('customerInfoResults');
   if (resultsContainer) resultsContainer.style.display = 'none';
 
+  currentSubmissionAgentFallback = null;
   if (customerAgentSelect) customerAgentSelect.value = '';
   customerDetailsSaved = false;
 
@@ -2453,7 +2586,7 @@ async function compressPdfUnderLimit(file, targetBytes = MAX_PDF_SIZE_BYTES) {
     return new File([bestBlob], `${baseName}.pdf`, { type: 'application/pdf' });
   }
 
-  throw new Error('Could not reduce PDF below 1.5MB. Please upload a smaller scan.');
+  throw new Error(`Could not reduce PDF below ${getPdfUploadLimitLabel()}. Please upload a smaller scan.`);
 }
 
 async function compressFileToUploadLimit(file) {
@@ -2497,7 +2630,7 @@ async function maybeCompressOversizedFile(file) {
   showNotification(`Compressing ${file.name}...`, 'info');
   const compressed = await compressFileToUploadLimit(file);
   if (compressed.size > MAX_PDF_SIZE_BYTES) {
-    throw new Error('Compressed file is still above 1.5MB. Please use a smaller file.');
+    throw new Error(`Compressed file is still above ${getPdfUploadLimitLabel()}. Please use a smaller file.`);
   }
   showNotification(`Compression complete: ${file.name} is now ${formatFileSize(compressed.size)}`, 'success');
   return compressed;
@@ -2528,11 +2661,11 @@ async function handleSingleFileSelection(file) {
       preparedFile = compressedFile;
     }
     if (isImage) {
-      // Requirement: on mobile camera snap, compress only when the photo is > 1MB.
+      // Requirement: on mobile camera snap, compress only when the photo exceeds the configured image limit.
       if (preparedFile.type.startsWith('image/') && preparedFile.size > MAX_IMAGE_UPLOAD_BYTES) {
-        showNotification('Optimizing photo to 1MB for upload...', 'info');
+        showNotification(`Optimizing photo to ${getImageUploadLimitLabel()} for upload...`, 'info');
         preparedFile = await compressImageTo200KB(preparedFile, MAX_IMAGE_UPLOAD_BYTES);
-        if (preparedFile.size > MAX_IMAGE_UPLOAD_BYTES) throw new Error('Photo must be 1MB or less after compression.');
+        if (preparedFile.size > MAX_IMAGE_UPLOAD_BYTES) throw new Error(`Photo must be ${getImageUploadLimitLabel()} or less after compression.`);
       }
     }
     currentFile = preparedFile;
@@ -2655,12 +2788,12 @@ async function convertImageToPdfUnderLimit(imageFile) {
       if (pdfBlob.size <= MAX_PDF_SIZE_BYTES) {
         return { pdfBlob, inputFile };
       }
-      lastError = new Error('Converted PDF still larger than 1.5MB');
+      lastError = new Error(`Converted PDF still larger than ${getPdfUploadLimitLabel()}`);
     } catch (e) {
       lastError = e;
     }
   }
-  throw lastError || new Error('Could not compress image to fit under 1.5MB PDF limit');
+  throw lastError || new Error(`Could not compress image to fit under ${getPdfUploadLimitLabel()} PDF limit`);
 }
 
 function findMatchingDocTypeByName(filename, usedTypes) {
@@ -2695,6 +2828,7 @@ async function handleBatchFiles(files) {
     const usedTypes = new Set(Object.keys(currentCustomerUploads || {}).filter((id) => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0));
     let successCount = 0;
     let failCount = 0;
+    const activeDocumentIds = new Set(DOCUMENT_TYPES.map((doc) => doc.id));
 
     for (let idx = 0; idx < files.length; idx++) {
       const item = files[idx];
@@ -2712,6 +2846,10 @@ async function handleBatchFiles(files) {
       if (!targetType) {
         const notUsed = DOCUMENT_TYPES.map(d => d.id).filter(id => !(currentCustomerUploads[id] && currentCustomerUploads[id].length > 0));
         targetType = notUsed.find((id) => !usedTypes.has(id)) || DOCUMENT_TYPES[0].id;
+      }
+      if (!activeDocumentIds.has(targetType)) {
+        failCount++;
+        continue;
       }
       // Prevent two different files from mapping to the same slot in the same batch.
       if (usedTypes.has(targetType)) {
@@ -2743,7 +2881,7 @@ async function handleBatchFiles(files) {
               const converted = await convertImageToPdfUnderLimit(file);
               pdfBlob = converted.pdfBlob;
             } catch (e) {
-              showNotification(`Converted ${file.name} > 1.5MB, skipped.`, 'error');
+              showNotification(`Converted ${file.name} is above ${getPdfUploadLimitLabel()}, skipped.`, 'error');
               failCount++;
               continue;
             }
@@ -2765,7 +2903,7 @@ async function handleBatchFiles(files) {
 
       try {
         const result = await storage.uploadFile(fileToSend, customerName, targetType);
-        setUploadedDocForType(targetType, { name: fileToSend.name, fileId: result.fileId, fileUrl: result.fileUrl, uploadedAt: new Date().toISOString(), localAddedAt: Date.now() });
+        setUploadedDocForType(targetType, { name: fileToSend.name, fileId: result.fileId, fileUrl: result.fileUrl, uploadedAt: await getTrustedNowIso(), localAddedAt: Date.now() });
         successCount++;
       } catch (e) {
         showNotification(`Upload failed for ${file.name}`, 'error');
@@ -2918,7 +3056,7 @@ async function uploadSingleDocument() {
         }
 
         if (pdfBlob.size > MAX_PDF_SIZE_BYTES) {
-          const ok = confirm('Converted PDF is larger than 1.5MB.\n\nTry compressing the photo further and retry?');
+          const ok = confirm(`Converted PDF is larger than ${getPdfUploadLimitLabel()}.\n\nTry compressing the photo further and retry?`);
           if (!ok) return;
           const converted = await convertImageToPdfUnderLimit(currentFile);
           pdfBlob = converted.pdfBlob;
@@ -2936,7 +3074,7 @@ async function uploadSingleDocument() {
       return;
     }
     const result = await storage.uploadFile(fileToSend, customerName, currentDocType);
-    setUploadedDocForType(currentDocType, { name: currentFile.name, fileId: result.fileId, fileUrl: result.fileUrl, uploadedAt: new Date().toISOString(), localAddedAt: Date.now() });
+    setUploadedDocForType(currentDocType, { name: currentFile.name, fileId: result.fileId, fileUrl: result.fileUrl, uploadedAt: await getTrustedNowIso(), localAddedAt: Date.now() });
     renderDocumentGrid(documentGrid, REQUIRED_DOC_TYPES, currentCustomerUploads, 'upload');
     renderDocumentGrid(optionalDocumentGrid, OPTIONAL_DOC_TYPES, currentCustomerUploads, 'upload');
     updateSubmitButton();
@@ -2963,24 +3101,23 @@ window.viewDocument = (docType) => {
 };
 
 // ==================== VIEW SUBMISSION DOCUMENTS ====================
-window.viewSubmissionDocs = async (submissionId) => {
-  const sub = await getLatestSubmissionById(submissionId);
-  const docs = getEffectiveSubmissionDocuments(sub);
-  if (!sub || docs.length === 0) { showNotification('No documents available', 'error'); return; }
-  const firstDoc = docs[0];
+window.viewSubmissionDocs = (submissionId) => {
+  const sub = allSubmissions.find(s => s.id === submissionId);
+  if (!sub || !sub.documents || sub.documents.length === 0) { showNotification('No documents available', 'error'); return; }
+  const firstDoc = sub.documents[0];
   const docTypeLabel = DOCUMENT_TYPES.find(t => t.id === firstDoc.documentType)?.name || firstDoc.documentType || 'Document';
   if (viewerModal && viewerFileName && documentViewer) {
     viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel}`;
-    documentViewer.src = buildViewerDocumentUrl(firstDoc.fileUrl, sub, 0);
+    documentViewer.src = firstDoc.fileUrl?.trim();
     viewerModal.classList.add('active');
   }
-  if (docs.length > 1) {
+  if (sub.documents.length > 1) {
     let currentIndex = 0;
     const showDoc = (index) => {
-      const doc = docs[index];
+      const doc = sub.documents[index];
       const docTypeLabel = DOCUMENT_TYPES.find(t => t.id === doc.documentType)?.name || doc.documentType || 'Document';
-      viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel} (${index + 1}/${docs.length})`;
-      documentViewer.src = buildViewerDocumentUrl(doc.fileUrl, sub, index);
+      viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel} (${index + 1}/${sub.documents.length})`;
+      documentViewer.src = doc.fileUrl?.trim();
     };
     const addViewerNav = () => {
       const viewerHeader = viewerModal ? viewerModal.querySelector('.viewer-header') : document.querySelector('.viewer-header');
@@ -2992,13 +3129,13 @@ window.viewSubmissionDocs = async (submissionId) => {
       nav.style.cssText = 'display: flex; gap: 10px; align-items: center;';
       nav.innerHTML = `
         <button id="prevDoc" class="action-btn" ${currentIndex === 0 ? 'disabled' : ''}><i class="fas fa-chevron-left"></i> Prev</button>
-        <span id="docCounter" style="font-size: 14px; color: #666;">${currentIndex + 1}/${docs.length}</span>
-        <button id="nextDoc" class="action-btn" ${currentIndex === docs.length - 1 ? 'disabled' : ''}><i class="fas fa-chevron-right"></i> Next</button>
+        <span id="docCounter" style="font-size: 14px; color: #666;">${currentIndex + 1}/${sub.documents.length}</span>
+        <button id="nextDoc" class="action-btn" ${currentIndex === sub.documents.length - 1 ? 'disabled' : ''}><i class="fas fa-chevron-right"></i> Next</button>
       `;
       const closeBtn = viewerHeader.querySelector('#closeViewer') || document.getElementById('closeViewer');
       viewerHeader.insertBefore(nav, closeBtn);
       document.getElementById('prevDoc').onclick = () => { if (currentIndex > 0) { currentIndex--; showDoc(currentIndex); addViewerNav(); } };
-      document.getElementById('nextDoc').onclick = () => { if (currentIndex < docs.length - 1) { currentIndex++; showDoc(currentIndex); addViewerNav(); } };
+      document.getElementById('nextDoc').onclick = () => { if (currentIndex < sub.documents.length - 1) { currentIndex++; showDoc(currentIndex); addViewerNav(); } };
     };
     addViewerNav();
   }
@@ -3008,6 +3145,10 @@ window.viewSubmissionDocs = async (submissionId) => {
 window.showApplicationTrack = async (submissionId) => {
   const sub = allSubmissions.find(s => s.id === submissionId);
   if (!sub) return;
+  if (String(sub.status || '').toLowerCase() === 'draft') {
+    showNotification('Draft applications are managed from the Draft tab.', 'info');
+    return;
+  }
   try {
     const stage = await getApplicationStage(sub);
     const trackModal = document.createElement('div');
@@ -3083,12 +3224,19 @@ function getStageIcon(stage) {
 function updateSubmitButton() {
   if (!submitCustomerBtn) return;
   const customerName = customerNameInput.value.trim();
+  const allowWithoutDocuments = canCurrentUserSubmitWithoutDocuments();
   const hasAnyDoc = Object.keys(currentCustomerUploads || {}).some(id => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0);
-  if (currentEditId) { submitCustomerBtn.disabled = !(customerName && hasAnyDoc); return; }
+  if (currentEditId) {
+    uploadedCountSpan.textContent = Object.keys(currentCustomerUploads || {}).filter((id) => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0).length;
+    submitCustomerBtn.disabled = !(customerName && (hasAnyDoc || allowWithoutDocuments));
+    syncUploadRequirementUi();
+    return;
+  }
   const requiredDocs = DOCUMENT_TYPES.filter(d => d.required !== false).map(d => d.id);
   const uploadedRequired = requiredDocs.filter(id => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0).length;
   uploadedCountSpan.textContent = Object.keys(currentCustomerUploads || {}).filter((id) => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0).length;
-  submitCustomerBtn.disabled = !(customerName && uploadedRequired === requiredDocs.length && customerDetailsSaved);
+  submitCustomerBtn.disabled = !(customerName && customerDetailsSaved && (allowWithoutDocuments || uploadedRequired === requiredDocs.length));
+  syncUploadRequirementUi();
 }
 
 function getMissingRequiredSubmissionFields() {
@@ -3117,50 +3265,39 @@ function getMissingRequiredSubmissionFields() {
 
 async function submitCustomer() {
   const customerName = customerNameInput.value.trim();
+  const allowWithoutDocuments = canCurrentUserSubmitWithoutDocuments();
   if (!customerName) return;
   if (!customerDetailsSaved) { showNotification('Please save customer details before submitting', 'error'); return; }
+  const rolePermissions = (await getSystemSettings(db, { force: true })).rolePermissions || {};
+  const currentRole = String(currentUserProfile?.role || 'uploader').trim().toLowerCase();
+  if (currentRole === 'uploader' && rolePermissions.uploaderCanUpload === false) {
+    showNotification('Uploader submissions are currently disabled by Super Admin.', 'error');
+    return;
+  }
   submitCustomerBtn.disabled = true;
   submitCustomerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
   try {
     const missingFields = getMissingRequiredSubmissionFields();
     if (missingFields.length > 0) {
       submitCustomerBtn.disabled = false;
-      submitCustomerBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Customer Documents';
+      syncUploadRequirementUi();
       return showNotification('All fields are compulsory. Missing or invalid: ' + missingFields.join(', '), 'error');
     }
     if (currentEditId) {
       const hasAnyDoc = Object.keys(currentCustomerUploads || {}).some(id => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0);
-      if (!hasAnyDoc) {
+      if (!hasAnyDoc && !allowWithoutDocuments) {
         submitCustomerBtn.disabled = false;
-        submitCustomerBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Customer Documents';
+        syncUploadRequirementUi();
         return showNotification('Please upload at least one document before submitting fix.', 'error');
       }
       const documents = [];
       Object.entries(currentCustomerUploads).forEach(([type, files]) => {
         files.forEach(file => { documents.push({ documentType: type, ...file }); });
       });
+      const agentPayload = getSelectedAgentPayload();
       const customerDetails = {
-        name: customerName,
-        dob: document.getElementById('customerDob')?.value || '',
-        email: document.getElementById('customerEmail')?.value?.trim() || '',
-        phone: document.getElementById('customerPhone')?.value?.trim() || '',
-        nin: document.getElementById('customerNIN')?.value?.trim() || '',
-        address: document.getElementById('customerAddress')?.value?.trim() || '',
-        accountNo: document.getElementById('accountNo')?.value?.trim() || '',
-        employer: document.getElementById('employer')?.value?.trim() || '',
-        originatingTP: document.getElementById('originatingTP')?.value?.trim() || '',
-        mortgageLoanApplicationFormDate: document.getElementById('mortgageLoanApplicationFormDate')?.value || '',
-        pfa: document.getElementById('pfa')?.value?.trim() || '',
-        penNo: document.getElementById('penNo')?.value?.trim() || '',
-        rsaStatementDate: document.getElementById('rsaStatementDate')?.value || '',
-        rsaBalance: document.getElementById('rsaBalance')?.value || '',
-        rsa25: document.getElementById('rsa25Percent')?.value || '',
-        propertyType: document.getElementById('propertyType')?.value?.trim() || '',
-        houseNumber: document.getElementById('houseNumber')?.value?.trim() || '',
-        tenor: document.getElementById('tenor')?.value || '',
-        propertyValue: document.getElementById('propertyValue')?.value || '',
-        facilityFee: document.getElementById('facilityFee')?.value || '',
-        loanAmount: normalizeLoanAmountValue(document.getElementById('loanAmount')?.value || '')
+        ...collectDraftableCustomerDetails(),
+        name: customerName
       };
       if (!customerDetails.houseNumber && customerDetails.propertyType) {
         customerDetails.houseNumber = await reserveHouseNumber(customerDetails.propertyType);
@@ -3171,13 +3308,17 @@ async function submitCustomer() {
       }
       if (!customerDetails.houseNumber) {
         submitCustomerBtn.disabled = false;
-        submitCustomerBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Customer Documents';
+        syncUploadRequirementUi();
         return showNotification('Unable to generate house number for this property type.', 'error');
       }
       const submissionRef = doc(db, 'submissions', currentEditId);
       const existingSub = allSubmissions.find((s) => s.id === currentEditId) || {};
       const reviewerCandidate = String(existingSub.reviewedBy || existingSub.assignedTo || '').trim();
       const reviewerToReassign = await isActiveUserWithRole(reviewerCandidate, ['reviewer']) ? reviewerCandidate : '';
+      const latestRejectedStage = String(existingSub.latestRejectedStage || '').trim().toLowerCase();
+      const rsaRejectFlow = String(existingSub.status || '').toLowerCase() === 'rejected_by_rsa' || latestRejectedStage === 'rsa';
+      const rsaOfficerCandidate = String(existingSub.latestRejectedBy || existingSub.assignedToRSA || '').trim();
+      const rsaToReassign = await isActiveUserWithRole(rsaOfficerCandidate, ['rsa']) ? rsaOfficerCandidate : String(existingSub.assignedToRSA || '').trim();
       const nextFixCount = Number(existingSub.fixCount || 0) + 1;
       const rejectionHistory = Array.isArray(existingSub.rejectionHistory)
         ? existingSub.rejectionHistory.filter((entry) => String(entry || '').trim())
@@ -3185,21 +3326,36 @@ async function submitCustomer() {
       const previousReason = String(existingSub.latestRejectionReason || existingSub.previousRejectionReason || existingSub.comment || '').trim();
       const previousRejectedBy = String(existingSub.latestRejectedBy || existingSub.previousRejectedBy || existingSub.reviewedBy || '').trim();
       const previousRejectedAt = existingSub.latestRejectedAt || existingSub.previousRejectedAt || existingSub.reviewedAt || null;
+      const preservedCommissionRate = resolveSubmissionCommissionRate(existingSub);
       await updateDoc(submissionRef, {
-        customerName, customerDetails, status: 'pending', documents,
+        customerName, customerDetails, status: rsaRejectFlow ? 'processing_to_pfa' : 'pending', documents,
         documentTypes: Object.keys(currentCustomerUploads), reuploadedAt: serverTimestamp(),
         houseNumber: customerDetails.houseNumber || '',
+        agentId: agentPayload.agentId,
+        agentName: agentPayload.agentName,
+        agentContactNumber: agentPayload.agentContactNumber,
+        agentAccountNumber: agentPayload.agentAccountNumber,
+        agentAccountBank: agentPayload.agentAccountBank,
         fixSubmitted: true, fixLocked: false, fixSubmittedAt: serverTimestamp(), fixCount: nextFixCount,
-        assignedTo: reviewerToReassign || existingSub.assignedTo || '',
-        reviewedAt: null,
+        assignedTo: rsaRejectFlow ? '' : (reviewerToReassign || existingSub.assignedTo || ''),
+        assignedToRSA: rsaRejectFlow ? (rsaToReassign || existingSub.assignedToRSA || '') : (existingSub.assignedToRSA || ''),
+        reviewedAt: rsaRejectFlow ? (existingSub.reviewedAt || null) : null,
+        reviewerDecision: rsaRejectFlow ? String(existingSub.reviewerDecision || '').trim() : '',
+        reviewerDecisionBy: rsaRejectFlow ? String(existingSub.reviewerDecisionBy || '').trim() : '',
+        reviewerDecisionAt: rsaRejectFlow ? (existingSub.reviewerDecisionAt || null) : null,
+        rsaReady: rsaRejectFlow ? true : Boolean(existingSub.rsaReady),
         comment: previousReason,
         rejectionHistory,
         previousRejectionReason: previousReason,
         previousRejectedBy,
         previousRejectedAt,
-        resubmittedAfterRejection: true
+        resubmittedAfterRejection: true,
+        latestRejectedStage: '',
+        commissionRate: preservedCommissionRate,
+        commissionRatePercent: Number((preservedCommissionRate * 100).toFixed(4)),
+        commissionRateLabel: formatCommissionRateLabel(preservedCommissionRate)
       });
-      if (!reviewerToReassign) {
+      if (!rsaRejectFlow && !reviewerToReassign) {
         await assignRoundRobin(submissionRef);
       }
       notifyStatusChangePush({
@@ -3211,9 +3367,11 @@ async function submitCustomer() {
         actionLabel: 'Application Re-Submitted',
         message: `Application for ${customerName} was re-submitted and is back in pending review.`
       }).catch(() => {});
-      showNotification(reviewerToReassign
-        ? '✅ Fix submitted and reassigned to the same reviewer for another review.'
-        : '✅ Fix submitted successfully!', 'success');
+      showNotification(rsaRejectFlow
+        ? '✅ Fix submitted and returned directly to RSA.'
+        : (reviewerToReassign
+            ? '✅ Fix submitted and reassigned to the same reviewer for another review.'
+            : '✅ Fix submitted successfully!'), 'success');
       closeModal(uploadModal);
       currentEditId = null;
       updateSubmitButton();
@@ -3221,31 +3379,30 @@ async function submitCustomer() {
     }
     const requiredDocs = DOCUMENT_TYPES.filter(d => d.required !== false).map(d => d.id);
     const missing = requiredDocs.filter(id => !(currentCustomerUploads[id] && currentCustomerUploads[id].length > 0));
-    if (missing.length > 0) {
+    if (!allowWithoutDocuments && missing.length > 0) {
       submitCustomerBtn.disabled = false;
-      submitCustomerBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Customer Documents';
+      syncUploadRequirementUi();
       return showNotification('Please upload required documents: ' + missing.join(', '), 'error');
     }
     const documents = collectSubmissionDocuments();
     const customerDetails = collectDraftableCustomerDetails();
     customerDetails.name = customerName;
-    const selectedAgentId = String(customerAgentSelect?.value || '').trim();
-    const selectedAgent = approvedAgents.find((a) => a.id === selectedAgentId) || null;
-    const agentSummary = selectedAgent
-      ? `Selected agent:\n- Name: ${selectedAgent.fullName || '-'}\n- Phone: ${selectedAgent.contactNumber || '-'}`
+    const agentPayload = getSelectedAgentPayload();
+    const agentSummary = agentPayload.agentName
+      ? `Selected agent:\n- Name: ${agentPayload.agentName || '-'}\n- Phone: ${agentPayload.agentContactNumber || '-'}`
       : 'Selected agent: No Agent';
     const proceed = confirm(
       `Please confirm submission details:\n\nCustomer: ${customerName || '-'}\n${agentSummary}\n\nProceed with submission?`
     );
     if (!proceed) {
       submitCustomerBtn.disabled = false;
-      submitCustomerBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Customer Documents';
+      syncUploadRequirementUi();
       return;
     }
     const allocatedHouseNumber = customerDetails.houseNumber || await reserveHouseNumber(customerDetails.propertyType);
     if (!allocatedHouseNumber) {
       submitCustomerBtn.disabled = false;
-      submitCustomerBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Customer Documents';
+      syncUploadRequirementUi();
       return showNotification('Unable to generate house number for this property type.', 'error');
     }
     customerDetails.houseNumber = allocatedHouseNumber;
@@ -3254,6 +3411,8 @@ async function submitCustomer() {
       houseNumberEl.value = allocatedHouseNumber;
     }
     const uploaderEmail = normalizeEmail(currentUser?.email);
+    const commissionSettings = await getCommissionSettings(db);
+    const commissionFields = buildSubmissionCommissionFields(commissionSettings);
     const submissionPayload = {
       customerName,
       customerDetails,
@@ -3263,11 +3422,12 @@ async function submitCustomer() {
       documents,
       documentTypes: Object.keys(currentCustomerUploads),
       houseNumber: allocatedHouseNumber,
-      agentId: selectedAgent?.id || '',
-      agentName: selectedAgent?.fullName || '',
-      agentContactNumber: selectedAgent?.contactNumber || '',
-      agentAccountNumber: selectedAgent?.accountNumber || '',
-      agentAccountBank: selectedAgent?.accountBank || '',
+      agentId: agentPayload.agentId,
+      agentName: agentPayload.agentName,
+      agentContactNumber: agentPayload.agentContactNumber,
+      agentAccountNumber: agentPayload.agentAccountNumber,
+      agentAccountBank: agentPayload.agentAccountBank,
+      ...commissionFields,
       submittedAt: serverTimestamp()
     };
     let subRef;
@@ -3281,7 +3441,9 @@ async function submitCustomer() {
       });
     }
     const routingRule = await getUploaderRoutingRule(uploaderEmail);
-    if (routingRule?.routeMode === 'skip_reviewer') {
+    const systemSettings = await getSystemSettings(db);
+    const effectiveRouteMode = routingRule?.routeMode || String(systemSettings.routingPolicies?.defaultRouteMode || 'normal').trim().toLowerCase();
+    if (effectiveRouteMode === 'skip_reviewer') {
       const assignedRsa = await assignDirectToRSA(subRef, uploaderEmail).catch(() => '');
       showNotification(assignedRsa ? `✅ Submitted and routed directly to RSA: ${assignedRsa}` : '✅ Submitted and routed directly to RSA queue.', 'success');
       notifyStatusChangePush({
@@ -3330,7 +3492,7 @@ async function submitCustomer() {
   } catch (error) {
     showNotification('Submission failed: ' + error.message, 'error');
   } finally {
-    submitCustomerBtn.innerHTML = '<i class="fas fa-check-circle"></i> Submit Customer Documents';
+    syncUploadRequirementUi();
   }
 }
 
@@ -3343,47 +3505,14 @@ window.openEditModal = async (id) => {
   currentHouseNumberReserved = true;
   setUploadModalHeading('fix');
   syncUploadModalControlState('fix');
-  const details = sub.customerDetails || {};
+  await loadApprovedAgents();
   try {
-    const pick = (keys, fallback = '') => {
-      for (const key of keys) {
-        const dVal = details?.[key];
-        if (dVal !== undefined && dVal !== null && String(dVal).trim() !== '') return String(dVal);
-        const sVal = sub?.[key];
-        if (sVal !== undefined && sVal !== null && String(sVal).trim() !== '') return String(sVal);
-      }
-      return fallback;
-    };
-    const fieldMap = [
-      { id: 'customerName', keys: ['name', 'customerName'], fallback: sub.customerName || '', label: 'Customer Name' },
-      { id: 'customerDob', keys: ['dob', 'dateOfBirth', 'customerDob'], fallback: '', label: 'Date of Birth' },
-      { id: 'customerEmail', keys: ['email', 'customerEmail'], fallback: '', label: 'Email' },
-      { id: 'customerPhone', keys: ['phone', 'customerPhone'], fallback: '', label: 'Phone' },
-      { id: 'customerNIN', keys: ['nin', 'customerNIN'], fallback: '', label: 'NIN' },
-      { id: 'customerAddress', keys: ['address', 'customerAddress'], fallback: '', label: 'Address' },
-      { id: 'accountNo', keys: ['accountNo'], fallback: '', label: 'Account Number' },
-      { id: 'employer', keys: ['employer'], fallback: '', label: 'Employer' },
-      { id: 'originatingTP', keys: ['originatingTP'], fallback: '', label: 'Originating Transfer Pin' },
-      { id: 'mortgageLoanApplicationFormDate', keys: ['mortgageLoanApplicationFormDate'], fallback: '', label: 'Mortgage Loan Application Form Date' },
-      { id: 'pfa', keys: ['pfa', 'pfaName'], fallback: '', label: 'PFA' },
-      { id: 'penNo', keys: ['penNo'], fallback: '', label: 'PEN Number' },
-      { id: 'rsaStatementDate', keys: ['rsaStatementDate'], fallback: '', label: 'RSA Statement Date' },
-      { id: 'rsaBalance', keys: ['rsaBalance'], fallback: '', label: 'RSA Balance' },
-      { id: 'propertyType', keys: ['propertyType'], fallback: '', label: 'Property Type' },
-      { id: 'houseNumber', keys: ['houseNumber'], fallback: '', label: 'House Number' },
-      { id: 'propertyValue', keys: ['propertyValue'], fallback: '', label: 'Property Value' },
-      { id: 'loanAmount', keys: ['loanAmount'], fallback: '', label: 'Loan Amount' },
-    ];
-    const missingFields = [];
-    fieldMap.forEach((field) => {
-      const el = document.getElementById(field.id);
-      if (!el) return;
-      const rawValue = pick(field.keys, field.fallback);
-      const value = field.id === 'loanAmount' ? normalizeLoanAmountValue(rawValue) : rawValue;
-      el.value = value;
-      if (!String(value || '').trim()) missingFields.push(field.label);
-    });
-    if (missingFields.length > 0) showNotification('Some saved fields are missing: ' + missingFields.join(', '), 'warning');
+    applyDraftFormValues(sub);
+    syncCurrentSubmissionAgentFallbackFromSubmission(sub);
+    populateApprovedAgentSelect();
+    if (customerAgentSelect) {
+      customerAgentSelect.value = getStoredAgentSelectionValue(sub);
+    }
     syncOriginatingTpField();
     if (!document.getElementById('houseNumber')?.value?.trim() && document.getElementById('propertyType')?.value?.trim()) {
       await refreshHouseNumberPreview();
@@ -3402,6 +3531,7 @@ window.openEditModal = async (id) => {
     window.renderDocumentGridUpload(optionalDocumentGrid, OPTIONAL_DOC_TYPES, currentCustomerUploads, 'edit');
   }
   updateSubmitButton();
+  syncUploadRequirementUi();
   if (customerNameInput) customerNameInput.focus();
   uploadModal.classList.add('active');
 };
@@ -3412,11 +3542,15 @@ async function submitEdit() {
   submitEditBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
   try {
     const documents = collectSubmissionDocuments();
-    if (documents.length > 0) {
+    if (documents.length > 0 || canCurrentUserSubmitWithoutDocuments()) {
       const submissionRef = doc(db, 'submissions', currentEditId);
       const existingSub = allSubmissions.find((s) => s.id === currentEditId) || {};
       const reviewerCandidate = String(existingSub.reviewedBy || existingSub.assignedTo || '').trim();
       const reviewerToReassign = await isActiveUserWithRole(reviewerCandidate, ['reviewer']) ? reviewerCandidate : '';
+      const latestRejectedStage = String(existingSub.latestRejectedStage || '').trim().toLowerCase();
+      const rsaRejectFlow = String(existingSub.status || '').toLowerCase() === 'rejected_by_rsa' || latestRejectedStage === 'rsa';
+      const rsaOfficerCandidate = String(existingSub.latestRejectedBy || existingSub.assignedToRSA || '').trim();
+      const rsaToReassign = await isActiveUserWithRole(rsaOfficerCandidate, ['rsa']) ? rsaOfficerCandidate : String(existingSub.assignedToRSA || '').trim();
       const nextFixCount = Number(existingSub.fixCount || 0) + 1;
       const rejectionHistory = Array.isArray(existingSub.rejectionHistory)
         ? existingSub.rejectionHistory.filter((entry) => String(entry || '').trim())
@@ -3424,8 +3558,9 @@ async function submitEdit() {
       const previousReason = String(existingSub.latestRejectionReason || existingSub.previousRejectionReason || existingSub.comment || '').trim();
       const previousRejectedBy = String(existingSub.latestRejectedBy || existingSub.previousRejectedBy || existingSub.reviewedBy || '').trim();
       const previousRejectedAt = existingSub.latestRejectedAt || existingSub.previousRejectedAt || existingSub.reviewedAt || null;
+      const preservedCommissionRate = resolveSubmissionCommissionRate(existingSub);
       await updateDoc(submissionRef, {
-        status: 'pending',
+        status: rsaRejectFlow ? 'processing_to_pfa' : 'pending',
         documents,
         documentTypes: Object.keys(currentCustomerUploads),
         reuploadedAt: serverTimestamp(),
@@ -3433,16 +3568,25 @@ async function submitEdit() {
         fixLocked: false,
         fixSubmittedAt: serverTimestamp(),
         fixCount: nextFixCount,
-        assignedTo: reviewerToReassign || existingSub.assignedTo || '',
-        reviewedAt: null,
+        assignedTo: rsaRejectFlow ? '' : (reviewerToReassign || existingSub.assignedTo || ''),
+        assignedToRSA: rsaRejectFlow ? (rsaToReassign || existingSub.assignedToRSA || '') : (existingSub.assignedToRSA || ''),
+        reviewedAt: rsaRejectFlow ? (existingSub.reviewedAt || null) : null,
+        reviewerDecision: rsaRejectFlow ? String(existingSub.reviewerDecision || '').trim() : '',
+        reviewerDecisionBy: rsaRejectFlow ? String(existingSub.reviewerDecisionBy || '').trim() : '',
+        reviewerDecisionAt: rsaRejectFlow ? (existingSub.reviewerDecisionAt || null) : null,
+        rsaReady: rsaRejectFlow ? true : Boolean(existingSub.rsaReady),
         comment: previousReason,
         rejectionHistory,
         previousRejectionReason: previousReason,
         previousRejectedBy,
         previousRejectedAt,
-        resubmittedAfterRejection: true
+        resubmittedAfterRejection: true,
+        latestRejectedStage: '',
+        commissionRate: preservedCommissionRate,
+        commissionRatePercent: Number((preservedCommissionRate * 100).toFixed(4)),
+        commissionRateLabel: formatCommissionRateLabel(preservedCommissionRate)
       });
-      if (!reviewerToReassign) {
+      if (!rsaRejectFlow && !reviewerToReassign) {
         await assignRoundRobin(submissionRef);
       }
       notifyStatusChangePush({
@@ -3455,12 +3599,18 @@ async function submitEdit() {
         message: `Application for ${existingSub.customerName || 'this customer'} was re-submitted and is back in pending review.`
       }).catch(() => {});
     }
-    showNotification('✅ Documents re-uploaded and sent back for reviewer action.', 'success');
+    showNotification(
+      (String((allSubmissions.find((s) => s.id === currentEditId)?.status || '')).toLowerCase() === 'rejected_by_rsa')
+        ? '✅ Documents re-uploaded and returned to RSA.'
+        : '✅ Documents re-uploaded and sent back for reviewer action.',
+      'success'
+    );
     closeModal(editModal);
   } catch (error) {
     showNotification('Update failed: ' + error.message, 'error');
   } finally {
     submitEditBtn.innerHTML = '<i class="fas fa-upload"></i> Re-upload Documents';
+    updateSubmitButton();
   }
 }
 
@@ -3479,9 +3629,11 @@ window.openDraftSubmission = async (id) => {
   if (singleFileInput) singleFileInput.value = '';
   clearSingleFilePreview();
   await loadApprovedAgents();
+  syncCurrentSubmissionAgentFallbackFromSubmission(sub);
+  populateApprovedAgentSelect();
   applyDraftFormValues(sub);
   hydrateCurrentUploads(sub.documents || []);
-  if (customerAgentSelect) customerAgentSelect.value = String(sub.agentId || '').trim();
+  if (customerAgentSelect) customerAgentSelect.value = getStoredAgentSelectionValue(sub);
   enableDraftEditingState();
   setUploadModalHeading('draft');
   syncUploadModalControlState('draft');
@@ -3505,11 +3657,10 @@ async function downloadBulkImportTemplate() {
   try {
     const workbook = new window.ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Submission Drafts');
-    const headers = [
-      'Customer Name', 'Date of Birth', 'Account No', 'Email', 'Phone', 'Agent Name',
-      'NIN', 'Address', 'Employer', 'Originating TP', 'Mortgage Form Date',
-      'PFA', 'PEN No', 'RSA Statement Date', 'RSA Balance'
-    ];
+    const systemSettings = await getSystemSettings(db, { force: true });
+    const headers = Array.isArray(systemSettings.bulkImportRules?.requiredColumns) && systemSettings.bulkImportRules.requiredColumns.length
+      ? systemSettings.bulkImportRules.requiredColumns
+      : getDefaultSystemSettings().bulkImportRules.requiredColumns;
     sheet.addRow(headers);
     sheet.addRow([
       'John Doe', '1986-05-18', '0123456789', 'john@example.com', '08012345678', 'Agent Example',
@@ -3614,6 +3765,10 @@ async function handleBulkImportSelection(event) {
 
   try {
     window.showLoader?.('Reading Excel draft import...');
+    const systemSettings = await getSystemSettings(db, { force: true });
+    const requiredHeaders = Array.isArray(systemSettings.bulkImportRules?.requiredColumns) && systemSettings.bulkImportRules.requiredColumns.length
+      ? systemSettings.bulkImportRules.requiredColumns
+      : getDefaultSystemSettings().bulkImportRules.requiredColumns;
     const workbook = new window.ExcelJS.Workbook();
     const buffer = await file.arrayBuffer();
     await workbook.xlsx.load(buffer);
@@ -3626,6 +3781,13 @@ async function handleBulkImportSelection(event) {
       const normalized = normalizeImportHeader(getCellText(cell.value));
       if (normalized) headerMap.set(colNumber, normalized);
     });
+    const normalizedHeaders = new Set(Array.from(headerMap.values()));
+    const missingHeaders = requiredHeaders
+      .map((header) => normalizeImportHeader(header))
+      .filter((header) => !normalizedHeaders.has(header));
+    if (missingHeaders.length) {
+      throw new Error(`Missing required bulk import columns: ${missingHeaders.join(', ')}`);
+    }
 
     let importedCount = 0;
     const skipped = [];
@@ -3747,16 +3909,7 @@ function getSubmissionSortMillis(submission) {
 }
 
 function safeFormatDate(dateValue) {
-  if (!dateValue) return 'N/A';
-  try {
-    let date;
-    if (dateValue.toDate && typeof dateValue.toDate === 'function') date = dateValue.toDate();
-    else if (typeof dateValue === 'string') date = new Date(dateValue);
-    else if (dateValue.seconds) date = new Date(dateValue.seconds * 1000);
-    else if (dateValue instanceof Date) date = dateValue;
-    else return 'N/A';
-    return date.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  } catch (error) { return 'Invalid date'; }
+  return formatAppDateTime(dateValue, 'N/A');
 }
 
 function normalizeWhatsAppPhone(raw) {
@@ -3810,7 +3963,7 @@ function renderDraftTable() {
   }
 
   draftTableBody.innerHTML = drafts.map((sub) => {
-    const docCount = getEffectiveSubmissionDocuments(sub).length;
+    const docCount = Array.isArray(sub.documents) ? sub.documents.length : 0;
     return `
       <tr data-submission-id="${sub.id}">
         <td><strong>${escapeHtml(sub.customerName || 'Untitled Draft')}</strong></td>
@@ -3818,20 +3971,45 @@ function renderDraftTable() {
         <td>${docCount}</td>
         <td>${safeFormatDate(sub.draftSavedAt || sub.uploadedAt)}</td>
         <td><span class="status-badge status-pending">Draft</span></td>
-        <td><button class="action-btn edit-btn" onclick="window.openDraftSubmission('${sub.id}')"><i class="fas fa-pen"></i> Resume</button></td>
+        <td>
+          <button class="action-btn edit-btn" onclick="window.openDraftSubmission('${sub.id}')"><i class="fas fa-pen"></i> Resume</button>
+          <button class="action-btn" onclick="window.deleteDraftSubmission('${sub.id}')" style="background:#b91c1c;color:#fff;border:none;"><i class="fas fa-trash"></i> Delete</button>
+        </td>
       </tr>
     `;
   }).join('');
 }
 
+window.deleteDraftSubmission = async (id) => {
+  const draft = allSubmissions.find((item) => item.id === id && String(item.status || '').toLowerCase() === 'draft');
+  if (!draft) {
+    showNotification('Draft not found.', 'error');
+    return;
+  }
+
+  const draftName = String(draft.customerName || 'Untitled Draft').trim();
+  const shouldDelete = window.confirm(`Delete draft "${draftName}"? This cannot be undone.`);
+  if (!shouldDelete) return;
+
+  try {
+    await deleteDoc(doc(db, 'submissions', id));
+    if (currentDraftId === id) {
+      currentDraftId = null;
+    }
+    if (currentEditId === id) {
+      currentEditId = null;
+    }
+    showNotification('Draft deleted successfully.', 'success');
+  } catch (error) {
+    showNotification('Failed to delete draft.', 'error');
+  }
+};
+
 function updateDashboardCards() {
   const draft = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'draft').length;
   const pending = allSubmissions.filter(s => s.status === 'pending').length;
-  const approved = allSubmissions.filter(s => {
-    const st = String(s.status || '').toLowerCase();
-    return st === 'processing_to_pfa' || st === 'approved' || st === 'sent_to_pfa' || st === 'rsa_submitted' || st === 'paid' || st === 'cleared';
-  }).length;
-  const rejected = allSubmissions.filter(s => s.status === 'rejected').length;
+  const approved = allSubmissions.filter((s) => isUploaderApprovedLifecycleStatus(s)).length;
+  const rejected = allSubmissions.filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase())).length;
   const paid = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'paid').length;
   document.getElementById('cardPendingCount').textContent = pending;
   document.getElementById('cardApprovedCount').textContent = approved;
@@ -3850,27 +4028,39 @@ function updateDashboardCards() {
   setBadge('paidCount', paid);
 }
 
+function isUploaderApprovedLifecycleStatus(submission = {}) {
+  const status = String(submission.status || '').toLowerCase();
+  return (
+    status === 'processing_to_pfa' ||
+    status === 'approved' ||
+    status === 'sent_to_pfa' ||
+    status === 'rsa_submitted' ||
+    status === 'paid' ||
+    status === 'cleared' ||
+    submission.finalSubmitted === true ||
+    submission.rsaSubmitted === true
+  );
+}
+
 async function renderPendingTable() {
   if (!pendingTableBody) { return; }
   const pending = allSubmissions.filter(s => s.status === 'pending');
-  if (pending.length === 0) { pendingTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No pending documents</td></tr>'; return; }
+  if (pending.length === 0) { pendingTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No pending documents</td></tr>'; return; }
   let html = '';
   for (const sub of pending) {
     const date = safeFormatDate(sub.uploadedAt);
     const assignedName = await getCurrentHandlerName(sub);
     const whatsapp = await renderStageContactLink(sub);
-    html += `<tr><td><strong>${sub.customerName}</strong></td><td>${whatsapp}</td><td>${assignedName}</td><td>${date}</td><td><span class="status-badge status-pending">Pending</span></td><td>${sub.comment || '-'}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    const agentName = escapeHtml(sub.agentName || sub.customerDetails?.agent || 'No Agent');
+    html += `<tr><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td><span class="status-badge status-pending">Pending</span></td><td>${escapeHtml(sub.comment || '-')}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   pendingTableBody.innerHTML = html;
 }
 
 async function renderApprovedTable() {
   if (!approvedTableBody) { return; }
-  const approved = allSubmissions.filter(s => {
-    const st = String(s.status || '').toLowerCase();
-    return st === 'processing_to_pfa' || st === 'approved' || st === 'sent_to_pfa' || st === 'rsa_submitted' || st === 'paid' || st === 'cleared';
-  });
-  if (approved.length === 0) { approvedTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No approved documents</td></tr>'; return; }
+  const approved = allSubmissions.filter((s) => isUploaderApprovedLifecycleStatus(s));
+  if (approved.length === 0) { approvedTableBody.innerHTML = '<tr><td colspan="10" class="no-data">No approved documents</td></tr>'; return; }
   let html = '';
   for (const sub of approved) {
     const uploadDate = safeFormatDate(sub.uploadedAt);
@@ -3879,29 +4069,38 @@ async function renderApprovedTable() {
     const approvedBy = (approvedByKey && userFullNames.get(approvedByKey)) ? userFullNames.get(approvedByKey) : (sub.reviewedBy || '-');
     const assignedName = await getCurrentHandlerName(sub);
     const whatsapp = await renderStageContactLink(sub);
-    const statusLabel = formatStatusLabel(sub.status || 'approved');
-    html += `<tr><td><strong>${sub.customerName}</strong></td><td>${whatsapp}</td><td>${assignedName}</td><td>${uploadDate}</td><td><span class="status-badge status-approved">${statusLabel}</span></td><td>${approvedBy}</td><td>${approvedDate}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    const agentName = escapeHtml(sub.agentName || sub.customerDetails?.agent || 'No Agent');
+    const lifecycleLabel = escapeHtml(formatSubmissionStatusLabel(sub.status || (sub.finalSubmitted ? 'sent_to_pfa' : 'approved')));
+    const lifecycleClass = String(sub.status || '').toLowerCase() === 'cleared'
+      ? 'status-cleared'
+      : String(sub.status || '').toLowerCase() === 'paid'
+        ? 'status-paid'
+        : 'status-approved';
+    html += `<tr><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${uploadDate}</td><td><span class="status-badge ${lifecycleClass}">${lifecycleLabel}</span></td><td>${escapeHtml(approvedBy || '-')}</td><td>${approvedDate}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDetails('${sub.id}')"><i class="fas fa-circle-info"></i> Details</button> <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> Docs</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   approvedTableBody.innerHTML = html;
 }
 
 async function renderRejectedTable() {
   if (!rejectedTableBody) { return; }
-  const rejected = allSubmissions.filter(s => s.status === 'rejected');
-  if (rejected.length === 0) { rejectedTableBody.innerHTML = '<tr><td colspan="12" class="no-data">No rejected documents</td></tr>'; return; }
+  const rejected = allSubmissions.filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase()));
+  if (rejected.length === 0) { rejectedTableBody.innerHTML = '<tr><td colspan="13" class="no-data">No rejected documents</td></tr>'; return; }
   let html = '';
   for (const sub of rejected) {
     const fixCount = Number(sub.fixCount || 0);
     const date = safeFormatDate(sub.uploadedAt);
     const rejectedDate = safeFormatDate(sub.reviewedAt);
-    const rejectedByKey = normalizeEmail(sub.reviewedBy);
-    const rejectedBy = (rejectedByKey && userFullNames.get(rejectedByKey)) ? userFullNames.get(rejectedByKey) : (sub.reviewedBy || '-');
+    const rejectedActor = sub.latestRejectedBy || sub.reviewedBy || '-';
+    const rejectedByKey = normalizeEmail(rejectedActor);
+    const rejectedBy = (rejectedByKey && userFullNames.get(rejectedByKey)) ? userFullNames.get(rejectedByKey) : (rejectedActor || '-');
+    const rejectedStatusLabel = String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? 'Rejected by RSA' : 'Rejected';
     const assignedName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned';
+    const agentName = escapeHtml(sub.agentName || sub.customerDetails?.agent || 'No Agent');
     const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button>`;
     const reasonBtn = hasRejectionHistory(sub)
       ? `<button class="action-btn reason-btn" onclick="window.openUploaderRejectionReasonModal('${sub.id}')"><i class="fas fa-eye"></i> View</button>`
       : 'No reason provided';
-    html += `<tr data-submission-id="${sub.id}"><td><strong>${sub.customerName}</strong></td><td>${chatBtn}</td><td>${fixCount}</td><td>${assignedName}</td><td>${date}</td><td><span class="status-badge status-rejected">Rejected</span></td><td>${reasonBtn}</td><td>${rejectedBy}</td><td>${rejectedDate}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-edit"></i> Re-upload</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td><span class="status-badge status-rejected">${escapeHtml(rejectedStatusLabel)}</span></td><td>${reasonBtn}</td><td>${escapeHtml(rejectedBy || '-')}</td><td>${rejectedDate}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-edit"></i> Re-upload</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   rejectedTableBody.innerHTML = html;
 }
@@ -3938,200 +4137,333 @@ window.openUploaderRejectionReasonModal = (submissionId) => {
   uploaderRejectionReasonModal.classList.add('active');
 };
 
-function renderPaidTable() {
-  if (!activeCommissionTableBody || !clearedCommissionTableBody) return;
-
-  const toSafeDomId = (value) => String(value || '').replace(/[^a-zA-Z0-9_-]+/g, '_');
-  const getAgentCommissionKey = (sub) => {
-    const agentId = String(sub?.agentId || '').trim();
-    if (agentId) return `agent:${agentId}`;
-    const agentName = String(sub?.agentName || '').trim().toLowerCase();
-    const uploaderEmail = normalizeEmail(sub?.uploadedBy);
-    return `fallback:${uploaderEmail}::${agentName || 'no-agent'}`;
+function getUploaderAgentCommissionUiRefs() {
+  return {
+    paidTab: document.getElementById('paidTab'),
+    totalSentCard: document.getElementById('uploaderAgentCommissionTotalSent'),
+    totalActiveCard: document.getElementById('uploaderAgentCommissionTotalActive'),
+    totalClearedCard: document.getElementById('uploaderAgentCommissionTotalCleared'),
+    tableBody: document.getElementById('agentCommissionTableBody'),
+    modal: document.getElementById('uploaderAgentCommissionModal'),
+    modalTitle: document.getElementById('uploaderAgentCommissionModalTitle'),
+    modalSummary: document.getElementById('uploaderAgentCommissionModalSummary'),
+    breakdownBody: document.getElementById('uploaderAgentCommissionBreakdownBody'),
+    sentBtn: document.getElementById('uploaderAgentCommissionSentTabBtn'),
+    activeBtn: document.getElementById('uploaderAgentCommissionActiveTabBtn'),
+    clearedBtn: document.getElementById('uploaderAgentCommissionClearedTabBtn'),
+    closeBtn: document.getElementById('closeUploaderAgentCommissionModal'),
+    closeFooterBtn: document.getElementById('closeUploaderAgentCommissionModalFooterBtn')
   };
+}
 
-  const buildAgentCommissionGroups = (items) => {
-    const groups = new Map();
-    items.forEach((sub) => {
-      const key = getAgentCommissionKey(sub);
-      const current = groups.get(key) || {
-        key,
-        agentName: String(sub?.agentName || '').trim() || 'No Agent',
-        customerNames: new Set(),
-        total25: 0,
-        totalCommission: 0,
-        latestAt: 0
-      };
-      const { twentyFive, commission2 } = getFinancials(sub);
-      current.customerNames.add(String(sub?.customerName || 'Unknown'));
-      current.total25 += twentyFive;
-      current.totalCommission += commission2;
-      const stamp = getDateFromAny(sub.paidAt || sub.clearedAt || sub.updatedAt);
-      const millis = stamp ? stamp.getTime() : 0;
-      if (millis > current.latestAt) current.latestAt = millis;
-      groups.set(key, current);
-    });
-    return Array.from(groups.values()).map((group) => ({
-      ...group,
-      customerCount: group.customerNames.size
-    })).sort((a, b) => b.latestAt - a.latestAt);
-  };
-
-  const renderBreakdownPanel = (group, mode = 'paid') => {
-    const sourceItems = mode === 'cleared' ? clearedAll : activeAll;
-    const groupItems = sourceItems.filter((sub) => getAgentCommissionKey(sub) === group.key);
-    const rows = groupItems.map((sub) => {
-      const { pfa, twentyFive, commission2 } = getFinancials(sub);
-      const dateValue = mode === 'cleared' ? safeFormatDate(sub.clearedAt || sub.updatedAt) : safeFormatDate(sub.paidAt || sub.updatedAt);
-      return `
-        <tr>
-          <td><strong>${sub.customerName || '-'}</strong></td>
-          <td>${pfa}</td>
-          <td>${formatCurrency(twentyFive)}</td>
-          <td>${formatCurrency(commission2)}</td>
-          <td>${dateValue}</td>
-        </tr>
-      `;
-    }).join('');
-
-    return `
-      <div class="agent-breakdown-panel">
-        <div class="agent-breakdown-meta">
-          <strong>${group.agentName || '-'}</strong>
-          <span>${group.customerCount} customer(s)</span>
-          <span>${formatCurrency(group.totalCommission)} commission</span>
+function ensureUploaderAgentCommissionUi() {
+  const paidTab = document.getElementById('paidTab');
+  if (!paidTab) return getUploaderAgentCommissionUiRefs();
+  if (!document.getElementById('agentCommissionTableBody')) {
+    paidTab.innerHTML = `
+      <div class="agent-commission-summary uploader-agent-commission-overview" style="margin-bottom:16px;">
+        <div class="agent-commission-summary-card commission-overview-card sent">
+          <span class="agent-commission-summary-label">Total Sent to PFA</span>
+          <strong id="uploaderAgentCommissionTotalSent">0</strong>
         </div>
+        <div class="agent-commission-summary-card commission-overview-card active">
+          <span class="agent-commission-summary-label">Total Active</span>
+          <strong id="uploaderAgentCommissionTotalActive">0</strong>
+        </div>
+        <div class="agent-commission-summary-card commission-overview-card cleared">
+          <span class="agent-commission-summary-label">Total Cleared</span>
+          <strong id="uploaderAgentCommissionTotalCleared">0</strong>
+        </div>
+      </div>
+      <div class="table-section" style="margin-top: 16px;">
         <div class="table-container">
-          <table class="customers-table agent-breakdown-table">
+          <table class="customers-table">
             <thead>
               <tr>
-                <th>Customer</th>
-                <th>PFA</th>
-                <th>25% RSA</th>
-                <th>2% Commission</th>
-                <th>${mode === 'cleared' ? 'Cleared Date' : 'Paid Date'}</th>
+                <th>Agent</th>
+                <th>Bank</th>
+                <th>Account Number</th>
+                <th>Total Commission</th>
+                <th>View</th>
               </tr>
             </thead>
-            <tbody>${rows}</tbody>
+            <tbody id="agentCommissionTableBody">
+              <tr><td colspan="5" class="loading-row"><div class="loading-spinner"></div> Loading agent commission records...</td></tr>
+            </tbody>
           </table>
         </div>
       </div>
     `;
-  };
-
-  const activeAll = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'paid');
-  const clearedAll = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'cleared');
-  const activeGroups = buildAgentCommissionGroups(activeAll);
-  const clearedGroups = buildAgentCommissionGroups(clearedAll);
-  const paidTabTotal = activeGroups.length + clearedGroups.length;
-  if (paidCountBadge) {
-    paidCountBadge.textContent = String(paidTabTotal);
-    paidCountBadge.style.display = 'inline-block';
-  }
-  if (activeCommissionCountEl) activeCommissionCountEl.textContent = String(activeGroups.length);
-  if (clearedCommissionCountEl) clearedCommissionCountEl.textContent = String(clearedGroups.length);
-
-  // Totals are based on ACTIVE commission only.
-  let total25 = 0;
-  let total2 = 0;
-  activeAll.forEach((sub) => {
-    const { twentyFive, commission2 } = getFinancials(sub);
-    total25 += twentyFive;
-    total2 += commission2;
-  });
-  if (paidTotal25El) paidTotal25El.textContent = formatCurrency(total25);
-  if (paidTotal1El) paidTotal1El.textContent = formatCurrency(total2);
-
-  // Separate totals for CLEARED commission.
-  let clearedTotal25 = 0;
-  let clearedTotal2 = 0;
-  clearedAll.forEach((sub) => {
-    const { twentyFive, commission2 } = getFinancials(sub);
-    clearedTotal25 += twentyFive;
-    clearedTotal2 += commission2;
-  });
-  if (clearedTotal25El) clearedTotal25El.textContent = formatCurrency(clearedTotal25);
-  if (clearedTotal1El) clearedTotal1El.textContent = formatCurrency(clearedTotal2);
-
-  const activeSearch = String(activeCommissionSearch?.value || '').trim().toLowerCase();
-  const activeStart = String(activeCommissionStartDate?.value || '').trim();
-  const activeEnd = String(activeCommissionEndDate?.value || '').trim();
-  const activeFiltered = activeGroups.filter((group) => {
-    const text = `${group.agentName || ''} ${Array.from(group.customerNames).join(' ')}`.toLowerCase();
-    const paidDate = group.latestAt ? new Date(group.latestAt) : null;
-    const textOk = !activeSearch || text.includes(activeSearch);
-    return textOk && inDateRange(paidDate, activeStart, activeEnd);
-  });
-
-  if (!activeFiltered.length) {
-    activeCommissionTableBody.innerHTML = '<tr><td colspan="6" class="no-data">No active commission records</td></tr>';
-  } else {
-    activeCommissionTableBody.innerHTML = activeFiltered.map(group => {
-      const breakdownId = `uploader-active-breakdown-${toSafeDomId(group.key)}`;
-      const paidDate = safeFormatDate(group.latestAt ? new Date(group.latestAt) : null);
-
-      return `
-        <tr>
-          <td><strong>${group.agentName || '-'}</strong></td>
-          <td>${group.customerCount}</td>
-          <td>${formatCurrency(group.total25)}</td>
-          <td>${formatCurrency(group.totalCommission)}</td>
-          <td><span class="status-badge status-approved">Paid</span></td>
-          <td>${paidDate}<div style="margin-top:8px;"><button class="action-btn agent-breakdown-toggle" onclick="window.toggleUploaderAgentBreakdown('${breakdownId}', this)"><i class="fas fa-chevron-down"></i> Breakdown</button></div></td>
-        </tr>
-        <tr id="${breakdownId}" class="agent-breakdown-row" style="display:none;">
-          <td colspan="6">${renderBreakdownPanel(group, 'paid')}</td>
-        </tr>
-      `;
-    }).join('');
   }
 
-  const clearedSearch = String(clearedCommissionSearch?.value || '').trim().toLowerCase();
-  const clearedStart = String(clearedCommissionStartDate?.value || '').trim();
-  const clearedEnd = String(clearedCommissionEndDate?.value || '').trim();
-  const clearedFiltered = clearedGroups.filter((group) => {
-    const text = `${group.agentName || ''} ${Array.from(group.customerNames).join(' ')}`.toLowerCase();
-    const clearedDate = group.latestAt ? new Date(group.latestAt) : null;
-    const textOk = !clearedSearch || text.includes(clearedSearch);
-    return textOk && inDateRange(clearedDate, clearedStart, clearedEnd);
-  });
-
-  if (!clearedFiltered.length) {
-    clearedCommissionTableBody.innerHTML = '<tr><td colspan="6" class="no-data">No cleared commission records</td></tr>';
-  } else {
-    clearedCommissionTableBody.innerHTML = clearedFiltered.map(group => {
-      const breakdownId = `uploader-cleared-breakdown-${toSafeDomId(group.key)}`;
-      const clearedDate = safeFormatDate(group.latestAt ? new Date(group.latestAt) : null);
-
-      return `
-        <tr>
-          <td><strong>${group.agentName || '-'}</strong></td>
-          <td>${group.customerCount}</td>
-          <td>${formatCurrency(group.total25)}</td>
-          <td>${formatCurrency(group.totalCommission)}</td>
-          <td><span class="status-badge status-pending">Cleared</span></td>
-          <td>${clearedDate}<div style="margin-top:8px;"><button class="action-btn agent-breakdown-toggle" onclick="window.toggleUploaderAgentBreakdown('${breakdownId}', this)"><i class="fas fa-chevron-down"></i> Breakdown</button></div></td>
-        </tr>
-        <tr id="${breakdownId}" class="agent-breakdown-row" style="display:none;">
-          <td colspan="6">${renderBreakdownPanel(group, 'cleared')}</td>
-        </tr>
-      `;
-    }).join('');
+  if (!document.getElementById('uploaderAgentCommissionModal')) {
+    const modal = document.createElement('div');
+    modal.id = 'uploaderAgentCommissionModal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="modal-content large-modal">
+        <div class="modal-header">
+          <h2 id="uploaderAgentCommissionModalTitle">Agent Commission Breakdown</h2>
+          <button class="close-btn" id="closeUploaderAgentCommissionModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="uploaderAgentCommissionModalSummary" class="agent-commission-summary"></div>
+          <div class="subtab-strip agent-commission-subtabs">
+            <button type="button" class="subtab-btn active" id="uploaderAgentCommissionSentTabBtn">Sent to PFA</button>
+            <button type="button" class="subtab-btn" id="uploaderAgentCommissionActiveTabBtn">Active</button>
+            <button type="button" class="subtab-btn" id="uploaderAgentCommissionClearedTabBtn">Cleared</button>
+          </div>
+          <div class="table-container">
+            <table class="customers-table">
+              <thead>
+                <tr>
+                  <th>Customer Name</th>
+                  <th>25% Balance</th>
+                  <th>Commission Amount</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="uploaderAgentCommissionBreakdownBody">
+                <tr><td colspan="4" class="loading-row"><div class="loading-spinner"></div> Loading breakdown...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="cancel-btn" id="closeUploaderAgentCommissionModalFooterBtn">Close</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
   }
+
+  const refs = getUploaderAgentCommissionUiRefs();
+  if (refs.sentBtn && !refs.sentBtn.dataset.bound) {
+    refs.sentBtn.dataset.bound = 'true';
+    refs.sentBtn.addEventListener('click', () => switchCommissionTab('sent_to_pfa'));
+  }
+  if (refs.activeBtn && !refs.activeBtn.dataset.bound) {
+    refs.activeBtn.dataset.bound = 'true';
+    refs.activeBtn.addEventListener('click', () => switchCommissionTab('active'));
+  }
+  if (refs.clearedBtn && !refs.clearedBtn.dataset.bound) {
+    refs.clearedBtn.dataset.bound = 'true';
+    refs.clearedBtn.addEventListener('click', () => switchCommissionTab('cleared'));
+  }
+  const closeModal = () => refs.modal?.classList.remove('active');
+  if (refs.closeBtn && !refs.closeBtn.dataset.bound) {
+    refs.closeBtn.dataset.bound = 'true';
+    refs.closeBtn.addEventListener('click', closeModal);
+  }
+  if (refs.closeFooterBtn && !refs.closeFooterBtn.dataset.bound) {
+    refs.closeFooterBtn.dataset.bound = 'true';
+    refs.closeFooterBtn.addEventListener('click', closeModal);
+  }
+  if (refs.modal && !refs.modal.dataset.bound) {
+    refs.modal.dataset.bound = 'true';
+    refs.modal.addEventListener('click', (e) => {
+      if (e.target === refs.modal) closeModal();
+    });
+  }
+  return refs;
 }
 
-window.toggleUploaderAgentBreakdown = (rowId, btn) => {
-  const row = document.getElementById(rowId);
-  if (!row) return;
-  const isOpen = row.style.display !== 'none';
-  row.style.display = isOpen ? 'none' : 'table-row';
-  if (btn) {
-    const icon = btn.querySelector('i');
-    if (icon) icon.className = isOpen ? 'fas fa-chevron-down' : 'fas fa-chevron-up';
-    const textNode = Array.from(btn.childNodes).find((node) => node.nodeType === Node.TEXT_NODE);
-    if (textNode) textNode.textContent = isOpen ? ' Breakdown' : ' Hide';
+function isUploaderCommissionTrackable(sub) {
+  const status = String(sub?.status || '').toLowerCase();
+  return status === 'sent_to_pfa' || status === 'rsa_submitted' || status === 'paid' || status === 'cleared' || sub?.finalSubmitted === true || sub?.rsaSubmitted === true;
+}
+
+function getUploaderCommissionStatusBucket(sub) {
+  const status = String(sub?.status || '').toLowerCase();
+  if (status === 'cleared') return 'cleared';
+  if (status === 'paid') return 'active';
+  return 'sent_to_pfa';
+}
+
+function getUploaderAgentCommissionKey(subOrAgent) {
+  const agentId = String(subOrAgent?.agentId || subOrAgent?.id || '').trim();
+  if (agentId) return `agent:${agentId}`;
+  const agentName = String(subOrAgent?.agentName || subOrAgent?.fullName || '').trim().toLowerCase();
+  const uploaderEmail = normalizeEmail(subOrAgent?.uploadedBy || subOrAgent?.createdBy);
+  return `fallback:${uploaderEmail}::${agentName || 'no-agent'}`;
+}
+
+function buildUploaderAgentCommissionGroups() {
+  const groups = new Map();
+
+  registeredAgents.forEach((agent) => {
+    const key = getUploaderAgentCommissionKey(agent);
+    groups.set(key, {
+      key,
+      agentName: String(agent?.fullName || 'No Agent').trim() || 'No Agent',
+      bank: String(agent?.accountBank || '-').trim() || '-',
+      accountNumber: String(agent?.accountNumber || '-').trim() || '-',
+      totalCommission: 0,
+      sentToPfaSubmissions: [],
+      activeSubmissions: [],
+      clearedSubmissions: [],
+      sentToPfaCommission: 0,
+      activeCommission: 0,
+      clearedCommission: 0
+    });
+  });
+
+  allSubmissions.forEach((sub) => {
+    if (!isUploaderCommissionTrackable(sub)) return;
+    if (!String(sub?.agentId || '').trim() && !String(sub?.agentName || '').trim()) return;
+
+    const key = getUploaderAgentCommissionKey(sub);
+    const group = groups.get(key) || {
+      key,
+      agentName: String(sub?.agentName || 'No Agent').trim() || 'No Agent',
+      bank: String(sub?.agentAccountBank || '-').trim() || '-',
+      accountNumber: String(sub?.agentAccountNumber || '-').trim() || '-',
+      totalCommission: 0,
+      sentToPfaSubmissions: [],
+      activeSubmissions: [],
+      clearedSubmissions: [],
+      sentToPfaCommission: 0,
+      activeCommission: 0,
+      clearedCommission: 0
+    };
+    const bucket = getUploaderCommissionStatusBucket(sub);
+    const { commission2 } = getFinancials(sub);
+
+    if (bucket === 'cleared') {
+      group.clearedSubmissions.push(sub);
+      group.clearedCommission += commission2;
+    } else if (bucket === 'active') {
+      group.activeSubmissions.push(sub);
+      group.activeCommission += commission2;
+    } else {
+      group.sentToPfaSubmissions.push(sub);
+      group.sentToPfaCommission += commission2;
+    }
+    group.totalCommission = group.sentToPfaCommission + group.activeCommission + group.clearedCommission;
+    if (group.bank === '-' && String(sub?.agentAccountBank || '').trim()) group.bank = String(sub.agentAccountBank).trim();
+    if (group.accountNumber === '-' && String(sub?.agentAccountNumber || '').trim()) group.accountNumber = String(sub.agentAccountNumber).trim();
+    groups.set(key, group);
+  });
+
+  return Array.from(groups.values()).sort((a, b) => {
+    if (b.totalCommission !== a.totalCommission) return b.totalCommission - a.totalCommission;
+    return a.agentName.localeCompare(b.agentName);
+  });
+}
+
+function renderUploaderAgentCommissionSummary(group) {
+  const summary = document.getElementById('uploaderAgentCommissionModalSummary');
+  if (!summary) return;
+  summary.innerHTML = `
+    <div class="agent-commission-summary-card">
+      <span class="agent-commission-summary-label">Agent</span>
+      <strong>${escapeHtml(group.agentName)}</strong>
+    </div>
+    <div class="agent-commission-summary-card">
+      <span class="agent-commission-summary-label">Sent to PFA</span>
+      <strong style="color:#2563eb;">${formatCurrency(group.sentToPfaCommission)}</strong>
+    </div>
+    <div class="agent-commission-summary-card">
+      <span class="agent-commission-summary-label">Active</span>
+      <strong style="color:#16a34a;">${formatCurrency(group.activeCommission)}</strong>
+    </div>
+    <div class="agent-commission-summary-card">
+      <span class="agent-commission-summary-label">Cleared</span>
+      <strong style="color:#dc2626;">${formatCurrency(group.clearedCommission)}</strong>
+    </div>
+    <div class="agent-commission-summary-card">
+      <span class="agent-commission-summary-label">Total Commission</span>
+      <strong>${formatCurrency(group.totalCommission)}</strong>
+    </div>
+  `;
+}
+
+function getCommissionAmountColor(bucket) {
+  if (bucket === 'cleared') return '#dc2626';
+  if (bucket === 'active') return '#16a34a';
+  return '#2563eb';
+}
+
+function formatCommissionStatus(status) {
+  const normalized = String(status || '').toLowerCase().trim();
+  if (!normalized) return '-';
+  if (normalized === 'sent_to_pfa' || normalized === 'rsa_submitted') return 'Sent to PFA';
+  if (normalized === 'paid') return 'Paid';
+  if (normalized === 'cleared') return 'Cleared';
+  return normalized.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function renderUploaderAgentCommissionBreakdown(view = 'sent_to_pfa') {
+  const body = document.getElementById('uploaderAgentCommissionBreakdownBody');
+  if (!body || !window.__currentUploaderAgentCommissionGroup) return;
+  const group = window.__currentUploaderAgentCommissionGroup;
+  const bucket = view === 'cleared' ? 'cleared' : view === 'active' ? 'active' : 'sent_to_pfa';
+  const rows = (bucket === 'cleared' ? group.clearedSubmissions : bucket === 'active' ? group.activeSubmissions : group.sentToPfaSubmissions)
+    .map((sub) => {
+      const { twentyFive, commission2 } = getFinancials(sub);
+      const amountColor = getCommissionAmountColor(bucket);
+      return `
+        <tr>
+          <td><strong>${escapeHtml(sub.customerName || '-')}</strong></td>
+          <td style="color:${amountColor};font-weight:700;">${formatCurrency(twentyFive)}</td>
+          <td style="color:${amountColor};font-weight:700;">${formatCurrency(commission2)}</td>
+          <td>${escapeHtml(formatCommissionStatus(sub.status || '-'))}</td>
+        </tr>
+      `;
+    }).join('');
+  body.innerHTML = rows || `<tr><td colspan="4" class="no-data">No ${bucket === 'sent_to_pfa' ? 'sent to PFA' : bucket} records for this agent</td></tr>`;
+}
+
+window.openUploaderAgentCommissionModal = (groupKey) => {
+  const refs = ensureUploaderAgentCommissionUi();
+  const group = buildUploaderAgentCommissionGroups().find((entry) => entry.key === decodeURIComponent(String(groupKey || '').trim()));
+  if (!group || !refs.modal) {
+    showNotification('Agent commission breakdown not found', 'error');
+    return;
   }
+  window.__currentUploaderAgentCommissionGroup = group;
+  refs.modalTitle.textContent = `${group.agentName} - Agent Commission`;
+  renderUploaderAgentCommissionSummary(group);
+  switchCommissionTab('sent_to_pfa');
+  refs.modal.classList.add('active');
 };
+
+function renderPaidTable() {
+  const refs = ensureUploaderAgentCommissionUi();
+  if (!refs.tableBody) return;
+
+  const groups = buildUploaderAgentCommissionGroups();
+  const submissionTotals = groups.reduce((acc, group) => {
+    acc.sent += group.sentToPfaSubmissions.length;
+    acc.active += group.activeSubmissions.length;
+    acc.cleared += group.clearedSubmissions.length;
+    return acc;
+  }, { sent: 0, active: 0, cleared: 0 });
+
+  if (refs.totalSentCard) refs.totalSentCard.textContent = String(submissionTotals.sent);
+  if (refs.totalActiveCard) refs.totalActiveCard.textContent = String(submissionTotals.active);
+  if (refs.totalClearedCard) refs.totalClearedCard.textContent = String(submissionTotals.cleared);
+
+  if (paidCountBadge) {
+    paidCountBadge.textContent = String(groups.length);
+    paidCountBadge.style.display = 'inline-block';
+  }
+
+  if (!groups.length) {
+    refs.tableBody.innerHTML = '<tr><td colspan="5" class="no-data">No agent commission records</td></tr>';
+    return;
+  }
+
+  refs.tableBody.innerHTML = groups.map((group) => `
+    <tr>
+      <td><strong>${escapeHtml(group.agentName)}</strong></td>
+      <td>${escapeHtml(group.bank)}</td>
+      <td>${escapeHtml(group.accountNumber)}</td>
+      <td><strong>${formatCurrency(group.totalCommission)}</strong></td>
+      <td><button class="action-btn view-btn-small" onclick="window.openUploaderAgentCommissionModal('${encodeURIComponent(group.key)}')"><i class="fas fa-eye"></i> View</button></td>
+    </tr>
+  `).join('');
+}
 
 function showNotification(message, type = 'info') {
   if (type === 'error') {
@@ -4177,8 +4509,9 @@ async function loadApprovedAgents() {
   }
 }
 
-function openAgentRegistrationModal() {
+async function openAgentRegistrationModal() {
   if (!agentRegistrationModal) return;
+  await populateAgentBankOptions({ force: true });
   agentRegistrationModal.classList.add('active');
 }
 
@@ -4211,12 +4544,155 @@ function escAttr(value) {
     .replace(/>/g, '&gt;');
 }
 
-window.viewAgentDetails = (agentId) => {
-  const agent = registeredAgents.find((row) => row.id === agentId);
+function formatMoneyDisplay(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '-';
+  const num = parseMoney(raw);
+  if (!Number.isFinite(num) || num === 0) return raw === '0' ? formatCurrency(0) : raw;
+  return formatCurrency(num);
+}
+
+function formatSubmissionStatusLabel(status) {
+  const normalized = String(status || '').toLowerCase().trim();
+  if (!normalized) return '-';
+  if (normalized === 'processing_to_pfa' || normalized === 'approved') return 'Processing to PFA';
+  if (normalized === 'sent_to_pfa' || normalized === 'rsa_submitted') return 'Sent to PFA';
+  if (normalized === 'rejected_by_rsa') return 'Rejected by RSA';
+  if (normalized === 'paid') return 'Paid';
+  if (normalized === 'cleared') return 'Cleared';
+  return normalized.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getSubmissionDetailValue(submission = {}, keys = [], fallback = '-') {
+  const details = submission?.customerDetails || {};
+  for (const key of keys) {
+    const detailValue = details?.[key];
+    if (detailValue !== undefined && detailValue !== null && String(detailValue).trim() !== '') return String(detailValue);
+    const rootValue = submission?.[key];
+    if (rootValue !== undefined && rootValue !== null && String(rootValue).trim() !== '') return String(rootValue);
+  }
+  return fallback;
+}
+
+window.viewSubmissionDetails = (submissionId) => {
+  const sub = allSubmissions.find((item) => item.id === submissionId);
+  if (!sub) {
+    showNotification('Submission details not found', 'error');
+    return;
+  }
+  const detailSections = [
+    {
+      title: 'Customer Details',
+      fields: [
+        ['Customer Name', getSubmissionDetailValue(sub, ['name', 'customerName'], sub.customerName || '-')],
+        ['Date of Birth', getSubmissionDetailValue(sub, ['dob', 'dateOfBirth', 'customerDob'])],
+        ['Email', getSubmissionDetailValue(sub, ['email', 'customerEmail'])],
+        ['Phone', getSubmissionDetailValue(sub, ['phone', 'customerPhone'])],
+        ['NIN', getSubmissionDetailValue(sub, ['nin', 'customerNIN'])],
+        ['Address', getSubmissionDetailValue(sub, ['address', 'customerAddress'])],
+        ['Account Number', getSubmissionDetailValue(sub, ['accountNo'])],
+        ['Employer', getSubmissionDetailValue(sub, ['employer'])],
+        ['Originating TP', getSubmissionDetailValue(sub, ['originatingTP'])]
+      ]
+    },
+    {
+      title: 'PFA Details',
+      fields: [
+        ['PFA', getSubmissionDetailValue(sub, ['pfa', 'pfaName'])],
+        ['PEN Number', getSubmissionDetailValue(sub, ['penNo'])],
+        ['RSA Statement Date', getSubmissionDetailValue(sub, ['rsaStatementDate'])],
+        ['RSA Balance', formatMoneyDisplay(getSubmissionDetailValue(sub, ['rsaBalance'], ''))],
+        ['25% RSA', formatMoneyDisplay(getSubmissionDetailValue(sub, ['rsa25', 'rsa25Percent'], ''))]
+      ]
+    },
+    {
+      title: 'Property Details',
+      fields: [
+        ['Property Type', getSubmissionDetailValue(sub, ['propertyType'])],
+        ['House Number', getSubmissionDetailValue(sub, ['houseNumber'])],
+        ['Property Value', formatMoneyDisplay(getSubmissionDetailValue(sub, ['propertyValue'], ''))],
+        ['Facility Fee', formatMoneyDisplay(getSubmissionDetailValue(sub, ['facilityFee'], ''))],
+        ['Loan Amount', formatMoneyDisplay(getSubmissionDetailValue(sub, ['loanAmount'], ''))],
+        ['Tenor', getSubmissionDetailValue(sub, ['tenor'])]
+      ]
+    },
+    {
+      title: 'Agent Details',
+      fields: [
+        ['Agent Name', String(sub.agentName || '').trim() || 'No Agent'],
+        ['Agent Contact', String(sub.agentContactNumber || '').trim() || '-'],
+        ['Agent Account Number', String(sub.agentAccountNumber || '').trim() || '-'],
+        ['Agent Account Bank', String(sub.agentAccountBank || '').trim() || '-']
+      ]
+    }
+  ];
+
+  const detailsModal = document.createElement('div');
+  detailsModal.className = 'modal active';
+  detailsModal.innerHTML = `
+    <div class="modal-content large-modal">
+      <div class="modal-header">
+        <h2><i class="fas fa-circle-info"></i> Application Details</h2>
+        <button class="close-btn" type="button">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="document-info" style="margin-bottom:18px;">
+          <h3>${escapeHtml(sub.customerName || 'Unknown Customer')}</h3>
+          <p><i class="fas fa-hashtag"></i> Application ID: ${escapeHtml(sub.id)}</p>
+          <p><i class="fas fa-user-check"></i> Status: ${escapeHtml(formatSubmissionStatusLabel(sub.status || 'pending'))}</p>
+        </div>
+        ${detailSections.map((section) => `
+          <div class="form-section" style="margin-bottom:16px;">
+            <div class="section-header">
+              <h3>${escapeHtml(section.title)}</h3>
+            </div>
+            <div class="section-body">
+              <div class="customer-input-grid">
+                ${section.fields.map(([label, value]) => `
+                  <div>
+                    <label>${escapeHtml(label)}</label>
+                    <input type="text" readonly value="${escAttr(value)}">
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="modal-footer">
+        <button class="cancel-btn" type="button">Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(detailsModal);
+  const close = () => detailsModal.remove();
+  detailsModal.querySelectorAll('button').forEach((btn) => btn.addEventListener('click', close));
+  detailsModal.addEventListener('click', (event) => {
+    if (event.target === detailsModal) close();
+  });
+};
+
+window.viewAgentDetails = async (agentId) => {
+  let agent =
+    registeredAgents.find((row) => row.id === agentId) ||
+    approvedAgents.find((row) => row.id === agentId) ||
+    null;
+
+  if (!agent) {
+    try {
+      const snap = await getDoc(doc(db, 'agents', agentId));
+      if (snap.exists()) {
+        agent = { id: snap.id, ...(snap.data() || {}) };
+      }
+    } catch (_) {
+    }
+  }
+
   if (!agent) {
     showNotification('Agent record not found', 'error');
     return;
   }
+
   const detailsModal = document.createElement('div');
   detailsModal.className = 'modal active';
   detailsModal.innerHTML = `
@@ -4275,6 +4751,8 @@ async function loadRegisteredAgents() {
       return bTime - aTime;
     });
 
+    renderPaidTable();
+
     if (!registeredAgents.length) {
       registeredAgentsTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No registered agents yet</td></tr>';
       return;
@@ -4293,6 +4771,7 @@ async function loadRegisteredAgents() {
     `).join('');
   } catch (error) {
     registeredAgents = [];
+    renderPaidTable();
     registeredAgentsTableBody.innerHTML = '<tr><td colspan="7" class="no-data">Unable to load agents</td></tr>';
   }
 }
@@ -4305,6 +4784,18 @@ function populateApprovedAgentSelect() {
   )).join('');
   if (current && approvedAgents.some((a) => a.id === current)) {
     customerAgentSelect.value = current;
+    return;
+  }
+  if (currentSubmissionAgentFallback && !approvedAgents.some((a) => a.id === currentSubmissionAgentFallback.value)) {
+    const labelName = currentSubmissionAgentFallback.fullName || 'Stored Agent';
+    const labelPhone = currentSubmissionAgentFallback.contactNumber || '-';
+    const opt = document.createElement('option');
+    opt.value = currentSubmissionAgentFallback.value;
+    opt.textContent = `${labelName} - ${labelPhone} (stored)`;
+    customerAgentSelect.appendChild(opt);
+    if (current === currentSubmissionAgentFallback.value) {
+      customerAgentSelect.value = currentSubmissionAgentFallback.value;
+    }
   }
 }
 
@@ -4333,17 +4824,36 @@ async function handleAgentRegistration(e) {
       submitAgentFormBtn.disabled = true;
       submitAgentFormBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
     }
+    const systemSettings = await getSystemSettings(db, { force: true });
+    const approvalRequired = systemSettings.agentRegistrationRules?.approvalRequired !== false;
     await addDoc(collection(db, 'agents'), {
       fullName,
       contactNumber,
       accountNumber,
       accountBank,
-      status: 'pending',
+      status: approvalRequired ? 'pending' : 'approved',
       createdBy: currentUser?.email || '',
       createdByUid: currentUser?.uid || '',
       createdAt: serverTimestamp()
     });
-    showNotification('Agent registration submitted for admin approval', 'success');
+    await notifyAdminPushEvent({
+      currentUser,
+      eventType: 'new_agent_registration',
+      title: approvalRequired ? 'New Agent Registration' : 'Agent Registered',
+      body: approvalRequired
+        ? `${fullName} was submitted for admin approval.`
+        : `${fullName} was registered successfully.`,
+      clickUrl: '/admin-dashboard.html',
+      meta: {
+        fullName,
+        contactNumber,
+        accountNumber,
+        accountBank,
+        createdBy: currentUser?.email || '',
+        approvalRequired
+      }
+    });
+    showNotification(approvalRequired ? 'Agent registration submitted for admin approval' : 'Agent registered successfully', 'success');
     agentRegistrationForm?.reset();
     closeAgentRegistrationModal();
     await loadRegisteredAgents();

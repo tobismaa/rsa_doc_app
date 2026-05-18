@@ -2,11 +2,15 @@
 import { auth, db } from './firebase-config.js';
 import { queueUploaderApprovedEmail, queueUploaderRejectedEmail, queueRsaApprovalEmail } from './email-alerts.js';
 import { notifyStatusChangePush } from './status-push.js';
+import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
+import { formatAppDate, formatAppDateTime, getTrustedDateKey, getTrustedNowIso } from './shared/app-time.js';
 import {
+    getCurrentUserProfile as getCurrentUserProfileShared,
+    getUserProfileByEmail as getUserProfileByEmailShared,
     getUserFullName as getUserFullNameShared,
     normalizeEmail as normalizeEmailShared
-} from './shared/user-directory.js?v=20260423b';
-import { getUploaderRoutingRule as getUploaderRoutingRuleShared, routingRuleDocId as routingRuleDocIdShared } from './shared/uploader-routing.js?v=20260423c';
+} from './shared/user-directory.js?v=20260518a';
+import { getUploaderRoutingRule as getUploaderRoutingRuleShared, routingRuleDocId as routingRuleDocIdShared } from './shared/uploader-routing.js?v=20260427e';
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
     collection,
@@ -36,7 +40,8 @@ const DOCUMENT_TYPES = {
     'consent_letter': 'Consent Letter',
     'indemnity_form': 'Indemnity Form',
     'utility_bill': 'Utility Bill',
-    'benefit_application_form': 'Benefit Application Form'
+    'benefit_application_form': 'Benefit Application Form',
+    'credit_life': 'Credit Life'
 };
 
 // ==================== GLOBAL VARIABLES ====================
@@ -48,16 +53,230 @@ let currentViewerSubmission = null;
 let currentViewerIndex = 0;
 let downloadInProgress = false;
 
+function getTimestampMsSafe(value) {
+    if (!value) return 0;
+    try {
+        if (typeof value?.toMillis === 'function') return value.toMillis();
+        if (typeof value?.toDate === 'function') return value.toDate().getTime();
+        const parsed = new Date(value).getTime();
+        return Number.isFinite(parsed) ? parsed : 0;
+    } catch (_) {
+        return 0;
+    }
+}
+
+function getEffectiveSubmissionDocuments(submission = null) {
+    const rawDocs = Array.isArray(submission?.documents) ? submission.documents : [];
+    if (rawDocs.length <= 1) return rawDocs;
+
+    const latestByType = new Map();
+    rawDocs.forEach((docItem, index) => {
+        const type = String(docItem?.documentType || '').trim();
+        const key = type || `__index_${index}`;
+        const previous = latestByType.get(key);
+        const currentScore = Math.max(
+            getTimestampMsSafe(docItem?.uploadedAt),
+            Number(docItem?.localAddedAt || 0)
+        );
+        const previousScore = previous
+            ? Math.max(
+                getTimestampMsSafe(previous?.uploadedAt),
+                Number(previous?.localAddedAt || 0)
+            )
+            : -1;
+
+        if (!previous || currentScore >= previousScore) {
+            latestByType.set(key, docItem);
+        }
+    });
+
+    const orderedTypes = Array.isArray(submission?.documentTypes) ? submission.documentTypes : [];
+    const normalizedOrder = orderedTypes
+        .map((type) => latestByType.get(String(type || '').trim()))
+        .filter(Boolean);
+
+    const alreadyIncluded = new Set(normalizedOrder);
+    const remainder = Array.from(latestByType.values()).filter((docItem) => !alreadyIncluded.has(docItem));
+    return [...normalizedOrder, ...remainder];
+}
+
+async function getLatestSubmissionById(submissionId) {
+    const normalizedId = String(submissionId || '').trim();
+    if (!normalizedId) return null;
+
+    const cached = allSubmissions.find((s) => s.id === normalizedId) || null;
+
+    try {
+        const snap = await getDoc(doc(db, 'submissions', normalizedId));
+        if (!snap.exists()) return cached;
+
+        const fresh = { id: snap.id, ...snap.data() };
+        const existingIndex = allSubmissions.findIndex((s) => s.id === normalizedId);
+        if (existingIndex >= 0) {
+            allSubmissions[existingIndex] = fresh;
+        } else {
+            allSubmissions.push(fresh);
+        }
+        return fresh;
+    } catch (_) {
+        return cached;
+    }
+}
+
+function buildViewerDocumentUrl(fileUrl, submission = null, docIndex = 0) {
+    const cleanUrl = String(fileUrl || '').trim();
+    if (!cleanUrl) return '';
+
+    try {
+        const url = new URL(cleanUrl, window.location.origin);
+        const versionSeed = Math.max(
+            getTimestampMsSafe(submission?.reuploadedAt),
+            getTimestampMsSafe(submission?.finalSubmittedAt),
+            getTimestampMsSafe(submission?.rsaSubmittedAt),
+            getTimestampMsSafe(submission?.fixSubmittedAt),
+            getTimestampMsSafe(submission?.uploadedAt)
+        ) || Date.now();
+        url.searchParams.set('_v', `${versionSeed}-${docIndex}`);
+        return url.toString();
+    } catch (_) {
+        const joiner = cleanUrl.includes('?') ? '&' : '?';
+        return `${cleanUrl}${joiner}_v=${Date.now()}-${docIndex}`;
+    }
+}
+
 function isRsaProcessingStatus(status) {
     const normalized = String(status || '').toLowerCase();
     return normalized === 'processing_to_pfa' || normalized === 'approved';
 }
 
+function getReviewerWorkflowState(submission = {}) {
+    const normalizedStatus = String(submission?.status || '').toLowerCase().trim();
+    if (!String(submission?.reviewedBy || '').trim()) return '';
+    if (normalizedStatus === 'rejected' || normalizedStatus === 'rejected_by_rsa') return 'rejected';
+    if (
+        normalizedStatus === 'processing_to_pfa' ||
+        normalizedStatus === 'approved' ||
+        normalizedStatus === 'sent_to_pfa' ||
+        normalizedStatus === 'rsa_submitted' ||
+        normalizedStatus === 'paid' ||
+        normalizedStatus === 'cleared'
+    ) {
+        return 'approved';
+    }
+    return '';
+}
+
+function isAssignedToCurrentReviewer(submission = {}) {
+    return normalizeEmail(submission?.assignedTo) === normalizeEmail(currentUser?.email);
+}
+
+function isReviewedByCurrentReviewer(submission = {}) {
+    return normalizeEmail(submission?.reviewedBy) === normalizeEmail(currentUser?.email);
+}
+
 function formatReviewerStatusLabel(status) {
     const normalized = String(status || '').toLowerCase();
     if (normalized === 'processing_to_pfa' || normalized === 'approved') return 'Processing to PFA';
+    if (normalized === 'rejected_by_rsa') return 'Rejected by RSA';
     if (!normalized) return '-';
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getRejectionHistoryEntries(submission) {
+    const rawHistory = Array.isArray(submission?.rejectionHistory) ? submission.rejectionHistory : [];
+    const normalizedHistory = rawHistory
+        .map((entry) => {
+            if (typeof entry === 'string') {
+                const reason = entry.trim();
+                return reason ? { reason, rejectedAt: null, rejectedBy: '' } : null;
+            }
+            const reason = String(entry?.reason || '').trim();
+            if (!reason) return null;
+            return {
+                reason,
+                rejectedAt: entry?.rejectedAt || null,
+                rejectedBy: String(entry?.rejectedBy || entry?.reviewerEmail || '').trim()
+            };
+        })
+        .filter(Boolean);
+
+    if (normalizedHistory.length > 0) return normalizedHistory;
+
+    const fallback = String(
+        submission?.latestRejectionReason ||
+        submission?.previousRejectionReason ||
+        submission?.comment ||
+        ''
+    ).trim();
+    return fallback ? [{
+        reason: fallback,
+        rejectedAt: submission?.latestRejectedAt || submission?.previousRejectedAt || submission?.reviewedAt || null,
+        rejectedBy: String(submission?.latestRejectedBy || submission?.previousRejectedBy || submission?.reviewedBy || '').trim()
+    }] : [];
+}
+
+function getRejectionHistoryReasons(submission) {
+    return getRejectionHistoryEntries(submission).map((entry) => entry.reason).filter(Boolean);
+}
+
+function hasReviewContext(submission) {
+    return getRejectionHistoryReasons(submission).length > 0;
+}
+
+function getPreviousRejectedBy(submission) {
+    return String(
+        submission?.latestRejectedBy ||
+        submission?.previousRejectedBy ||
+        submission?.reviewedBy ||
+        ''
+    ).trim();
+}
+
+function getPreviousRejectedAt(submission) {
+    return submission?.latestRejectedAt || submission?.previousRejectedAt || submission?.reviewedAt || null;
+}
+
+function getTimestampMs(value) {
+    if (!value) return 0;
+    if (typeof value?.toMillis === 'function') return value.toMillis();
+    if (typeof value?.seconds === 'number') return value.seconds * 1000;
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isResubmittedSubmission(submission) {
+    return String(submission?.status || '').toLowerCase() === 'pending' && (
+        submission?.resubmittedAfterRejection === true ||
+        Number(submission?.fixCount || 0) > 0 ||
+        Boolean(submission?.reuploadedAt)
+    );
+}
+
+function renderReviewContext(submission, { multiline = false } = {}) {
+    const reasons = getRejectionHistoryReasons(submission);
+    if (!reasons.length) return '';
+
+    const lines = reasons.map((reason, index) => `Rejection ${index + 1}: ${escapeHtml(reason)}`);
+    const html = lines.join('<br>');
+    return multiline ? html : `<div class="review-context-snippet">${html}</div>`;
+}
+
+function renderReviewContextButton(submissionId, submission) {
+    if (!hasReviewContext(submission)) return '-';
+    return `
+        <button class="action-btn review-context-trigger" onclick="window.openReviewContextModal('${submissionId}')">
+            <i class="fas fa-eye"></i> View
+        </button>
+    `;
 }
 
 function normalizeWhatsAppPhone(raw) {
@@ -78,6 +297,9 @@ function renderWhatsAppLink(raw) {
 
 // Cache for user full names
 const userFullNameCache = new Map();
+let reviewerLeaveHistoryLoaded = false;
+let reviewerMyLeaveHistory = [];
+let reviewerReliefLeaveHistory = [];
 
 // ==================== DOM ELEMENTS ====================
 const userName = document.getElementById('userName');
@@ -86,15 +308,22 @@ const pendingTableBody = document.getElementById('pendingTableBody');
 const approvedTableBody = document.getElementById('approvedTableBody');
 const rejectedTableBody = document.getElementById('rejectedTableBody');
 const commentModal = document.getElementById('commentModal');
+const reviewContextModal = document.getElementById('reviewContextModal');
 const viewerModal = document.getElementById('viewerModal');
 const closeCommentModal = document.getElementById('closeCommentModal');
+const closeReviewContextModal = document.getElementById('closeReviewContextModal');
 const closeViewer = document.getElementById('closeViewer');
 const cancelComment = document.getElementById('cancelComment');
+const closeReviewContextBtn = document.getElementById('closeReviewContextBtn');
 const approveBtn = document.getElementById('approveDocument');
 const rejectBtn = document.getElementById('rejectDocument');
 const commentText = document.getElementById('commentText');
 const modalCustomerName = document.getElementById('modalCustomerName');
 const modalDocumentType = document.getElementById('modalDocumentType');
+const previousRejectionBox = document.getElementById('previousRejectionBox');
+const reviewContextCustomerName = document.getElementById('reviewContextCustomerName');
+const reviewContextContact = document.getElementById('reviewContextContact');
+const reviewContextHistory = document.getElementById('reviewContextHistory');
 const viewerFileName = document.getElementById('viewerFileName');
 const documentViewer = document.getElementById('documentViewer');
 const viewerDownloadBtn = document.getElementById('viewerDownloadBtn');
@@ -461,21 +690,7 @@ window.downloadAll = async (submissionId) => {
 
 // ==================== FORMAT TIMESTAMP ====================
 function formatTimestamp(timestamp) {
-    if (!timestamp) return 'N/A';
-    
-    try {
-        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-        return date.toLocaleString('en-NG', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true
-        });
-    } catch (e) {
-        return 'N/A';
-    }
+    return formatAppDateTime(timestamp, 'N/A');
 }
 
 function normalizeDocumentType(documentType = '') {
@@ -497,9 +712,7 @@ function getCanonicalDocumentType(doc = {}, fallbackType = '') {
 
 function formatSimpleDate(value) {
     if (!value) return '';
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return String(value);
-    return d.toLocaleDateString('en-NG', { day: '2-digit', month: 'short', year: 'numeric' });
+    return formatAppDate(value, String(value));
 }
 
 function formatNaira(value) {
@@ -581,11 +794,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const normalizedCurrentEmail = normalizeEmail(user.email);
             
             try {
-                const userQuery = query(collection(db, 'users'), where('email', '==', normalizedCurrentEmail));
-                const userSnapshot = await getDocs(userQuery);
-                
-                if (!userSnapshot.empty) {
-                    currentUserData = userSnapshot.docs[0].data();
+                const resolvedProfile = await getCurrentUserProfileShared(db, user);
+
+                if (resolvedProfile) {
+                    currentUserData = resolvedProfile;
                     userName.textContent = currentUserData.fullName || currentUserData.displayName || user.email.split('@')[0];
                 } else {
                     currentUserData = { email: user.email, fullName: user.displayName || user.email, role: 'reviewer', status: 'active' };
@@ -603,11 +815,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 userAvatar.src = 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2740%27 height=%2740%27 viewBox=%270 0 40 40%27%3E%3Ccircle cx=%2720%27 cy=%2720%27 r=%2720%27 fill=%27%23003366%27/%3E%3Ctext x=%2720%27 y=%2725%27 text-anchor=%27middle%27 fill=%27%23ffffff%27 font-size=%2716%27 font-family=%27Arial%27%3ER%3C/text%3E%3C/svg%3E';
             }
 
-            const q = query(collection(db, 'users'), where('email', '==', normalizedCurrentEmail));
-            const snapshot = await getDocs(q);
-
-            const role = String(snapshot.docs[0]?.data()?.role || '').toLowerCase();
-            if (!snapshot.empty && role === 'reviewer') {
+            const role = String(currentUserData?.role || '').toLowerCase();
+            if (role === 'reviewer') {
                 renderProfileTab();
                 loadSubmissions();
             } else {
@@ -705,17 +914,34 @@ function applyZoom() {
 // ==================== EVENT LISTENERS ====================
 function setupEventListeners() {
     if (closeCommentModal) closeCommentModal.addEventListener('click', () => closeModal(commentModal));
+    if (closeReviewContextModal) closeReviewContextModal.addEventListener('click', () => closeModal(reviewContextModal));
     if (closeViewer) closeViewer.addEventListener('click', closeViewerModal);
     if (cancelComment) cancelComment.addEventListener('click', () => closeModal(commentModal));
+    if (closeReviewContextBtn) closeReviewContextBtn.addEventListener('click', () => closeModal(reviewContextModal));
 
     if (approveBtn) approveBtn.addEventListener('click', () => confirmApprove());
     if (rejectBtn) rejectBtn.addEventListener('click', () => confirmReject());
+    document.getElementById('reviewerLeaveMineBtn')?.addEventListener('click', () => {
+        document.getElementById('reviewerLeaveMineSection')?.style.setProperty('display', '');
+        document.getElementById('reviewerLeaveReliefSection')?.style.setProperty('display', 'none');
+    });
+    document.getElementById('reviewerLeaveReliefBtn')?.addEventListener('click', () => {
+        document.getElementById('reviewerLeaveMineSection')?.style.setProperty('display', 'none');
+        document.getElementById('reviewerLeaveReliefSection')?.style.setProperty('display', '');
+    });
+    document.getElementById('closeReviewerLeaveApplicationsBtn')?.addEventListener('click', () => {
+        document.getElementById('reviewerLeaveApplicationsModal')?.classList.remove('active');
+    });
     
     if (viewerDownloadBtn) viewerDownloadBtn.addEventListener('click', saveCurrentDocumentWithPicker);
 
     window.addEventListener('click', (e) => {
         if (e.target === commentModal) closeModal(commentModal);
+        if (e.target === reviewContextModal) closeModal(reviewContextModal);
         if (e.target === viewerModal) closeViewerModal();
+        if (e.target === document.getElementById('reviewerLeaveApplicationsModal')) {
+            document.getElementById('reviewerLeaveApplicationsModal')?.classList.remove('active');
+        }
     });
 }
 
@@ -724,21 +950,26 @@ async function loadSubmissions() {
     const reviewerEmail = normalizeEmail(currentUser?.email);
     if (!reviewerEmail) return;
 
-    // only fetch documents that were assigned to the logged-in viewer
+    // Load broadly, then filter locally so previously reviewed items remain visible
+    // after they are moved onward to RSA/PFA and no longer stay in assignedTo.
     const q = query(
         collection(db, 'submissions'),
-        where('assignedTo', '==', reviewerEmail),
         orderBy('uploadedAt', 'desc')
     );
 
     const processSnapshot = async (snapshot) => {
         allSubmissions = [];
-        const uploaderEmails = [...new Set(snapshot.docs.map(doc => doc.data().uploadedBy))];
-        const reviewerEmails = [...new Set(snapshot.docs.map(doc => doc.data().reviewedBy))];
+        const relevantDocs = snapshot.docs.filter((docSnap) => {
+            const data = docSnap.data() || {};
+            return normalizeEmail(data.assignedTo) === reviewerEmail
+                || normalizeEmail(data.reviewedBy) === reviewerEmail;
+        });
+        const uploaderEmails = [...new Set(relevantDocs.map(doc => doc.data().uploadedBy))];
+        const reviewerEmails = [...new Set(relevantDocs.map(doc => doc.data().reviewedBy))];
         const allEmails = [...new Set([...uploaderEmails, ...reviewerEmails].filter(Boolean))];
         await Promise.all(allEmails.map(email => getUserFullName(email)));
 
-        for (const docSnap of snapshot.docs) {
+        for (const docSnap of relevantDocs) {
             const data = docSnap.data();
             const uploaderName = await getUserFullName(data.uploadedBy);
             const reviewerName = data.reviewedBy ? await getUserFullName(data.reviewedBy) : null;
@@ -772,13 +1003,13 @@ async function loadSubmissionsFallback() {
 
         const fallbackQuery = query(
             collection(db, 'submissions'),
-            where('assignedTo', '==', reviewerEmail)
+            orderBy('uploadedAt', 'desc')
         );
         const snapshot = await getDocs(fallbackQuery);
-        const docsSorted = snapshot.docs.slice().sort((a, b) => {
-            const ta = a.data().uploadedAt?.toMillis?.() ?? new Date(a.data().uploadedAt || 0).getTime();
-            const tb = b.data().uploadedAt?.toMillis?.() ?? new Date(b.data().uploadedAt || 0).getTime();
-            return tb - ta;
+        const docsSorted = snapshot.docs.filter((docSnap) => {
+            const data = docSnap.data() || {};
+            return normalizeEmail(data.assignedTo) === reviewerEmail
+                || normalizeEmail(data.reviewedBy) === reviewerEmail;
         });
 
         const uploaderEmails = [...new Set(docsSorted.map(doc => doc.data().uploadedBy))];
@@ -814,9 +1045,9 @@ function updatePendingCount() {
 }
 
 function updateNavCounts() {
-    const pendingSubmissions = allSubmissions.filter(sub => sub.status === 'pending').length;
-    const approvedSubmissions = allSubmissions.filter(sub => isRsaProcessingStatus(sub.status) && sub.reviewedBy === currentUser?.email).length;
-    const rejectedSubmissions = allSubmissions.filter(sub => sub.status === 'rejected' && sub.reviewedBy === currentUser?.email).length;
+    const pendingSubmissions = allSubmissions.filter(sub => sub.status === 'pending' && isAssignedToCurrentReviewer(sub)).length;
+    const approvedSubmissions = allSubmissions.filter(sub => getReviewerWorkflowState(sub) === 'approved' && isReviewedByCurrentReviewer(sub)).length;
+    const rejectedSubmissions = allSubmissions.filter(sub => getReviewerWorkflowState(sub) === 'rejected' && isReviewedByCurrentReviewer(sub)).length;
     [
         [pendingCountBadge, pendingSubmissions],
         [approvedCountBadge, approvedSubmissions],
@@ -831,9 +1062,9 @@ function updateNavCounts() {
 
 // --- DASHBOARD HELPERS ---
 function updateDashboardCards() {
-    const approved = allSubmissions.filter(s => isRsaProcessingStatus(s.status) && s.reviewedBy === currentUser?.email).length;
-    const pending = allSubmissions.filter(s => s.status === 'pending').length;
-    const rejected = allSubmissions.filter(s => s.status === 'rejected' && s.reviewedBy === currentUser?.email).length;
+    const approved = allSubmissions.filter(s => getReviewerWorkflowState(s) === 'approved' && isReviewedByCurrentReviewer(s)).length;
+    const pending = allSubmissions.filter(s => s.status === 'pending' && isAssignedToCurrentReviewer(s)).length;
+    const rejected = allSubmissions.filter(s => getReviewerWorkflowState(s) === 'rejected' && isReviewedByCurrentReviewer(s)).length;
     document.getElementById('vCardApprovedCount') && (document.getElementById('vCardApprovedCount').textContent = approved);
     document.getElementById('vCardPendingCount') && (document.getElementById('vCardPendingCount').textContent = pending);
     document.getElementById('vCardRejectedCount') && (document.getElementById('vCardRejectedCount').textContent = rejected);
@@ -844,7 +1075,11 @@ function renderRecentReviews() {
     const tbody = document.getElementById('vRecentTableBody');
     if (!tbody) return;
     const q = (document.getElementById('vRecentSearch')?.value || '').toLowerCase();
-    const items = allSubmissions.filter(s => (s.reviewedBy === currentUser?.email) && (isRsaProcessingStatus(s.status) || s.status === 'rejected'))
+    const items = allSubmissions.filter(s => {
+        if (!isReviewedByCurrentReviewer(s)) return false;
+        const decision = getReviewerWorkflowState(s);
+        return decision === 'approved' || decision === 'rejected';
+    })
         .slice().sort((a,b) => {
             const ta = a.reviewedAt?.seconds ? a.reviewedAt.seconds*1000 : (a.reviewedAt ? new Date(a.reviewedAt).getTime() : 0);
             const tb = b.reviewedAt?.seconds ? b.reviewedAt.seconds*1000 : (b.reviewedAt ? new Date(b.reviewedAt).getTime() : 0);
@@ -860,7 +1095,7 @@ function renderRecentReviews() {
         return `
             <tr>
                 <td><strong>${sub.customerName || 'Unknown'}</strong></td>
-                <td>${formatReviewerStatusLabel(sub.status)}</td>
+                <td>${escapeHtml(formatReviewerStatusLabel(sub.status))}</td>
                 <td>${dt}</td>
                 <td>${sub.uploadedByName || 'N/A'}</td>
                 <td><button class="action-btn view-btn-small" onclick="window.viewSubmission('${sub.id}')"><i class="fas fa-eye"></i></button></td>
@@ -871,14 +1106,21 @@ function renderRecentReviews() {
 
 // ==================== RENDER TABLES ====================
 function renderAllTables() {
-    const pendingSubs = allSubmissions.filter(sub => sub.status === 'pending');
+    const pendingSubs = allSubmissions
+        .filter(sub => sub.status === 'pending' && isAssignedToCurrentReviewer(sub))
+        .slice()
+        .sort((a, b) => {
+            const aTime = getTimestampMs(a.reuploadedAt || a.uploadedAt);
+            const bTime = getTimestampMs(b.reuploadedAt || b.uploadedAt);
+            return bTime - aTime;
+        });
     renderPendingTable(pendingSubs);
 
     // Viewer should only see approved/rejected items they reviewed
-    const approvedSubs = allSubmissions.filter(sub => isRsaProcessingStatus(sub.status) && sub.reviewedBy === currentUser?.email);
+    const approvedSubs = allSubmissions.filter(sub => getReviewerWorkflowState(sub) === 'approved' && isReviewedByCurrentReviewer(sub));
     renderApprovedTable(approvedSubs);
 
-    const rejectedSubs = allSubmissions.filter(sub => sub.status === 'rejected' && sub.reviewedBy === currentUser?.email);
+    const rejectedSubs = allSubmissions.filter(sub => getReviewerWorkflowState(sub) === 'rejected' && isReviewedByCurrentReviewer(sub));
     renderRejectedTable(rejectedSubs);
 }
 
@@ -886,29 +1128,38 @@ function renderPendingTable(submissions) {
     if (!pendingTableBody) return;
 
     if (submissions.length === 0) {
-        pendingTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No pending documents found</td></tr>';
+        pendingTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No pending documents found</td></tr>';
         return;
     }
 
     pendingTableBody.innerHTML = submissions.map(sub => {
+        const isResubmitted = isResubmittedSubmission(sub);
         let date = 'N/A';
-        if (sub.uploadedAt) {
+        if (isResubmitted && sub.reuploadedAt) {
+            date = `${formatTimestamp(sub.reuploadedAt)} (Re-uploaded)`;
+        } else if (sub.uploadedAt) {
             date = formatTimestamp(sub.uploadedAt);
         }
-        
+
         const docTypes = sub.documentTypes?.map(type => DOCUMENT_TYPES[type] || type).join(', ') || 'N/A';
-        const docCount = sub.documents?.length || 0;
+        const docCount = getEffectiveSubmissionDocuments(sub).length;
         const whatsapp = renderWhatsAppLink(sub.customerDetails?.phone || sub.customerPhone || '');
-        const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>`;
+        const statusBadges = `
+            <span class="status-badge status-pending">Pending</span>
+            ${isResubmitted ? '<span class="status-badge status-resubmitted">Resubmitted</span>' : ''}
+        `;
+        const reviewContext = renderReviewContextButton(sub.id, sub);
 
         return `
-            <tr>
+            <tr class="${isResubmitted ? 'submission-row-resubmitted' : ''}">
                 <td><strong>${sub.customerName || 'Unknown'}</strong></td>
+                <td>${sub.agentName || 'No Agent'}</td>
                 <td>${date}</td>
                 <td>${docTypes} <small class="text-muted">(${docCount})</small></td>
                 <td>${whatsapp}</td>
                 <td>${sub.uploadedByName || 'N/A'}</td>
-                <td><span class="status-badge status-pending">Pending</span></td>
+                <td>${statusBadges}</td>
+                <td>${reviewContext}</td>
                 <td>
                     <div class="action-buttons">
                         <button class="action-btn view-btn-small" onclick="window.viewSubmission('${sub.id}')">
@@ -934,7 +1185,7 @@ function renderApprovedTable(submissions) {
     if (!approvedTableBody) return;
 
     if (submissions.length === 0) {
-        approvedTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No approved documents found</td></tr>';
+        approvedTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No approved documents found</td></tr>';
         return;
     }
 
@@ -953,6 +1204,7 @@ function renderApprovedTable(submissions) {
         return `
             <tr>
                 <td><strong>${sub.customerName || 'Unknown'}</strong></td>
+                <td>${sub.agentName || 'No Agent'}</td>
                 <td>${uploadDate}</td>
                 <td>${whatsapp}</td>
                 <td>${sub.uploadedByName || 'N/A'}</td>
@@ -980,7 +1232,7 @@ function renderRejectedTable(submissions) {
     if (!rejectedTableBody) return;
 
     if (submissions.length === 0) {
-        rejectedTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No rejected documents found</td></tr>';
+        rejectedTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No rejected documents found</td></tr>';
         return;
     }
 
@@ -991,17 +1243,20 @@ function renderRejectedTable(submissions) {
         }
         
         const docTypes = sub.documentTypes?.map(type => DOCUMENT_TYPES[type] || type).join(', ') || 'N/A';
-        const docCount = sub.documents?.length || 0;
+        const docCount = getEffectiveSubmissionDocuments(sub).length;
         const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>`;
+        const rejectionLabel = String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? 'Rejected by RSA' : 'Rejected';
+        const rejectionReason = String(sub.latestRejectionReason || sub.previousRejectionReason || sub.comment || '').trim() || 'No reason provided';
 
         return `
             <tr>
                 <td><strong>${sub.customerName || 'Unknown'}</strong></td>
+                <td>${sub.agentName || 'No Agent'}</td>
                 <td>${date}</td>
                 <td>${docTypes} <small class="text-muted">(${docCount})</small></td>
                 <td>${chatBtn}</td>
                 <td>${sub.uploadedByName || 'N/A'}</td>
-                <td>${sub.comment || 'No reason provided'}</td>
+                <td><strong>${rejectionLabel}:</strong> ${rejectionReason}</td>
                 <td>
                     <div class="action-buttons">
                         <button class="action-btn view-btn-small" onclick="window.viewSubmission('${sub.id}')">
@@ -1018,15 +1273,16 @@ function renderRejectedTable(submissions) {
 }
 
 // ==================== VIEW SUBMISSION ====================
-window.viewSubmission = (submissionId) => {
-    const sub = allSubmissions.find(s => s.id === submissionId);
-    if (!sub || !sub.documents || sub.documents.length === 0) {
+window.viewSubmission = async (submissionId) => {
+    const sub = await getLatestSubmissionById(submissionId);
+    const docs = getEffectiveSubmissionDocuments(sub);
+    if (!sub || docs.length === 0) {
         showNotification('No documents available', 'error');
         return;
     }
 
     // Store current submission and reset index
-    currentViewerSubmission = sub;
+    currentViewerSubmission = { ...sub, documents: docs };
     currentViewerIndex = 0;
 
     if (viewerDownloadBtn) {
@@ -1060,7 +1316,7 @@ function showDocumentAtIndex(index) {
     }
     
     // Set document source
-    documentViewer.src = doc.fileUrl?.trim();
+    documentViewer.src = buildViewerDocumentUrl(doc.fileUrl, currentViewerSubmission, index);
     
     // Update download button data
     if (viewerDownloadBtn) {
@@ -1141,26 +1397,27 @@ async function isActiveRSAUser(email) {
     const normalized = normalizeEmail(email);
     if (!normalized) return false;
     try {
-        const userQ = query(collection(db, 'users'), where('email', '==', normalized));
-        const snap = await getDocs(userQ);
-        if (snap.empty) return false;
-        const data = snap.docs[0].data() || {};
-        const role = String(data.role || '').toLowerCase();
+        const data = await getUserProfileByEmailShared(db, normalized);
+        if (!data) return false;
+        const role = String(data.role || '').trim().toLowerCase();
         const status = String(data.status || 'active').toLowerCase();
         const leaveStatus = String(data.leaveStatus || '').toLowerCase();
-        return role === 'rsa' && status !== 'deactivated' && leaveStatus !== 'on_leave';
+        return role === 'rsa'
+            && status !== 'deactivated'
+            && leaveStatus !== 'on_leave'
+            && data?.skipRsaRoundRobin !== true;
     } catch (_) {
         return false;
     }
 }
 
 async function getRSAEmails() {
-    const q = query(collection(db, 'users'), where('role', '==', 'rsa'));
-    const snap = await getDocs(q);
+    const snap = await getDocs(collection(db, 'users'));
     return snap.docs
         .map(d => d.data() || {})
-        .filter((u) => String(u.status || 'active').toLowerCase() !== 'deactivated' && String(u.leaveStatus || '').toLowerCase() !== 'on_leave')
-        .map(u => u.email)
+        .filter((u) => String(u.role || '').trim().toLowerCase() === 'rsa')
+        .filter((u) => String(u.status || 'active').toLowerCase() !== 'deactivated' && String(u.leaveStatus || '').toLowerCase() !== 'on_leave' && u?.skipRsaRoundRobin !== true)
+        .map(u => normalizeEmail(u.email))
         .filter(Boolean)
         .sort(); // alphabetical so order is deterministic
 }
@@ -1196,36 +1453,42 @@ async function assignRoundRobinRSA(submissionRef) {
 
     const rsaUsers = await getRSAEmails();
     if (!rsaUsers.length) return null;
+    const systemSettings = await getSystemSettings(db);
+    if (!systemSettings.rsaRoundRobinEnabled) {
+        await updateDoc(submissionRef, { assignedToRSA: '', rsaAssignmentMode: 'round_robin_disabled' });
+        return null;
+    }
     
     let assigned = null;
     let assignmentMethod = 'round_robin';
+    const trustedDateKey = await getTrustedDateKey();
     try {
         await runTransaction(db, async tx => {
             let lastIndex = -1;
-            let lastDate = '';
-            const today = new Date().toISOString().slice(0, 10);
             const counterSnap = await tx.get(RSA_COUNTER_DOC);
             
             if (counterSnap.exists()) {
                 const data = counterSnap.data();
                 lastIndex = typeof data.lastIndex === 'number' ? data.lastIndex : -1;
-                lastDate = data.lastDate || '';
             }
-            
-            if (lastDate !== today) lastIndex = -1;
-            
             const newIndex = (lastIndex + 1) % rsaUsers.length;
             assigned = rsaUsers[newIndex];
             
-            tx.set(RSA_COUNTER_DOC, { lastIndex: newIndex, lastDate: today }, { merge: true });
+            tx.set(RSA_COUNTER_DOC, { lastIndex: newIndex, lastDate: trustedDateKey }, { merge: true });
             tx.update(submissionRef, { assignedToRSA: assigned, rsaAssignmentMode: 'round_robin' });
         });
-    } catch (_) {
+    } catch (error) {
         assigned = rsaUsers[0] || null;
         if (assigned) {
             await updateDoc(submissionRef, { assignedToRSA: assigned, rsaAssignmentMode: 'round_robin_fallback' });
             assignmentMethod = 'round_robin_fallback';
         }
+        console.error('RSA round-robin transaction failed; using fallback assignment.', {
+            submissionId: submissionRef?.id || '',
+            fallbackAssignedTo: assigned,
+            rsaUsers,
+            error
+        });
     }
     
     // Track assignment in history collection (after transaction)
@@ -1260,7 +1523,44 @@ window.openReviewModal = (submissionId) => {
     modalCustomerName.textContent = sub.customerName;
     modalDocumentType.textContent = `${sub.documents?.length || 0} documents uploaded`;
     commentText.value = '';
+    if (previousRejectionBox) {
+        previousRejectionBox.innerHTML = '';
+        previousRejectionBox.style.display = 'none';
+    }
     commentModal.classList.add('active');
+};
+
+window.openReviewContextModal = (submissionId) => {
+    const sub = allSubmissions.find(s => s.id === submissionId);
+    if (!sub || !reviewContextModal) return;
+
+    const entries = getRejectionHistoryEntries(sub);
+    const contactValue = String(sub.customerDetails?.phone || sub.customerPhone || '-').trim() || '-';
+
+    if (reviewContextCustomerName) {
+        reviewContextCustomerName.textContent = sub.customerName || 'Unknown';
+    }
+    if (reviewContextContact) {
+        reviewContextContact.textContent = `Contact: ${contactValue}`;
+    }
+    if (reviewContextHistory) {
+        if (entries.length) {
+            reviewContextHistory.innerHTML = `
+                <ol class="review-context-list">
+                    ${entries.map((entry, index) => {
+                        const timeText = entry.rejectedAt ? formatTimestamp(entry.rejectedAt) : 'Time not available';
+                        return `<li><strong>Rejection ${index + 1}:</strong> ${escapeHtml(entry.reason)}<span class="review-context-time">${escapeHtml(timeText)}</span></li>`;
+                    }).join('')}
+                </ol>
+            `;
+            reviewContextHistory.style.display = 'block';
+        } else {
+            reviewContextHistory.innerHTML = 'No rejection context available.';
+            reviewContextHistory.style.display = 'block';
+        }
+    }
+
+    reviewContextModal.classList.add('active');
 };
 
 // ==================== CONFIRM ACTIONS ====================
@@ -1292,9 +1592,25 @@ async function reviewDocument(action) {
     const currentSub = allSubmissions.find(s => s.id === currentSubmissionId);
     const customerName = currentSub?.customerName || 'Customer';
     const uploaderEmail = currentSub?.uploadedBy || '';
+    const systemSettings = await getSystemSettings(db, { force: true });
+    const rejectionRules = systemSettings.rejectionRules || {};
+    const rolePermissions = systemSettings.rolePermissions || {};
+    const minRejectLength = Number(rejectionRules.minLength || 0);
+    if (action === 'approved' && rolePermissions.reviewerCanApprove === false) {
+        showNotification('Reviewer approvals are currently disabled by Super Admin.', 'error');
+        return;
+    }
+    if (action === 'rejected' && rolePermissions.reviewerCanReject === false) {
+        showNotification('Reviewer rejections are currently disabled by Super Admin.', 'error');
+        return;
+    }
 
-    if (action === 'rejected' && !comment) {
+    if (action === 'rejected' && rejectionRules.reviewerRequired !== false && !comment) {
         showNotification('Please provide a reason for rejection', 'error');
+        return;
+    }
+    if (action === 'rejected' && comment && minRejectLength > 0 && comment.length < minRejectLength) {
+        showNotification(`Rejection reason must be at least ${minRejectLength} characters.`, 'error');
         return;
     }
 
@@ -1310,6 +1626,9 @@ async function reviewDocument(action) {
                 comment: comment || '',
                 reviewedBy: currentUser.email,
                 reviewedAt: serverTimestamp(),
+                reviewerDecision: 'approved',
+                reviewerDecisionBy: currentUser.email,
+                reviewerDecisionAt: serverTimestamp(),
                 rsaReady: true
             });
 
@@ -1347,11 +1666,31 @@ async function reviewDocument(action) {
             showNotification(`Document moved to Processing to PFA and assigned to RSA: ${rsaAssigned || 'pending'}`, 'success');
         } else {
             // If rejecting, don't assign to RSA
+            const currentHistory = getRejectionHistoryEntries(currentSub);
+            const nextHistory = [
+                ...currentHistory,
+                {
+                    reason: comment,
+                    rejectedAt: await getTrustedNowIso(),
+                    rejectedBy: currentUser.email
+                }
+            ].filter((entry) => String(entry?.reason || '').trim());
             await updateDoc(submissionRef, {
                 status: action,
                 comment: comment || '',
+                rejectionHistory: nextHistory,
+                latestRejectionReason: comment || '',
+                latestRejectedBy: currentUser.email,
+                latestRejectedAt: serverTimestamp(),
+                previousRejectionReason: comment || '',
+                previousRejectedBy: currentUser.email,
+                previousRejectedAt: serverTimestamp(),
+                resubmittedAfterRejection: false,
                 reviewedBy: currentUser.email,
                 reviewedAt: serverTimestamp(),
+                reviewerDecision: 'rejected',
+                reviewerDecisionBy: currentUser.email,
+                reviewerDecisionAt: serverTimestamp(),
                 rsaReady: true
             });
 
@@ -1624,18 +1963,144 @@ window.switchTab = (tabId, triggerEl = null) => {
         'pending': 'Pending Documents Review',
         'approved': 'Approved Documents',
         'rejected': 'Rejected Documents',
+        'leave': 'Leave History',
         'profile': 'My Profile',
         'help': 'Help & SOP'
     };
     if (pageTitle) pageTitle.textContent = titles[tabId] || 'Dashboard';
+    if (tabId === 'leave') {
+        renderReviewerLeaveHistory().catch(() => {});
+    }
+};
+
+function getLeaveTimestampMillis(value) {
+    if (!value) return 0;
+    try {
+        if (typeof value.toMillis === 'function') return value.toMillis();
+        if (typeof value.toDate === 'function') return value.toDate().getTime();
+        const d = new Date(value);
+        return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+    } catch (_) {
+        return 0;
+    }
+}
+
+function buildReviewerLeaveHistoryRecords(audits, mode = 'mine') {
+    const currentEmail = normalizeEmail(currentUser?.email);
+    const activated = audits
+        .filter((entry) => entry.action === 'user_leave_activated')
+        .filter((entry) => mode === 'mine' ? normalizeEmail(entry.userEmail) === currentEmail : normalizeEmail(entry.relieverEmail) === currentEmail)
+        .sort((a, b) => getLeaveTimestampMillis(b.timestamp) - getLeaveTimestampMillis(a.timestamp));
+    const resumed = audits.filter((entry) => entry.action === 'user_leave_resumed');
+    return activated.map((startEntry) => {
+        const startMs = getLeaveTimestampMillis(startEntry.timestamp);
+        const matchingResume = resumed
+            .filter((entry) => normalizeEmail(entry.userEmail) === normalizeEmail(startEntry.userEmail) && String(entry.stage || '') === String(startEntry.stage || ''))
+            .filter((entry) => getLeaveTimestampMillis(entry.timestamp) >= startMs)
+            .sort((a, b) => getLeaveTimestampMillis(a.timestamp) - getLeaveTimestampMillis(b.timestamp))[0] || null;
+        return {
+            id: `${startEntry.id || startMs}-${mode}`,
+            originalUserEmail: normalizeEmail(startEntry.userEmail),
+            relieverEmail: normalizeEmail(startEntry.relieverEmail),
+            stage: startEntry.stage || '',
+            startAt: startEntry.timestamp || null,
+            endAt: matchingResume?.timestamp || null,
+            startAtMs: startMs,
+            endAtMs: getLeaveTimestampMillis(matchingResume?.timestamp),
+            movedCount: Number(startEntry.movedCount || 0),
+            returnedCount: Number(matchingResume?.returnedCount || 0),
+            finalizedCount: Number(matchingResume?.finalizedCount || 0),
+            status: matchingResume ? 'Completed' : 'Active'
+        };
+    });
+}
+
+async function loadReviewerLeaveHistory() {
+    const auditSnap = await getDocs(query(collection(db, 'audit'), orderBy('timestamp', 'desc')));
+    const audits = auditSnap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
+    reviewerMyLeaveHistory = buildReviewerLeaveHistoryRecords(audits, 'mine');
+    reviewerReliefLeaveHistory = buildReviewerLeaveHistoryRecords(audits, 'relief');
+    reviewerLeaveHistoryLoaded = true;
+}
+
+function renderReviewerLeaveRows(records, bodyId, includeOriginalUser = false) {
+    const body = document.getElementById(bodyId);
+    if (!body) return;
+    if (!records.length) {
+        body.innerHTML = `<tr><td colspan="${includeOriginalUser ? 8 : 7}" class="no-data">No leave records found</td></tr>`;
+        return;
+    }
+    body.innerHTML = records.map((record) => `
+        <tr>
+            ${includeOriginalUser ? `<td>${record.originalUserEmail || '-'}</td>` : ''}
+            <td>${formatTimestamp(record.startAt)}</td>
+            <td>${record.endAt ? formatTimestamp(record.endAt) : '-'}</td>
+            <td>${record.status}</td>
+            <td>${record.relieverEmail || '-'}</td>
+            <td>${record.movedCount}</td>
+            <td>${record.returnedCount}/${record.finalizedCount}</td>
+            <td><button class="action-btn view-btn-small" onclick="window.openReviewerLeaveApplications('${record.id}')"><i class="fas fa-eye"></i> View</button></td>
+        </tr>
+    `).join('');
+}
+
+async function renderReviewerLeaveHistory() {
+    if (!reviewerLeaveHistoryLoaded) {
+        await loadReviewerLeaveHistory();
+    }
+    renderReviewerLeaveRows(reviewerMyLeaveHistory, 'reviewerMyLeaveTableBody', false);
+    renderReviewerLeaveRows(reviewerReliefLeaveHistory, 'reviewerReliefLeaveTableBody', true);
+}
+
+window.openReviewerLeaveApplications = async (recordId) => {
+    const record = [...reviewerMyLeaveHistory, ...reviewerReliefLeaveHistory].find((item) => item.id === recordId);
+    if (!record) return;
+    const submissionsSnap = await getDocs(collection(db, 'submissions'));
+    const endMs = record.endAtMs || Number.MAX_SAFE_INTEGER;
+    const rows = submissionsSnap.docs
+        .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))
+        .filter((sub) => normalizeEmail(sub.leaveCoverOriginalEmail) === record.originalUserEmail)
+        .filter((sub) => normalizeEmail(sub.leaveCoverRelieverEmail) === record.relieverEmail || !record.relieverEmail)
+        .filter((sub) => String(sub.leaveCoverStage || '') === String(record.stage || ''))
+        .filter((sub) => {
+            const movedMs = getLeaveTimestampMillis(sub.leaveCoverStartedAt);
+            return movedMs >= record.startAtMs && movedMs <= endMs + (24 * 60 * 60 * 1000);
+        });
+    const body = document.getElementById('reviewerLeaveApplicationsBody');
+    const title = document.getElementById('reviewerLeaveApplicationsTitle');
+    if (title) title.textContent = `Leave Applications - ${record.originalUserEmail || 'User'}`;
+    if (body) {
+        body.innerHTML = rows.length ? rows.map((sub) => `
+            <tr>
+                <td>${sub.customerName || 'Unknown'}</td>
+                <td>${sub.status || '-'}</td>
+                <td>${formatTimestamp(sub.leaveCoverStartedAt)}</td>
+                <td>${formatTimestamp(sub.leaveCoverReturnedAt)}</td>
+                <td>${formatTimestamp(sub.leaveCoverFinalizedAt)}</td>
+            </tr>
+        `).join('') : '<tr><td colspan="5" class="no-data">No applications found for this leave record</td></tr>';
+    }
+    document.getElementById('reviewerLeaveApplicationsModal')?.classList.add('active');
 };
 
 // ==================== MODAL UTILITIES ====================
 function closeModal(modal) {
+    if (!modal) return;
     modal.classList.remove('active');
     if (modal === commentModal) {
         currentSubmissionId = null;
         commentText.value = '';
+        if (previousRejectionBox) {
+            previousRejectionBox.innerHTML = '';
+            previousRejectionBox.style.display = 'none';
+        }
+    } else if (modal === reviewContextModal) {
+        if (reviewContextCustomerName) reviewContextCustomerName.textContent = '-';
+        if (reviewContextContact) reviewContextContact.textContent = 'Contact: -';
+        if (reviewContextHistory) {
+            reviewContextHistory.innerHTML = '';
+            reviewContextHistory.style.display = 'none';
+        }
     }
 }
 

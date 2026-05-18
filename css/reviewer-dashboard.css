@@ -607,6 +607,82 @@ body {
   font-size: 12px;
 }
 
+.status-badge.status-resubmitted {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #93c5fd;
+}
+
+.status-badge.status-resubmitted::before {
+  content: '↺';
+  font-size: 12px;
+}
+
+.submission-row-resubmitted {
+  background: #f8fbff;
+}
+
+.submission-row-resubmitted td {
+  border-bottom-color: #dbeafe;
+}
+
+.review-context-box {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.review-context-box strong {
+  color: #7c2d12;
+}
+
+.review-context-box small {
+  display: block;
+  margin-top: 6px;
+  color: #9a3412;
+}
+
+.review-context-snippet {
+  max-width: 320px;
+}
+
+.review-context-trigger {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.review-context-trigger:hover {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+.review-context-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.review-context-list li {
+  margin-bottom: 10px;
+}
+
+.review-context-list li:last-child {
+  margin-bottom: 0;
+}
+
+.review-context-time {
+  display: block;
+  margin-top: 4px;
+  color: #9a3412;
+  font-size: 12px;
+}
+
 /* Loading Row */
 .loading-row {
   text-align: center;
@@ -918,6 +994,154 @@ body {
 
 .comment-area textarea::placeholder {
   color: var(--gray-400);
+}
+
+.rsa-reject-modal-content {
+  max-width: 640px;
+}
+
+.rsa-reject-info-card {
+  border-left-color: var(--danger);
+  background:
+    radial-gradient(circle at top right, rgba(254, 202, 202, 0.6), transparent 42%),
+    linear-gradient(135deg, #fff7f7, #fff1f2);
+}
+
+.rsa-reject-info-card h3 {
+  color: #991b1b;
+}
+
+.rsa-reject-highlight-box {
+  background: linear-gradient(180deg, #fff 0%, #fff8f8 100%);
+  border: 1px solid #fecaca;
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: 0 18px 36px rgba(127, 29, 29, 0.08);
+}
+
+.rsa-reject-highlight-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  margin-bottom: 14px;
+  background: rgba(220, 38, 38, 0.08);
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rsa-reject-highlight-label::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #dc2626;
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.16);
+}
+
+.rsa-reject-comment-area textarea {
+  min-height: 170px;
+  border-color: #fca5a5;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 248, 248, 0.98));
+  box-shadow: inset 0 1px 2px rgba(127, 29, 29, 0.04);
+}
+
+.rsa-reject-comment-area textarea:focus {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.12);
+}
+
+.rsa-export-modal-content {
+  max-width: 620px;
+}
+
+.rsa-export-results-modal-content {
+  max-width: 1180px;
+}
+
+.rsa-export-date-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.rsa-export-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rsa-export-field span {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+}
+
+.rsa-export-field input {
+  min-height: 48px;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: #0f172a;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98));
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.rsa-export-field input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+
+.rsa-export-results-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 18px;
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 36%),
+    linear-gradient(135deg, #f8fbff, #eff6ff);
+}
+
+.rsa-export-results-kicker {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+}
+
+.rsa-export-results-title {
+  margin-top: 6px;
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f3b67;
+}
+
+.rsa-export-results-subtitle {
+  margin-top: 8px;
+  font-size: 14px;
+  color: #475569;
+}
+
+.rsa-export-results-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 /* Modal Buttons */

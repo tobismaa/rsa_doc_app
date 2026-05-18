@@ -81,6 +81,10 @@
                     <span>Rejected</span>
                     <span class="badge" id="rejectedCount">0</span>
                 </a>
+                <a href="#" class="nav-item" data-tab="leave">
+                    <i class="fas fa-person-walking-luggage"></i>
+                    <span>Leave</span>
+                </a>
                 <a href="#" class="nav-item" data-tab="profile">
                     <i class="fas fa-user-circle"></i>
                     <span>My Profile</span>
@@ -168,16 +172,18 @@
                             <thead>
                                 <tr>
                                     <th>Customer Name</th>
+                                    <th>Agent</th>
                                     <th>Upload Date/Time</th>
                                     <th>Document Types</th>
-                                    <th>Contact (WhatsApp)</th>
+                                    <th>Contact</th>
                                     <th>Uploaded By</th>
                                     <th>Status</th>
+                                    <th>Rejection Reason</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="pendingTableBody">
-                                <tr><td colspan="7" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
+                                <tr><td colspan="9" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -192,8 +198,9 @@
                             <thead>
                                 <tr>
                                     <th>Customer Name</th>
+                                    <th>Agent</th>
                                     <th>Upload Date/Time</th>
-                                    <th>Contact (WhatsApp)</th>
+                                    <th>Contact</th>
                                     <th>Uploaded By</th>
                                     <th>Approved By</th>
                                     <th>Approved Date/Time</th>
@@ -201,7 +208,7 @@
                                 </tr>
                             </thead>
                             <tbody id="approvedTableBody">
-                                <tr><td colspan="7" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
+                                <tr><td colspan="8" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -216,6 +223,7 @@
                             <thead>
                                 <tr>
                                     <th>Customer Name</th>
+                                    <th>Agent</th>
                                     <th>Upload Date/Time</th>
                                     <th>Document Types</th>
                                     <th>Chat</th>
@@ -225,7 +233,7 @@
                                 </tr>
                             </thead>
                             <tbody id="rejectedTableBody">
-                                <tr><td colspan="7" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
+                                <tr><td colspan="8" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -247,6 +255,31 @@
                             <div class="profile-item"><span class="profile-label">Role</span><span id="profileRole" class="profile-value">-</span></div>
                             <div class="profile-item"><span class="profile-label">Status</span><span id="profileStatus" class="profile-value">-</span></div>
                             <div class="profile-item profile-item-wide"><span class="profile-label">Date Registered</span><span id="profileRegisteredAt" class="profile-value">-</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="leaveTab" class="tab-content">
+                <div class="table-section">
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+                        <button type="button" class="action-btn" id="reviewerLeaveMineBtn" style="background:#003366;color:#fff;border:none;">My Leave History</button>
+                        <button type="button" class="action-btn" id="reviewerLeaveReliefBtn">Relief History</button>
+                    </div>
+                    <div id="reviewerLeaveMineSection">
+                        <div class="table-container">
+                            <table class="customers-table" style="min-width:980px;">
+                                <thead><tr><th>Leave Start</th><th>Leave End</th><th>Status</th><th>Assigned Reliever</th><th>Moved</th><th>Returned/Finalized</th><th>View</th></tr></thead>
+                                <tbody id="reviewerMyLeaveTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div id="reviewerLeaveReliefSection" style="display:none;">
+                        <div class="table-container">
+                            <table class="customers-table" style="min-width:980px;">
+                                <thead><tr><th>Original User</th><th>Leave Start</th><th>Leave End</th><th>Status</th><th>Assigned Reliever</th><th>Moved</th><th>Returned/Finalized</th><th>View</th></tr></thead>
+                                <tbody id="reviewerReliefLeaveTableBody"></tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -273,6 +306,7 @@
                         <i class="fas fa-comment"></i>
                         Comment (required for rejection):
                     </label>
+                    <div id="previousRejectionBox" class="review-context-box" style="display:none;"></div>
                     <textarea id="commentText" placeholder="Enter your feedback here..." rows="4"></textarea>
                 </div>
             </div>
@@ -285,6 +319,25 @@
                 <button class="approve-btn" id="approveDocument">
                     <i class="fas fa-check"></i> Approve
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="reviewContextModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Rejection Reason</h2>
+                <button class="close-btn" id="closeReviewContextModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="document-info">
+                    <h3 id="reviewContextCustomerName">-</h3>
+                    <p id="reviewContextContact">Contact: -</p>
+                </div>
+                <div id="reviewContextHistory" class="review-context-box" style="display:none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="cancel-btn" id="closeReviewContextBtn">Close</button>
             </div>
         </div>
     </div>
@@ -325,6 +378,23 @@
                 <button class="action-btn download-merged-btn" id="viewerMergedDownloadBtn">
                     <i class="fas fa-download"></i> Download Merged PDF to Folder
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="reviewerLeaveApplicationsModal" class="modal">
+        <div class="modal-content" style="max-width:900px;">
+            <div class="modal-header">
+                <h2 id="reviewerLeaveApplicationsTitle">Leave Applications</h2>
+                <button class="close-btn" id="closeReviewerLeaveApplicationsBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="table-container">
+                    <table class="customers-table">
+                        <thead><tr><th>Customer</th><th>Status</th><th>Moved At</th><th>Returned At</th><th>Finalized At</th></tr></thead>
+                        <tbody id="reviewerLeaveApplicationsBody"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -581,7 +651,7 @@
     </div>
 
     <script type="module" src="js/firebase-config.js?v=20260415b"></script>
-    <script type="module" src="js/reviewer-dashboard.js?v=20260423f"></script>
+    <script type="module" src="js/reviewer-dashboard.js?v=20260507e"></script>
     
     <script>
         // Mobile sidebar functionality
@@ -680,10 +750,10 @@
             };
         });
     </script>
-    <script src="js/table-enhancer.js?v=20260415"></script>
-    <script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
-    <link rel="stylesheet" href="css/app-chat.css?v=20260416q">
-    <script type="module" src="js/app-chat.js?v=20260423a"></script>
+    <script src="js/table-enhancer.js?v=20260512b"></script>
+<script type="module" src="js/profile-completion-guard.js?v=20260518a"></script>
+    <link rel="stylesheet" href="css/app-chat.css?v=20260518a">
+    <script type="module" src="js/app-chat.js?v=20260518a"></script>
     <link rel="stylesheet" href="css/pwa-install.css">
     <script src="js/pwa-install.js?v=20260423a"></script>
     <link rel="stylesheet" href="css/profile-card.css">

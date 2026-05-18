@@ -13,7 +13,7 @@
     <script src="js/console-guard.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
-    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260508i">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 </head>
 <body>
@@ -37,6 +37,8 @@
             <a href="#" class="nav-item active" data-tab="global"><i class="fas fa-chart-line"></i><span>Global View</span><span class="badge" id="globalNavCount">0</span></a>
             <a href="#" class="nav-item" data-tab="admins"><i class="fas fa-users-cog"></i><span>User Management</span><span class="badge" id="adminsNavCount">0</span></a>
             <a href="#" class="nav-item" data-tab="routing-rules"><i class="fas fa-route"></i><span>Uploader Routing</span><span class="badge" id="routingRulesNavCount">0</span></a>
+            <a href="#" class="nav-item" data-tab="application-agents"><i class="fas fa-user-pen"></i><span>Application Agents</span></a>
+            <a href="#" class="nav-item" data-tab="agent-records"><i class="fas fa-address-card"></i><span>Agent Records</span></a>
             <a href="#" class="nav-item" data-tab="audit"><i class="fas fa-file-shield"></i><span>Audit</span><span class="badge" id="auditNavCount">0</span></a>
             <a href="#" class="nav-item" data-tab="security"><i class="fas fa-lock"></i><span>Security</span><span class="badge" id="securityNavCount">0</span></a>
             <a href="#" class="nav-item" data-tab="round-robin"><i class="fas fa-rotate"></i><span>Round Robin</span></a>
@@ -103,20 +105,102 @@
             <div class="table-section">
                 <h2>Uploader Permanent Routing Rules</h2>
                 <p style="color:#64748b;margin:0 0 12px;">Set default reviewer, RSA and payment assignment per uploader or staff member using uploader switch. System will use this mapping before round robin.</p>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;margin:0 0 14px;">
+                    <input type="text" id="routingRulesSearch" placeholder="Search uploader, email, reviewer, RSA, payment..." style="min-width:260px;flex:1;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
+                </div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px;">
+                    <button id="routingNormalTabBtn" class="action-btn" type="button" style="background:#003366;color:#fff;border:none;" onclick="window.switchRoutingRulesSubTab('normal')">Normal</button>
+                    <button id="routingSkipReviewerTabBtn" class="action-btn" type="button" onclick="window.switchRoutingRulesSubTab('skip-reviewer')">Skip Reviewer</button>
+                </div>
+                <div id="routingNormalSection">
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Uploader</th>
+                                    <th>Email</th>
+                                    <th>Default Reviewer</th>
+                                    <th>Default RSA</th>
+                                    <th>Default Payment</th>
+                                    <th>Last Updated</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="routingRulesTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="routingSkipReviewerSection" style="display:none;">
+                    <p style="color:#64748b;margin:0 0 12px;">Configure uploaders that should bypass reviewer and route directly to RSA.</p>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Uploader</th>
+                                    <th>Email</th>
+                                    <th>Default RSA</th>
+                                    <th>Default Payment</th>
+                                    <th>Last Updated</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="routingRulesSkipReviewerTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="application-agentsTab" class="tab-content">
+            <div class="table-section">
+                <h2>Attach Missing Agent</h2>
+                <p style="color:#64748b;margin:0 0 12px;">Update submissions that were created without an agent. Only agents registered by that same uploader are eligible.</p>
                 <div class="table-container">
                     <table class="documents-table">
                         <thead>
                             <tr>
+                                <th>Customer</th>
                                 <th>Uploader</th>
-                                <th>Email</th>
-                                <th>Default Reviewer</th>
-                                <th>Default RSA</th>
-                                <th>Default Payment</th>
-                                <th>Last Updated</th>
+                                <th>Status</th>
+                                <th>Current Agent</th>
+                                <th>Registered Agent Options</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
-                        <tbody id="routingRulesTableBody"></tbody>
+                        <tbody id="superApplicationAgentTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="agent-recordsTab" class="tab-content">
+            <div class="table-section">
+                <h2>Agent Records</h2>
+                <p style="color:#64748b;margin:0 0 12px;">Correct registered agent details and sync the updated name, phone, and bank details across linked applications.</p>
+                <div class="filters" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+                    <input type="text" id="superAgentSearch" placeholder="Search agent name, phone, bank, account number, uploader..." style="min-width:280px;flex:1;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
+                    <select id="superAgentStatusFilter" style="padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
+                        <option value="">All Status</option>
+                        <option value="approved">Approved</option>
+                        <option value="pending">Pending</option>
+                        <option value="rejected">Rejected</option>
+                    </select>
+                </div>
+                <div class="table-container">
+                    <table class="documents-table">
+                        <thead>
+                            <tr>
+                                <th>Agent</th>
+                                <th>Contact</th>
+                                <th>Bank</th>
+                                <th>Account Number</th>
+                                <th>Registered By</th>
+                                <th>Status</th>
+                                <th>Linked Apps</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="superAgentRecordsTableBody"></tbody>
                     </table>
                 </div>
             </div>
@@ -165,28 +249,501 @@
         <div id="settingsTab" class="tab-content">
             <div class="table-section">
                 <h2>System Settings</h2>
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
-                    <label>Portal URL
-                        <input id="settingPortalUrl" type="text" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
-                    </label>
-                    <label>Email Provider
-                        <input id="settingEmailProvider" type="text" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
-                    </label>
-                    <label>Maintenance Mode
-                        <select id="settingMaintenanceMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
-                            <option value="false">Off</option>
-                            <option value="true">On</option>
-                        </select>
-                    </label>
+                <div style="margin-bottom:16px;color:#64748b;">Click a main settings tab to see its subtabs, then open the one you want in a modal workspace.</div>
+                <div id="settingsDropdownNav" class="settings-dropdown-nav" style="margin-bottom:16px;"></div>
+
+                <div id="settingsSystemSection">
+                    <div style="padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">General Controls</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Manage system availability and the announcement shown across dashboards.</p>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+                            <label>Maintenance Mode
+                                <select id="settingMaintenanceMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="false">Off</option>
+                                    <option value="true">On</option>
+                                </select>
+                            </label>
+                            <label style="grid-column:1/-1;">Maintenance Message
+                                <textarea id="settingMaintenanceMessage" rows="4" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;"></textarea>
+                            </label>
+                            <label>Announcement Enabled
+                                <select id="settingAnnouncementEnabled" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="false">Off</option>
+                                    <option value="true">On</option>
+                                </select>
+                            </label>
+                            <label>Announcement Tone
+                                <select id="settingAnnouncementTone" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="info">Info</option>
+                                    <option value="warning">Warning</option>
+                                    <option value="success">Success</option>
+                                </select>
+                            </label>
+                            <label style="grid-column:1/-1;">Dashboard Announcement
+                                <textarea id="settingAnnouncementMessage" rows="3" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;"></textarea>
+                            </label>
+                        </div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Upload Limits</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Control the maximum file sizes accepted across uploader forms.</p>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+                            <label>Max Image Upload (MB)
+                                <input id="settingMaxImageUploadMb" type="number" min="0.1" step="0.1" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                            </label>
+                            <label>Max PDF Upload (MB)
+                                <input id="settingMaxPdfUploadMb" type="number" min="0.1" step="0.1" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                            </label>
+                        </div>
+                    </div>
                 </div>
-                <div style="margin-top:14px;">
-                    <button class="action-btn" style="background:#003366;color:#fff;border:none;" onclick="window.saveSuperSettings()"><i class="fas fa-save"></i> Save Settings</button>
+
+                <div id="settingsWorkflowSection" style="display:none;">
+                    <div style="padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Round Robin Controls</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Enable or disable automatic round robin assignment for each workflow stage.</p>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+                            <label>Reviewer Round Robin
+                                <select id="settingReviewerRoundRobinEnabled" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                            </label>
+                            <label>RSA Round Robin
+                                <select id="settingRsaRoundRobinEnabled" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                            </label>
+                            <label>Payment Round Robin
+                                <select id="settingPaymentRoundRobinEnabled" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Review Rules</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Control approval requirements, rejection rules, and how linked application edits behave.</p>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+                            <label>Sync Agent Edits To Linked Applications
+                                <select id="settingAgentEditSyncEnabled" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                            </label>
+                            <label>Agent Registration Approval
+                                <select id="settingAgentRegistrationApprovalRequired" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="true">Require Approval</option>
+                                    <option value="false">Auto Approve</option>
+                                </select>
+                            </label>
+                            <label>Rejection Min Length
+                                <input id="settingRejectionMinLength" type="number" min="0" step="1" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                            </label>
+                            <label>Reviewer Reject Reason Required
+                                <select id="settingReviewerRejectRequired" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="true">Required</option>
+                                    <option value="false">Optional</option>
+                                </select>
+                            </label>
+                            <label>RSA Reject Reason Required
+                                <select id="settingRsaRejectRequired" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="true">Required</option>
+                                    <option value="false">Optional</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Document Requirement By Role / Level</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Choose which roles or user levels must complete required document uploads before they can submit.</p>
+                        <div id="documentRequirementRoleGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;"></div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Routing Policy Settings</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Control how applications move when permanent routes are missing or reviewer step is skipped.</p>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+                            <label>Default Routing Mode
+                                <select id="settingDefaultRouteMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="normal">Normal</option>
+                                    <option value="skip_reviewer">Skip Reviewer</option>
+                                </select>
+                            </label>
+                            <label>Fallback Assignment Mode
+                                <select id="settingFallbackAssignmentMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="round_robin">Round Robin</option>
+                                    <option value="manual_review">Manual Review</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Status / Workflow Labels</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Change workflow wording shown across the app without touching code.</p>
+                        <div id="workflowLabelsGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;"></div>
+                    </div>
                 </div>
+
+                <div id="settingsCommissionSection" style="display:none;">
+                    <div style="padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Commission and Pricing</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Manage commission timing and submission pricing defaults.</p>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+                            <label>Commission Rate (%)
+                                <input id="settingCommissionRate" type="number" min="0" step="0.01" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                            </label>
+                            <label>Commission Effective From
+                                <input id="settingCommissionEffectiveFrom" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                            </label>
+                        </div>
+                        <p style="color:#64748b;margin:12px 0 0;">Commission changes apply only to future submitted applications. Existing submissions keep their stored rate.</p>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px;">
+                            <div>
+                                <h3 style="margin:0 0 4px;color:#0f3b67;">Bank Management</h3>
+                                <p style="margin:0;color:#64748b;">Add or disable agent account banks used in uploader agent registration.</p>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+                            <input id="agentBankNameInput" type="text" placeholder="Enter bank name" style="min-width:260px;flex:1;padding:10px 12px;border:1px solid #d5dfeb;border-radius:10px;">
+                            <button id="addAgentBankBtn" class="action-btn" type="button" style="background:#0f3b67;color:#fff;border:none;">
+                                <i class="fas fa-plus"></i> Add Bank
+                            </button>
+                        </div>
+                        <div class="table-container">
+                            <table class="documents-table">
+                                <thead>
+                                    <tr>
+                                        <th>Bank Name</th>
+                                        <th>Status</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="agentBankTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">PFA List</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Add and remove PFAs used in uploader forms and downstream processing.</p>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+                            <input id="pfaNameInput" type="text" placeholder="Enter PFA name" style="min-width:260px;flex:1;padding:10px 12px;border:1px solid #d5dfeb;border-radius:10px;">
+                            <button id="addPfaBtn" class="action-btn" type="button" style="background:#0f3b67;color:#fff;border:none;">
+                                <i class="fas fa-plus"></i> Add PFA
+                            </button>
+                        </div>
+                        <div class="table-container">
+                            <table class="documents-table">
+                                <thead>
+                                    <tr>
+                                        <th>PFA Name</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pfaTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Document Requirements Manager</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Control document names, active status, and required or optional behavior.</p>
+                        <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+                            <button id="addDocumentRequirementBtn" class="action-btn" type="button" style="background:#0f3b67;color:#fff;border:none;">
+                                <i class="fas fa-plus"></i> Add Document Box
+                            </button>
+                        </div>
+                        <div class="table-container">
+                            <table class="documents-table">
+                                <thead>
+                                    <tr>
+                                        <th>Document ID</th>
+                                        <th>Document Name</th>
+                                        <th>Required</th>
+                                        <th>Active</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="documentRequirementsTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Bulk Import Required Columns</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Enter one column header per line. The download template and import validation will use this list.</p>
+                        <textarea id="settingBulkImportRequiredColumns" rows="8" style="width:100%;padding:12px;border:1px solid #d5dfeb;border-radius:12px;resize:vertical;"></textarea>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Property Type Amount Range</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Manage property types, amount ranges, and values from a proper table.</p>
+                        <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+                            <button id="addPropertyRuleBtn" class="action-btn" type="button" style="background:#0f3b67;color:#fff;border:none;">
+                                <i class="fas fa-plus"></i> Add Property Type
+                            </button>
+                        </div>
+                        <div class="table-container">
+                            <table class="documents-table">
+                                <thead>
+                                    <tr>
+                                        <th>Property Type</th>
+                                        <th>Min</th>
+                                        <th>Max</th>
+                                        <th>Value</th>
+                                        <th>Fee</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="propertyRulesTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">House Number Rules</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Manage house number formats by property type.</p>
+                        <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+                            <button id="addHouseNumberRuleBtn" class="action-btn" type="button" style="background:#0f3b67;color:#fff;border:none;">
+                                <i class="fas fa-plus"></i> Add House Rule
+                            </button>
+                        </div>
+                        <div class="table-container">
+                            <table class="documents-table">
+                                <thead>
+                                    <tr>
+                                        <th>Property Type</th>
+                                        <th>Mode</th>
+                                        <th>Prefix</th>
+                                        <th>Start Number</th>
+                                        <th>Start Letter</th>
+                                        <th>Start Prefix</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="houseNumberRulesTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="settingsNotificationsSection" style="display:none;">
+                    <div style="padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Messages and Alerts</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Control outbound email and push notifications.</p>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+                            <label>Email Notifications
+                                <select id="settingNotificationsEmailEnabled" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                            </label>
+                            <label>Push Notifications
+                                <select id="settingNotificationsPushEnabled" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Notification Templates</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Change common notification messages with normal text fields.</p>
+                        <div id="notificationTemplatesGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;"></div>
+                    </div>
+                </div>
+
+                <div id="settingsAccessSection" style="display:none;">
+                    <div style="padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Access Levels</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Assign level-based access for uploaders and RSA officers.</p>
+                        <input
+                            id="accessUserSearchInput"
+                            type="text"
+                            placeholder="Search uploader or RSA user..."
+                            oninput="window.updateAccessUserSearch(this.value)"
+                            style="width:100%;max-width:360px;margin:0 0 12px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;"
+                        >
+                        <div class="table-container">
+                            <table class="documents-table">
+                                <thead>
+                                    <tr>
+                                        <th>User</th>
+                                        <th>Email</th>
+                                        <th>Role</th>
+                                        <th>Level</th>
+                                        <th>Capability</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="accessLevelsTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">RSA Round Robin Control</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Choose which RSA users should be included or skipped during automatic RSA round robin assignment.</p>
+                        <input
+                            id="rsaRoundRobinSearchInput"
+                            type="text"
+                            placeholder="Search RSA user..."
+                            oninput="window.updateAccessUserSearch(this.value)"
+                            style="width:100%;max-width:360px;margin:0 0 12px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;"
+                        >
+                        <div id="rsaRoundRobinAccessGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;"></div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Role Permissions</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Turn workflow actions on or off without touching code.</p>
+                        <div id="rolePermissionsGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;"></div>
+                    </div>
+                </div>
+
+                <div id="settingsSecuritySection" style="display:none;">
+                    <div style="padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Security and Audit</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Manage session timing and how long audit data should be retained.</p>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+                            <label>Session Timeout (minutes)
+                                <input id="settingSessionTimeoutMinutes" type="number" min="1" step="1" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                            </label>
+                            <label>Audit Retention (days)
+                                <input id="settingAuditRetentionDays" type="number" min="1" step="1" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                            </label>
+                        </div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Cache and Session Control</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Use these controls when you want open dashboards to reload the newest app files or force fresh login sessions.</p>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                            <button id="clearAppCacheBtn" class="action-btn" style="background:#b45309;color:#fff;border:none;"><i class="fas fa-broom"></i> Clear Cache For All Users</button>
+                            <button id="forceLogoutAllUsersBtn" class="action-btn" type="button" style="background:#b91c1c;color:#fff;border:none;"><i class="fas fa-right-from-bracket"></i> Force Logout All Users</button>
+                            <button id="exportAuditCsvBtn" class="action-btn" type="button" style="background:#0f766e;color:#fff;border:none;"><i class="fas fa-file-export"></i> Export Audit CSV</button>
+                        </div>
+                    </div>
+                </div>
+                <div style="margin-top:14px;padding:14px 16px;border:1px dashed #c9d8ea;border-radius:14px;background:#f8fbff;color:#64748b;">
+                    Open a subtab from any dropdown to manage that settings area in the modal workspace.
+                </div>
+                <button id="saveSettingsBtn" class="action-btn" type="button" style="display:none;background:#003366;color:#fff;border:none;"><i class="fas fa-save"></i> Save Settings</button>
             </div>
         </div>
 
     </main>
 </div>
+
+<div id="clearCacheConfirmModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content clear-cache-confirm-content">
+        <div class="modal-header">
+            <h2><i class="fas fa-broom"></i> Confirm Cache Clear</h2>
+            <button id="closeClearCacheConfirmModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body clear-cache-confirm-body">
+            <div class="clear-cache-confirm-hero">
+                <div class="clear-cache-confirm-icon">
+                    <i class="fas fa-rotate"></i>
+                </div>
+                <div>
+                    <strong>Refresh Cached App Files</strong>
+                    <p>This will tell all currently signed-in users with an open dashboard to clear cached app files and reload automatically.</p>
+                </div>
+            </div>
+            <div class="clear-cache-confirm-note">
+                <i class="fas fa-circle-info"></i>
+                <span>Users should remain signed in. This does not delete application data or Firestore records.</span>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelClearCacheConfirmBtn" type="button" class="cancel-btn">Cancel</button>
+            <button id="confirmClearCacheBtn" type="button" class="confirm-btn">
+                <i class="fas fa-broom"></i> Clear Cache
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="documentRequirementModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content document-requirement-modal-content">
+        <div class="modal-header">
+            <h2><i class="fas fa-folder-plus"></i> Add Document Box</h2>
+            <button id="closeDocumentRequirementModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <form id="documentRequirementForm">
+            <div class="modal-body document-requirement-modal-body">
+                <div class="document-requirement-modal-hero">
+                    <div class="document-requirement-modal-icon">
+                        <i class="fas fa-file-circle-plus"></i>
+                    </div>
+                    <div>
+                        <strong>Create a new uploader document box</strong>
+                        <p>Enter the document details below. The box will be added to the document manager after you save.</p>
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <label>Document Name
+                        <input type="text" id="documentRequirementName" placeholder="e.g. Utility Bill" required>
+                    </label>
+                    <label>Document ID
+                        <input type="text" id="documentRequirementId" placeholder="Auto-generated if left blank">
+                    </label>
+                    <label>Required
+                        <select id="documentRequirementRequired">
+                            <option value="true">Required</option>
+                            <option value="false">Optional</option>
+                        </select>
+                    </label>
+                    <label>Active
+                        <select id="documentRequirementActive">
+                            <option value="true">Active</option>
+                            <option value="false">Inactive</option>
+                        </select>
+                    </label>
+                    <label style="grid-column:1/-1;">Icon Class
+                        <input type="text" id="documentRequirementIcon" placeholder="fa-file-alt">
+                    </label>
+                </div>
+                <div class="document-requirement-modal-note">
+                    <i class="fas fa-circle-info"></i>
+                    <span>If you leave the document ID empty, the system will generate one from the document name.</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelDocumentRequirementModalBtn" type="button" class="cancel-btn">Cancel</button>
+                <button id="saveDocumentRequirementModalBtn" type="submit" class="confirm-btn">
+                    <i class="fas fa-save"></i> Save Document Box
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="settingsSectionModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content settings-section-modal-content">
+        <div class="modal-header settings-section-modal-header">
+            <h2 id="settingsSectionModalTitle"><i class="fas fa-sliders"></i> Settings Section</h2>
+            <button id="closeSettingsSectionModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body settings-section-modal-body">
+            <div class="settings-section-modal-hero">
+                <div class="settings-section-modal-icon" id="settingsSectionModalIcon">
+                    <i class="fas fa-sliders"></i>
+                </div>
+                <div>
+                    <strong id="settingsSectionModalHeroTitle">Settings Workspace</strong>
+                    <p id="settingsSectionModalDescription">Manage this area in a larger focused workspace, then save your changes.</p>
+                </div>
+            </div>
+            <div id="settingsSectionModalContentHost"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelSettingsSectionModalBtn" type="button" class="cancel-btn">Close</button>
+            <button id="saveSettingsSectionModalBtn" type="button" class="confirm-btn">
+                <i class="fas fa-save"></i> Save Changes
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="settingsModalStorage" style="display:none;" aria-hidden="true"></div>
 
 <button type="button" id="helpFab" class="sop-fab" title="Open SOP">
     <i class="fas fa-circle-question"></i>
@@ -282,10 +839,66 @@
     </div>
 </div>
 
+<div id="superAgentModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content super-agent-modal-content">
+        <div class="modal-header">
+            <h2><i class="fas fa-address-card"></i> Edit Agent Record</h2>
+            <button id="closeSuperAgentModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <form id="superAgentForm">
+            <div class="super-agent-modal-body">
+                <div class="super-agent-modal-hero">
+                    <div class="super-agent-modal-hero-icon">
+                        <i class="fas fa-user-pen"></i>
+                    </div>
+                    <div>
+                        <strong>Update Agent Details Safely</strong>
+                        <p>Changes here also refresh linked application agent details across the workflow.</p>
+                    </div>
+                </div>
+                <div class="form-grid super-agent-form-grid">
+                    <label>Agent Full Name
+                        <input type="text" id="superAgentFullName" required>
+                    </label>
+                    <label>Contact Number
+                        <input type="text" id="superAgentContactNumber" required>
+                    </label>
+                    <label>Account Number
+                        <input type="text" id="superAgentAccountNumber" required>
+                    </label>
+                    <label>Account Bank
+                        <input type="text" id="superAgentAccountBank" required>
+                    </label>
+                    <label>Status
+                        <select id="superAgentStatus">
+                            <option value="pending">Pending</option>
+                            <option value="approved">Approved</option>
+                            <option value="rejected">Rejected</option>
+                        </select>
+                    </label>
+                    <label>Registered By
+                        <input type="text" id="superAgentRegisteredBy" readonly>
+                    </label>
+                </div>
+                <div class="super-agent-modal-note">
+                    <i class="fas fa-circle-info"></i>
+                    <span>Saving will update the agent profile and sync the corrected name, phone, and bank details into linked submissions for this agent.</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancelSuperAgentModalBtn" type="button" class="cancel-btn">Cancel</button>
+                <button id="saveSuperAgentModalBtn" type="submit" class="confirm-btn">
+                    <i class="fas fa-save"></i> Save Agent
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
-<script src="js/table-enhancer.js?v=20260423a"></script>
-<script type="module" src="js/super-admin.js?v=20260423e"></script>
-<script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
+<script src="js/table-enhancer.js?v=20260512b"></script>
+<script type="module" src="js/super-admin.js?v=20260518a"></script>
+<script type="module" src="js/profile-completion-guard.js?v=20260518a"></script>
 <link rel="stylesheet" href="css/pwa-install.css">
     <script src="js/pwa-install.js?v=20260423a"></script>
 <link rel="stylesheet" href="css/sop-help.css">

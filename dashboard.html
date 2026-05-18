@@ -15,9 +15,10 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- DOMPurify for security -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <!-- External CSS -->
-    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
-    <link rel="stylesheet" href="css/uploader-dashboard.css?v=20260423b">
+    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260427b">
+    <link rel="stylesheet" href="css/uploader-dashboard.css?v=20260506d">
     <style>
         /* Additional modal styles to ensure visibility */
         .modal {
@@ -532,6 +533,11 @@
                     <i class="fas fa-tachometer-alt"></i>
                     <span>Dashboard</span>
                 </a>
+                <a href="#" class="nav-item" data-tab="draft">
+                    <i class="fas fa-file-pen"></i>
+                    <span>Draft</span>
+                    <span class="badge" id="draftCount">0</span>
+                </a>
                 <a href="#" class="nav-item" data-tab="pending">
                     <i class="fas fa-clock"></i>
                     <span>Pending Review</span>
@@ -549,7 +555,7 @@
                 </a>
                 <a href="#" class="nav-item" data-tab="paid">
                     <i class="fas fa-money-check-dollar"></i>
-                    <span>Paid Customers</span>
+                    <span>Agent Commission</span>
                     <span class="badge" id="paidCount">0</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="register-agent">
@@ -589,6 +595,13 @@
                     <button class="new-upload-btn" id="newUploadBtn">
                         <i class="fas fa-plus-circle"></i> <span class="btn-text">New Submission</span>
                     </button>
+                    <button class="global-track-btn" id="bulkTemplateBtn">
+                        <i class="fas fa-file-excel"></i> <span>Bulk Template</span>
+                    </button>
+                    <button class="new-upload-btn" id="bulkImportBtn">
+                        <i class="fas fa-file-import"></i> <span class="btn-text">Bulk Import</span>
+                    </button>
+                    <input type="file" id="bulkImportInput" accept=".xlsx" hidden>
                 </div>
             </header>
 
@@ -646,6 +659,32 @@
                 </div>
             </div>
 
+            <!-- Draft Tab -->
+            <div id="draftTab" class="tab-content">
+                <div class="table-section">
+                    <div class="filters-bar">
+                        <input type="text" id="draftSearch" placeholder="Search draft customer or agent">
+                    </div>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer Name</th>
+                                    <th>Agent</th>
+                                    <th>Documents</th>
+                                    <th>Last Saved</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="draftTableBody">
+                                <tr><td colspan="6" class="loading-row"><div class="loading-spinner"></div> Loading drafts...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- Pending Tab -->
             <div id="pendingTab" class="tab-content">
                 <div class="table-section">
@@ -657,8 +696,9 @@
                             <thead>
                                 <tr>
                                     <th>Customer Name</th>
+                                    <th>Agent</th>
                                     <th>Contact (WhatsApp)</th>
-                                    <th>Assigned To</th>
+                                    <th>Current Handler</th>
                                     <th>Upload Date/Time</th>
                                     <th>Status</th>
                                     <th>Comment</th>
@@ -667,7 +707,7 @@
                                 </tr>
                             </thead>
                             <tbody id="pendingTableBody">
-                                <tr><td colspan="8" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
+                                <tr><td colspan="9" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -685,6 +725,7 @@
                             <thead>
                                 <tr>
                                     <th>Customer Name</th>
+                                    <th>Agent</th>
                                     <th>Contact (WhatsApp)</th>
                                     <th>Assigned To</th>
                                     <th>Upload Date/Time</th>
@@ -696,7 +737,7 @@
                                 </tr>
                             </thead>
                             <tbody id="approvedTableBody">
-                                <tr><td colspan="9" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
+                                <tr><td colspan="10" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -714,6 +755,7 @@
                             <thead>
                                 <tr>
                                     <th>Customer Name</th>
+                                    <th>Agent</th>
                                     <th>Chat</th>
                                     <th>Re-upload Count</th>
                                     <th>Assigned To</th>
@@ -728,15 +770,34 @@
                                 </tr>
                             </thead>
                             <tbody id="rejectedTableBody">
-                                <tr><td colspan="12" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
+                                <tr><td colspan="13" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
                             </tbody>
                         </table>
                     </div>
+            </div>
+        </div>
+
+        <div id="uploaderRejectionReasonModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Rejection Reason</h2>
+                    <button class="close-btn" id="closeUploaderRejectionReasonModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="document-info">
+                        <h3 id="uploaderRejectionReasonCustomerName">-</h3>
+                        <p id="uploaderRejectionReasonContact">Contact: -</p>
+                    </div>
+                    <div id="uploaderRejectionReasonHistory" class="rejection-history-box" style="display:none;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="cancel-btn" id="closeUploaderRejectionReasonBtn">Close</button>
                 </div>
             </div>
+        </div>
 
-            <!-- Paid Customers Tab -->
-            <div id="paidTab" class="tab-content">
+        <!-- Agent Commission Tab -->
+        <div id="paidTab" class="tab-content">
                 <div class="overview-cards">
                     <div class="stat-card approved" id="activeTotal25Card">
                         <div class="stat-content">
@@ -750,7 +811,7 @@
                     <div class="stat-card approved" id="activeTotal1Card">
                         <div class="stat-content">
                             <div>
-                                <div class="stat-label">Active 2% Commission</div>
+                                <div class="stat-label">Active Commission</div>
                                 <div class="stat-value" id="paidTotal1">₦0.00</div>
                             </div>
                             <i class="fas fa-coins stat-icon"></i>
@@ -768,7 +829,7 @@
                     <div class="stat-card pending" id="clearedTotal1Card" style="display:none;">
                         <div class="stat-content">
                             <div>
-                                <div class="stat-label">Cleared 2% Commission</div>
+                                <div class="stat-label">Cleared Commission</div>
                                 <div class="stat-value" id="clearedTotal1">₦0.00</div>
                             </div>
                             <i class="fas fa-coins stat-icon"></i>
@@ -801,7 +862,7 @@
                                         <th>Agent</th>
                                         <th>Customers</th>
                                         <th>Total 25% RSA</th>
-                                        <th>Total 2% Commission</th>
+                                        <th>Total Commission</th>
                                         <th>Status</th>
                                         <th>Paid Date</th>
                                     </tr>
@@ -826,7 +887,7 @@
                                         <th>Agent</th>
                                         <th>Customers</th>
                                         <th>Total 25% RSA</th>
-                                        <th>Total 2% Commission</th>
+                                        <th>Total Commission</th>
                                         <th>Status</th>
                                         <th>Cleared Date</th>
                                     </tr>
@@ -927,9 +988,9 @@
                         <p>Agent stays pending until admin approval; only approved agents appear in submission dropdown.</p>
                     </div>
                     <div class="sop-topic">
-                        <h4>5. Paid Customers</h4>
-                        <p>Use <strong>Active Commission</strong> and <strong>Cleared Commission</strong> subtabs to monitor payouts and settled commissions.</p>
-                        <p>Filter by dates and customer/PFA to reconcile records and confirm payment lifecycle.</p>
+                        <h4>5. Agent Commission</h4>
+                        <p>Use the <strong>Agent Commission</strong> tab to review each registered agent and open their commission breakdown.</p>
+                        <p>Inside the modal, check <strong>Sent to PFA</strong>, <strong>Active</strong>, and <strong>Cleared</strong> records to confirm commission stage and amount.</p>
                     </div>
                     <div class="sop-topic">
                         <h4>6. Rejected Items</h4>
@@ -1019,7 +1080,8 @@
                             <div class="customer-input-grid">
                                 <div>
                                     <label for="pfa">PFA *</label>
-                                    <input type="text" id="pfa" placeholder="PFA name">
+                                    <input type="text" id="pfa" list="pfaOptionsList" placeholder="PFA name">
+                                    <datalist id="pfaOptionsList"></datalist>
                                 </div>
                                 <div>
                                     <label for="penNo">PEN No *</label>
@@ -1056,6 +1118,10 @@
                                     <input type="text" id="propertyType" readonly placeholder="Auto-selected">
                                 </div>
                                 <div>
+                                    <label for="houseNumber">House Number (auto)</label>
+                                    <input type="text" id="houseNumber" readonly placeholder="Auto-generated">
+                                </div>
+                                <div>
                                     <label>Property Value</label>
                                     <div class="currency-field">
                                         <span class="formatted-currency" id="propertyValueFormatted"></span>
@@ -1085,8 +1151,8 @@
                     </div>
 
                     <div class="form-actions">
-                        <button class="submit-btn" id="saveDetailsBtn">
-                            <i class="fas fa-save"></i> Save Details
+                        <button class="submit-btn" id="saveDetailsBtn" type="button">
+                            <i class="fas fa-arrow-right"></i> Next: Upload Documents
                         </button>
                         <button class="cancel-btn" id="resetDetailsBtn">
                             <i class="fas fa-undo"></i> Reset
@@ -1095,12 +1161,12 @@
                 </div>
 
                 <div class="document-grid-section">
-                    <h3>Required Documents</h3>
+                    <h3 id="requiredDocumentsHeading">Required Documents</h3>
                     <div class="batch-upload-bar">
                         <button id="batchUploadBtn" class="upload-btn" disabled>
                             <i class="fas fa-file-upload"></i> Batch Upload
                         </button>
-                        <small>Save details first to enable batch upload (Max 1.5MB per file)</small>
+                        <small id="batchUploadHint">Save details first to enable batch upload (Max 1.5MB per file)</small>
                         <input type="file" id="batchFileInput" accept=".pdf,.jpg,.jpeg,.png" multiple hidden>
                     </div>
                     <div class="document-grid" id="documentGrid"></div>
@@ -1114,10 +1180,16 @@
                 <div class="submit-section">
                     <div class="progress-indicator">
                         <span id="uploadedCount">0</span>/<span id="totalCount">16</span> documents ready
+                        <span id="uploadProgressText"></span>
                     </div>
-                    <button class="submit-btn" id="submitCustomerBtn" disabled>
-                        <i class="fas fa-check-circle"></i> Submit All Documents
-                    </button>
+                    <div class="submit-action-group">
+                        <button class="cancel-btn draft-save-btn" id="saveDraftBtn" type="button">
+                            <i class="fas fa-floppy-disk"></i> Save Draft
+                        </button>
+                        <button class="submit-btn" id="submitCustomerBtn" disabled>
+                            <i class="fas fa-check-circle"></i> Submit All Documents
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1150,22 +1222,34 @@
                             <select id="agentAccountBank" required>
                                 <option value="">Select Bank</option>
                                 <option>Access Bank</option>
+                                <option>ALAT by Wema</option>
+                                <option>Coronation Merchant Bank</option>
                                 <option>Citibank</option>
+                                <option>FairMoney MFB</option>
                                 <option>Ecobank</option>
                                 <option>Fidelity Bank</option>
                                 <option>First Bank of Nigeria</option>
                                 <option>First City Monument Bank (FCMB)</option>
+                                <option>FSDH Merchant Bank</option>
                                 <option>Globus Bank</option>
                                 <option>Guaranty Trust Bank (GTBank)</option>
                                 <option>Heritage Bank</option>
+                                <option>Jaiz Bank</option>
                                 <option>Keystone Bank</option>
+                                <option>Kuda MFB</option>
                                 <option>Lotus Bank</option>
                                 <option>Moniepoint MFB</option>
+                                <option>Optimus Bank</option>
                                 <option>Opay</option>
+                                <option>PalmPay</option>
                                 <option>Parallex Bank</option>
                                 <option>Polaris Bank</option>
                                 <option>PremiumTrust Bank</option>
                                 <option>Providus Bank</option>
+                                <option>Rand Merchant Bank</option>
+                                <option>Rubies MFB</option>
+                                <option>Safe Haven MFB</option>
+                                <option>Signature Bank</option>
                                 <option>Stanbic IBTC Bank</option>
                                 <option>Standard Chartered Bank</option>
                                 <option>Sterling Bank</option>
@@ -1175,7 +1259,9 @@
                                 <option>Union Bank of Nigeria</option>
                                 <option>United Bank for Africa (UBA)</option>
                                 <option>Unity Bank</option>
+                                <option>VFD Microfinance Bank</option>
                                 <option>Wema Bank</option>
+                                <option>Woven Finance</option>
                                 <option>Zenith Bank</option>
                             </select>
                         </div>
@@ -1370,6 +1456,23 @@
     <!-- Notification Toast -->
     <div id="notification" class="notification"></div>
 
+    <div id="errorDetailModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header" style="background:#fef2f2;border-bottom:1px solid #fecaca;">
+                <h2 style="color:#991b1b;"><i class="fas fa-circle-exclamation"></i> Error Details</h2>
+                <button class="close-btn" id="closeErrorDetailModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="background:#fff7ed;border-left:4px solid #ef4444;padding:16px;border-radius:8px;">
+                    <p id="errorDetailMessage" style="margin:0;color:#1e293b;line-height:1.7;white-space:pre-wrap;"></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="dismissErrorDetailModalBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- ========== SCRIPTS - ORDER IS CRITICAL ========== -->
     <!-- 1. Firebase Config (no dependencies) -->
     <script type="module" src="js/firebase-config.js?v=20260415b"></script>
@@ -1397,16 +1500,16 @@
     </script>
 
     <!-- 4. Auth Module -->
-    <script type="module" src="js/auth.js?v=20260423a"></script>
+    <script type="module" src="js/auth.js?v=20260518a"></script>
 
     <!-- 5. Backblaze Storage -->
     <script type="module" src="js/backblaze-storage.js?v=20260416b"></script>
 
     <!-- 6. Document Uploader (main upload logic) -->
-<script type="module" src="js/document-uploader.js?v=20260423h"></script>
+<script type="module" src="js/document-uploader-v2.js?v=20260515a"></script>
 
     <!-- 7. Dashboard (Track & Calculator only) -->
-<script type="module" src="js/uploader-dashboard.js?v=20260423b"></script>
+<script type="module" src="js/uploader-dashboard.js?v=20260515a"></script>
 
     <script>
         // `window.signOutUser` is provided by `js/auth.js` (Firebase sign-out).
@@ -1550,10 +1653,10 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 })();
 </script>
-<script src="js/table-enhancer.js?v=20260415"></script>
-<script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
-<link rel="stylesheet" href="css/app-chat.css?v=20260416q">
-<script type="module" src="js/app-chat.js?v=20260423a"></script>
+<script src="js/table-enhancer.js?v=20260512b"></script>
+<script type="module" src="js/profile-completion-guard.js?v=20260518a"></script>
+<link rel="stylesheet" href="css/app-chat.css?v=20260518a">
+<script type="module" src="js/app-chat.js?v=20260518a"></script>
 <link rel="stylesheet" href="css/pwa-install.css">
 <script src="js/pwa-install.js?v=20260423a"></script>
 <link rel="stylesheet" href="css/profile-card.css">

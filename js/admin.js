@@ -1,6 +1,7 @@
 ﻿// js/admin.js - COMPLETE UPDATED VERSION WITH FIXED DOWNLOAD ALL
 import { auth, db } from './firebase-config.js';
 import { ADMIN_API_BASE_URL } from './admin-api-config.js';
+import { formatAppDateTime, getTrustedDateKey } from './shared/app-time.js';
 import {
     collection,
     addDoc,
@@ -22,6 +23,10 @@ import {
     createUserWithEmailAndPassword,
     signOut
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
+import {
+    getSubmissionCommissionAmount,
+    resolveSubmissionCommissionRate
+} from './shared/commission-config.js?v=20260507a';
 
 // Security: suppress console output in admin dashboard.
 (() => {
@@ -62,6 +67,7 @@ let allSubmissions = [];
 let allPendingAgents = [];
 let allApprovedAgents = [];
 let allPendingUsers = [];
+let allEscalations = [];
 let adminNames = {};
 let uploaderNames = {};
 let userIdNameCache = new Map();
@@ -74,7 +80,7 @@ let selectedLeaveUserId = '';
 
 const TAB_GROUPS = {
     'user-management': ['users', 'pending-users', 'pending-agents', 'registered-agents'],
-    'application-management': ['pending-docs', 'approved-docs', 'rejected-docs', 'track-apps', 'finally-submitted', 'payments']
+    'application-management': ['draft-docs', 'pending-docs', 'approved-docs', 'rejected-docs', 'escalations', 'track-apps', 'finally-submitted', 'payments', 'agent-commissions']
 };
 
 const TAB_LABELS = {
@@ -82,12 +88,15 @@ const TAB_LABELS = {
     'pending-users': 'Pending Users',
     'pending-agents': 'Pending Agents',
     'registered-agents': 'Registered Agents',
+    'draft-docs': 'Draft',
     'pending-docs': 'Pending',
     'approved-docs': 'Approved',
     'rejected-docs': 'Rejected',
+    escalations: 'Escalations',
     'track-apps': 'Track Applications',
     'finally-submitted': 'Final Submission',
-    payments: 'Payment'
+    payments: 'Payment',
+    'agent-commissions': 'Agent Commissions'
 };
 
 function setCountBadge(id, count) {
@@ -102,24 +111,34 @@ function getAdminSubTabCount(tabId) {
     if (tabId === 'pending-users') return allPendingUsers.length;
     if (tabId === 'pending-agents') return allPendingAgents.length;
     if (tabId === 'registered-agents') return allApprovedAgents.length;
+    if (tabId === 'draft-docs') return allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'draft').length;
     if (tabId === 'pending-docs') return allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'pending').length;
     if (tabId === 'approved-docs') return allSubmissions.filter((s) => {
         const status = String(s.status || '').toLowerCase();
         return status === 'processing_to_pfa' || status === 'approved';
     }).length;
-    if (tabId === 'rejected-docs') return allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'rejected').length;
-    if (tabId === 'track-apps') return allSubmissions.length;
+    if (tabId === 'rejected-docs') return allSubmissions.filter((s) => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase())).length;
+    if (tabId === 'escalations') return allEscalations.filter((item) => item?.escalationHandled !== true).length;
+    if (tabId === 'track-apps') return allSubmissions.filter((s) => String(s.status || '').toLowerCase() !== 'draft').length;
     if (tabId === 'finally-submitted') return allSubmissions.filter((s) => s.finalSubmitted === true || s.rsaSubmitted === true).length;
     if (tabId === 'payments') return allSubmissions.filter((s) => {
         const status = String(s.status || '').toLowerCase();
         return status === 'sent_to_pfa' || status === 'rsa_submitted';
     }).length;
+    if (tabId === 'agent-commissions') {
+        const keys = new Set();
+        allApprovedAgents.forEach((agent) => keys.add(getAgentCommissionKey(agent)));
+        allSubmissions.forEach((sub) => {
+            if (getSubmissionHasAgent(sub) && isSubmissionCommissionTrackable(sub)) keys.add(getSubmissionAgentCommissionKey(sub));
+        });
+        return keys.size;
+    }
     return 0;
 }
 
 function updateAdminNavigationCounts() {
     const userManagementCount = getAdminSubTabCount('users') + getAdminSubTabCount('pending-users') + getAdminSubTabCount('pending-agents') + getAdminSubTabCount('registered-agents');
-    const applicationManagementCount = getAdminSubTabCount('track-apps');
+    const applicationManagementCount = allSubmissions.length;
     setCountBadge('userManagementCount', userManagementCount);
     setCountBadge('applicationManagementCount', applicationManagementCount);
 }
@@ -248,10 +267,13 @@ const usersTableBody = document.getElementById('usersTableBody');
 const pendingUsersGrid = document.getElementById('pendingUsersGrid');
 const pendingAgentsTableBody = document.getElementById('pendingAgentsTableBody');
 const approvedAgentsTableBody = document.getElementById('approvedAgentsTableBody');
+const draftDocsTableBody = document.getElementById('draftDocsTableBody');
 const pendingDocsTableBody = document.getElementById('pendingDocsTableBody');
 const approvedDocsTableBody = document.getElementById('approvedDocsTableBody');
 const rejectedDocsTableBody = document.getElementById('rejectedDocsTableBody');
+const escalationsTableBody = document.getElementById('escalationsTableBody');
 const paymentsTableBody = document.getElementById('paymentsTableBody');
+const agentCommissionTableBody = document.getElementById('agentCommissionTableBody');
 const trackAppsTableBody = document.getElementById('trackAppsTableBody');
 const trackPrevPageBtn = document.getElementById('trackPrevPageBtn');
 const trackNextPageBtn = document.getElementById('trackNextPageBtn');
@@ -264,6 +286,18 @@ let notificationTimer = null;
 const viewerModal = document.getElementById('viewerModal');
 const viewerFileName = document.getElementById('viewerFileName');
 const documentViewer = document.getElementById('documentViewer');
+const adminRejectionReasonModal = document.getElementById('adminRejectionReasonModal');
+const closeAdminRejectionReasonModal = document.getElementById('closeAdminRejectionReasonModal');
+const closeAdminRejectionReasonBtn = document.getElementById('closeAdminRejectionReasonBtn');
+const adminRejectionReasonCustomerName = document.getElementById('adminRejectionReasonCustomerName');
+const adminRejectionReasonHistory = document.getElementById('adminRejectionReasonHistory');
+const agentCommissionModal = document.getElementById('agentCommissionModal');
+const agentCommissionModalTitle = document.getElementById('agentCommissionModalTitle');
+const agentCommissionModalSummary = document.getElementById('agentCommissionModalSummary');
+const agentCommissionBreakdownBody = document.getElementById('agentCommissionBreakdownBody');
+const agentCommissionSentTabBtn = document.getElementById('agentCommissionSentTabBtn');
+const agentCommissionActiveTabBtn = document.getElementById('agentCommissionActiveTabBtn');
+const agentCommissionClearedTabBtn = document.getElementById('agentCommissionClearedTabBtn');
 const profileNameEl = document.getElementById('profileName');
 const profileRegisteredAtEl = document.getElementById('profileRegisteredAt');
 const profileEmailEl = document.getElementById('profileEmail');
@@ -271,6 +305,8 @@ const profileWhatsappEl = document.getElementById('profileWhatsapp');
 const profileLocationEl = document.getElementById('profileLocation');
 const profileRoleEl = document.getElementById('profileRole');
 const profileStatusEl = document.getElementById('profileStatus');
+let currentAgentCommissionGroup = null;
+let currentAgentCommissionView = 'sent_to_pfa';
 // Admin password reset removed (per request).
 
 function renderProfileTab() {
@@ -289,6 +325,86 @@ function renderProfileTab() {
     if (profileLocationEl) profileLocationEl.textContent = location;
     if (profileRoleEl) profileRoleEl.textContent = role.charAt(0).toUpperCase() + role.slice(1);
     if (profileStatusEl) profileStatusEl.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function getRejectionHistoryEntries(submission) {
+    const rawHistory = Array.isArray(submission?.rejectionHistory) ? submission.rejectionHistory : [];
+    const normalizedHistory = rawHistory
+        .map((entry) => {
+            if (typeof entry === 'string') {
+                const reason = entry.trim();
+                return reason ? { reason, rejectedAt: null } : null;
+            }
+            const reason = String(entry?.reason || '').trim();
+            if (!reason) return null;
+            return {
+                reason,
+                rejectedAt: entry?.rejectedAt || null
+            };
+        })
+        .filter(Boolean);
+
+    if (normalizedHistory.length > 0) return normalizedHistory;
+
+    const fallbackReason = String(
+        submission?.latestRejectionReason ||
+        submission?.previousRejectionReason ||
+        submission?.comment ||
+        ''
+    ).trim();
+
+    return fallbackReason ? [{
+        reason: fallbackReason,
+        rejectedAt: submission?.latestRejectedAt || submission?.previousRejectedAt || submission?.reviewedAt || null
+    }] : [];
+}
+
+function getRejectCount(submission) {
+    return getRejectionHistoryEntries(submission).length;
+}
+
+function isResubmittedSubmission(submission) {
+    return String(submission?.status || '').toLowerCase() === 'pending' && (
+        submission?.resubmittedAfterRejection === true ||
+        Number(submission?.fixCount || 0) > 0 ||
+        Boolean(submission?.reuploadedAt)
+    );
+}
+
+function renderRejectedDocRow(sub) {
+    const uploadDate = formatDate(sub.uploadedAt);
+    const rejectionTime = formatDate(sub.latestRejectedAt || sub.rejectedAt || sub.reviewedAt || sub.uploadedAt);
+    const uploaderFullName = uploaderNames[sub.uploadedBy] || sub.uploadedBy?.split('@')[0] || 'Unknown';
+    const assignedToName = sub.assignedTo ? getDisplayNameByEmail(sub.assignedTo) : '-';
+    const statusLabel = formatStatusLabel(sub.status || 'rejected');
+    const rejectCount = getRejectCount(sub);
+    const reasonCell = rejectCount > 0
+        ? `<button class="action-btn reason-btn" onclick="window.openAdminRejectionReasonModal('${sub.id}')"><i class="fas fa-eye"></i> View</button>`
+        : '-';
+
+    return `
+        <tr>
+            <td><strong>${sub.customerName || 'Unknown'}</strong></td>
+            <td>${uploadDate}</td>
+            <td>${uploaderFullName}</td>
+            <td>${assignedToName}</td>
+            <td><span class="status-badge status-rejected">${statusLabel}</span></td>
+            <td>${rejectionTime}</td>
+            <td>${rejectCount || 0}</td>
+            <td>${reasonCell}</td>
+            <td>
+                <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
+                    <i class="fas fa-eye"></i> View All
+                </button>
+                <button class="action-btn download-all-btn" onclick="window.downloadAllSubmission('${sub.id}')">
+                    <i class="fas fa-download"></i> Download All
+                </button>
+                <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
+                    <i class="fas fa-comments"></i> Chat
+                </button>
+            </td>
+        </tr>
+    `;
 }
 
 function ensureRoundRobinUnifiedTab() {
@@ -320,14 +436,14 @@ function ensureRoundRobinUnifiedTab() {
                         <div style="background:white;padding:15px;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:12px;color:#999;margin-bottom:5px;">Last Distribution</div><div id="lastDistributionPayment" style="font-size:16px;font-weight:600;color:#003366;">Loading...</div></div>
                         <div style="background:white;padding:15px;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:12px;color:#999;margin-bottom:5px;">Current Index</div><div id="currentDistributionIndexPayment" style="font-size:16px;font-weight:600;color:#003366;">Loading...</div></div>
                         <div style="background:white;padding:15px;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:12px;color:#999;margin-bottom:5px;">Last Reset Date</div><div id="lastResetDatePayment" style="font-size:16px;font-weight:600;color:#003366;">Loading...</div></div>
-                        <div style="background:white;padding:15px;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:12px;color:#999;margin-bottom:5px;">Total Payment Users</div><div id="totalPaymentUserCount" style="font-size:16px;font-weight:600;color:#003366;">Loading...</div></div>
+                        <div style="background:white;padding:15px;border-radius:8px;border:1px solid #e5e7eb;"><div style="font-size:12px;color:#999;margin-bottom:5px;">Total Payment Officers</div><div id="totalPaymentUserCount" style="font-size:16px;font-weight:600;color:#003366;">Loading...</div></div>
                     </div>
                 </div>
                 <div style="background:#f8f9fa;padding:20px;border-radius:8px;margin-bottom:25px;">
                     <h3>Distribution Statistics (Today)</h3>
                     <div class="table-container" style="max-height:400px;overflow-y:auto;">
                         <table class="documents-table" style="margin-bottom:0;">
-                            <thead><tr><th>Payment User Name</th><th>Email</th><th>Assigned Today</th><th>Completed</th><th>Pending</th></tr></thead>
+                            <thead><tr><th>Payment Officer Name</th><th>Email</th><th>Assigned Today</th><th>Completed</th><th>Pending</th></tr></thead>
                             <tbody id="distributionStatsPaymentBody"></tbody>
                         </table>
                     </div>
@@ -648,6 +764,7 @@ async function checkAdminAuth() {
                 loadPendingAgents();
                 loadApprovedAgents();
                 loadSubmissions();
+                loadEscalations();
                 loadAuditLog();
                 loadAdminNames();
                 loadUploaderNames();
@@ -784,9 +901,21 @@ function setupEventListeners() {
     document.getElementById('userRoleFilter')?.addEventListener('change', filterUsers);
     document.getElementById('userStatusFilter')?.addEventListener('change', filterUsers);
 
+    document.getElementById('draftDocSearch')?.addEventListener('input', filterDraftDocs);
+    document.getElementById('draftDocDate')?.addEventListener('change', filterDraftDocs);
     document.getElementById('pendingDocSearch')?.addEventListener('input', filterPendingDocs);
+    document.getElementById('pendingDocDate')?.addEventListener('change', filterPendingDocs);
     document.getElementById('approvedDocSearch')?.addEventListener('input', filterApprovedDocs);
+    document.getElementById('approvedDocDate')?.addEventListener('change', filterApprovedDocs);
     document.getElementById('rejectedDocSearch')?.addEventListener('input', filterRejectedDocs);
+    document.getElementById('rejectedDocDate')?.addEventListener('change', filterRejectedDocs);
+    closeAdminRejectionReasonModal?.addEventListener('click', closeAdminRejectionReasonModalFn);
+    closeAdminRejectionReasonBtn?.addEventListener('click', closeAdminRejectionReasonModalFn);
+    document.getElementById('closeAgentCommissionModal')?.addEventListener('click', closeAgentCommissionModalFn);
+    document.getElementById('closeAgentCommissionModalFooterBtn')?.addEventListener('click', closeAgentCommissionModalFn);
+    agentCommissionSentTabBtn?.addEventListener('click', () => switchAgentCommissionBreakdownTab('sent_to_pfa'));
+    agentCommissionActiveTabBtn?.addEventListener('click', () => switchAgentCommissionBreakdownTab('active'));
+    agentCommissionClearedTabBtn?.addEventListener('click', () => switchAgentCommissionBreakdownTab('cleared'));
 
     document.getElementById('auditDate')?.addEventListener('change', filterAudit);
     document.getElementById('auditAction')?.addEventListener('change', filterAudit);
@@ -828,6 +957,8 @@ function setupEventListeners() {
 
     window.addEventListener('click', (e) => {
         if (e.target === viewerModal) closeViewerModal();
+        if (e.target === adminRejectionReasonModal) closeAdminRejectionReasonModalFn();
+        if (e.target === agentCommissionModal) closeAgentCommissionModalFn();
         const userModal = document.getElementById('userModal');
         if (e.target === userModal) closeUserModal();
         const leaveModal = document.getElementById('leaveModal');
@@ -844,6 +975,27 @@ function setupEventListeners() {
     document.getElementById('testDistributionPaymentBtn')?.addEventListener('click', handleTestDistributionPayment);
     document.getElementById('closeTestResultModal')?.addEventListener('click', closeTestResultModal);
     document.getElementById('closeTestResultBtn')?.addEventListener('click', closeTestResultModal);
+}
+
+function closeAdminRejectionReasonModalFn() {
+    if (adminRejectionReasonModal) adminRejectionReasonModal.classList.remove('active');
+    if (adminRejectionReasonCustomerName) adminRejectionReasonCustomerName.textContent = '-';
+    if (adminRejectionReasonHistory) {
+        adminRejectionReasonHistory.innerHTML = '';
+        adminRejectionReasonHistory.style.display = 'none';
+    }
+}
+
+function closeAgentCommissionModalFn() {
+    currentAgentCommissionGroup = null;
+    currentAgentCommissionView = 'sent_to_pfa';
+    if (agentCommissionModal) agentCommissionModal.classList.remove('active');
+    if (agentCommissionModalTitle) agentCommissionModalTitle.textContent = 'Agent Commission Breakdown';
+    if (agentCommissionModalSummary) agentCommissionModalSummary.innerHTML = '';
+    if (agentCommissionBreakdownBody) agentCommissionBreakdownBody.innerHTML = '';
+    agentCommissionSentTabBtn?.classList.add('active');
+    agentCommissionActiveTabBtn?.classList.remove('active');
+    agentCommissionClearedTabBtn?.classList.remove('active');
 }
 
 // ==================== TAB SWITCHING ====================
@@ -888,6 +1040,12 @@ function renderAdminSubTabs(parentTabId) {
 }
 
 function runTabEffects(tabId) {
+    if (tabId === 'draft-docs') {
+        renderDraftDocs();
+    }
+    if (tabId === 'escalations') {
+        renderEscalations();
+    }
     if (tabId === 'track-apps') {
         renderTrackApplications();
     }
@@ -896,6 +1054,9 @@ function runTabEffects(tabId) {
     }
     if (tabId === 'payments') {
         renderPaymentQueue();
+    }
+    if (tabId === 'agent-commissions') {
+        renderAgentCommissions();
     }
     if (tabId === 'round-robin') {
         loadRoundRobinMonitor();
@@ -915,12 +1076,15 @@ function switchLeafTab(tabId) {
         'pending-users': 'User Management - Pending Users',
         'pending-agents': 'User Management - Pending Agents',
         'registered-agents': 'User Management - Registered Agents',
+        'draft-docs': 'Application Management - Draft',
         'pending-docs': 'Application Management - Pending',
         'approved-docs': 'Application Management - Approved',
         'rejected-docs': 'Application Management - Rejected',
+        escalations: 'Application Management - Escalations',
         'track-apps': 'Application Management - Track Applications',
         'finally-submitted': 'Application Management - Final Submission',
         payments: 'Application Management - Payment',
+        'agent-commissions': 'Application Management - Agent Commissions',
         audit: 'Audit Log',
         profile: 'My Profile',
         'round-robin': 'Round Robin Monitor',
@@ -1061,11 +1225,13 @@ function loadApprovedAgents() {
     onSnapshot(q, (snapshot) => {
         allApprovedAgents = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
         renderApprovedAgentsTable(allApprovedAgents);
+        renderAgentCommissions();
         updateAdminNavigationCounts();
         renderAdminSubTabs(currentParentTab);
     }, () => {
         allApprovedAgents = [];
         renderApprovedAgentsTable([]);
+        renderAgentCommissions();
         updateAdminNavigationCounts();
         renderAdminSubTabs(currentParentTab);
     });
@@ -1219,7 +1385,7 @@ function renderUsersTable(users) {
     if (!usersTableBody) return;
 
     if (users.length === 0) {
-        usersTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No users found</td></tr>';
+        usersTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No users found</td></tr>';
         return;
     }
 
@@ -1247,6 +1413,7 @@ function renderUsersTable(users) {
                 <td><span class="role-badge ${normalizedRole}">${roleLabel}</span></td>
                 <td>${leaveStatusHtml}</td>
                 <td>${formatDate(user.createdAt)}</td>
+                <td>${formatDate(user.lastLoginAt)}</td>
                 <td>
                     <div class="action-buttons">
                         <button class="action-btn view-btn" onclick="window.viewUser('${user.id}')" title="View">
@@ -1282,14 +1449,17 @@ function loadSubmissions() {
             allSubmissions.push({ id: doc.id, ...doc.data() });
         });
 
+        renderDraftDocs();
         renderPendingDocs();
         renderApprovedDocs();
         renderRejectedDocs();
+        renderEscalations();
         renderTrackApplications();
         renderFinallySubmitted();
         renderPaymentQueue();
+        renderAgentCommissions();
         updatePendingDocCount(allSubmissions.filter(s => s.status === 'pending'));
-        updateRejectedDocCount(allSubmissions.filter(s => s.status === 'rejected'));
+        updateRejectedDocCount(allSubmissions.filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase())));
         updateFinallySubmittedCount();
         updatePaymentPendingCount();
         updateAdminNavigationCounts();
@@ -1297,6 +1467,135 @@ function loadSubmissions() {
     }, (error) => {
         // Silent fail
     });
+}
+
+function loadEscalations() {
+    const q = query(collection(db, 'applicationChats'), where('escalated', '==', true));
+
+    onSnapshot(q, (snapshot) => {
+        allEscalations = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        renderEscalations();
+        updateAdminNavigationCounts();
+        renderAdminSubTabs(currentParentTab);
+    }, () => {
+        allEscalations = [];
+        renderEscalations();
+    });
+}
+
+window.toggleEscalationHandled = async (chatId, handled) => {
+    const normalizedId = String(chatId || '').trim();
+    if (!normalizedId || !currentAdmin?.email) return;
+
+    try {
+        const payload = handled
+            ? {
+                escalationHandled: true,
+                escalationHandledAt: serverTimestamp(),
+                escalationHandledBy: String(currentAdmin.email || '').trim().toLowerCase()
+            }
+            : {
+                escalationHandled: false,
+                escalationHandledAt: null,
+                escalationHandledBy: ''
+            };
+
+        await updateDoc(doc(db, 'applicationChats', normalizedId), payload);
+        showNotification(handled ? 'Escalation marked as handled' : 'Escalation reopened', 'success');
+    } catch (error) {
+        showNotification(`Failed to update escalation: ${error?.message || 'Unknown error'}`, 'error');
+    }
+};
+
+async function getLatestSubmissionById(submissionId) {
+    const normalizedId = String(submissionId || '').trim();
+    if (!normalizedId) return null;
+
+    const cached = allSubmissions.find((s) => s.id === normalizedId) || null;
+
+    try {
+        const snap = await getDoc(doc(db, 'submissions', normalizedId));
+        if (!snap.exists()) return cached;
+
+        const fresh = { id: snap.id, ...snap.data() };
+        const existingIndex = allSubmissions.findIndex((s) => s.id === normalizedId);
+        if (existingIndex >= 0) {
+            allSubmissions[existingIndex] = fresh;
+        } else {
+            allSubmissions.push(fresh);
+        }
+        return fresh;
+    } catch (_) {
+        return cached;
+    }
+}
+
+function getTimestampMsSafe(value) {
+    if (!value) return 0;
+    try {
+        if (typeof value?.toMillis === 'function') return value.toMillis();
+        if (typeof value?.toDate === 'function') return value.toDate().getTime();
+        const parsed = new Date(value).getTime();
+        return Number.isFinite(parsed) ? parsed : 0;
+    } catch (_) {
+        return 0;
+    }
+}
+
+function buildViewerDocumentUrl(fileUrl, submission = null, docIndex = 0) {
+    const cleanUrl = String(fileUrl || '').trim();
+    if (!cleanUrl) return '';
+
+    try {
+        const url = new URL(cleanUrl, window.location.origin);
+        const versionSeed = Math.max(
+            getTimestampMsSafe(submission?.reuploadedAt),
+            getTimestampMsSafe(submission?.finalSubmittedAt),
+            getTimestampMsSafe(submission?.rsaSubmittedAt),
+            getTimestampMsSafe(submission?.fixSubmittedAt),
+            getTimestampMsSafe(submission?.uploadedAt)
+        ) || Date.now();
+        url.searchParams.set('_v', `${versionSeed}-${docIndex}`);
+        return url.toString();
+    } catch (_) {
+        const joiner = cleanUrl.includes('?') ? '&' : '?';
+        return `${cleanUrl}${joiner}_v=${Date.now()}-${docIndex}`;
+    }
+}
+
+function getEffectiveSubmissionDocuments(submission = null) {
+    const rawDocs = Array.isArray(submission?.documents) ? submission.documents : [];
+    if (rawDocs.length <= 1) return rawDocs;
+
+    const latestByType = new Map();
+    rawDocs.forEach((docItem, index) => {
+        const type = String(docItem?.documentType || '').trim();
+        const key = type || `__index_${index}`;
+        const previous = latestByType.get(key);
+        const currentScore = Math.max(
+            getTimestampMsSafe(docItem?.uploadedAt),
+            Number(docItem?.localAddedAt || 0)
+        );
+        const previousScore = previous
+            ? Math.max(
+                getTimestampMsSafe(previous?.uploadedAt),
+                Number(previous?.localAddedAt || 0)
+            )
+            : -1;
+
+        if (!previous || currentScore >= previousScore) {
+            latestByType.set(key, docItem);
+        }
+    });
+
+    const orderedTypes = Array.isArray(submission?.documentTypes) ? submission.documentTypes : [];
+    const normalizedOrder = orderedTypes
+        .map((type) => latestByType.get(String(type || '').trim()))
+        .filter(Boolean);
+
+    const alreadyIncluded = new Set(normalizedOrder);
+    const remainder = Array.from(latestByType.values()).filter((docItem) => !alreadyIncluded.has(docItem));
+    return [...normalizedOrder, ...remainder];
 }
 
 // ==================== UPDATE COUNTS ====================
@@ -1316,135 +1615,93 @@ function updatePendingDocCount(items) {
 }
 
 function updateRejectedDocCount(items) {
-    const rejectedCount = Array.isArray(items) ? items.filter(u => u.status === 'rejected').length : 0;
+    const rejectedCount = Array.isArray(items) ? items.filter(u => ['rejected', 'rejected_by_rsa'].includes(String(u.status || '').toLowerCase())).length : 0;
     setCountBadge('rejectedDocCount', rejectedCount);
     setCountBadge('rejected-docsCount', rejectedCount);
     updateAdminNavigationCounts();
 }
 
 // ==================== RENDER PENDING DOCUMENTS ====================
+function renderDraftDocs() {
+    filterDraftDocs();
+}
+
 function renderPendingDocs() {
-    if (!pendingDocsTableBody) return;
-
-    const pending = allSubmissions.filter(s => s.status === 'pending');
-
-    if (pending.length === 0) {
-        pendingDocsTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No pending documents</td></tr>';
-        return;
-    }
-
-    pendingDocsTableBody.innerHTML = pending.map(sub => {
-        const uploadDate = formatDate(sub.uploadedAt);
-        const uploaderFullName = uploaderNames[sub.uploadedBy] || sub.uploadedBy?.split('@')[0] || 'Unknown';
-        const assignedEmail = (sub.assignedTo || '').toString().trim().toLowerCase();
-        const assignedLabel = assignedEmail
-            ? (uploaderNames[assignedEmail] || assignedEmail.split('@')[0] || assignedEmail)
-            : 'Unassigned';
-        const rejectionReason = sub.comment || '-';
-
-        return `
-            <tr>
-                <td><strong>${sub.customerName || 'Unknown'}</strong></td>
-                <td>${uploadDate}</td>
-                <td>${uploaderFullName}</td>
-                <td>${assignedLabel}</td>
-                <td><span class="status-badge status-pending">Pending</span></td>
-                <td>${rejectionReason}</td>
-                <td>
-                    <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
-                        <i class="fas fa-eye"></i> View All
-                    </button>
-                    <button class="action-btn download-all-btn" onclick="window.downloadAllSubmission('${sub.id}')">
-                        <i class="fas fa-download"></i> Download All
-                    </button>
-                    <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
-                        <i class="fas fa-comments"></i> Chat
-                    </button>
-                </td>
-            </tr>
-        `;
-    }).join('');
+    filterPendingDocs();
 }
 
 // ==================== RENDER APPROVED DOCUMENTS ====================
 function renderApprovedDocs() {
-    if (!approvedDocsTableBody) return;
-
-    const approved = allSubmissions.filter(s => {
-        const status = String(s.status || '').toLowerCase();
-        return status === 'processing_to_pfa' || status === 'approved';
-    });
-
-    if (approved.length === 0) {
-        approvedDocsTableBody.innerHTML = '<tr><td colspan="6" class="no-data">No approved documents</td></tr>';
-        return;
-    }
-
-    approvedDocsTableBody.innerHTML = approved.map(sub => {
-        const uploadDate = formatDate(sub.uploadedAt);
-        const approvedDate = formatDate(sub.reviewedAt);
-        const uploaderFullName = uploaderNames[sub.uploadedBy] || sub.uploadedBy?.split('@')[0] || 'Unknown';
-        const approverFullName = adminNames[sub.reviewedBy] || sub.reviewedBy?.split('@')[0] || 'N/A';
-
-        return `
-            <tr>
-                <td><strong>${sub.customerName || 'Unknown'}</strong></td>
-                <td>${uploadDate}</td>
-                <td>${uploaderFullName}</td>
-                <td>${approverFullName}</td>
-                <td>${approvedDate}</td>
-                <td>
-                    <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
-                        <i class="fas fa-eye"></i> View All
-                    </button>
-                    <button class="action-btn download-all-btn" onclick="window.downloadAllSubmission('${sub.id}')">
-                        <i class="fas fa-download"></i> Download All
-                    </button>
-                    <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
-                        <i class="fas fa-comments"></i> Chat
-                    </button>
-                </td>
-            </tr>
-        `;
-    }).join('');
+    filterApprovedDocs();
 }
 
 // ==================== RENDER REJECTED DOCUMENTS ====================
 function renderRejectedDocs() {
-    if (!rejectedDocsTableBody) return;
+    filterRejectedDocs();
+}
 
-    const rejected = allSubmissions.filter(s => s.status === 'rejected');
+function formatEscalationStageLabel(stageKey) {
+    const normalized = String(stageKey || '').trim().toLowerCase();
+    if (normalized === 'rsa') return 'RSA Stage';
+    if (normalized === 'payment') return 'Payment Stage';
+    return 'Reviewer Stage';
+}
 
-    if (rejected.length === 0) {
-        rejectedDocsTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No rejected documents</td></tr>';
+function getEscalationSubmission(chatItem) {
+    return allSubmissions.find((sub) => sub.id === chatItem.id) || null;
+}
+
+function getEscalationDisplayStatus(chatItem) {
+    return chatItem?.escalationHandled === true ? 'Handled' : 'Open';
+}
+
+function renderEscalations() {
+    if (!escalationsTableBody) return;
+
+    const sortedItems = [...allEscalations].sort((a, b) => {
+        const handledDiff = Number(Boolean(a?.escalationHandled)) - Number(Boolean(b?.escalationHandled));
+        if (handledDiff !== 0) return handledDiff;
+        const aTime = a?.escalatedAt?.toMillis ? a.escalatedAt.toMillis() : new Date(a?.escalatedAt || 0).getTime();
+        const bTime = b?.escalatedAt?.toMillis ? b.escalatedAt.toMillis() : new Date(b?.escalatedAt || 0).getTime();
+        return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+    });
+
+    if (!sortedItems.length) {
+        escalationsTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No escalated applications</td></tr>';
         return;
     }
 
-    rejectedDocsTableBody.innerHTML = rejected.map(sub => {
-        const uploadDate = formatDate(sub.uploadedAt);
-        const rejectedDate = formatDate(sub.reviewedAt);
-        const uploaderFullName = uploaderNames[sub.uploadedBy] || sub.uploadedBy?.split('@')[0] || 'Unknown';
-        const rejecterFullName = adminNames[sub.reviewedBy] || sub.reviewedBy?.split('@')[0] || 'N/A';
-        const rejectionReason = sub.comment || '-';
+    escalationsTableBody.innerHTML = sortedItems.map((chatItem) => {
+        const submission = getEscalationSubmission(chatItem);
+        const customerName = submission?.customerName || chatItem.customerName || 'Unknown';
+        const uploadedBy = getDisplayNameByEmail(submission?.uploadedBy || chatItem.uploadedBy || '');
+        const escalatedBy = getDisplayNameByEmail(chatItem.escalatedBy || '');
+        const stageLabel = formatEscalationStageLabel(chatItem.currentStage);
+        const applicationStatus = formatStatusLabel(submission?.status || chatItem.currentStage || '-');
+        const escalatedAt = formatDate(chatItem.escalatedAt || chatItem.updatedAt);
+        const handledBy = chatItem.escalationHandledBy ? getDisplayNameByEmail(chatItem.escalationHandledBy) : '-';
+        const handledAt = chatItem.escalationHandledAt ? formatDate(chatItem.escalationHandledAt) : '-';
+        const handlingText = chatItem.escalationHandled === true
+            ? `Handled by ${escapeHtml(handledBy)}<br><small>${escapeHtml(handledAt)}</small>`
+            : '<span class="status-badge status-pending">Open</span>';
+        const actionBtn = chatItem.escalationHandled === true
+            ? `<button class="action-btn" onclick="window.toggleEscalationHandled('${chatItem.id}', false)"><i class="fas fa-rotate-left"></i> Reopen</button>`
+            : `<button class="action-btn" onclick="window.toggleEscalationHandled('${chatItem.id}', true)"><i class="fas fa-check"></i> Mark Handled</button>`;
 
         return `
             <tr>
-                <td><strong>${sub.customerName || 'Unknown'}</strong></td>
-                <td>${uploadDate}</td>
-                <td>${uploaderFullName}</td>
-                <td>${rejecterFullName}</td>
-                <td>${rejectedDate}</td>
-                <td><span class="rejection-comment">${rejectionReason}</span></td>
+                <td><strong>${escapeHtml(customerName)}</strong></td>
+                <td>${escapeHtml(uploadedBy)}</td>
+                <td>${escapeHtml(escalatedBy)}</td>
+                <td>${escapeHtml(stageLabel)}</td>
+                <td><span class="status-badge ${chatItem?.escalationHandled === true ? 'status-approved' : 'status-rejected'}">${escapeHtml(getEscalationDisplayStatus(chatItem))}</span><br><small>${escapeHtml(applicationStatus)}</small></td>
+                <td>${escapeHtml(escalatedAt)}</td>
+                <td>${handlingText}</td>
                 <td>
-                    <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
-                        <i class="fas fa-eye"></i> View All
+                    <button class="action-btn" onclick="window.openApplicationChat('${chatItem.id}')">
+                        <i class="fas fa-comments"></i> Open Chat
                     </button>
-                    <button class="action-btn download-all-btn" onclick="window.downloadAllSubmission('${sub.id}')">
-                        <i class="fas fa-download"></i> Download All
-                    </button>
-                    <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
-                        <i class="fas fa-comments"></i> Chat
-                    </button>
+                    ${actionBtn}
                 </td>
             </tr>
         `;
@@ -1459,7 +1716,7 @@ function renderFinallySubmitted() {
     const finallySubmitted = allSubmissions.filter(s => s.finalSubmitted === true || s.rsaSubmitted === true);
 
     if (finallySubmitted.length === 0) {
-        finallySubmittedTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No finally submitted applications</td></tr>';
+        finallySubmittedTableBody.innerHTML = '<tr><td colspan="10" class="no-data">No finally submitted applications</td></tr>';
         updateFinallySubmittedCount();
         return;
     }
@@ -1473,6 +1730,8 @@ function renderFinallySubmitted() {
 
         const rsaEmail = sub.finalSubmittedBy || sub.rsaSubmittedBy || sub.assignedToRSA || '';
         const rsaName = rsaEmail ? getDisplayNameByEmail(rsaEmail) : '-';
+        const paymentEmail = sub.assignedToPayment || '';
+        const paymentName = paymentEmail ? getDisplayNameByEmail(paymentEmail) : '-';
 
         const uploadedAt = formatDate(sub.uploadedAt);
         const approvedAt = formatDate(sub.reviewedAt);
@@ -1490,6 +1749,7 @@ function renderFinallySubmitted() {
                 <td>${escapeHtml(uploaderName)}</td>
                 <td>${escapeHtml(reviewerName)}</td>
                 <td>${escapeHtml(rsaName)}</td>
+                <td>${escapeHtml(paymentName)}</td>
                 <td>${uploadedAt}</td>
                 <td>${approvedAt}</td>
                 <td>${submittedAt}</td>
@@ -1522,7 +1782,7 @@ function renderPaymentQueue() {
     });
 
     if (paymentQueue.length === 0) {
-        paymentsTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No payment records available</td></tr>';
+        paymentsTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No payment records available</td></tr>';
         return;
     }
 
@@ -1531,20 +1791,226 @@ function renderPaymentQueue() {
         const status = String(sub.status || '').toLowerCase();
         const isPaid = status === 'paid';
         const statusLabel = isPaid ? 'Paid' : 'Sent to PFA';
+        const uploaderEmail = String(sub.uploadedBy || '').trim();
+        const uploaderName = uploaderEmail ? getDisplayNameByEmail(uploaderEmail) : '-';
+        const paymentEmail = String(sub.assignedToPayment || '').trim();
+        const paymentName = paymentEmail ? getDisplayNameByEmail(paymentEmail) : '-';
 
         return `
             <tr>
                 <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
                 <td>${escapeHtml(pfa)}</td>
+                <td>${escapeHtml(uploaderName)}</td>
                 <td>${escapeHtml(sub.agentName || '-')}</td>
+                <td>${escapeHtml(paymentName)}</td>
                 <td>${formatCurrency(twentyFive)}</td>
                 <td>${formatCurrency(commission2)}</td>
                 <td><span class="status-badge status-approved">${statusLabel}</span></td>
-                <td><span style="color:#64748b;font-size:12px;font-weight:700;">Read only</span></td>
             </tr>
         `;
     }).join('');
 }
+
+function getSubmissionHasAgent(sub) {
+    return Boolean(String(sub?.agentId || '').trim() || String(sub?.agentName || '').trim());
+}
+
+function isSubmissionCommissionTrackable(sub) {
+    const status = String(sub?.status || '').toLowerCase();
+    return status === 'sent_to_pfa' || status === 'rsa_submitted' || status === 'paid' || status === 'cleared' || sub?.finalSubmitted === true || sub?.rsaSubmitted === true;
+}
+
+function getSubmissionAgentCommissionKey(sub) {
+    const agentId = String(sub?.agentId || '').trim();
+    if (agentId) return `agent:${agentId}`;
+    return `name:${String(sub?.agentName || '').trim().toLowerCase()}`;
+}
+
+function getAgentCommissionKey(agent) {
+    const agentId = String(agent?.id || agent?.agentId || '').trim();
+    if (agentId) return `agent:${agentId}`;
+    return `name:${String(agent?.fullName || agent?.agentName || '').trim().toLowerCase()}`;
+}
+
+function buildAgentCommissionGroups() {
+    const groups = new Map();
+
+    allApprovedAgents.forEach((agent) => {
+        const key = getAgentCommissionKey(agent);
+        groups.set(key, {
+            key,
+            agentId: String(agent.id || agent.agentId || '').trim(),
+            agentName: String(agent.fullName || agent.agentName || 'Unknown Agent').trim(),
+            registeredByEmail: String(agent.createdBy || '').trim(),
+            registeredByName: String(agent.createdBy || '').trim() ? getDisplayNameByEmail(String(agent.createdBy || '').trim()) : '-',
+            bankName: String(agent.bankName || agent.accountBank || '').trim() || '-',
+            accountNumber: String(agent.accountNumber || agent.agentAccountNumber || '').trim() || '-',
+            sentToPfaSubmissions: [],
+            activeSubmissions: [],
+            clearedSubmissions: [],
+            sentToPfaCommission: 0,
+            activeCommission: 0,
+            clearedCommission: 0,
+            totalCommission: 0
+        });
+    });
+
+    allSubmissions.forEach((sub) => {
+        if (!getSubmissionHasAgent(sub) || !isSubmissionCommissionTrackable(sub)) return;
+
+        const key = getSubmissionAgentCommissionKey(sub);
+        const existing = groups.get(key) || {
+            key,
+            agentId: String(sub.agentId || '').trim(),
+            agentName: String(sub.agentName || 'Unknown Agent').trim() || 'Unknown Agent',
+            registeredByEmail: String(sub.uploadedBy || '').trim(),
+            registeredByName: String(sub.uploadedBy || '').trim() ? getDisplayNameByEmail(String(sub.uploadedBy || '').trim()) : '-',
+            bankName: String(sub.agentAccountBank || '').trim() || '-',
+            accountNumber: String(sub.agentAccountNumber || '').trim() || '-',
+            sentToPfaSubmissions: [],
+            activeSubmissions: [],
+            clearedSubmissions: [],
+            sentToPfaCommission: 0,
+            activeCommission: 0,
+            clearedCommission: 0,
+            totalCommission: 0
+        };
+
+        const normalizedStatus = String(sub.status || '').toLowerCase();
+        const { commission2 } = getSubmissionFinancials(sub);
+
+        if (normalizedStatus === 'cleared') {
+            existing.clearedSubmissions.push(sub);
+            existing.clearedCommission += commission2;
+        } else if (normalizedStatus === 'paid') {
+            existing.activeSubmissions.push(sub);
+            existing.activeCommission += commission2;
+        } else {
+            existing.sentToPfaSubmissions.push(sub);
+            existing.sentToPfaCommission += commission2;
+        }
+
+        existing.totalCommission = existing.sentToPfaCommission + existing.activeCommission + existing.clearedCommission;
+        if (existing.bankName === '-' && String(sub.agentAccountBank || '').trim()) {
+            existing.bankName = String(sub.agentAccountBank || '').trim();
+        }
+        if (existing.accountNumber === '-' && String(sub.agentAccountNumber || '').trim()) {
+            existing.accountNumber = String(sub.agentAccountNumber || '').trim();
+        }
+        if ((!existing.registeredByName || existing.registeredByName === '-') && String(sub.uploadedBy || '').trim()) {
+            existing.registeredByEmail = String(sub.uploadedBy || '').trim();
+            existing.registeredByName = getDisplayNameByEmail(existing.registeredByEmail);
+        }
+        groups.set(key, existing);
+    });
+
+    return Array.from(groups.values()).sort((a, b) => {
+        if (b.totalCommission !== a.totalCommission) return b.totalCommission - a.totalCommission;
+        return a.agentName.localeCompare(b.agentName);
+    });
+}
+
+function renderAgentCommissions() {
+    if (!agentCommissionTableBody) return;
+
+    const groups = buildAgentCommissionGroups();
+    if (!groups.length) {
+        agentCommissionTableBody.innerHTML = '<tr><td colspan="6" class="no-data">No agent commission records available</td></tr>';
+        return;
+    }
+
+    agentCommissionTableBody.innerHTML = groups.map((group) => `
+        <tr>
+            <td><strong>${escapeHtml(group.agentName)}</strong></td>
+            <td>${escapeHtml(group.registeredByName || group.registeredByEmail || '-')}</td>
+            <td>${escapeHtml(group.bankName)}</td>
+            <td>${escapeHtml(group.accountNumber)}</td>
+            <td><strong>${formatCurrency(group.totalCommission)}</strong></td>
+            <td>
+                <button class="action-btn view-btn-small" onclick="window.openAgentCommissionModal('${encodeURIComponent(group.key)}')">
+                    <i class="fas fa-eye"></i> View
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function renderAgentCommissionModalSummary(group) {
+    if (!agentCommissionModalSummary) return;
+    agentCommissionModalSummary.innerHTML = `
+        <div class="agent-commission-summary-card">
+            <span class="agent-commission-summary-label">Agent</span>
+            <strong>${escapeHtml(group.agentName)}</strong>
+        </div>
+        <div class="agent-commission-summary-card">
+            <span class="agent-commission-summary-label">Sent to PFA Commission</span>
+            <strong>${formatCurrency(group.sentToPfaCommission)}</strong>
+        </div>
+        <div class="agent-commission-summary-card">
+            <span class="agent-commission-summary-label">Active Commission</span>
+            <strong>${formatCurrency(group.activeCommission)}</strong>
+        </div>
+        <div class="agent-commission-summary-card">
+            <span class="agent-commission-summary-label">Cleared Commission</span>
+            <strong>${formatCurrency(group.clearedCommission)}</strong>
+        </div>
+        <div class="agent-commission-summary-card">
+            <span class="agent-commission-summary-label">Total Commission</span>
+            <strong>${formatCurrency(group.totalCommission)}</strong>
+        </div>
+    `;
+}
+
+function renderAgentCommissionBreakdown(view = 'active') {
+    if (!agentCommissionBreakdownBody || !currentAgentCommissionGroup) return;
+
+    const list = view === 'cleared'
+        ? currentAgentCommissionGroup.clearedSubmissions
+        : view === 'active'
+            ? currentAgentCommissionGroup.activeSubmissions
+            : currentAgentCommissionGroup.sentToPfaSubmissions;
+    const emptyLabel = view === 'cleared' ? 'cleared' : view === 'active' ? 'active' : 'sent to PFA';
+    const rows = list
+        .map((sub) => {
+            const { twentyFive, commission2 } = getSubmissionFinancials(sub);
+            return `
+                <tr>
+                    <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
+                    <td>${formatCurrency(twentyFive)}</td>
+                    <td>${formatCurrency(commission2)}</td>
+                    <td>${escapeHtml(formatStatusLabel(sub.status || '-'))}</td>
+                </tr>
+            `;
+        }).join('');
+
+    agentCommissionBreakdownBody.innerHTML = rows || `<tr><td colspan="4" class="no-data">No ${emptyLabel} commission records for this agent</td></tr>`;
+}
+
+function switchAgentCommissionBreakdownTab(view = 'sent_to_pfa') {
+    currentAgentCommissionView = view === 'cleared' ? 'cleared' : view === 'active' ? 'active' : 'sent_to_pfa';
+    agentCommissionSentTabBtn?.classList.toggle('active', currentAgentCommissionView === 'sent_to_pfa');
+    agentCommissionActiveTabBtn?.classList.toggle('active', currentAgentCommissionView === 'active');
+    agentCommissionClearedTabBtn?.classList.toggle('active', currentAgentCommissionView === 'cleared');
+    renderAgentCommissionBreakdown(currentAgentCommissionView);
+}
+
+window.openAgentCommissionModal = (groupKey) => {
+    const normalizedKey = decodeURIComponent(String(groupKey || '').trim());
+    const group = buildAgentCommissionGroups().find((entry) => entry.key === normalizedKey);
+    if (!group) {
+        showNotification('Agent commission breakdown not found', 'error');
+        return;
+    }
+
+    currentAgentCommissionGroup = group;
+    currentAgentCommissionView = 'sent_to_pfa';
+    if (agentCommissionModalTitle) {
+        agentCommissionModalTitle.textContent = `${group.agentName} - Commission Breakdown`;
+    }
+    renderAgentCommissionModalSummary(group);
+    switchAgentCommissionBreakdownTab('sent_to_pfa');
+    agentCommissionModal?.classList.add('active');
+};
 
 // ==================== UPDATE FINALLY SUBMITTED COUNT ====================
 function updateFinallySubmittedCount() {
@@ -1594,9 +2060,10 @@ function getSubmissionFinancials(sub) {
     const computed25 = roundDownToNearestThousand(rsaBalance * 0.25);
     const stored25 = parseMoney(details.rsa25Percent || sub?.rsa25Percent || 0);
     const twentyFive = stored25 ? roundDownToNearestThousand(stored25) : computed25;
-    const commission2 = twentyFive * 0.02;
+    const commissionRate = resolveSubmissionCommissionRate(sub);
+    const commission2 = getSubmissionCommissionAmount(sub, twentyFive);
     const pfa = String(details.pfa || sub?.pfa || '').trim() || '-';
-    return { pfa, twentyFive, commission2 };
+    return { pfa, twentyFive, commission2, commissionRate };
 }
 
 function formatStatusLabel(status) {
@@ -1604,6 +2071,7 @@ function formatStatusLabel(status) {
     if (!normalized) return '-';
     if (normalized === 'processing_to_pfa' || normalized === 'approved') return 'Processing to PFA';
     if (normalized === 'sent_to_pfa' || normalized === 'rsa_submitted') return 'Sent to PFA';
+    if (normalized === 'rejected_by_rsa') return 'Rejected by RSA';
     if (normalized === 'paid') return 'Paid';
     if (normalized === 'cleared') return 'Cleared';
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
@@ -1710,32 +2178,31 @@ function getLeaveActionLabel(user = {}) {
 }
 
 // ==================== VIEW ALL DOCUMENTS FOR A SUBMISSION ====================
-window.viewSubmissionDocs = (submissionId) => {
-    const sub = allSubmissions.find(s => s.id === submissionId);
-    if (!sub || !sub.documents || sub.documents.length === 0) {
+window.viewSubmissionDocs = async (submissionId) => {
+    const sub = await getLatestSubmissionById(submissionId);
+    const docs = getEffectiveSubmissionDocuments(sub);
+    if (!sub || docs.length === 0) {
         showNotification('No documents available', 'error');
         return;
     }
 
-    const firstDoc = sub.documents[0];
+    const firstDoc = docs[0];
     const docTypeLabel = DOCUMENT_TYPES[firstDoc.documentType] || firstDoc.documentType || 'Document';
 
     if (viewerModal && viewerFileName && documentViewer) {
         viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel}`;
-        const cleanUrl = firstDoc.fileUrl?.trim();
-        documentViewer.src = cleanUrl || '';
+        documentViewer.src = buildViewerDocumentUrl(firstDoc.fileUrl, sub, 0);
         viewerModal.classList.add('active');
     }
 
-    if (sub.documents.length > 1) {
+    if (docs.length > 1) {
         let currentIndex = 0;
 
         const showDoc = (index) => {
-            const doc = sub.documents[index];
+            const doc = docs[index];
             const docTypeLabel = DOCUMENT_TYPES[doc.documentType] || doc.documentType || 'Document';
-            viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel} (${index + 1}/${sub.documents.length})`;
-            const cleanUrl = doc.fileUrl?.trim();
-            documentViewer.src = cleanUrl || '';
+            viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel} (${index + 1}/${docs.length})`;
+            documentViewer.src = buildViewerDocumentUrl(doc.fileUrl, sub, index);
         };
 
         const addViewerNav = () => {
@@ -1752,8 +2219,8 @@ window.viewSubmissionDocs = (submissionId) => {
                 <button id="prevDoc" class="action-btn" ${currentIndex === 0 ? 'disabled' : ''}>
                     <i class="fas fa-chevron-left"></i> Prev
                 </button>
-                <span id="docCounter" style="font-size: 14px; color: #666;">${currentIndex + 1}/${sub.documents.length}</span>
-                <button id="nextDoc" class="action-btn" ${currentIndex === sub.documents.length - 1 ? 'disabled' : ''}>
+                <span id="docCounter" style="font-size: 14px; color: #666;">${currentIndex + 1}/${docs.length}</span>
+                <button id="nextDoc" class="action-btn" ${currentIndex === docs.length - 1 ? 'disabled' : ''}>
                     <i class="fas fa-chevron-right"></i> Next
                 </button>
             `;
@@ -1769,7 +2236,7 @@ window.viewSubmissionDocs = (submissionId) => {
             };
 
             document.getElementById('nextDoc').onclick = () => {
-                if (currentIndex < sub.documents.length - 1) {
+                if (currentIndex < docs.length - 1) {
                     currentIndex++;
                     showDoc(currentIndex);
                     addViewerNav();
@@ -1783,13 +2250,13 @@ window.viewSubmissionDocs = (submissionId) => {
 
 // ==================== DOWNLOAD ALL SUBMISSION WITH PROGRESS ====================
 window.downloadAllSubmission = async (submissionId) => {
-    const sub = allSubmissions.find(s => s.id === submissionId);
+    const sub = await getLatestSubmissionById(submissionId);
     if (!sub) {
         showNotification('Submission not found', 'error');
         return;
     }
 
-    const docs = sub.documents || [];
+    const docs = getEffectiveSubmissionDocuments(sub);
     if (!docs.length) {
         showNotification('No documents available for this application', 'warning');
         return;
@@ -2108,8 +2575,13 @@ function openAgentDetailsModal(selected) {
     const registeredByName = registeredByRaw ? getDisplayNameByEmail(registeredByRaw) : '-';
     const registeredBy = registeredByName && registeredByName !== registeredByRaw ? registeredByName : (registeredByName || registeredByRaw || '-');
     const statusRaw = String(selected.status || 'pending').toLowerCase().trim();
-    const statusClass = (statusRaw === 'processing_to_pfa' || statusRaw === 'approved') ? 'status-approved' : (statusRaw === 'rejected' ? 'status-rejected' : 'pending');
-    const statusLabel = formatStatusLabel(statusRaw || 'pending');
+    const normalizedAgentStatus = statusRaw === 'processing_to_pfa' ? 'approved' : statusRaw;
+    const statusClass = normalizedAgentStatus === 'approved'
+        ? 'status-approved'
+        : (normalizedAgentStatus === 'rejected' ? 'status-rejected' : 'pending');
+    const statusLabel = normalizedAgentStatus === 'approved'
+        ? 'Approved'
+        : (normalizedAgentStatus === 'rejected' ? 'Rejected' : 'Pending');
 
     detailsDiv.innerHTML = `
         <div class="detail-section">
@@ -2349,10 +2821,6 @@ window.viewUser = async (userId) => {
                         <span class="detail-label">Location:</span>
                         <span class="detail-value">${user.location || 'N/A'}</span>
                     </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Department:</span>
-                        <span class="detail-value">${user.department || 'N/A'}</span>
-                    </div>
                 </div>
                 <div class="detail-section">
                     <h4>Account Information</h4>
@@ -2367,6 +2835,10 @@ window.viewUser = async (userId) => {
                     <div class="detail-row">
                         <span class="detail-label">Joined:</span>
                         <span class="detail-value">${formatDate(user.createdAt)}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Last Login:</span>
+                        <span class="detail-value">${formatDate(user.lastLoginAt)}</span>
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">Submissions:</span>
@@ -2424,6 +2896,16 @@ function tsToDate(ts) {
     }
 }
 
+function matchesExactDate(ts, dateValue) {
+    if (!dateValue) return true;
+    const date = tsToDate(ts);
+    if (!date) return false;
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}` === dateValue;
+}
+
 function renderTrackApplications() {
     if (!trackAppsTableBody) return;
 
@@ -2436,7 +2918,9 @@ function renderTrackApplications() {
     const end = endVal ? new Date(endVal) : null;
     if (end) end.setHours(23, 59, 59, 999);
 
-    let list = Array.isArray(allSubmissions) ? [...allSubmissions] : [];
+    let list = Array.isArray(allSubmissions)
+        ? allSubmissions.filter((s) => String(s.status || '').toLowerCase() !== 'draft')
+        : [];
 
     if (statusFilter && statusFilter !== 'all') {
         list = list.filter((s) => String(s.status || '').toLowerCase() === statusFilter);
@@ -3017,8 +3501,99 @@ function filterUsers() {
     renderUsersTable(filtered);
 }
 
+window.deleteDraftApplication = (submissionId, triggerBtn = null) => {
+    const sub = allSubmissions.find((s) => s.id === submissionId && String(s.status || '').toLowerCase() === 'draft');
+    if (!sub) {
+        showNotification('Draft application not found', 'error');
+        return;
+    }
+
+    const draftName = String(sub.customerName || 'Untitled Draft').trim();
+    showConfirmModal(
+        'Delete Draft Application',
+        `Delete draft application "${draftName}" permanently?`,
+        async () => {
+            const originalHtml = triggerBtn?.innerHTML || '';
+            try {
+                if (triggerBtn) {
+                    triggerBtn.disabled = true;
+                    triggerBtn.classList.add('loading');
+                    triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+                }
+                await deleteDoc(doc(db, 'submissions', submissionId));
+                await addDoc(collection(db, 'audit'), {
+                    action: 'draft_application_deleted',
+                    submissionId,
+                    customerName: sub.customerName || '',
+                    uploadedBy: sub.uploadedBy || '',
+                    performedBy: currentAdmin?.email || '',
+                    timestamp: serverTimestamp()
+                });
+                showNotification('Draft application deleted', 'success');
+                closeConfirmModal();
+            } catch (error) {
+                if (triggerBtn) {
+                    triggerBtn.disabled = false;
+                    triggerBtn.classList.remove('loading');
+                    triggerBtn.innerHTML = originalHtml || '<i class="fas fa-trash"></i> Delete';
+                }
+                showNotification('Failed to delete draft application', 'error');
+            }
+        }
+    );
+};
+
+function filterDraftDocs() {
+    const searchTerm = document.getElementById('draftDocSearch')?.value.toLowerCase() || '';
+    const dateFilter = document.getElementById('draftDocDate')?.value || '';
+    const drafts = allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'draft');
+
+    const filtered = drafts.filter((sub) => {
+        const matchesSearch = searchTerm === '' ||
+            String(sub.customerName || '').toLowerCase().includes(searchTerm) ||
+            String(sub.uploadedBy || '').toLowerCase().includes(searchTerm) ||
+            String(sub.agentName || '').toLowerCase().includes(searchTerm);
+        const relevantDate = sub.draftSavedAt || sub.uploadedAt || sub.updatedAt;
+        const matchesDate = matchesExactDate(relevantDate, dateFilter);
+        return matchesSearch && matchesDate;
+    });
+
+    if (!draftDocsTableBody) return;
+
+    if (filtered.length === 0) {
+        draftDocsTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No draft applications</td></tr>';
+        return;
+    }
+
+    draftDocsTableBody.innerHTML = filtered.map((sub) => {
+        const uploaderEmail = String(sub.uploadedBy || '').trim().toLowerCase();
+        const uploaderLabel = uploaderEmail ? (uploaderNames[uploaderEmail] || uploaderEmail.split('@')[0] || uploaderEmail) : 'Unknown';
+        const lastSaved = sub.draftSavedAt || sub.uploadedAt || sub.updatedAt;
+        const docCount = Array.isArray(sub.documents) ? sub.documents.length : 0;
+        return `
+            <tr>
+                <td><strong>${escapeHtml(sub.customerName || 'Untitled Draft')}</strong></td>
+                <td>${escapeHtml(uploaderLabel)}</td>
+                <td>${escapeHtml(sub.agentName || 'No Agent')}</td>
+                <td>${docCount}</td>
+                <td>${formatDate(lastSaved)}</td>
+                <td><span class="status-badge status-pending">Draft</span></td>
+                <td>
+                    <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
+                        <i class="fas fa-eye"></i> View All
+                    </button>
+                    <button class="action-btn" onclick="window.deleteDraftApplication('${sub.id}', this)" style="background:#b91c1c;color:#fff;border:none;">
+                        <i class="fas fa-trash"></i> Delete
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
 function filterPendingDocs() {
     const searchTerm = document.getElementById('pendingDocSearch')?.value.toLowerCase() || '';
+    const dateFilter = document.getElementById('pendingDocDate')?.value || '';
     const pending = allSubmissions.filter(s => s.status === 'pending');
 
     const filtered = pending.filter(sub => {
@@ -3026,7 +3601,9 @@ function filterPendingDocs() {
             sub.customerName?.toLowerCase().includes(searchTerm) ||
             sub.uploadedBy?.toLowerCase().includes(searchTerm) ||
             sub.assignedTo?.toLowerCase().includes(searchTerm);
-        return matchesSearch;
+        const relevantDate = isResubmittedSubmission(sub) ? (sub.reuploadedAt || sub.uploadedAt) : sub.uploadedAt;
+        const matchesDate = matchesExactDate(relevantDate, dateFilter);
+        return matchesSearch && matchesDate;
     });
 
     if (!pendingDocsTableBody) return;
@@ -3037,14 +3614,22 @@ function filterPendingDocs() {
     }
 
     pendingDocsTableBody.innerHTML = filtered.map(sub => {
-        const uploadDate = sub.uploadedAt ?
-            (sub.uploadedAt.toDate ? sub.uploadedAt.toDate() : new Date(sub.uploadedAt)).toLocaleString() : 'N/A';
+        const isResubmitted = isResubmittedSubmission(sub);
+        const preferredDate = isResubmitted ? (sub.reuploadedAt || sub.uploadedAt) : sub.uploadedAt;
+        const uploadDate = preferredDate ?
+            (preferredDate.toDate ? preferredDate.toDate() : new Date(preferredDate)).toLocaleString() : 'N/A';
         const uploaderFullName = uploaderNames[sub.uploadedBy] || sub.uploadedBy?.split('@')[0] || 'Unknown';
         const assignedEmail = (sub.assignedTo || '').toString().trim().toLowerCase();
         const assignedLabel = assignedEmail
             ? (uploaderNames[assignedEmail] || assignedEmail.split('@')[0] || assignedEmail)
             : 'Unassigned';
-        const rejectionReason = sub.comment || '-';
+        const reasonCell = getRejectCount(sub) > 0
+            ? `<button class="action-btn reason-btn" onclick="window.openAdminRejectionReasonModal('${sub.id}')"><i class="fas fa-eye"></i> View</button>`
+            : '-';
+        const statusCell = `
+            <span class="status-badge status-pending">Pending</span>
+            ${isResubmitted ? '<span class="status-badge status-resubmitted">Resubmitted</span>' : ''}
+        `;
 
         return `
             <tr>
@@ -3052,8 +3637,8 @@ function filterPendingDocs() {
                 <td>${uploadDate}</td>
                 <td>${uploaderFullName}</td>
                 <td>${assignedLabel}</td>
-                <td><span class="status-badge status-pending">Pending</span></td>
-                <td>${rejectionReason}</td>
+                <td>${statusCell}</td>
+                <td>${reasonCell}</td>
                 <td>
                     <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
                         <i class="fas fa-eye"></i> View All
@@ -3072,6 +3657,7 @@ function filterPendingDocs() {
 
 function filterApprovedDocs() {
     const searchTerm = document.getElementById('approvedDocSearch')?.value.toLowerCase() || '';
+    const dateFilter = document.getElementById('approvedDocDate')?.value || '';
     const approved = allSubmissions.filter(s => {
         const status = String(s.status || '').toLowerCase();
         return status === 'processing_to_pfa' || status === 'approved';
@@ -3081,7 +3667,8 @@ function filterApprovedDocs() {
         const matchesSearch = searchTerm === '' ||
             sub.customerName?.toLowerCase().includes(searchTerm) ||
             sub.uploadedBy?.toLowerCase().includes(searchTerm);
-        return matchesSearch;
+        const matchesDate = matchesExactDate(sub.reviewedAt || sub.uploadedAt, dateFilter);
+        return matchesSearch && matchesDate;
     });
 
     if (!approvedDocsTableBody) return;
@@ -3124,53 +3711,25 @@ function filterApprovedDocs() {
 
 function filterRejectedDocs() {
     const searchTerm = document.getElementById('rejectedDocSearch')?.value.toLowerCase() || '';
-    const rejected = allSubmissions.filter(s => s.status === 'rejected');
+    const dateFilter = document.getElementById('rejectedDocDate')?.value || '';
+    const rejected = allSubmissions.filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase()));
 
     const filtered = rejected.filter(sub => {
         const matchesSearch = searchTerm === '' ||
             sub.customerName?.toLowerCase().includes(searchTerm) ||
             sub.uploadedBy?.toLowerCase().includes(searchTerm);
-        return matchesSearch;
+        const matchesDate = matchesExactDate(sub.latestRejectedAt || sub.rejectedAt || sub.reviewedAt || sub.uploadedAt, dateFilter);
+        return matchesSearch && matchesDate;
     });
 
     if (!rejectedDocsTableBody) return;
 
     if (filtered.length === 0) {
-        rejectedDocsTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No rejected documents</td></tr>';
+        rejectedDocsTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No rejected documents</td></tr>';
         return;
     }
 
-    rejectedDocsTableBody.innerHTML = filtered.map(sub => {
-        const uploadDate = sub.uploadedAt ?
-            (sub.uploadedAt.toDate ? sub.uploadedAt.toDate() : new Date(sub.uploadedAt)).toLocaleString() : 'N/A';
-        const rejectedDate = sub.reviewedAt ?
-            (sub.reviewedAt.toDate ? sub.reviewedAt.toDate() : new Date(sub.reviewedAt)).toLocaleString() : 'N/A';
-        const uploaderFullName = uploaderNames[sub.uploadedBy] || sub.uploadedBy?.split('@')[0] || 'Unknown';
-        const rejecterFullName = adminNames[sub.reviewedBy] || sub.reviewedBy?.split('@')[0] || 'N/A';
-        const rejectionReason = sub.comment || '-';
-
-        return `
-            <tr>
-                <td><strong>${sub.customerName || 'Unknown'}</strong></td>
-                <td>${uploadDate}</td>
-                <td>${uploaderFullName}</td>
-                <td>${rejecterFullName}</td>
-                <td>${rejectedDate}</td>
-                <td><span class="rejection-comment">${rejectionReason}</span></td>
-                <td>
-                    <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
-                        <i class="fas fa-eye"></i> View All
-                    </button>
-                    <button class="action-btn download-all-btn" onclick="window.downloadAllSubmission('${sub.id}')">
-                        <i class="fas fa-download"></i> Download All
-                    </button>
-                    <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
-                        <i class="fas fa-comments"></i> Chat
-                    </button>
-                </td>
-            </tr>
-        `;
-    }).join('');
+    rejectedDocsTableBody.innerHTML = filtered.map(renderRejectedDocRow).join('');
 }
 
 function filterAudit() {
@@ -3192,6 +3751,33 @@ function filterAudit() {
 
     renderAuditTable(filtered);
 }
+
+window.openAdminRejectionReasonModal = (submissionId) => {
+    const sub = allSubmissions.find((s) => s.id === submissionId);
+    if (!sub || !adminRejectionReasonModal) return;
+
+    const entries = getRejectionHistoryEntries(sub);
+    if (adminRejectionReasonCustomerName) {
+        adminRejectionReasonCustomerName.textContent = sub.customerName || 'Unknown';
+    }
+    if (adminRejectionReasonHistory) {
+        if (entries.length) {
+            adminRejectionReasonHistory.innerHTML = `
+                <ol class="rejection-history-list">
+                    ${entries.map((entry, index) => {
+                        const timeText = entry.rejectedAt ? formatDate(entry.rejectedAt) : 'Time not available';
+                        return `<li><strong>Rejection ${index + 1}:</strong> ${escapeHtml(entry.reason)}<span class="rejection-history-time">${escapeHtml(timeText)}</span></li>`;
+                    }).join('')}
+                </ol>
+            `;
+        } else {
+            adminRejectionReasonHistory.textContent = 'No rejection reason available.';
+        }
+        adminRejectionReasonHistory.style.display = 'block';
+    }
+
+    adminRejectionReasonModal.classList.add('active');
+};
 
 // ==================== MODAL CONTROLS ====================
 function closeUserModal() {
@@ -3299,15 +3885,35 @@ function showConfirmModal(title, message, onConfirm) {
     const confirmBtn = document.getElementById('confirmAction');
     if (confirmBtn) {
         const newConfirmBtn = confirmBtn.cloneNode(true);
+        newConfirmBtn.disabled = false;
+        newConfirmBtn.classList.remove('loading');
+        newConfirmBtn.innerHTML = 'Confirm';
         confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
         newConfirmBtn.addEventListener('click', async () => {
-            await onConfirm();
+            const originalHtml = newConfirmBtn.innerHTML;
+            newConfirmBtn.disabled = true;
+            newConfirmBtn.classList.add('loading');
+            newConfirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            try {
+                await onConfirm();
+            } catch (error) {
+                newConfirmBtn.disabled = false;
+                newConfirmBtn.classList.remove('loading');
+                newConfirmBtn.innerHTML = originalHtml;
+                throw error;
+            }
         });
     }
 }
 
 function closeConfirmModal() {
     document.getElementById('confirmModal').classList.remove('active');
+    const confirmBtn = document.getElementById('confirmAction');
+    if (confirmBtn) {
+        confirmBtn.disabled = false;
+        confirmBtn.classList.remove('loading');
+        confirmBtn.innerHTML = 'Confirm';
+    }
 }
 
 // ==================== NOTIFICATION SYSTEM ====================
@@ -3380,7 +3986,7 @@ async function loadRoundRobinMonitor() {
 }
 
 async function loadDistributionStats(viewers) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = await getTrustedDateKey();
     const statsBody = document.getElementById('distributionStatsBody');
     if (!statsBody) return;
 
@@ -3390,12 +3996,12 @@ async function loadDistributionStats(viewers) {
         const assignedQuery = query(
             collection(db, 'submissions'),
             where('assignedTo', '==', viewer.email),
-            where('uploadedAt', '>=', new Date(today + 'T00:00:00Z'))
+            where('uploadedAt', '>=', new Date(`${today}T00:00:00+01:00`))
         );
         const assignedSnap = await getDocs(assignedQuery);
         const assignedCount = assignedSnap.size;
 
-        const completedDocs = assignedSnap.docs.filter(d => ['approved', 'rejected'].includes(d.data().status));
+        const completedDocs = assignedSnap.docs.filter(d => ['approved', 'rejected', 'rejected_by_rsa'].includes(d.data().status));
         const completedCount = completedDocs.length;
 
         const pendingCount = assignedCount - completedCount;
@@ -3517,7 +4123,7 @@ async function handleTestDistribution() {
                 lastDate = data.lastDate || '';
             }
 
-            const today = new Date().toISOString().slice(0, 10);
+            const today = await getTrustedDateKey();
             if (lastDate !== today) lastIndex = -1;
 
             const nextIndex = (lastIndex + 1) % viewers.length;
@@ -3561,8 +4167,13 @@ async function loadRSARoundRobinMonitor() {
         const rsaUsers = rsaSnap.docs.map(d => ({
             id: d.id,
             email: d.data().email,
-            fullName: d.data().fullName || d.data().email
-        })).sort((a, b) => a.email.localeCompare(b.email));
+            fullName: d.data().fullName || d.data().email,
+            status: String(d.data().status || 'active').toLowerCase(),
+            leaveStatus: String(d.data().leaveStatus || '').toLowerCase(),
+            skipRsaRoundRobin: d.data().skipRsaRoundRobin === true
+        }))
+            .filter((user) => user.status !== 'deactivated' && user.leaveStatus !== 'on_leave' && user.skipRsaRoundRobin !== true)
+            .sort((a, b) => a.email.localeCompare(b.email));
 
         const nextIndex = (lastIndex + 1) % (rsaUsers.length || 1);
         const nextRSAEmail = rsaUsers[nextIndex]?.email || 'N/A';
@@ -3585,7 +4196,7 @@ async function loadRSARoundRobinMonitor() {
 }
 
 async function loadRSADistributionStats(rsaUsers) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = await getTrustedDateKey();
     const statsBody = document.getElementById('distributionStatsRSABody');
     if (!statsBody) return;
 
@@ -3595,7 +4206,7 @@ async function loadRSADistributionStats(rsaUsers) {
         const assignedQuery = query(
             collection(db, 'submissions'),
             where('assignedToRSA', '==', rsa.email),
-            where('uploadedAt', '>=', new Date(today + 'T00:00:00Z'))
+            where('uploadedAt', '>=', new Date(`${today}T00:00:00+01:00`))
         );
         const assignedSnap = await getDocs(assignedQuery);
         const assignedCount = assignedSnap.size;
@@ -3707,7 +4318,12 @@ async function handleTestDistributionRSA() {
 
             const rsaQuery = query(collection(db, 'users'), where('role', '==', 'rsa'));
             const rsaSnap = await getDocs(rsaQuery);
-            const rsaUsers = rsaSnap.docs.map(d => d.data().email).filter(Boolean).sort();
+            const rsaUsers = rsaSnap.docs
+                .map(d => d.data() || {})
+                .filter((user) => String(user.status || 'active').toLowerCase() !== 'deactivated' && String(user.leaveStatus || '').toLowerCase() !== 'on_leave' && user?.skipRsaRoundRobin !== true)
+                .map((user) => user.email)
+                .filter(Boolean)
+                .sort();
 
             if (rsaUsers.length === 0) {
                 throw new Error('No RSA users found in the system');
@@ -3724,9 +4340,6 @@ async function handleTestDistributionRSA() {
                 lastDate = data.lastDate || '';
             }
 
-            const today = new Date().toISOString().slice(0, 10);
-            if (lastDate !== today) lastIndex = -1;
-
             const nextIndex = (lastIndex + 1) % rsaUsers.length;
             const nextRSA = rsaUsers[nextIndex];
 
@@ -3736,7 +4349,7 @@ async function handleTestDistributionRSA() {
                 { label: 'Next Index', value: String(nextIndex) },
                 { label: 'Next RSA User', value: nextRSA },
                 { label: 'Current Date', value: today },
-                { label: 'Last Reset Date', value: lastDate || 'Never' },
+                { label: 'Last Counter Update', value: lastDate || 'Never' },
                 { label: 'Test Status', value: 'PASSED', ok: true }
             ]);
 
@@ -3784,7 +4397,7 @@ async function loadPaymentRoundRobinMonitor() {
 }
 
 async function loadPaymentDistributionStats(paymentUsers) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = await getTrustedDateKey();
     const statsBody = document.getElementById('distributionStatsPaymentBody');
     if (!statsBody) return;
 
@@ -3794,7 +4407,7 @@ async function loadPaymentDistributionStats(paymentUsers) {
         const assignedQuery = query(
             collection(db, 'submissions'),
             where('assignedToPayment', '==', paymentUser.email),
-            where('uploadedAt', '>=', new Date(today + 'T00:00:00Z'))
+            where('uploadedAt', '>=', new Date(`${today}T00:00:00+01:00`))
         );
         const assignedSnap = await getDocs(assignedQuery);
         const assignedCount = assignedSnap.size;
@@ -3920,19 +4533,16 @@ async function handleTestDistributionPayment() {
                 lastDate = data.lastDate || '';
             }
 
-            const today = new Date().toISOString().slice(0, 10);
-            if (lastDate !== today) lastIndex = -1;
-
             const nextIndex = (lastIndex + 1) % paymentUsers.length;
             const nextPaymentUser = paymentUsers[nextIndex];
 
             showTestResultModal('Payment Round-Robin Test Result', [
-                { label: 'Total Payment Users', value: String(paymentUsers.length) },
+                { label: 'Total Payment Officers', value: String(paymentUsers.length) },
                 { label: 'Last Index', value: String(lastIndex) },
                 { label: 'Next Index', value: String(nextIndex) },
-                { label: 'Next Payment User', value: nextPaymentUser },
+                { label: 'Next Payment Officer', value: nextPaymentUser },
                 { label: 'Current Date', value: today },
-                { label: 'Last Reset Date', value: lastDate || 'Never' },
+                { label: 'Last Counter Update', value: lastDate || 'Never' },
                 { label: 'Test Status', value: 'PASSED', ok: true }
             ]);
 
@@ -3990,19 +4600,7 @@ function formatAuditDescription(audit) {
 }
 
 function formatDate(timestamp) {
-    if (!timestamp) return 'N/A';
-    try {
-        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-        return date.toLocaleString('en-NG', {
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-    } catch (error) {
-        return 'Invalid date';
-    }
+    return formatAppDateTime(timestamp, 'N/A');
 }
 
 // ==================== SIGN OUT ====================

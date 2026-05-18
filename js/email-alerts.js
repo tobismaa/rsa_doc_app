@@ -1,4 +1,5 @@
 import { db } from './firebase-config.js';
+import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
 import {
     EMAILJS_PUBLIC_KEY,
     EMAILJS_SERVICE_ID,
@@ -109,6 +110,10 @@ async function sendEmailViaEmailJs({ eventKey, to, subject, text, html, meta = {
 }
 
 async function queueEmailNotification({ eventKey, to, subject, textLines, htmlLines, meta = {} }) {
+    const systemSettings = await getSystemSettings(db);
+    if (!systemSettings.notificationsEmailEnabled) {
+        return { queued: false, reason: 'email-disabled' };
+    }
     const recipient = normalizeEmail(to);
     const dedupeKey = String(eventKey || '').trim();
     if (!recipient || !dedupeKey) return { queued: false, reason: 'missing-recipient-or-key' };

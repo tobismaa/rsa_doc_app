@@ -81,7 +81,15 @@
 
   function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.register('/service-worker.js?v=20260423c').catch(() => {});
+    const cacheBustToken = String(
+      localStorage.getItem('cmbank_app_cache_bust_token') ||
+      sessionStorage.getItem('cmbank_app_cache_bust_token') ||
+      ''
+    ).trim();
+    const serviceWorkerUrl = cacheBustToken
+      ? `/service-worker.js?v=20260508a&clear=${encodeURIComponent(cacheBustToken)}`
+      : '/service-worker.js?v=20260508a';
+    navigator.serviceWorker.register(serviceWorkerUrl).catch(() => {});
   }
 
   window.addEventListener('beforeinstallprompt', (e) => {

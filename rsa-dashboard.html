@@ -12,7 +12,7 @@
     <title>CMBank RSA - RSA Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
-    <link rel="stylesheet" href="css/reviewer-dashboard.css?v=20260423b">
+    <link rel="stylesheet" href="css/reviewer-dashboard.css?v=20260508d">
     <!-- Security: DOMPurify for XSS protection -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <!-- PDF-Lib needed for merging documents -->
@@ -73,6 +73,19 @@
                     <span>Finally Submitted</span>
                     <span class="badge" id="finallySubmittedCount">0</span>
                 </a>
+                <a href="#" class="nav-item" data-tab="rejected">
+                    <i class="fas fa-times-circle"></i>
+                    <span>Rejected by RSA</span>
+                    <span class="badge" id="rejectedCount">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="excel-export" id="rsaExcelExportNavItem" style="display:none;">
+                    <i class="fas fa-file-excel"></i>
+                    <span>Excel Export</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="leave">
+                    <i class="fas fa-person-walking-luggage"></i>
+                    <span>Leave</span>
+                </a>
                 <a href="#" class="nav-item" data-tab="profile">
                     <i class="fas fa-user-circle"></i>
                     <span>My Profile</span>
@@ -127,6 +140,7 @@
                                 <tr>
                                     <th style="width:44px;"><input type="checkbox" id="rsaSelectAllRows" title="Select all shown"></th>
                                     <th>Customer</th>
+                                    <th>Agent</th>
                                     <th>Uploader</th>
                                     <th>Reviewer</th>
                                     <th>Upload Date/Time</th>
@@ -155,6 +169,7 @@
                             <thead>
                                 <tr>
                                     <th>Customer</th>
+                                    <th>Agent</th>
                                     <th>Uploader</th>
                                     <th>Reviewer</th>
                                     <th>RSA Officer</th>
@@ -167,6 +182,101 @@
                             </thead>
                             <tbody id="finallySubmittedTableBody"></tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="rejectedTab" class="tab-content">
+                <div class="table-section">
+                    <div class="table-container">
+                        <table class="customers-table" style="min-width:900px;">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Agent</th>
+                                    <th>Uploader</th>
+                                    <th>Upload Date/Time</th>
+                                    <th>Rejected Time</th>
+                                    <th>Rejected By</th>
+                                    <th>Reason</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rsaRejectedTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="excel-exportTab" class="tab-content">
+                <div class="table-section">
+                    <div class="document-info" style="background:
+                        radial-gradient(circle at top right, rgba(16, 185, 129, 0.18), transparent 42%),
+                        linear-gradient(135deg, #effdf5, #ecfeff);
+                        border-left-color:#059669;">
+                        <h3 style="color:#065f46;"><i class="fas fa-file-excel"></i> RSA Level 2 Excel Export</h3>
+                        <p style="margin:8px 0 0;color:#065f46;">
+                            Choose a date range, review all applications in that period, then export all or only the rows you select.
+                        </p>
+                    </div>
+                    <div style="display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-top:16px;padding:20px;border:1px solid #dbeafe;background:#f8fbff;border-radius:18px;box-shadow:0 18px 35px rgba(15, 59, 103, 0.08);">
+                        <div>
+                            <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#1d4ed8;font-weight:800;">Export Window</div>
+                            <div style="font-size:24px;font-weight:800;color:#0f3b67;margin-top:6px;">All RSA Applications by Date Range</div>
+                            <div style="font-size:14px;color:#475569;margin-top:8px;max-width:640px;">
+                                This export tab is available only to RSA Level 2 and pulls records across all RSA users for the chosen upload date range.
+                            </div>
+                        </div>
+                        <button id="openRsaExcelDateModalBtn" class="action-btn" style="background:#15803d;color:#fff;border:none;padding:12px 18px;">
+                            <i class="fas fa-calendar-range"></i> Choose Date Range
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="leaveTab" class="tab-content">
+                <div class="table-section">
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+                        <button type="button" class="action-btn" id="rsaLeaveMineBtn" style="background:#003366;color:#fff;border:none;">My Leave History</button>
+                        <button type="button" class="action-btn" id="rsaLeaveReliefBtn">Relief History</button>
+                    </div>
+                    <div id="rsaLeaveMineSection">
+                        <div class="table-container">
+                            <table class="customers-table" style="min-width:980px;">
+                                <thead>
+                                    <tr>
+                                        <th>Leave Start</th>
+                                        <th>Leave End</th>
+                                        <th>Status</th>
+                                        <th>Assigned Reliever</th>
+                                        <th>Moved</th>
+                                        <th>Returned/Finalized</th>
+                                        <th>View</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rsaMyLeaveTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div id="rsaLeaveReliefSection" style="display:none;">
+                        <div class="table-container">
+                            <table class="customers-table" style="min-width:980px;">
+                                <thead>
+                                    <tr>
+                                        <th>Original User</th>
+                                        <th>Leave Start</th>
+                                        <th>Leave End</th>
+                                        <th>Status</th>
+                                        <th>Assigned Reliever</th>
+                                        <th>Moved</th>
+                                        <th>Returned/Finalized</th>
+                                        <th>View</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rsaReliefLeaveTableBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -200,6 +310,145 @@
     </div>
 
     <div id="notification" class="notification"></div>
+
+    <div id="rsaLeaveApplicationsModal" class="modal">
+        <div class="modal-content" style="max-width:900px;">
+            <div class="modal-header">
+                <h2 id="rsaLeaveApplicationsTitle">Leave Applications</h2>
+                <button class="close-btn" id="closeRsaLeaveApplicationsBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="table-container">
+                    <table class="customers-table">
+                        <thead>
+                            <tr>
+                                <th>Customer</th>
+                                <th>Status</th>
+                                <th>Moved At</th>
+                                <th>Returned At</th>
+                                <th>Finalized At</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rsaLeaveApplicationsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="rsaRejectModal" class="modal">
+        <div class="modal-content rsa-reject-modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-triangle-exclamation"></i> Reject Application</h2>
+                <button class="close-btn" id="closeRsaRejectModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="document-info rsa-reject-info-card">
+                    <h3 id="rsaRejectCustomerName">-</h3>
+                    <p><i class="fas fa-circle-info"></i> Send a clear correction note back to the uploader.</p>
+                </div>
+                <div class="rsa-reject-highlight-box">
+                    <div class="rsa-reject-highlight-label">What needs correction?</div>
+                    <div class="comment-area rsa-reject-comment-area" style="margin:0;">
+                        <textarea id="rsaRejectReasonInput" rows="6" placeholder="Example: RSA statement date is missing, loan amount does not match the uploaded statement, and PFA form needs replacement."></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="cancelRsaRejectModal">Cancel</button>
+                <button type="button" class="reject-btn" id="confirmRsaRejectBtn">
+                    <i class="fas fa-times-circle"></i> Reject Application
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="rsaExcelDateModal" class="modal">
+        <div class="modal-content rsa-export-modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-calendar-days"></i> Choose Export Date Range</h2>
+                <button class="close-btn" id="closeRsaExcelDateModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="document-info" style="border-left-color:#15803d;background:
+                    radial-gradient(circle at top right, rgba(22, 163, 74, 0.16), transparent 40%),
+                    linear-gradient(135deg, #f0fdf4, #f0fdfa);">
+                    <h3 style="color:#166534;">Upload Date Filter</h3>
+                    <p style="margin:8px 0 0;color:#166534;">Pick the start and end upload dates for the applications you want to inspect before exporting.</p>
+                </div>
+                <div class="rsa-export-date-grid">
+                    <label class="rsa-export-field">
+                        <span>Start Date</span>
+                        <input type="date" id="rsaExcelStartDate">
+                    </label>
+                    <label class="rsa-export-field">
+                        <span>End Date</span>
+                        <input type="date" id="rsaExcelEndDate">
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="cancelRsaExcelDateModal">Cancel</button>
+                <button type="button" class="approve-btn" id="submitRsaExcelDateRangeBtn" style="background:#15803d;">
+                    <i class="fas fa-arrow-right"></i> Show Applications
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="rsaExcelResultsModal" class="modal">
+        <div class="modal-content rsa-export-results-modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-table-list"></i> RSA Excel Export Applications</h2>
+                <button class="close-btn" id="closeRsaExcelResultsModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="rsa-export-results-toolbar">
+                    <div>
+                        <div class="rsa-export-results-kicker">Selected Date Range</div>
+                        <div id="rsaExcelRangeSummary" class="rsa-export-results-title">-</div>
+                        <div id="rsaExcelResultsCount" class="rsa-export-results-subtitle">0 applications found</div>
+                    </div>
+                    <div class="rsa-export-results-actions">
+                        <button id="exportRsaLevel2AllBtn" class="action-btn" style="background:#15803d;color:#fff;border:none;">
+                            <i class="fas fa-file-export"></i> Export All
+                        </button>
+                        <button id="exportRsaLevel2SelectedBtn" class="action-btn" style="background:#0f766e;color:#fff;border:none;">
+                            <i class="fas fa-check-square"></i> Export Selected
+                        </button>
+                    </div>
+                </div>
+                <div style="margin:0 0 14px;">
+                    <input
+                        type="search"
+                        id="rsaExcelResultsSearch"
+                        placeholder="Search customer, agent, uploader, reviewer, or status"
+                        style="width:100%;padding:12px 14px;border:1px solid #cbd5e1;border-radius:12px;outline:none;"
+                    >
+                </div>
+                <div class="table-container">
+                    <table class="customers-table" style="min-width:980px;">
+                        <thead>
+                            <tr>
+                                <th style="width:44px;"><input type="checkbox" id="rsaExcelResultsSelectAll" title="Select all export rows"></th>
+                                <th>Customer</th>
+                                <th>Agent</th>
+                                <th>Uploader</th>
+                                <th>Reviewer</th>
+                                <th>Upload Date</th>
+                                <th>Approved Time</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rsaExcelResultsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="closeRsaExcelResultsFooterBtn">Close</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Customer Details Modal -->
     <div id="customerDetailsModal" class="modal">
@@ -461,11 +710,11 @@
 
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script type="module" src="js/firebase-config.js"></script>
-    <script type="module" src="js/rsa-dashboard.js?v=20260423k"></script>
-    <script src="js/table-enhancer.js?v=20260415"></script>
-    <script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
-    <link rel="stylesheet" href="css/app-chat.css?v=20260416q">
-    <script type="module" src="js/app-chat.js?v=20260423a"></script>
+    <script type="module" src="js/rsa-dashboard.js?v=20260512a"></script>
+    <script src="js/table-enhancer.js?v=20260512b"></script>
+    <script type="module" src="js/profile-completion-guard.js?v=20260518a"></script>
+    <link rel="stylesheet" href="css/app-chat.css?v=20260518a">
+    <script type="module" src="js/app-chat.js?v=20260518a"></script>
     <link rel="stylesheet" href="css/pwa-install.css">
     <script src="js/pwa-install.js?v=20260423a"></script>
     <link rel="stylesheet" href="css/profile-card.css">

@@ -9,7 +9,9 @@ import {
   setDoc,
   updateDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
-import { isActiveUserWithRole, normalizeEmail } from "./user-directory.js?v=20260423b";
+import { isActiveUserWithRole, normalizeEmail } from "./user-directory.js?v=20260427c";
+import { getSystemSettings } from "./system-settings.js?v=20260507c";
+import { getTrustedDateKey } from "./app-time.js";
 
 export function routingRuleDocId(uploaderEmail) {
   return encodeURIComponent(normalizeEmail(uploaderEmail));
@@ -25,6 +27,7 @@ export async function getUploaderRoutingRule(db, uploaderEmail) {
     if (data.enabled === false) return null;
     return {
       uploaderEmail: normalizedUploader,
+      routeMode: String(data.routeMode || 'normal').toLowerCase() === 'skip_reviewer' ? 'skip_reviewer' : 'normal',
       reviewerEmail: normalizeEmail(data.reviewerEmail),
       rsaEmail: normalizeEmail(data.rsaEmail),
       paymentEmail: normalizeEmail(data.paymentEmail)
@@ -91,13 +94,18 @@ export async function assignRoundRobin({ db, currentUser, subRef, counterDoc }) 
 
   const viewers = await getViewerEmails(db);
   if (!viewers.length) return null;
+  const systemSettings = await getSystemSettings(db);
+  if (!systemSettings.reviewerRoundRobinEnabled) {
+    await updateDoc(subRef, { assignedTo: '', assignmentMode: 'round_robin_disabled' });
+    return null;
+  }
 
   let assigned = null;
+  const today = await getTrustedDateKey();
   try {
     await runTransaction(db, async (tx) => {
       let lastIndex = -1;
       let lastDate = '';
-      const today = new Date().toISOString().slice(0, 10);
       const counterSnap = await tx.get(counterDoc);
       if (counterSnap.exists()) {
         const data = counterSnap.data();

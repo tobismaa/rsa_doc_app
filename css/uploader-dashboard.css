@@ -243,6 +243,35 @@ body {
   font-size: 16px;
 }
 
+.submit-action-group {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.draft-save-btn {
+  min-width: 150px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+}
+
+.draft-save-btn:hover {
+  background: #f8fafc;
+}
+
+@media (max-width: 768px) {
+  .submit-action-group {
+    width: 100%;
+  }
+
+  .submit-action-group .submit-btn,
+  .submit-action-group .draft-save-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 /* ==================== MOBILE HEADER ==================== */
 .mobile-header {
   display: none;
@@ -703,6 +732,8 @@ body {
 }
 .action-btn.view-btn-small { background: var(--cm-primary); color: white; border: none; }
 .action-btn.view-btn-small:hover { background: var(--cm-primary-light); }
+.action-btn.reason-btn { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+.action-btn.reason-btn:hover { background: #2563eb; color: #fff; border-color: #2563eb; }
 .action-btn.track-btn { background: var(--cm-gold); color: white; border: none; }
 .action-btn.track-btn:hover { background: var(--cm-gold-light); }
 .action-btn.edit-btn { background: var(--warning); color: #333; border: none; }
@@ -773,6 +804,41 @@ body {
   padding: 40px !important;
   color: #94a3b8;
   font-style: italic;
+}
+
+.rejection-history-box {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.rejection-history-box strong {
+  color: #7c2d12;
+}
+
+.rejection-history-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.rejection-history-list li {
+  margin-bottom: 10px;
+}
+
+.rejection-history-list li:last-child {
+  margin-bottom: 0;
+}
+
+.rejection-history-time {
+  display: block;
+  margin-top: 4px;
+  color: #9a3412;
+  font-size: 12px;
 }
 
 /* ==================== MODALS - BASE ==================== */
@@ -1621,6 +1687,115 @@ select:focus {
 
 .tab-content.active {
   display: block !important;
+}
+
+.uploader-agent-commission-overview {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.uploader-agent-commission-overview .commission-overview-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 132px;
+  padding: 18px 20px;
+  border-radius: 18px;
+  border: 1px solid transparent;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.28), transparent 42%),
+    linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.uploader-agent-commission-overview .commission-overview-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12);
+}
+
+.uploader-agent-commission-overview .commission-overview-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 8px;
+  border-radius: 18px 0 0 18px;
+  background: currentColor;
+  opacity: 0.95;
+}
+
+.uploader-agent-commission-overview .commission-overview-card::after {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  font-family: "Font Awesome 6 Free";
+  font-weight: 900;
+  font-size: 28px;
+  opacity: 0.14;
+}
+
+.uploader-agent-commission-overview .commission-overview-card .agent-commission-summary-label {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.uploader-agent-commission-overview .commission-overview-card strong {
+  display: block;
+  font-size: 40px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-weight: 800;
+}
+
+.uploader-agent-commission-overview .commission-overview-card.sent {
+  color: #1d4ed8;
+  border-color: rgba(37, 99, 235, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(191, 219, 254, 0.6), transparent 45%),
+    linear-gradient(145deg, #eff6ff 0%, #dbeafe 100%);
+}
+
+.uploader-agent-commission-overview .commission-overview-card.sent::after {
+  content: '\f0aa';
+}
+
+.uploader-agent-commission-overview .commission-overview-card.active {
+  color: #15803d;
+  border-color: rgba(22, 163, 74, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(187, 247, 208, 0.6), transparent 45%),
+    linear-gradient(145deg, #f0fdf4 0%, #dcfce7 100%);
+}
+
+.uploader-agent-commission-overview .commission-overview-card.active::after {
+  content: '\f058';
+}
+
+.uploader-agent-commission-overview .commission-overview-card.cleared {
+  color: #b45309;
+  border-color: rgba(217, 119, 6, 0.22);
+  background:
+    radial-gradient(circle at top right, rgba(253, 230, 138, 0.65), transparent 45%),
+    linear-gradient(145deg, #fffbeb 0%, #fef3c7 100%);
+}
+
+.uploader-agent-commission-overview .commission-overview-card.cleared::after {
+  content: '\f560';
+}
+
+@media (max-width: 640px) {
+  .uploader-agent-commission-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .uploader-agent-commission-overview .commission-overview-card {
+    min-height: 118px;
+  }
+
+  .uploader-agent-commission-overview .commission-overview-card strong {
+    font-size: 34px;
+  }
 }
 
 /* ==================== 🔧 CRITICAL FIX: DYNAMIC MODAL Z-INDEX STACKING ==================== */

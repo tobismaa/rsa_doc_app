@@ -70,7 +70,7 @@ Shows the last 20 assignments with:
 **When to use:**
 - If the system needs to restart distribution
 - After changes to the viewer list
-- For daily manual reset (though it auto-resets at midnight)
+- For a manual restart from the first user when needed
 
 **Action:**
 1. Click "Reset Counter (Today)"

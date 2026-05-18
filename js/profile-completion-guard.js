@@ -1,6 +1,9 @@
 import { auth, db } from './firebase-config.js';
-import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js';
-import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
+import { onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js';
+import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
+import { getMaintenanceSettings, isMaintenanceExemptRole, showMaintenanceOverlay } from './shared/maintenance-mode.js?v=20260507a';
+import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
+import { registerPushTokenForCurrentUser } from './push-alerts.js';
 
 const REQUIRED_FIELDS = [
   { key: 'fullName', label: 'Full Name' },
@@ -8,6 +11,14 @@ const REQUIRED_FIELDS = [
   { key: 'whatsappCode', label: 'WhatsApp Country Code' },
   { key: 'whatsappLocalNumber', label: 'WhatsApp Number' }
 ];
+
+const CACHE_CLEAR_HANDLED_KEY = 'cmbank_app_cache_clear_handled_token';
+const CACHE_BUST_TOKEN_KEY = 'cmbank_app_cache_bust_token';
+let cacheClearWatcherStarted = false;
+let cacheClearInProgress = false;
+let securityWatchStarted = false;
+let sessionTimeoutTimer = null;
+let inactivityHandlersBound = false;
 
 const WHATSAPP_COUNTRY_CODES = [
   { code: '+234', label: 'Nigeria', flag: '🇳🇬' },
@@ -165,7 +176,196 @@ function buildModal(missing = [], existing = {}) {
   document.body.appendChild(backdrop);
 }
 
+async function clearBrowserAppCaches(cacheClearToken = '') {
+  if ('serviceWorker' in navigator) {
+    try {
+      try {
+        navigator.serviceWorker.controller?.postMessage?.({ type: 'clear-app-cache', token: cacheClearToken });
+      } catch (_) {}
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => {
+        try {
+          registration.active?.postMessage?.({ type: 'clear-app-cache', token: cacheClearToken });
+          registration.waiting?.postMessage?.({ type: 'clear-app-cache', token: cacheClearToken });
+          registration.installing?.postMessage?.({ type: 'clear-app-cache', token: cacheClearToken });
+        } catch (_) {}
+        return registration.update().catch(() => false);
+      }));
+    } catch (_) {}
+  }
+
+  if ('caches' in window) {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key).catch(() => false)));
+    } catch (_) {}
+  }
+}
+
+function showDashboardAnnouncement(announcement = {}) {
+  const existing = document.getElementById('systemAnnouncementBanner');
+  const enabled = announcement?.enabled === true;
+  const message = String(announcement?.message || '').trim();
+  if (!enabled || !message) {
+    existing?.remove();
+    return;
+  }
+
+  const tone = String(announcement?.tone || 'info').trim().toLowerCase();
+  const palette = tone === 'warning'
+    ? { bg: '#fff7ed', border: '#fdba74', text: '#9a3412' }
+    : tone === 'success'
+      ? { bg: '#ecfdf5', border: '#6ee7b7', text: '#065f46' }
+      : { bg: '#eff6ff', border: '#93c5fd', text: '#1d4ed8' };
+  const escapedMessage = normalizeText(message);
+  const bannerMarkup = `<div class="system-announcement-shell"><span class="system-announcement-badge">Update</span><div class="system-announcement-track"><span class="system-announcement-text">${escapedMessage}</span></div></div>`;
+
+  if (existing) {
+    existing.innerHTML = bannerMarkup;
+    existing.style.background = palette.bg;
+    existing.style.borderBottom = `1px solid ${palette.border}`;
+    existing.style.color = palette.text;
+    return;
+  }
+
+  if (!document.getElementById('systemAnnouncementBannerStyles')) {
+    const style = document.createElement('style');
+    style.id = 'systemAnnouncementBannerStyles';
+    style.textContent = `
+      @keyframes systemAnnouncementScroll {
+        0% { transform: translateX(100%); }
+        100% { transform: translateX(-100%); }
+      }
+      .system-announcement-track {
+        position: relative;
+        overflow: hidden;
+        white-space: nowrap;
+        flex: 1;
+      }
+      .system-announcement-text {
+        display: inline-block;
+        padding-left: 100%;
+        white-space: nowrap;
+        will-change: transform;
+        animation: systemAnnouncementScroll 16s linear infinite;
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+      }
+      .system-announcement-shell {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .system-announcement-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.75);
+        border: 1px solid rgba(255,255,255,0.9);
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+        font-size: 12px;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  const banner = document.createElement('div');
+  banner.id = 'systemAnnouncementBanner';
+  banner.innerHTML = bannerMarkup;
+  banner.style.cssText = `position:sticky;top:0;z-index:19999;padding:12px 18px;background:${palette.bg};border-bottom:1px solid ${palette.border};color:${palette.text};box-shadow:0 10px 24px rgba(15,23,42,0.08);`;
+  document.body.prepend(banner);
+}
+
+function startSessionTimeout(minutes = 60) {
+  if (sessionTimeoutTimer) clearTimeout(sessionTimeoutTimer);
+  const timeoutMs = Math.max(1, Number(minutes || 60)) * 60 * 1000;
+  sessionTimeoutTimer = window.setTimeout(async () => {
+    try {
+      await signOut(auth);
+    } finally {
+      window.location.href = 'index.html';
+    }
+  }, timeoutMs);
+}
+
+function bindInactivityHandlers(minutes = 60) {
+  const restart = () => startSessionTimeout(minutes);
+  if (!inactivityHandlersBound) {
+    ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'].forEach((eventName) => {
+      window.addEventListener(eventName, restart, { passive: true });
+    });
+    inactivityHandlersBound = true;
+  }
+  restart();
+}
+
+function watchForCacheClearSignal() {
+  if (cacheClearWatcherStarted) return;
+  cacheClearWatcherStarted = true;
+
+  onSnapshot(doc(db, 'settings', 'system'), async (snap) => {
+    const data = snap.exists() ? (snap.data() || {}) : {};
+    const token = String(data.cacheClearToken || '').trim();
+    const handled = String(localStorage.getItem(CACHE_CLEAR_HANDLED_KEY) || '').trim();
+    if (!token || token === handled || cacheClearInProgress) return;
+
+    cacheClearInProgress = true;
+    try {
+      localStorage.setItem(CACHE_CLEAR_HANDLED_KEY, token);
+      localStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
+      sessionStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
+      await clearBrowserAppCaches(token);
+    } catch (_) {
+      localStorage.setItem(CACHE_CLEAR_HANDLED_KEY, token);
+      localStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
+      sessionStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
+    }
+
+    const url = new URL(window.location.href);
+    url.searchParams.set('_cacheReset', token || Date.now().toString());
+    window.location.replace(url.toString());
+  }, () => {
+    // Fail open if the signal watcher cannot start.
+  });
+}
+
+function watchForSecuritySignals(userData = {}) {
+  if (securityWatchStarted) return;
+  securityWatchStarted = true;
+
+  onSnapshot(doc(db, 'settings', 'system'), async (snap) => {
+    const systemSettings = snap.exists()
+      ? await getSystemSettings(db, { force: true })
+      : await getSystemSettings(db, { force: true });
+
+    showDashboardAnnouncement(systemSettings.dashboardAnnouncement);
+    bindInactivityHandlers(systemSettings.securityControls.sessionTimeoutMinutes);
+
+    const forceLogoutToken = String(systemSettings.securityControls.forceLogoutToken || '').trim();
+    const handled = String(localStorage.getItem('cmbank_force_logout_token') || '').trim();
+    if (forceLogoutToken && forceLogoutToken !== handled && !isMaintenanceExemptRole(userData.role)) {
+      localStorage.setItem('cmbank_force_logout_token', forceLogoutToken);
+      try {
+        await signOut(auth);
+      } finally {
+        window.location.href = 'index.html';
+      }
+    }
+  }, () => {});
+}
+
 async function findUserDocByUidOrEmail(uid, email) {
+  if (uid) {
+    const directDoc = await getDoc(doc(db, 'users', uid));
+    if (directDoc.exists()) return directDoc;
+  }
+
   const byUid = query(collection(db, 'users'), where('uid', '==', uid));
   const uidSnap = await getDocs(byUid);
   if (!uidSnap.empty) return uidSnap.docs[0];
@@ -263,6 +463,31 @@ async function enforceProfileCompletion(user) {
 onAuthStateChanged(auth, async (user) => {
   if (!user) return;
   try {
+    watchForCacheClearSignal();
+    const userDoc = await findUserDocByUidOrEmail(user.uid, user.email);
+    if (!userDoc) return;
+
+    const userData = userDoc.data() || {};
+    const systemSettings = await getSystemSettings(db, { force: true });
+    showDashboardAnnouncement(systemSettings.dashboardAnnouncement);
+    bindInactivityHandlers(systemSettings.securityControls.sessionTimeoutMinutes);
+    watchForSecuritySignals(userData);
+    await registerPushTokenForCurrentUser(user, userDoc.id);
+    const maintenanceSettings = await getMaintenanceSettings(db, { force: true });
+    if (maintenanceSettings.maintenanceMode && !isMaintenanceExemptRole(userData.role)) {
+      showMaintenanceOverlay({
+        message: maintenanceSettings.maintenanceMessage || 'Maintenance mode is currently enabled. To protect live workflow data, portal access is temporarily restricted.',
+        onSignOut: async () => {
+          try {
+            await signOut(auth);
+          } finally {
+            window.location.href = 'index.html';
+          }
+        }
+      });
+      return;
+    }
+
     await enforceProfileCompletion(user);
   } catch (_err) {
     // Fail open to avoid blocking legitimate users on transient issues.

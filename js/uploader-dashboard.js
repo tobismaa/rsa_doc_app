@@ -1,6 +1,12 @@
 // js/uploader-dashboard.js - LIGHTWEIGHT VERSION (Only Track + Calculator)
 import { auth, db } from './firebase-config.js';
 import {
+    getCurrentUserProfile as getCurrentUserProfileShared,
+    getUserFullName as getUserFullNameShared
+} from './shared/user-directory.js?v=20260518a';
+import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
+import { formatAppDateTime } from './shared/app-time.js';
+import {
     collection, query, where, orderBy, onSnapshot, getDocs, getDoc, doc, limit
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
@@ -10,7 +16,7 @@ let allSubmissions = [];
 const userFullNames = new Map();
 
 // ==================== PROPERTY RULES (RSA Balance Ranges) ====================
-const PROPERTY_RULES = [
+const DEFAULT_PROPERTY_RULES = [
     { name: '1 BEDROOM 8 IN 1 FLAT', value: 6000000, fee: 2000, min: 4000000, max: 6499999 },
     { name: '1 BEDROOM 4 IN 1 BUNGALOW', value: 6500000, fee: 2000, min: 6500000, max: 6999999 },
     { name: '1 BEDROOM 2 IN 1 BUNGALOW', value: 7000000, fee: 2000, min: 7000000, max: 9999999 },
@@ -24,6 +30,7 @@ const PROPERTY_RULES = [
     { name: '7 BEDROOM TERRACE DUPLEX', value: 200000000, fee: 40000, min: 200000000, max: 249999999 },
     { name: '8 BEDROOM TERRACE DUPLEX', value: 250000000, fee: 50000, min: 250000000, max: 299999999 }
 ];
+let PROPERTY_RULES = [...DEFAULT_PROPERTY_RULES];
 
 function determinePropertyByRsa(rsaAmount) {
     const n = Number(rsaAmount) || 0;
@@ -72,10 +79,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (user) {
             currentUser = user;
             try {
-                const q = query(collection(db, 'users'), where('email', '==', user.email));
-                const snap = await getDocs(q);
-                if (!snap.empty) {
-                    const data = snap.docs[0].data();
+                const systemSettings = await getSystemSettings(db, { force: true });
+                PROPERTY_RULES = Array.isArray(systemSettings.propertyRules) && systemSettings.propertyRules.length
+                    ? [...systemSettings.propertyRules]
+                    : [...DEFAULT_PROPERTY_RULES];
+                const data = await getCurrentUserProfileShared(db, user);
+                if (data) {
                     userName.textContent = data.fullName || user.displayName || user.email.split('@')[0];
                 } else {
                     userName.textContent = user.displayName || user.email.split('@')[0];
@@ -174,7 +183,7 @@ function setupTabSwitching() {
                 overview: 'Dashboard',
                 approved: 'Approved Documents',
                 rejected: 'Rejected Submissions',
-                paid: 'Paid Customers',
+                paid: 'Agent Commission',
                 'register-agent': 'Register Agent',
                 profile: 'My Profile',
                 help: 'Help & SOP'
@@ -320,7 +329,10 @@ async function performGlobalTrackSearch() {
             const docRef = doc(db, 'submissions', searchTerm);
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) {
-                results = [{ id: docSnap.id, ...docSnap.data() }];
+                const data = docSnap.data() || {};
+                if (String(data.status || '').toLowerCase() !== 'draft') {
+                    results = [{ id: docSnap.id, ...data }];
+                }
             }
         } else {
             const allSubmissionsQuery = query(submissionsRef, orderBy('customerName'), limit(100));
@@ -328,7 +340,8 @@ async function performGlobalTrackSearch() {
             querySnapshot.forEach((doc) => {
                 const data = doc.data();
                 const customerName = (data.customerName || '').toLowerCase();
-                if (customerName.includes(searchTerm.toLowerCase())) {
+                const status = String(data.status || '').toLowerCase();
+                if (status !== 'draft' && customerName.includes(searchTerm.toLowerCase())) {
                     results.push({ id: doc.id, ...data });
                 }
             });
@@ -397,14 +410,9 @@ async function getUserFullName(email) {
     if (!email) return 'Unknown';
     if (userFullNames.has(email)) return userFullNames.get(email);
     try {
-        const userQuery = query(collection(db, 'users'), where('email', '==', email));
-        const userSnapshot = await getDocs(userQuery);
-        if (!userSnapshot.empty) {
-            const userData = userSnapshot.docs[0].data();
-            const fullName = userData.fullName || userData.displayName || email.split('@')[0];
-            userFullNames.set(email, fullName);
-            return fullName;
-        }
+        const fullName = await getUserFullNameShared(db, email);
+        userFullNames.set(email, fullName);
+        return fullName;
     } catch (err) {
         // Silently fail
     }
@@ -449,14 +457,8 @@ async function ensureUserFullNames(emails) {
     for (const email of emails) {
         if (!email || userFullNames.has(email)) continue;
         try {
-            const q = query(collection(db, 'users'), where('email', '==', email));
-            const snap = await getDocs(q);
-            if (!snap.empty) {
-                const d = snap.docs[0].data();
-                userFullNames.set(email, d.fullName || d.displayName || email.split('@')[0]);
-            } else {
-                userFullNames.set(email, email.split('@')[0]);
-            }
+            const fullName = await getUserFullNameShared(db, email);
+            userFullNames.set(email, fullName);
         } catch (e) {
             userFullNames.set(email, email.split('@')[0]);
         }
@@ -464,27 +466,23 @@ async function ensureUserFullNames(emails) {
 }
 
 function safeFormatDate(dateValue) {
-    if (!dateValue) return 'N/A';
-    try {
-        let date;
-        if (dateValue.toDate && typeof dateValue.toDate === 'function') date = dateValue.toDate();
-        else if (typeof dateValue === 'string') date = new Date(dateValue);
-        else if (dateValue.seconds) date = new Date(dateValue.seconds * 1000);
-        else if (dateValue instanceof Date) date = dateValue;
-        else return 'N/A';
-        return date.toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    } catch (error) {
-        return 'Invalid date';
-    }
+    return formatAppDateTime(dateValue, 'N/A');
 }
 
 function updateDashboardCards() {
     const pending = allSubmissions.filter(s => s.status === 'pending').length;
-    const approved = allSubmissions.filter(s => {
-        const st = String(s.status || '').toLowerCase();
-        return st === 'processing_to_pfa' || st === 'approved';
+    const approved = allSubmissions.filter((s) => {
+        const status = String(s.status || '').toLowerCase();
+        return status === 'processing_to_pfa' ||
+            status === 'approved' ||
+            status === 'sent_to_pfa' ||
+            status === 'rsa_submitted' ||
+            status === 'paid' ||
+            status === 'cleared' ||
+            s.finalSubmitted === true ||
+            s.rsaSubmitted === true;
     }).length;
-    const rejected = allSubmissions.filter(s => s.status === 'rejected').length;
+    const rejected = allSubmissions.filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase())).length;
     const paid = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'paid').length;
     document.getElementById('cardPendingCount') && (document.getElementById('cardPendingCount').textContent = pending);
     document.getElementById('cardApprovedCount') && (document.getElementById('cardApprovedCount').textContent = approved);
@@ -514,8 +512,7 @@ function renderRecentTable() {
     }
 
     rows.innerHTML = recent.map(sub => {
-        const uAt = sub.uploadedAt ? (sub.uploadedAt.toDate ? sub.uploadedAt.toDate() : new Date(sub.uploadedAt)) : null;
-        const uploadDate = uAt ? uAt.toLocaleString('en-NG', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : 'N/A';
+        const uploadDate = formatAppDateTime(sub.uploadedAt, 'N/A');
         const uploaderName = (sub.uploadedBy && userFullNames.get(sub.uploadedBy)) ? userFullNames.get(sub.uploadedBy) : (sub.uploadedBy || '-');
         return `
             <tr>

@@ -1,6 +1,9 @@
 // js/auth.js - COMPLETE WORKING VERSION WITH DEPARTMENT FIELD
 import { auth, db } from './firebase-config.js';
+import { notifyAdminPushEvent } from './push-alerts.js';
 import { EMAIL_API_BASE_URL } from './email-api-config.js';
+import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
+import { getMaintenanceSettings, isMaintenanceExemptRole } from './shared/maintenance-mode.js?v=20260507a';
 import {
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
@@ -11,9 +14,11 @@ import {
     collection,
     setDoc,
     doc,
+    getDoc,
     query,
     where,
     getDocs,
+    updateDoc,
     serverTimestamp
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
@@ -180,6 +185,36 @@ function getReadableResetErrorMessage(error, emailExists = null) {
             if (emailExists === false) return 'No account found with this email.';
             return 'Failed to send reset email: ' + (error?.message || 'Unknown error');
     }
+}
+
+async function findWritableUserRef(user) {
+    if (!user?.uid && !user?.email) return null;
+
+    const preferredUid = String(user?.uid || '').trim();
+    const normalizedEmail = String(user?.email || '').trim().toLowerCase();
+
+    if (preferredUid) {
+        const uidRef = doc(db, 'users', preferredUid);
+        const uidSnap = await getDoc(uidRef);
+        if (uidSnap.exists()) return uidRef;
+    }
+
+    if (normalizedEmail) {
+        const emailQuery = query(collection(db, 'users'), where('email', '==', normalizedEmail));
+        const emailSnapshot = await getDocs(emailQuery);
+        if (!emailSnapshot.empty) {
+            return doc(db, 'users', emailSnapshot.docs[0].id);
+        }
+    }
+
+    return preferredUid ? doc(db, 'users', preferredUid) : null;
+}
+
+function getWritableUserRefFromProfile(user, profile) {
+    const profileDocId = String(profile?.__docId || '').trim();
+    if (profileDocId) return doc(db, 'users', profileDocId);
+    const preferredUid = String(user?.uid || '').trim();
+    return preferredUid ? doc(db, 'users', preferredUid) : null;
 }
 
 // Close modal when clicking close button or outside
@@ -540,6 +575,23 @@ if (signupFormElement) {
 
                 await setDoc(doc(db, 'users', user.uid), userData, { merge: true });
 
+                await notifyAdminPushEvent({
+                    currentUser: user,
+                    eventType: 'new_user_registration',
+                    title: isFirstUser ? 'New Admin Account Created' : 'New User Registration',
+                    body: isFirstUser
+                        ? `${capitalizedName} created the first admin account.`
+                        : `${capitalizedName} registered and is pending approval.`,
+                    clickUrl: '/admin-dashboard.html',
+                    meta: {
+                        userId: user.uid,
+                        fullName: capitalizedName,
+                        email,
+                        role: userData.role,
+                        status: userData.status
+                    }
+                });
+
                 // Success message
                 if (isFirstUser) {
                     showSuccess('First user created as ADMIN! You can now login.');
@@ -622,12 +674,9 @@ if (loginFormElement) {
             const user = userCredential.user;
 
             // Check user status in Firestore
-            const usersQuery = query(collection(db, 'users'), where('email', '==', email));
-            const querySnapshot = await getDocs(usersQuery);
+            const userData = await getCurrentUserProfileShared(db, user);
 
-            if (!querySnapshot.empty) {
-                const userDoc = querySnapshot.docs[0];
-                const userData = userDoc.data();
+            if (userData) {
 
                 // Check status
                 if (userData.status === 'pending') {
@@ -638,6 +687,24 @@ if (loginFormElement) {
                     showError('Your account has been deactivated. Please contact admin.');
                     await signOut(auth);
                     return;
+                }
+
+                const maintenanceSettings = await getMaintenanceSettings(db, { force: true });
+                if (maintenanceSettings.maintenanceMode && !isMaintenanceExemptRole(userData.role)) {
+                    showError(maintenanceSettings.maintenanceMessage || 'System is currently under maintenance. Please try again later.');
+                    await signOut(auth);
+                    return;
+                }
+
+                try {
+                    const writableUserRef = getWritableUserRefFromProfile(user, userData) || await findWritableUserRef(user);
+                    if (writableUserRef) {
+                        await updateDoc(writableUserRef, {
+                            lastLoginAt: serverTimestamp()
+                        });
+                    }
+                } catch (_) {
+                    // Fail open so an analytics timestamp issue does not block login.
                 }
 
                 // Redirect based on role

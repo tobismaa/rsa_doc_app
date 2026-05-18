@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cmbank-rsa-v15';
+const CACHE_NAME = 'cmbank-rsa-v19';
 const BADGE_DB_NAME = 'cmbank-badge-db';
 const BADGE_STORE_NAME = 'appState';
 const BADGE_COUNT_KEY = 'unreadCount';
@@ -20,7 +20,7 @@ const ASSETS = [
   '/css/profile-card.css',
   '/css/app-chat.css',
   '/js/auth.js',
-  '/js/document-uploader.js',
+  '/js/document-uploader-v2.js',
   '/js/reviewer-dashboard.js',
   '/js/rsa-dashboard.js',
   '/js/admin.js',
@@ -34,6 +34,15 @@ const ASSETS = [
   '/icons/icon-512.png',
   '/manifest.webmanifest'
 ];
+const CLEAR_CACHE_REFRESH_WINDOW_MS = 2 * 60 * 1000;
+let forceNetworkRefreshUntil = 0;
+
+try {
+  const workerUrl = new URL(self.location.href);
+  if (String(workerUrl.searchParams.get('clear') || '').trim()) {
+    forceNetworkRefreshUntil = Date.now() + CLEAR_CACHE_REFRESH_WINDOW_MS;
+  }
+} catch (_) {}
 
 function openBadgeDb() {
   return new Promise((resolve, reject) => {
@@ -144,6 +153,17 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+self.addEventListener('message', (event) => {
+  if (event?.data?.type !== 'clear-app-cache') return;
+  event.waitUntil((async () => {
+    forceNetworkRefreshUntil = Date.now() + CLEAR_CACHE_REFRESH_WINDOW_MS;
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key).catch(() => false)));
+    } catch (_) {}
+  })());
+});
+
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const requestUrl = new URL(event.request.url);
@@ -154,10 +174,33 @@ self.addEventListener('fetch', (event) => {
     requestUrl.pathname.endsWith('.html') ||
     requestUrl.pathname === '/' ||
     requestUrl.pathname === '';
+  const isCoreAssetRequest =
+    requestUrl.pathname.endsWith('.js') ||
+    requestUrl.pathname.endsWith('.css') ||
+    requestUrl.pathname.endsWith('.webmanifest');
+  const shouldForceNetworkRefresh =
+    requestUrl.searchParams.has('_cacheReset') ||
+    (Date.now() < forceNetworkRefreshUntil && (isHtmlRequest || isCoreAssetRequest));
+  const networkRequest = shouldForceNetworkRefresh
+    ? new Request(event.request, { cache: 'no-store' })
+    : event.request;
 
   if (isHtmlRequest) {
     event.respondWith(
-      fetch(event.request)
+      fetch(networkRequest)
+        .then((resp) => {
+          const copy = resp.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
+          return resp;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || Response.error()))
+    );
+    return;
+  }
+
+  if (isCoreAssetRequest) {
+    event.respondWith(
+      fetch(networkRequest)
         .then((resp) => {
           const copy = resp.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});

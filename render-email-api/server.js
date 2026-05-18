@@ -83,6 +83,24 @@ function buildResetPageUrl(req, candidateUrl) {
     }
 }
 
+const lagosDateTimeFormatter = new Intl.DateTimeFormat('en-NG', {
+    timeZone: 'Africa/Lagos',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+});
+
+const lagosDateKeyFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+});
+
 async function resolveUserMapByEmail(emails) {
     const out = new Map();
     for (const email of emails) {
@@ -152,6 +170,18 @@ app.get('/health', (_req, res) => {
         service: 'rsa-render-email-api',
         authRequired: requireAuth,
         ts: new Date().toISOString()
+    });
+});
+
+app.get('/api/server-time', (_req, res) => {
+    const now = new Date();
+    res.json({
+        ok: true,
+        epochMs: now.getTime(),
+        iso: now.toISOString(),
+        timeZone: 'Africa/Lagos',
+        lagosDateTime: lagosDateTimeFormatter.format(now),
+        lagosDateKey: lagosDateKeyFormatter.format(now)
     });
 });
 
@@ -711,6 +741,126 @@ app.post('/api/submission/status-push', authMiddleware, async (req, res) => {
         return res.status(500).json({
             ok: false,
             error: String(err?.message || 'Failed to send status push')
+        });
+    }
+});
+
+app.post('/api/admin/push-event', authMiddleware, async (req, res) => {
+    try {
+        const eventType = String(req.body?.eventType || '').trim().toLowerCase();
+        const title = String(req.body?.title || '').trim();
+        const body = String(req.body?.body || '').trim();
+        const clickUrl = String(req.body?.clickUrl || '/admin-dashboard.html').trim() || '/admin-dashboard.html';
+        const meta = req.body?.meta || {};
+
+        if (!eventType || !title || !body) {
+            return res.status(400).json({ ok: false, error: 'eventType, title, and body are required' });
+        }
+
+        const allowedEventTypes = new Set([
+            'new_user_registration',
+            'new_agent_registration'
+        ]);
+        if (!allowedEventTypes.has(eventType)) {
+            return res.status(400).json({ ok: false, error: 'Unsupported admin push event type' });
+        }
+
+        const allUsersSnap = await adminDb.collection('users').get();
+        const adminRecipients = [];
+        const tokenOwners = [];
+
+        allUsersSnap.docs.forEach((docSnap) => {
+            const data = docSnap.data() || {};
+            const role = normalizeRole(data.role);
+            const status = String(data.status || '').toLowerCase();
+            if (!['admin', 'super_admin'].includes(role)) return;
+            if (status && status !== 'active') return;
+            const email = safeLowerEmail(data.email);
+            adminRecipients.push(email || docSnap.id);
+            const tokens = Array.isArray(data.fcmTokens) ? data.fcmTokens : [];
+            tokens.forEach((token) => {
+                const cleaned = String(token || '').trim();
+                if (cleaned) {
+                    tokenOwners.push({ email, userId: docSnap.id, token: cleaned });
+                }
+            });
+        });
+
+        const uniqueMap = new Map();
+        tokenOwners.forEach((entry) => {
+            if (!uniqueMap.has(entry.token)) uniqueMap.set(entry.token, entry);
+        });
+        const uniqueOwners = Array.from(uniqueMap.values());
+        const tokens = uniqueOwners.map((entry) => entry.token);
+
+        if (tokens.length === 0) {
+            return res.json({
+                ok: true,
+                sent: 0,
+                reason: 'no-device-tokens',
+                debug: { adminRecipients }
+            });
+        }
+
+        const response = await admin.messaging().sendEachForMulticast({
+            tokens,
+            notification: { title, body },
+            data: {
+                eventType,
+                clickUrl,
+                title,
+                body,
+                meta: JSON.stringify(meta || {})
+            },
+            webpush: {
+                fcmOptions: { link: clickUrl },
+                notification: {
+                    title,
+                    body,
+                    icon: '/favicon.png?v=20260416f',
+                    badge: '/icons/icon-192.png?v=20260416f',
+                    data: { url: clickUrl }
+                }
+            }
+        });
+
+        const badTokens = [];
+        response.responses.forEach((r, idx) => {
+            if (r.success) return;
+            const code = String(r.error?.code || '');
+            if (
+                code.includes('registration-token-not-registered') ||
+                code.includes('invalid-argument')
+            ) {
+                badTokens.push(uniqueOwners[idx]);
+            }
+        });
+
+        for (const bad of badTokens) {
+            if (!bad?.userId) continue;
+            try {
+                const ref = adminDb.collection('users').doc(bad.userId);
+                const snap = await ref.get();
+                if (!snap.exists) continue;
+                const arr = Array.isArray(snap.data()?.fcmTokens) ? snap.data().fcmTokens : [];
+                const next = arr.filter((t) => String(t || '').trim() !== bad.token);
+                await ref.set({ fcmTokens: next, fcmTokenPrunedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+            } catch (_) {}
+        }
+
+        return res.json({
+            ok: true,
+            sent: response.successCount,
+            failed: response.failureCount,
+            debug: {
+                adminRecipients,
+                tokenOwners: uniqueOwners.map((entry) => entry.email || entry.userId)
+            }
+        });
+    } catch (err) {
+        return res.status(500).json({
+            ok: false,
+            error: String(err?.message || 'Failed to send admin push event')
         });
     }
 });

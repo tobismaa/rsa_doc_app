@@ -3,6 +3,7 @@
 (() => {
   const ROWS_PER_PAGE = 10;
   const stateMap = new WeakMap();
+  let globalInitQueued = false;
 
   function ensureStyles() {
     if (document.getElementById('tableEnhancerStyles')) return;
@@ -120,7 +121,7 @@
     if (!tbody) return;
 
     removeEnhancerEmptyRow(tbody);
-    const query = state.search.value.trim().toLowerCase();
+    const query = String(state.search?.value || '').trim().toLowerCase();
     const allRows = getDataRows(tbody);
 
     // keep original "loading/no-data" rows visible when no data rows exist
@@ -164,6 +165,42 @@
     state.nextBtn.disabled = state.page >= totalPages;
   }
 
+  function debounce(fn, wait = 180) {
+    let timeoutId = null;
+    return (...args) => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => fn(...args), wait);
+    };
+  }
+
+  function queueApplyPagination(table, state) {
+    if (state.renderQueued) return;
+    state.renderQueued = true;
+    window.requestAnimationFrame(() => {
+      state.renderQueued = false;
+      applyPagination(table, state);
+    });
+  }
+
+  function hasNearbyCustomSearch(container) {
+    if (!container) return false;
+    const parentSection =
+      container.closest('.table-section') ||
+      container.closest('.recent-section') ||
+      container.parentElement;
+    if (!parentSection) return false;
+
+    const candidateInputs = Array.from(parentSection.querySelectorAll('input[type="search"], input[type="text"]'));
+    return candidateInputs.some((input) => {
+      if (input.classList.contains('table-enhancer-search')) return false;
+      if (input.type === 'hidden') return false;
+      if (input.closest('.modal-footer')) return false;
+      const placeholder = String(input.getAttribute('placeholder') || '').trim().toLowerCase();
+      const id = String(input.id || '').trim().toLowerCase();
+      return placeholder.includes('search') || id.includes('search');
+    });
+  }
+
   function setupTable(table, index) {
     if (stateMap.has(table)) return;
     const tbody = table.tBodies && table.tBodies[0];
@@ -175,12 +212,19 @@
     const controls = document.createElement('div');
     controls.className = 'table-enhancer-controls';
     controls.setAttribute('data-table-enhancer', String(index));
+    const useGeneratedSearch = !hasNearbyCustomSearch(container);
 
-    const search = document.createElement('input');
-    search.type = 'search';
-    search.className = 'table-enhancer-search';
-    search.placeholder = 'Search this table...';
-    search.setAttribute('aria-label', 'Search table rows');
+    let search = null;
+    if (useGeneratedSearch) {
+      search = document.createElement('input');
+      search.type = 'search';
+      search.className = 'table-enhancer-search';
+      search.placeholder = 'Search this table...';
+      search.setAttribute('aria-label', 'Search table rows');
+      controls.appendChild(search);
+    } else {
+      controls.style.justifyContent = 'flex-end';
+    }
 
     const pager = document.createElement('div');
     pager.className = 'table-enhancer-pager';
@@ -203,7 +247,6 @@
     pager.appendChild(pageLabel);
     pager.appendChild(nextBtn);
 
-    controls.appendChild(search);
     controls.appendChild(pager);
 
     container.parentNode.insertBefore(controls, container);
@@ -215,34 +258,36 @@
       prevBtn,
       nextBtn,
       pageLabel,
+      renderQueued: false,
       page: 1,
       observer: null
     };
     stateMap.set(table, state);
 
-    search.addEventListener('input', () => {
+    const handleSearchInput = debounce(() => {
       state.page = 1;
-      applyPagination(table, state);
-    });
+      queueApplyPagination(table, state);
+    }, 200);
+    search?.addEventListener('input', handleSearchInput);
 
     prevBtn.addEventListener('click', () => {
       state.page -= 1;
-      applyPagination(table, state);
+      queueApplyPagination(table, state);
     });
 
     nextBtn.addEventListener('click', () => {
       state.page += 1;
-      applyPagination(table, state);
+      queueApplyPagination(table, state);
     });
 
     const observer = new MutationObserver(() => {
       // Keep on current page if possible when table data refreshes
-      applyPagination(table, state);
+      queueApplyPagination(table, state);
     });
     observer.observe(tbody, { childList: true, subtree: false });
     state.observer = observer;
 
-    applyPagination(table, state);
+    queueApplyPagination(table, state);
   }
 
   function init() {
@@ -262,8 +307,20 @@
   }
 
   // Catch tables rendered later (dynamic tabs/modals)
-  const appObserver = new MutationObserver(() => {
-    init();
+  const appObserver = new MutationObserver((mutations) => {
+    const shouldCheck = mutations.some((mutation) =>
+      Array.from(mutation.addedNodes || []).some((node) => {
+        if (!(node instanceof Element)) return false;
+        return node.matches('table, tbody, tr, .table-container, .table-section, .recent-section') ||
+          node.querySelector?.('table, tbody, tr, .table-container, .table-section, .recent-section');
+      })
+    );
+    if (!shouldCheck || globalInitQueued) return;
+    globalInitQueued = true;
+    window.requestAnimationFrame(() => {
+      globalInitQueued = false;
+      init();
+    });
   });
   appObserver.observe(document.documentElement, { childList: true, subtree: true });
 })();

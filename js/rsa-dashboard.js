@@ -1,9 +1,11 @@
 import { auth, db } from './firebase-config.js';
+import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
     collection,
     addDoc,
     doc,
+    getDoc,
     query,
     where,
     orderBy,
@@ -15,14 +17,17 @@ import {
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { queueUploaderFinalSubmissionEmail } from './email-alerts.js';
 import { notifyStatusChangePush } from './status-push.js';
+import { formatAppDate, formatAppDateTime, getTrustedDateKey } from './shared/app-time.js';
 import {
+    getUserProfileByEmail as getUserProfileByEmailShared,
+    getCurrentUserProfile as getCurrentUserProfileShared,
     getUserFullName as getUserFullNameShared,
     normalizeEmail as normalizeEmailShared
-} from './shared/user-directory.js?v=20260423b';
+} from './shared/user-directory.js?v=20260518a';
 import {
     getUploaderRoutingRule as getUploaderRoutingRuleShared,
     routingRuleDocId as routingRuleDocIdShared
-} from './shared/uploader-routing.js?v=20260423c';
+} from './shared/uploader-routing.js?v=20260427e';
 
 // ==================== DOCUMENT TYPES MAPPING ====================
 const DOCUMENT_TYPES = {
@@ -42,7 +47,8 @@ const DOCUMENT_TYPES = {
     'offer_letter_last_page': 'Offer Letter Last Page',
     'pmi_soa': 'PMI SOA',
     'benefit_application_form': 'Benefit Application Form',
-    'data_recapture': 'Data Recapture'
+    'data_recapture': 'Data Recapture',
+    'credit_life': 'Credit Life'
 };
 
 let currentUser = null;
@@ -50,6 +56,13 @@ let currentRsaProfileData = null;
 let currentTab = 'approved';
 let allSubmissions = [];
 let currentRsaDisplayedSubmissions = [];
+let currentRsaExcelResults = [];
+let currentRsaExcelFilteredResults = [];
+let currentRsaExcelRange = { start: '', end: '' };
+let currentRsaExcelSelectedIds = new Set();
+let rsaLeaveHistoryLoaded = false;
+let rsaMyLeaveHistory = [];
+let rsaReliefLeaveHistory = [];
 const userFullNameCache = new Map();
 let unsubscribeQueue = null;
 let queueLoadSeq = 0;
@@ -65,9 +78,16 @@ const rsaEndDate = document.getElementById('rsaEndDate');
 const rsaFilterBtn = document.getElementById('rsaFilterBtn');
 const pageTitle = document.getElementById('pageTitle');
 const approvedCountBadge = document.getElementById('approvedCount');
+const rejectedCountBadge = document.getElementById('rejectedCount');
 const userNameEl = document.getElementById('userName');
 const userRoleEl = document.getElementById('userRole');
 const finalSubmitBtn = document.getElementById('finalSubmitBtn');
+const rsaRejectModal = document.getElementById('rsaRejectModal');
+const closeRsaRejectModalBtn = document.getElementById('closeRsaRejectModal');
+const cancelRsaRejectModalBtn = document.getElementById('cancelRsaRejectModal');
+const confirmRsaRejectBtn = document.getElementById('confirmRsaRejectBtn');
+const rsaRejectCustomerNameEl = document.getElementById('rsaRejectCustomerName');
+const rsaRejectReasonInput = document.getElementById('rsaRejectReasonInput');
 const profileNameEl = document.getElementById('profileName');
 const profileRegisteredAtEl = document.getElementById('profileRegisteredAt');
 const profileEmailEl = document.getElementById('profileEmail');
@@ -76,8 +96,28 @@ const profileLocationEl = document.getElementById('profileLocation');
 const profileRoleEl = document.getElementById('profileRole');
 const profileStatusEl = document.getElementById('profileStatus');
 const rsaSelectAllRows = document.getElementById('rsaSelectAllRows');
+const rsaExcelExportNavItem = document.getElementById('rsaExcelExportNavItem');
+const approvedExcelExportBar = document.querySelector('.excel-export-bar');
+const openRsaExcelDateModalBtn = document.getElementById('openRsaExcelDateModalBtn');
+const rsaExcelDateModal = document.getElementById('rsaExcelDateModal');
+const closeRsaExcelDateModalBtn = document.getElementById('closeRsaExcelDateModal');
+const cancelRsaExcelDateModalBtn = document.getElementById('cancelRsaExcelDateModal');
+const submitRsaExcelDateRangeBtn = document.getElementById('submitRsaExcelDateRangeBtn');
+const rsaExcelStartDateInput = document.getElementById('rsaExcelStartDate');
+const rsaExcelEndDateInput = document.getElementById('rsaExcelEndDate');
+const rsaExcelResultsModal = document.getElementById('rsaExcelResultsModal');
+const closeRsaExcelResultsModalBtn = document.getElementById('closeRsaExcelResultsModal');
+const closeRsaExcelResultsFooterBtn = document.getElementById('closeRsaExcelResultsFooterBtn');
+const rsaExcelRangeSummary = document.getElementById('rsaExcelRangeSummary');
+const rsaExcelResultsCount = document.getElementById('rsaExcelResultsCount');
+const rsaExcelResultsSearch = document.getElementById('rsaExcelResultsSearch');
+const rsaExcelResultsTableBody = document.getElementById('rsaExcelResultsTableBody');
+const rsaExcelResultsSelectAll = document.getElementById('rsaExcelResultsSelectAll');
+const exportRsaLevel2AllBtn = document.getElementById('exportRsaLevel2AllBtn');
+const exportRsaLevel2SelectedBtn = document.getElementById('exportRsaLevel2SelectedBtn');
 
 let currentDetailsSubmissionId = null;
+let currentRejectSubmissionId = null;
 
 function renderProfileTab() {
     if (!profileNameEl && !profileEmailEl && !profileRoleEl && !profileStatusEl) return;
@@ -99,11 +139,7 @@ function renderProfileTab() {
 
 // format time helper
 function formatTimestamp(ts) {
-    if (!ts) return 'N/A';
-    try {
-        const d = ts.toDate ? ts.toDate() : new Date(ts);
-        return d.toLocaleString('en-NG', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
-    } catch(e){return 'N/A';}
+    return formatAppDateTime(ts, 'N/A');
 }
 
 function normalizeWhatsAppPhone(raw) {
@@ -147,10 +183,8 @@ async function isActivePaymentUser(email) {
     const normalized = normalizeEmail(email);
     if (!normalized) return false;
     try {
-        const userQuery = query(collection(db, 'users'), where('email', '==', normalized));
-        const snap = await getDocs(userQuery);
-        if (snap.empty) return false;
-        const data = snap.docs[0].data() || {};
+        const data = await getUserProfileByEmailShared(db, normalized);
+        if (!data) return false;
         const role = String(data.role || '').toLowerCase();
         const status = String(data.status || 'active').toLowerCase();
         const leaveStatus = String(data.leaveStatus || '').toLowerCase();
@@ -192,6 +226,7 @@ async function assignPaymentRoundRobin(submissionId) {
     }
 
     const paymentUsers = await getActivePaymentUsers();
+    const systemSettings = await getSystemSettings(db);
 
     if (!paymentUsers.length) {
         await updateDoc(submissionRef, {
@@ -202,29 +237,35 @@ async function assignPaymentRoundRobin(submissionId) {
         return '';
     }
 
+    if (!systemSettings.paymentRoundRobinEnabled) {
+        await updateDoc(submissionRef, {
+            assignedToPayment: '',
+            paymentAssignedAt: serverTimestamp(),
+            paymentAssignmentMethod: 'round_robin_disabled'
+        });
+        return '';
+    }
+
     const counterRef = doc(db, 'counters', 'roundRobinPayment');
     let assignedPayment = '';
-    const today = new Date().toISOString().slice(0, 10);
+    const trustedDateKey = await getTrustedDateKey();
 
     try {
         await runTransaction(db, async (tx) => {
             const counterSnap = await tx.get(counterRef);
             let lastIndex = -1;
-            let lastDate = '';
 
             if (counterSnap.exists()) {
                 const data = counterSnap.data() || {};
                 lastIndex = typeof data.lastIndex === 'number' ? data.lastIndex : -1;
-                lastDate = data.lastDate || '';
             }
 
-            if (lastDate !== today) lastIndex = -1;
             const nextIndex = (lastIndex + 1) % paymentUsers.length;
             assignedPayment = paymentUsers[nextIndex];
 
             tx.set(counterRef, {
                 lastIndex: nextIndex,
-                lastDate: today,
+                lastDate: trustedDateKey,
                 lastAssignedTo: assignedPayment,
                 updatedAt: serverTimestamp()
             }, { merge: true });
@@ -265,10 +306,8 @@ async function loadCurrentRsaProfile(user) {
     let profileData = null;
 
     try {
-        const userQuery = query(collection(db, 'users'), where('email', '==', email));
-        const userSnapshot = await getDocs(userQuery);
-        if (!userSnapshot.empty) {
-            profileData = userSnapshot.docs[0].data();
+        profileData = await getCurrentUserProfileShared(db, user);
+        if (profileData) {
             currentRsaProfileData = profileData;
         }
     } catch (error) {
@@ -281,6 +320,7 @@ async function loadCurrentRsaProfile(user) {
         currentRsaProfileData = { email, fullName: displayName, role: 'rsa', status: 'active' };
     }
     renderProfileTab();
+    updateRsaExcelAccessUI();
 
     const role = String(profileData?.role || '').toLowerCase();
     if (role && role !== 'rsa') {
@@ -289,6 +329,32 @@ async function loadCurrentRsaProfile(user) {
         return false;
     }
     return true;
+}
+
+function getCurrentRsaRoleLevel() {
+    const rawLevel = currentRsaProfileData?.roleLevel ?? currentRsaProfileData?.accessLevel ?? 1;
+    const normalized = String(rawLevel || '').trim().toLowerCase();
+    if (Number(rawLevel) === 2 || normalized === '2' || normalized === 'level 2' || normalized === 'level2') {
+        return 2;
+    }
+    return 1;
+}
+
+function isCurrentRsaLevelTwo() {
+    return getCurrentRsaRoleLevel() >= 2;
+}
+
+function updateRsaExcelAccessUI() {
+    const isLevelTwo = isCurrentRsaLevelTwo();
+    if (rsaExcelExportNavItem) {
+        rsaExcelExportNavItem.style.display = isLevelTwo ? '' : 'none';
+    }
+    if (approvedExcelExportBar) {
+        approvedExcelExportBar.style.display = 'flex';
+    }
+    if (!isLevelTwo && currentTab === 'excel-export') {
+        switchTab('approved');
+    }
 }
 
 // ------- utility helpers (borrowed from viewer dashboard) -------
@@ -392,6 +458,13 @@ function showNotification(message, type='info') {
     notification.className = `notification ${type}`;
     notification.style.display = 'block';
     setTimeout(()=>{ notification.style.display='none'; }, 3000);
+}
+
+function escapeHtml(value) {
+    if (!value) return '';
+    const div = document.createElement('div');
+    div.textContent = String(value);
+    return div.innerHTML;
 }
 
 function showLoader(msg) {
@@ -541,6 +614,7 @@ function getRsaExcelRows(submissions) {
         const rsaBalance = parseMoneyValue(details.rsaBalance);
         const expected25 = Number.isFinite(Number(rsaBalance)) ? Number(rsaBalance) * 0.25 : '';
         const equityValue = expected25 === '' ? '' : roundDownToThousand(expected25);
+        const houseNumber = details.houseNumber || sub.houseNumber || '';
 
         return [
             index + 1,
@@ -554,7 +628,7 @@ function getRsaExcelRows(submissions) {
             expected25 === '' ? '' : Number(formatMoneyForExcel(expected25)),
             details.propertyType || '',
             toTitleCaseWords(details.originatingTP || ''),
-            '',
+            houseNumber,
             propertyValue === '' ? '' : Number(formatMoneyForExcel(propertyValue)),
             equityValue === '' ? '' : Number(formatMoneyForExcel(equityValue)),
             loanAmount === '' ? '' : Number(formatMoneyForExcel(loanAmount)),
@@ -650,8 +724,183 @@ async function downloadRsaExcel(submissions, scopeLabel = 'selected') {
     const blob = new Blob([buffer], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = await getTrustedDateKey();
     await saveFileWithLocationPicker(blob, `rsa_processing_to_pfa_${scopeLabel}_${stamp}.xlsx`);
+}
+
+async function getAllRsaExcelSubmissions() {
+    const snap = await getDocs(query(collection(db, 'submissions'), orderBy('uploadedAt', 'desc')));
+    const next = snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    const filtered = next.filter((sub) => {
+        const status = String(sub.status || '').toLowerCase();
+        return (status === 'processing_to_pfa' || status === 'approved') && !sub.finalSubmitted && !sub.rsaSubmitted;
+    });
+    const reviewerEmails = [...new Set(filtered.map((s) => s.reviewedBy).filter(Boolean))];
+    const uploaderEmails = [...new Set(filtered.map((s) => s.uploadedBy).filter(Boolean))];
+    await Promise.all([...reviewerEmails, ...uploaderEmails].map((email) => getUserFullName(email)));
+    return filtered.map((sub) => ({
+        ...sub,
+        reviewedByName: sub.reviewedBy ? (userFullNameCache.get(String(sub.reviewedBy).toLowerCase()) || sub.reviewedBy) : '-',
+        uploadedByName: sub.uploadedBy ? (userFullNameCache.get(String(sub.uploadedBy).toLowerCase()) || sub.uploadedBy) : '-'
+    }));
+}
+
+function getSubmissionUploadDateMillis(submission) {
+    return getTimestampMillis(submission?.uploadedAt);
+}
+
+function formatDateRangeLabel(startValue, endValue) {
+    const toLabel = (value) => {
+        if (!value) return 'Any date';
+        return formatAppDate(`${value}T00:00:00`, value);
+    };
+    return `${toLabel(startValue)} to ${toLabel(endValue)}`;
+}
+
+function closeRsaExcelDateModal() {
+    rsaExcelDateModal?.classList.remove('active');
+}
+
+function openRsaExcelDateModal() {
+    if (!isCurrentRsaLevelTwo()) {
+        showNotification('This export flow is available only to RSA Level 2.', 'warning');
+        return;
+    }
+    if (rsaExcelStartDateInput && rsaExcelEndDateInput && (!rsaExcelStartDateInput.value || !rsaExcelEndDateInput.value)) {
+        const end = new Date();
+        const start = new Date();
+        start.setDate(end.getDate() - 30);
+        rsaExcelEndDateInput.value = end.toISOString().slice(0, 10);
+        rsaExcelStartDateInput.value = start.toISOString().slice(0, 10);
+    }
+    rsaExcelDateModal?.classList.add('active');
+}
+
+function closeRsaExcelResultsModal() {
+    rsaExcelResultsModal?.classList.remove('active');
+    currentRsaExcelResults = [];
+    currentRsaExcelFilteredResults = [];
+    currentRsaExcelRange = { start: '', end: '' };
+    currentRsaExcelSelectedIds = new Set();
+    if (rsaExcelResultsSearch) rsaExcelResultsSearch.value = '';
+    if (rsaExcelResultsSelectAll) {
+        rsaExcelResultsSelectAll.checked = false;
+        rsaExcelResultsSelectAll.indeterminate = false;
+    }
+}
+
+function getSelectedRsaExcelResults() {
+    const selectedIds = Array.from(currentRsaExcelSelectedIds);
+    return currentRsaExcelResults.filter((sub) => selectedIds.includes(sub.id));
+}
+
+function updateRsaExcelResultsSelectAllState() {
+    if (!rsaExcelResultsSelectAll) return;
+    const visibleRows = currentRsaExcelFilteredResults;
+    const checkedVisibleCount = visibleRows.filter((sub) => currentRsaExcelSelectedIds.has(sub.id)).length;
+    rsaExcelResultsSelectAll.checked = visibleRows.length > 0 && checkedVisibleCount === visibleRows.length;
+    rsaExcelResultsSelectAll.indeterminate = checkedVisibleCount > 0 && checkedVisibleCount < visibleRows.length;
+}
+
+function getRsaExcelResultsSearchText(sub) {
+    const status = String(sub.status || '').toLowerCase();
+    const statusLabel = (status === 'processing_to_pfa' || status === 'approved') ? 'processing to pfa' : String(sub.status || '');
+    return [
+        sub.customerName,
+        sub.agentName,
+        sub.uploadedByName,
+        sub.uploadedBy,
+        sub.reviewedByName,
+        sub.reviewedBy,
+        statusLabel
+    ].map((value) => String(value || '').toLowerCase()).join(' ');
+}
+
+function syncRsaExcelFilteredResults() {
+    const queryText = String(rsaExcelResultsSearch?.value || '').trim().toLowerCase();
+    currentRsaExcelFilteredResults = !queryText
+        ? [...currentRsaExcelResults]
+        : currentRsaExcelResults.filter((sub) => getRsaExcelResultsSearchText(sub).includes(queryText));
+}
+
+function renderRsaExcelResultsModal() {
+    if (!rsaExcelResultsTableBody) return;
+    syncRsaExcelFilteredResults();
+    if (rsaExcelRangeSummary) {
+        rsaExcelRangeSummary.textContent = formatDateRangeLabel(currentRsaExcelRange.start, currentRsaExcelRange.end);
+    }
+    if (rsaExcelResultsCount) {
+        const total = currentRsaExcelResults.length;
+        const visible = currentRsaExcelFilteredResults.length;
+        rsaExcelResultsCount.textContent = visible === total
+            ? `${total} application${total === 1 ? '' : 's'} found`
+            : `${visible} of ${total} application${total === 1 ? '' : 's'} shown`;
+    }
+    if (rsaExcelResultsSelectAll) {
+        rsaExcelResultsSelectAll.checked = false;
+        rsaExcelResultsSelectAll.indeterminate = false;
+    }
+    if (!currentRsaExcelFilteredResults.length) {
+        rsaExcelResultsTableBody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:36px;color:#666">No applications found for this date range</td></tr>';
+        return;
+    }
+    rsaExcelResultsTableBody.innerHTML = currentRsaExcelFilteredResults.map((sub) => {
+        const reviewer = sub.reviewedByName || sub.reviewedBy || '-';
+        const uploader = sub.uploadedByName || sub.uploadedBy || '-';
+        const status = String(sub.status || '').toLowerCase();
+        const statusLabel = (status === 'processing_to_pfa' || status === 'approved') ? 'Processing to PFA' : (sub.status || '-');
+        return `
+            <tr>
+                <td><input type="checkbox" class="rsa-export-results-select" value="${sub.id}" ${currentRsaExcelSelectedIds.has(sub.id) ? 'checked' : ''} title="Select ${sub.customerName || 'customer'}"></td>
+                <td><strong>${sub.customerName || '-'}</strong></td>
+                <td>${sub.agentName || 'No Agent'}</td>
+                <td>${uploader}</td>
+                <td>${reviewer}</td>
+                <td>${formatTimestamp(sub.uploadedAt)}</td>
+                <td>${formatTimestamp(getApprovedTimestamp(sub))}</td>
+                <td>${statusLabel}</td>
+            </tr>
+        `;
+    }).join('');
+    updateRsaExcelResultsSelectAllState();
+}
+
+async function handleRsaLevelTwoDateRangeSubmit() {
+    if (!isCurrentRsaLevelTwo()) {
+        showNotification('This export flow is available only to RSA Level 2.', 'warning');
+        return;
+    }
+    const startValue = rsaExcelStartDateInput?.value || '';
+    const endValue = rsaExcelEndDateInput?.value || '';
+    if (!startValue || !endValue) {
+        showNotification('Please choose both start and end dates.', 'warning');
+        return;
+    }
+    if (new Date(`${startValue}T00:00:00`).getTime() > new Date(`${endValue}T23:59:59`).getTime()) {
+        showNotification('Start date cannot be after end date.', 'warning');
+        return;
+    }
+
+    try {
+        showLoader('Loading RSA applications for export...');
+        const submissions = await getAllRsaExcelSubmissions();
+        const startMs = new Date(`${startValue}T00:00:00`).getTime();
+        const endMs = new Date(`${endValue}T23:59:59`).getTime();
+        currentRsaExcelResults = submissions.filter((sub) => {
+            const uploadedAtMs = getSubmissionUploadDateMillis(sub);
+            return uploadedAtMs >= startMs && uploadedAtMs <= endMs;
+        });
+        currentRsaExcelSelectedIds = new Set();
+        if (rsaExcelResultsSearch) rsaExcelResultsSearch.value = '';
+        currentRsaExcelRange = { start: startValue, end: endValue };
+        renderRsaExcelResultsModal();
+        closeRsaExcelDateModal();
+        rsaExcelResultsModal?.classList.add('active');
+    } catch (error) {
+        showNotification('Failed to load RSA export applications.', 'error');
+    } finally {
+        hideLoader();
+    }
 }
 
 function getSelectedRsaSubmissions() {
@@ -678,8 +927,66 @@ let mergedPdfBlob = null;
 let mergedPdfUrl = null;
 let mergeInProgress = false;
 
-window.openMergeModal = (submissionId) => {
-    const sub = allSubmissions.find(s=>s.id===submissionId);
+async function getLatestSubmissionById(submissionId) {
+    const normalizedId = String(submissionId || '').trim();
+    if (!normalizedId) return null;
+
+    const cached = allSubmissions.find((s) => s.id === normalizedId) || null;
+
+    try {
+        const snap = await getDoc(doc(db, 'submissions', normalizedId));
+        if (!snap.exists()) return cached;
+
+        const fresh = { id: snap.id, ...snap.data() };
+        const index = allSubmissions.findIndex((s) => s.id === normalizedId);
+        if (index >= 0) {
+            allSubmissions[index] = fresh;
+        } else {
+            allSubmissions.push(fresh);
+        }
+        return fresh;
+    } catch (_) {
+        return cached;
+    }
+}
+
+function getEffectiveSubmissionDocuments(submission = null) {
+    const rawDocs = Array.isArray(submission?.documents) ? submission.documents : [];
+    if (rawDocs.length <= 1) return rawDocs;
+
+    const latestByType = new Map();
+    rawDocs.forEach((docItem, index) => {
+        const type = String(docItem?.documentType || '').trim();
+        const key = type || `__index_${index}`;
+        const previous = latestByType.get(key);
+        const currentScore = Math.max(
+            getTimestampMsSafe(docItem?.uploadedAt),
+            Number(docItem?.localAddedAt || 0)
+        );
+        const previousScore = previous
+            ? Math.max(
+                getTimestampMsSafe(previous?.uploadedAt),
+                Number(previous?.localAddedAt || 0)
+            )
+            : -1;
+
+        if (!previous || currentScore >= previousScore) {
+            latestByType.set(key, docItem);
+        }
+    });
+
+    const orderedTypes = Array.isArray(submission?.documentTypes) ? submission.documentTypes : [];
+    const normalizedOrder = orderedTypes
+        .map((type) => latestByType.get(String(type || '').trim()))
+        .filter(Boolean);
+
+    const alreadyIncluded = new Set(normalizedOrder);
+    const remainder = Array.from(latestByType.values()).filter((docItem) => !alreadyIncluded.has(docItem));
+    return [...normalizedOrder, ...remainder];
+}
+
+window.openMergeModal = async (submissionId) => {
+    const sub = await getLatestSubmissionById(submissionId);
     if (!sub) return;
     currentMergeSubmission = sub;
     mergeSelectionOrder = [];
@@ -690,7 +997,8 @@ window.openMergeModal = (submissionId) => {
     const mergeDownloadSection = document.getElementById('mergeDownloadSection');
     if (mergeDownloadSection) mergeDownloadSection.style.display='none';
     document.getElementById('mergeCustomerName').textContent = sub.customerName;
-    if (!sub.documents || sub.documents.length===0) {
+    const effectiveDocs = getEffectiveSubmissionDocuments(sub);
+    if (!effectiveDocs.length) {
         showNotification('No documents available to merge','error');
         return;
     }
@@ -752,7 +1060,7 @@ function renumberBadges() {
 
 function refreshMergeList() {
     if (!currentMergeSubmission) return;
-    const originalDocs = currentMergeSubmission.documents || [];
+    const originalDocs = getEffectiveSubmissionDocuments(currentMergeSubmission);
     let combinedHtml = `
         <div class="merge-list-header">
             <div class="select-all">
@@ -899,7 +1207,7 @@ window.removeAdditionalFile = (id) => {
 };
 
 async function handleMergeDocuments() {
-    const originalDocs = currentMergeSubmission?.documents || [];
+    const originalDocs = getEffectiveSubmissionDocuments(currentMergeSubmission);
     if (mergeSelectionOrder.length === 0) {
         showNotification('Please select documents to merge','error');
         return;
@@ -1147,7 +1455,7 @@ function loadQueue() {
         // Filter for records that are either rsaReady=true OR rsaSubmitted=true (old structure)
         const next = snap.docs
             .map(d => ({ id: d.id, ...d.data() }))
-            .filter(s => s.rsaReady === true || s.rsaSubmitted === true);
+            .filter(s => s.rsaReady === true || s.rsaSubmitted === true || String(s.status || '').toLowerCase() === 'rejected_by_rsa');
 
         const reviewerEmails = [...new Set(next.map(s => s.reviewedBy).filter(Boolean))];
         const uploaderEmails = [...new Set(next.map(s => s.uploadedBy).filter(Boolean))];
@@ -1173,6 +1481,11 @@ function updateApprovedCount() {
         approvedCountBadge.textContent = cnt;
         approvedCountBadge.style.display = 'inline-block';
     }
+    const rejectedCnt = allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'rejected_by_rsa').length;
+    if (rejectedCountBadge) {
+        rejectedCountBadge.textContent = rejectedCnt;
+        rejectedCountBadge.style.display = 'inline-block';
+    }
     updateFinallySubmittedCount();
 }
 
@@ -1185,7 +1498,9 @@ function switchTab(tabId) {
     targetTab?.classList.add('active');
     const titles = {
         approved: 'Processing to PFA',
+        rejected: 'Rejected by RSA',
         'finally-submitted': 'Finally Submitted Applications',
+        'excel-export': 'RSA Excel Export',
         profile: 'My Profile',
         help: 'Help & SOP'
     };
@@ -1222,7 +1537,170 @@ function renderCurrentTab() {
         renderRsaRows(list);
     } else if (currentTab === 'finally-submitted') {
         renderFinallySubmittedTab();
+    } else if (currentTab === 'rejected') {
+        renderRejectedRsaTab();
+    } else if (currentTab === 'leave') {
+        renderRsaLeaveHistory();
     }
+}
+
+function getTimestampMillis(value) {
+    if (!value) return 0;
+    try {
+        if (typeof value.toMillis === 'function') return value.toMillis();
+        if (typeof value.toDate === 'function') return value.toDate().getTime();
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    } catch (_) {
+        return 0;
+    }
+}
+
+function buildLeaveHistoryRecords(audits, mode = 'mine') {
+    const currentEmail = normalizeEmail(currentUser?.email);
+    const activated = audits
+        .filter((entry) => entry.action === 'user_leave_activated')
+        .filter((entry) => mode === 'mine'
+            ? normalizeEmail(entry.userEmail) === currentEmail
+            : normalizeEmail(entry.relieverEmail) === currentEmail)
+        .sort((a, b) => getTimestampMillis(b.timestamp) - getTimestampMillis(a.timestamp));
+
+    const resumed = audits.filter((entry) => entry.action === 'user_leave_resumed');
+    return activated.map((startEntry) => {
+        const startMs = getTimestampMillis(startEntry.timestamp);
+        const matchingResume = resumed
+            .filter((entry) => normalizeEmail(entry.userEmail) === normalizeEmail(startEntry.userEmail) && String(entry.stage || '') === String(startEntry.stage || ''))
+            .filter((entry) => getTimestampMillis(entry.timestamp) >= startMs)
+            .sort((a, b) => getTimestampMillis(a.timestamp) - getTimestampMillis(b.timestamp))[0] || null;
+        return {
+            id: `${startEntry.id || startMs}-${mode}`,
+            originalUserEmail: normalizeEmail(startEntry.userEmail),
+            relieverEmail: normalizeEmail(startEntry.relieverEmail),
+            stage: startEntry.stage || '',
+            startAt: startEntry.timestamp || null,
+            endAt: matchingResume?.timestamp || null,
+            startAtMs: startMs,
+            endAtMs: getTimestampMillis(matchingResume?.timestamp),
+            movedCount: Number(startEntry.movedCount || 0),
+            returnedCount: Number(matchingResume?.returnedCount || 0),
+            finalizedCount: Number(matchingResume?.finalizedCount || 0),
+            status: matchingResume ? 'Completed' : 'Active',
+            activatedBy: startEntry.performedBy || '',
+            resumedBy: matchingResume?.performedBy || ''
+        };
+    });
+}
+
+async function loadRsaLeaveHistory() {
+    const [auditSnap] = await Promise.all([
+        getDocs(query(collection(db, 'audit'), orderBy('timestamp', 'desc')))
+    ]);
+    const audits = auditSnap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
+    rsaMyLeaveHistory = buildLeaveHistoryRecords(audits, 'mine');
+    rsaReliefLeaveHistory = buildLeaveHistoryRecords(audits, 'relief');
+    rsaLeaveHistoryLoaded = true;
+}
+
+function renderRsaLeaveRows(records, bodyId, includeOriginalUser = false) {
+    const body = document.getElementById(bodyId);
+    if (!body) return;
+    if (!records.length) {
+        body.innerHTML = `<tr><td colspan="${includeOriginalUser ? 8 : 7}" style="text-align:center;padding:32px;color:#666">No leave records found</td></tr>`;
+        return;
+    }
+    body.innerHTML = records.map((record) => `
+        <tr>
+            ${includeOriginalUser ? `<td>${escapeHtml(userFullNameCache.get(record.originalUserEmail) || record.originalUserEmail || '-')}</td>` : ''}
+            <td>${formatTimestamp(record.startAt)}</td>
+            <td>${record.endAt ? formatTimestamp(record.endAt) : '-'}</td>
+            <td>${escapeHtml(record.status)}</td>
+            <td>${escapeHtml(userFullNameCache.get(record.relieverEmail) || record.relieverEmail || '-')}</td>
+            <td>${record.movedCount}</td>
+            <td>${record.returnedCount}/${record.finalizedCount}</td>
+            <td><button class="action-btn" onclick="window.openRsaLeaveApplications('${record.id}')"><i class="fas fa-eye"></i> View</button></td>
+        </tr>
+    `).join('');
+}
+
+async function renderRsaLeaveHistory() {
+    if (!rsaLeaveHistoryLoaded) {
+        await loadRsaLeaveHistory();
+    }
+    renderRsaLeaveRows(rsaMyLeaveHistory, 'rsaMyLeaveTableBody', false);
+    renderRsaLeaveRows(rsaReliefLeaveHistory, 'rsaReliefLeaveTableBody', true);
+}
+
+window.openRsaLeaveApplications = async (recordId) => {
+    const record = [...rsaMyLeaveHistory, ...rsaReliefLeaveHistory].find((item) => item.id === recordId);
+    if (!record) return;
+    const submissionsSnap = await getDocs(collection(db, 'submissions'));
+    const startMs = record.startAtMs || 0;
+    const endMs = record.endAtMs || Number.MAX_SAFE_INTEGER;
+    const matches = submissionsSnap.docs
+        .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))
+        .filter((sub) => normalizeEmail(sub.leaveCoverOriginalEmail) === record.originalUserEmail)
+        .filter((sub) => normalizeEmail(sub.leaveCoverRelieverEmail) === record.relieverEmail || !record.relieverEmail)
+        .filter((sub) => String(sub.leaveCoverStage || '') === String(record.stage || ''))
+        .filter((sub) => {
+            const movedMs = getTimestampMillis(sub.leaveCoverStartedAt);
+            return movedMs >= startMs && movedMs <= endMs + (24 * 60 * 60 * 1000);
+        });
+
+    const body = document.getElementById('rsaLeaveApplicationsBody');
+    const title = document.getElementById('rsaLeaveApplicationsTitle');
+    if (title) title.textContent = `Leave Applications - ${userFullNameCache.get(record.originalUserEmail) || record.originalUserEmail || 'User'}`;
+    if (body) {
+        body.innerHTML = matches.length
+            ? matches.map((sub) => `
+                <tr>
+                    <td>${escapeHtml(sub.customerName || 'Unknown')}</td>
+                    <td>${escapeHtml(String(sub.status || '-'))}</td>
+                    <td>${formatTimestamp(sub.leaveCoverStartedAt)}</td>
+                    <td>${formatTimestamp(sub.leaveCoverReturnedAt)}</td>
+                    <td>${formatTimestamp(sub.leaveCoverFinalizedAt)}</td>
+                </tr>
+            `).join('')
+            : '<tr><td colspan="5" style="text-align:center;padding:24px;color:#666">No applications found for this leave record</td></tr>';
+    }
+    document.getElementById('rsaLeaveApplicationsModal')?.classList.add('active');
+};
+
+function renderRejectedRsaTab() {
+    const body = document.getElementById('rsaRejectedTableBody');
+    if (!body) return;
+
+    let list = allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'rejected_by_rsa');
+    if (rsaSearch && rsaSearch.value.trim()) {
+        const qstr = rsaSearch.value.trim().toLowerCase();
+        list = list.filter((s) =>
+            (s.customerName || '').toLowerCase().includes(qstr) ||
+            (s.uploadedBy || '').toLowerCase().includes(qstr) ||
+            (s.uploadedByName || '').toLowerCase().includes(qstr)
+        );
+    }
+
+    if (!list.length) {
+        body.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#666">No RSA-rejected applications</td></tr>';
+        return;
+    }
+
+    body.innerHTML = list.map((sub) => `
+        <tr>
+            <td><strong>${sub.customerName || '-'}</strong></td>
+            <td>${sub.agentName || 'No Agent'}</td>
+            <td>${sub.uploadedByName || sub.uploadedBy || '-'}</td>
+            <td>${formatTimestamp(sub.uploadedAt)}</td>
+            <td>${formatTimestamp(sub.latestRejectedAt || sub.reviewedAt)}</td>
+            <td>${sub.latestRejectedBy || currentUser?.email || '-'}</td>
+            <td>${sub.latestRejectionReason || sub.comment || '-'}</td>
+            <td><span class="status-badge status-rejected">Rejected by RSA</span></td>
+            <td>
+                <button class="action-btn" onclick="window.openCustomerDetails('${sub.id}')"><i class="fas fa-eye"></i> Details</button>
+                <button class="action-btn" onclick="window.downloadAllRsa('${sub.id}')"><i class="fas fa-download"></i> Download All</button>
+                <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>
+            </td>
+        </tr>
+    `).join('');
 }
 
 function renderFinallySubmittedTab() {
@@ -1265,6 +1743,7 @@ function renderFinallySubmittedTab() {
 
         return `<tr>
             <td><strong>${sub.customerName || 'Unknown'}</strong></td>
+            <td>${sub.agentName || 'No Agent'}</td>
             <td>${uploader}</td>
             <td>${reviewer}</td>
             <td>${rsaOfficer}</td>
@@ -1305,7 +1784,7 @@ function renderRsaRows(submissions) {
         rsaSelectAllRows.indeterminate = false;
     }
     if (submissions.length === 0) {
-        rsaTableBody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:#666">No records</td></tr>';
+        rsaTableBody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:#666">No records</td></tr>';
         return;
     }
     rsaTableBody.innerHTML = submissions.map(sub=>{
@@ -1322,11 +1801,13 @@ function renderRsaRows(submissions) {
             <button class="action-btn" onclick="window.downloadAllRsa('${sub.id}')"><i class="fas fa-download"></i> Download All</button>
             <button class="action-btn merge-btn" onclick="window.openMergeModal('${sub.id}')"><i class="fas fa-compress-alt"></i> Merge</button>
             <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>
+            <button class="action-btn" style="background:#dc2626;color:#fff;border:none;" onclick="window.rejectRsaSubmission('${sub.id}')"><i class="fas fa-times-circle"></i> Reject</button>
             <button class="action-btn" style="background:#10b981;color:#fff;border:none;" onclick="window.finalSubmitRsa('${sub.id}')"><i class="fas fa-paper-plane"></i> Final Submit</button>
         `;
         return `<tr>
             <td><input type="checkbox" class="rsa-export-select" value="${sub.id}" title="Select ${sub.customerName || 'customer'} for Excel"></td>
             <td>${sub.customerName||'-'}</td>
+            <td>${sub.agentName || 'No Agent'}</td>
             <td>${uploader}</td>
             <td>${reviewer}</td>
             <td>${formatTimestamp(sub.uploadedAt)}</td>
@@ -1341,6 +1822,11 @@ function renderRsaRows(submissions) {
 window.finalSubmitRsa = async (submissionId) => {
     const sub = allSubmissions.find(s => s.id === submissionId);
     if (!sub) return;
+    const rolePermissions = (await getSystemSettings(db, { force: true })).rolePermissions || {};
+    if (rolePermissions.rsaCanApprove === false) {
+        showNotification('RSA final submissions are currently disabled by Super Admin.', 'error');
+        return;
+    }
 
     const currentStatus = String(sub.status || '').toLowerCase();
     if (!(currentStatus === 'processing_to_pfa' || currentStatus === 'approved')) {
@@ -1438,8 +1924,19 @@ rsaSelectAllRows?.addEventListener('change', () => {
 rsaTableBody?.addEventListener('change', (e) => {
     if (e.target?.classList?.contains('rsa-export-select')) updateRsaSelectAllState();
 });
-document.querySelectorAll('.export-rsa-all-excel').forEach((btn) => btn.addEventListener('click', () => {
-    downloadRsaExcel(currentRsaDisplayedSubmissions, 'all');
+document.querySelectorAll('.export-rsa-all-excel').forEach((btn) => btn.addEventListener('click', async () => {
+    try {
+        const submissions = isCurrentRsaLevelTwo()
+            ? await getAllRsaExcelSubmissions()
+            : currentRsaDisplayedSubmissions;
+        if (!submissions.length) {
+            showNotification('No RSA records available for Excel export', 'info');
+            return;
+        }
+        downloadRsaExcel(submissions, isCurrentRsaLevelTwo() ? 'all_rsa_users' : 'all');
+    } catch (error) {
+        showNotification('Failed to prepare RSA Excel export', 'error');
+    }
 }));
 document.querySelectorAll('.export-rsa-selected-excel').forEach((btn) => btn.addEventListener('click', () => {
     const selected = getSelectedRsaSubmissions();
@@ -1449,12 +1946,78 @@ document.querySelectorAll('.export-rsa-selected-excel').forEach((btn) => btn.add
     }
     downloadRsaExcel(selected, 'selected');
 }));
+openRsaExcelDateModalBtn?.addEventListener('click', openRsaExcelDateModal);
+closeRsaExcelDateModalBtn?.addEventListener('click', closeRsaExcelDateModal);
+cancelRsaExcelDateModalBtn?.addEventListener('click', closeRsaExcelDateModal);
+submitRsaExcelDateRangeBtn?.addEventListener('click', handleRsaLevelTwoDateRangeSubmit);
+closeRsaExcelResultsModalBtn?.addEventListener('click', closeRsaExcelResultsModal);
+closeRsaExcelResultsFooterBtn?.addEventListener('click', closeRsaExcelResultsModal);
+rsaExcelResultsSelectAll?.addEventListener('change', () => {
+    currentRsaExcelFilteredResults.forEach((sub) => {
+        if (rsaExcelResultsSelectAll.checked) {
+            currentRsaExcelSelectedIds.add(sub.id);
+        } else {
+            currentRsaExcelSelectedIds.delete(sub.id);
+        }
+    });
+    document.querySelectorAll('.rsa-export-results-select').forEach((input) => {
+        input.checked = currentRsaExcelSelectedIds.has(input.value);
+    });
+    updateRsaExcelResultsSelectAllState();
+});
+rsaExcelResultsTableBody?.addEventListener('change', (e) => {
+    if (!e.target?.classList?.contains('rsa-export-results-select')) return;
+    if (e.target.checked) {
+        currentRsaExcelSelectedIds.add(e.target.value);
+    } else {
+        currentRsaExcelSelectedIds.delete(e.target.value);
+    }
+    updateRsaExcelResultsSelectAllState();
+});
+let rsaExcelResultsSearchDebounce = null;
+rsaExcelResultsSearch?.addEventListener('input', () => {
+    if (rsaExcelResultsSearchDebounce) window.clearTimeout(rsaExcelResultsSearchDebounce);
+    rsaExcelResultsSearchDebounce = window.setTimeout(() => {
+        renderRsaExcelResultsModal();
+    }, 180);
+});
+exportRsaLevel2AllBtn?.addEventListener('click', () => {
+    if (!currentRsaExcelResults.length) {
+        showNotification('No applications available in this export window.', 'warning');
+        return;
+    }
+    downloadRsaExcel(currentRsaExcelResults, 'level2_date_range_all');
+});
+exportRsaLevel2SelectedBtn?.addEventListener('click', () => {
+    const selected = getSelectedRsaExcelResults();
+    if (!selected.length) {
+        showNotification('Select at least one application from the export list.', 'warning');
+        return;
+    }
+    downloadRsaExcel(selected, 'level2_date_range_selected');
+});
 
 // Finally Submitted tab filters
 const finalFilterBtn = document.getElementById('finalFilterBtn');
 const finalSearch = document.getElementById('finalSearch');
 finalFilterBtn?.addEventListener('click', renderCurrentTab);
 finalSearch?.addEventListener('input', renderCurrentTab);
+document.getElementById('rsaLeaveMineBtn')?.addEventListener('click', () => {
+    document.getElementById('rsaLeaveMineSection')?.style.setProperty('display', '');
+    document.getElementById('rsaLeaveReliefSection')?.style.setProperty('display', 'none');
+    const mineBtn = document.getElementById('rsaLeaveMineBtn');
+    const reliefBtn = document.getElementById('rsaLeaveReliefBtn');
+    if (mineBtn) { mineBtn.style.background = '#003366'; mineBtn.style.color = '#fff'; mineBtn.style.border = 'none'; }
+    if (reliefBtn) { reliefBtn.style.background = ''; reliefBtn.style.color = ''; reliefBtn.style.border = ''; }
+});
+document.getElementById('rsaLeaveReliefBtn')?.addEventListener('click', () => {
+    document.getElementById('rsaLeaveMineSection')?.style.setProperty('display', 'none');
+    document.getElementById('rsaLeaveReliefSection')?.style.setProperty('display', '');
+    const mineBtn = document.getElementById('rsaLeaveMineBtn');
+    const reliefBtn = document.getElementById('rsaLeaveReliefBtn');
+    if (reliefBtn) { reliefBtn.style.background = '#003366'; reliefBtn.style.color = '#fff'; reliefBtn.style.border = 'none'; }
+    if (mineBtn) { mineBtn.style.background = ''; mineBtn.style.color = ''; mineBtn.style.border = ''; }
+});
 
 // tab navigation
 document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -1489,6 +2052,16 @@ document.getElementById('mergeDocumentsBtn')?.addEventListener('click', handleMe
 document.getElementById('closeCustomerDetails')?.addEventListener('click', closeCustomerDetailsModal);
 document.getElementById('closeCustomerDetailsFooter')?.addEventListener('click', closeCustomerDetailsModal);
 document.getElementById('closeViewer')?.addEventListener('click', closeViewerModal);
+document.getElementById('closeRsaLeaveApplicationsBtn')?.addEventListener('click', () => {
+    document.getElementById('rsaLeaveApplicationsModal')?.classList.remove('active');
+});
+closeRsaRejectModalBtn?.addEventListener('click', closeRsaRejectModal);
+cancelRsaRejectModalBtn?.addEventListener('click', closeRsaRejectModal);
+confirmRsaRejectBtn?.addEventListener('click', submitRsaRejection);
+rsaRejectReasonInput?.addEventListener('input', () => {
+    rsaRejectReasonInput.style.borderColor = '';
+    rsaRejectReasonInput.style.boxShadow = '';
+});
 finalSubmitBtn?.addEventListener('click', (e) => {
     e.preventDefault();
     if (currentDetailsSubmissionId) window.finalSubmitRsa(currentDetailsSubmissionId);
@@ -1539,11 +2112,17 @@ window.addEventListener('click', (e) => {
     if (e.target === customerDetailsModal) closeCustomerDetailsModal();
     if (e.target === viewerModal) closeViewerModal();
     if (e.target === mergeModal) closeMergeModalFunc();
+    if (e.target === rsaRejectModal) closeRsaRejectModal();
+    if (e.target === rsaExcelDateModal) closeRsaExcelDateModal();
+    if (e.target === rsaExcelResultsModal) closeRsaExcelResultsModal();
+    if (e.target === document.getElementById('rsaLeaveApplicationsModal')) {
+        document.getElementById('rsaLeaveApplicationsModal')?.classList.remove('active');
+    }
 });
 
 // ==================== CUSTOMER DETAILS MODAL ====================
-window.openCustomerDetails = (submissionId) => {
-    const sub = allSubmissions.find(s => s.id === submissionId);
+window.openCustomerDetails = async (submissionId) => {
+    const sub = await getLatestSubmissionById(submissionId);
     if (!sub) return;
 
     currentDetailsSubmissionId = submissionId;
@@ -1573,6 +2152,7 @@ window.openCustomerDetails = (submissionId) => {
 
     // Property / loan
     doc.getElementById('detailPropertyType').textContent = details.propertyType || '-';
+    doc.getElementById('detailHouseNo').textContent = details.houseNumber || sub.houseNumber || '-';
     doc.getElementById('detailTenor').textContent = details.tenor ? `${details.tenor}` : '-';
     doc.getElementById('detailPropertyValue').textContent = details.propertyValue ? formatCurrency(details.propertyValue) : '-';
     doc.getElementById('detailFacilityFee').textContent = details.facilityFee ? formatCurrency(details.facilityFee) : '-';
@@ -1585,7 +2165,7 @@ window.openCustomerDetails = (submissionId) => {
     doc.getElementById('detailReviewedBy').textContent = sub.reviewedBy || '-';
     
     // Populate documents list
-    const docsList = sub.documents || [];
+    const docsList = getEffectiveSubmissionDocuments(sub);
     
     const docListHtml = docsList.length === 0 
         ? '<p style="color: #999; text-align: center; padding: 20px;">No documents submitted</p>'
@@ -1611,7 +2191,8 @@ window.openCustomerDetails = (submissionId) => {
     doc.getElementById('customerDocumentsList').innerHTML = docListHtml;
 
     if (finalSubmitBtn) {
-        const canSubmit = (sub.status || '').toLowerCase() === 'approved';
+        const normalizedStatus = (sub.status || '').toLowerCase();
+        const canSubmit = normalizedStatus === 'approved' || normalizedStatus === 'processing_to_pfa';
         finalSubmitBtn.disabled = !canSubmit;
         finalSubmitBtn.style.opacity = canSubmit ? '1' : '0.6';
         finalSubmitBtn.title = canSubmit ? 'Mark as finally submitted' : 'Only approved applications can be submitted';
@@ -1636,26 +2217,61 @@ function closeCustomerDetailsModal() {
     if (modal) modal.classList.remove('active');
 }
 
+function getTimestampMsSafe(value) {
+    if (!value) return 0;
+    try {
+        if (typeof value?.toMillis === 'function') return value.toMillis();
+        if (typeof value?.toDate === 'function') return value.toDate().getTime();
+        const parsed = new Date(value).getTime();
+        return Number.isFinite(parsed) ? parsed : 0;
+    } catch (_) {
+        return 0;
+    }
+}
+
+function buildViewerDocumentUrl(fileUrl, submission = null, docIndex = 0) {
+    const cleanUrl = String(fileUrl || '').trim();
+    if (!cleanUrl) return '';
+
+    try {
+        const url = new URL(cleanUrl, window.location.origin);
+        const versionSeed = Math.max(
+            getTimestampMsSafe(submission?.reuploadedAt),
+            getTimestampMsSafe(submission?.finalSubmittedAt),
+            getTimestampMsSafe(submission?.rsaSubmittedAt),
+            getTimestampMsSafe(submission?.fixSubmittedAt),
+            getTimestampMsSafe(submission?.uploadedAt)
+        ) || Date.now();
+        url.searchParams.set('_v', `${versionSeed}-${docIndex}`);
+        return url.toString();
+    } catch (_) {
+        const joiner = cleanUrl.includes('?') ? '&' : '?';
+        return `${cleanUrl}${joiner}_v=${Date.now()}-${docIndex}`;
+    }
+}
+
 window.viewDocumentRSA = (submissionId, docIndex) => {
     const sub = allSubmissions.find(s => s.id === submissionId);
-    if (!sub || !sub.documents || !sub.documents[docIndex]) return;
+    const docs = getEffectiveSubmissionDocuments(sub);
+    if (!sub || !docs[docIndex]) return;
     
-    const doc = sub.documents[docIndex];
+    const doc = docs[docIndex];
     const viewerFileName = document.getElementById('viewerFileName');
     const documentViewer = document.getElementById('documentViewer');
     
     if (viewerFileName) viewerFileName.textContent = doc.name;
-    if (documentViewer) documentViewer.src = doc.fileUrl;
+    if (documentViewer) documentViewer.src = buildViewerDocumentUrl(doc.fileUrl, sub, docIndex);
     
     const viewerModal = document.getElementById('viewerModal');
     if (viewerModal) viewerModal.classList.add('active');
 };
 
 window.downloadDocumentRSA = async (submissionId, docIndex) => {
-    const sub = allSubmissions.find(s => s.id === submissionId);
-    if (!sub || !sub.documents || !sub.documents[docIndex]) return;
+    const sub = await getLatestSubmissionById(submissionId);
+    const docs = getEffectiveSubmissionDocuments(sub);
+    if (!sub || !docs[docIndex]) return;
     
-    const doc = sub.documents[docIndex];
+    const doc = docs[docIndex];
     try {
         showLoader('Downloading document...');
         const response = await fetchWithCorsFallback(doc.fileUrl);
@@ -1674,10 +2290,10 @@ window.downloadDocumentRSA = async (submissionId, docIndex) => {
 };
 
 window.downloadAllRsa = async (submissionId) => {
-    const sub = allSubmissions.find(s => s.id === submissionId);
+    const sub = await getLatestSubmissionById(submissionId);
     if (!sub) return;
 
-    const docs = sub.documents || [];
+    const docs = getEffectiveSubmissionDocuments(sub);
     if (!docs.length) {
         showNotification('No documents available for this application', 'warning');
         return;
@@ -1735,6 +2351,7 @@ window.downloadAllRsa = async (submissionId) => {
             showNotification(`Storage blocked secure download for ${directOpenedCount} document(s), so they opened directly.`, 'warning');
         } else {
             showNotification('All documents downloaded successfully', 'success');
+            alert('All documents downloaded successfully.');
         }
     } catch (error) {
         if (error?.name === 'AbortError') {
@@ -1746,6 +2363,110 @@ window.downloadAllRsa = async (submissionId) => {
         hideLoader();
     }
 };
+
+window.rejectRsaSubmission = async (submissionId) => {
+    const sub = allSubmissions.find((s) => s.id === submissionId);
+    if (!sub) return;
+    currentRejectSubmissionId = submissionId;
+    if (rsaRejectCustomerNameEl) rsaRejectCustomerNameEl.textContent = sub.customerName || 'This customer';
+    if (rsaRejectReasonInput) {
+        rsaRejectReasonInput.value = sub.latestRejectionReason || sub.comment || '';
+        rsaRejectReasonInput.style.borderColor = '';
+        rsaRejectReasonInput.style.boxShadow = '';
+    }
+    rsaRejectModal?.classList.add('active');
+    setTimeout(() => rsaRejectReasonInput?.focus(), 30);
+};
+
+async function submitRsaRejection() {
+    const submissionId = String(currentRejectSubmissionId || '').trim();
+    if (!submissionId) return;
+    const sub = allSubmissions.find((s) => s.id === submissionId);
+    if (!sub) {
+        closeRsaRejectModal();
+        return;
+    }
+
+    const trimmedReason = String(rsaRejectReasonInput?.value || '').trim();
+    const systemSettings = await getSystemSettings(db, { force: true });
+    const rejectionRules = systemSettings.rejectionRules || {};
+    const rolePermissions = systemSettings.rolePermissions || {};
+    const minRejectLength = Number(rejectionRules.minLength || 0);
+    if (rolePermissions.rsaCanReject === false) {
+        showNotification('RSA rejections are currently disabled by Super Admin.', 'warning');
+        return;
+    }
+    if (rejectionRules.rsaRequired !== false && !trimmedReason) {
+        if (rsaRejectReasonInput) {
+            rsaRejectReasonInput.style.borderColor = '#dc2626';
+            rsaRejectReasonInput.style.boxShadow = '0 0 0 4px rgba(220, 38, 38, 0.12)';
+            rsaRejectReasonInput.focus();
+        }
+        showNotification('Rejection reason is required.', 'warning');
+        return;
+    }
+    if (trimmedReason && minRejectLength > 0 && trimmedReason.length < minRejectLength) {
+        if (rsaRejectReasonInput) rsaRejectReasonInput.focus();
+        showNotification(`Rejection reason must be at least ${minRejectLength} characters.`, 'warning');
+        return;
+    }
+
+    if (confirmRsaRejectBtn) {
+        confirmRsaRejectBtn.disabled = true;
+        confirmRsaRejectBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Rejecting...';
+    }
+
+    try {
+        await updateDoc(doc(db, 'submissions', submissionId), {
+            status: 'rejected_by_rsa',
+            comment: trimmedReason,
+            latestRejectionReason: trimmedReason,
+            latestRejectedBy: currentUser?.email || '',
+            latestRejectedAt: serverTimestamp(),
+            latestRejectedStage: 'rsa',
+            resubmittedAfterRejection: false,
+            rsaReady: true
+        });
+        await addDoc(collection(db, 'audit'), {
+            action: 'application_rejected_by_rsa',
+            submissionId,
+            customerName: sub.customerName || '',
+            userEmail: sub.uploadedBy || '',
+            rejectedBy: currentUser?.email || '',
+            details: trimmedReason,
+            timestamp: serverTimestamp()
+        });
+        notifyStatusChangePush({
+            currentUser,
+            submissionId,
+            customerName: sub.customerName || '',
+            newStatus: 'rejected_by_rsa',
+            statusLabel: 'Rejected by RSA',
+            actionLabel: 'Application Rejected by RSA',
+            message: `Application for ${sub.customerName || 'this customer'} was rejected by RSA for correction.`
+        }).catch(() => {});
+        closeRsaRejectModal();
+        showNotification('Successfully rejected by RSA.', 'success');
+    } catch (error) {
+        showNotification('Failed to reject application: ' + (error?.message || 'Unknown error'), 'error');
+    } finally {
+        if (confirmRsaRejectBtn) {
+            confirmRsaRejectBtn.disabled = false;
+            confirmRsaRejectBtn.innerHTML = '<i class="fas fa-times-circle"></i> Reject Application';
+        }
+    }
+}
+
+function closeRsaRejectModal() {
+    currentRejectSubmissionId = null;
+    rsaRejectModal?.classList.remove('active');
+    if (rsaRejectCustomerNameEl) rsaRejectCustomerNameEl.textContent = '-';
+    if (rsaRejectReasonInput) {
+        rsaRejectReasonInput.value = '';
+        rsaRejectReasonInput.style.borderColor = '';
+        rsaRejectReasonInput.style.boxShadow = '';
+    }
+}
 
 function closeViewerModal() {
     const modal = document.getElementById('viewerModal');

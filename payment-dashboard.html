@@ -38,15 +38,28 @@
             </div>
 
             <nav class="nav-menu">
-                <a href="#" class="nav-item active" data-tab="payments">
+                <a href="#" class="nav-item active" data-tab="dashboard">
+                    <i class="fas fa-chart-pie"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="sent-to-pfa">
                     <i class="fas fa-money-bill-transfer"></i>
-                    <span>Payment Queue</span>
+                    <span>Sent to PFA</span>
                     <span class="badge" id="paymentPendingCount">0</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="paid-customers">
                     <i class="fas fa-circle-check"></i>
-                    <span>Paid Agents</span>
+                    <span>Paid</span>
                     <span class="badge" id="paidCustomerCount">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="cleared-customers">
+                    <i class="fas fa-check-double"></i>
+                    <span>Cleared</span>
+                    <span class="badge" id="clearedCustomerCount">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="leave">
+                    <i class="fas fa-person-walking-luggage"></i>
+                    <span>Leave</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="profile">
                     <i class="fas fa-user"></i>
@@ -57,30 +70,72 @@
 
         <main class="main-content">
             <header class="content-header">
-                <h1 id="pageTitle">Payment Queue</h1>
+                <h1 id="pageTitle">Payment Dashboard</h1>
                 <button id="forceRefreshBtn" class="action-btn" style="padding:10px 14px;font-size:13px;">
                     <i class="fas fa-arrows-rotate"></i> Refresh
                 </button>
             </header>
 
-            <div id="paymentsTab" class="tab-content active">
-                <div class="table-section">
-                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-                        <h2 style="margin:0;">Payment Dashboard</h2>
-                        <button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.clearPaidSubmissions()">
-                            <i class="fas fa-check-double"></i> Settle Commission
-                        </button>
+            <div id="dashboardTab" class="tab-content active">
+                <div class="overview-cards" style="margin-bottom:16px;">
+                    <div class="stat-card pending">
+                        <div class="stat-content">
+                            <div>
+                                <div class="stat-label">Sent to PFA</div>
+                                <div class="stat-value" id="dashboardSentToPfaCount">0</div>
+                            </div>
+                            <i class="fas fa-paper-plane stat-icon"></i>
+                        </div>
                     </div>
-                    <p style="color:#64748b;margin:0 0 14px;">Treat commission per agent. Each row below represents one agent batch, even when one uploader manages multiple agents.</p>
+                    <div class="stat-card approved">
+                        <div class="stat-content">
+                            <div>
+                                <div class="stat-label">Paid</div>
+                                <div class="stat-value" id="dashboardPaidCount">0</div>
+                            </div>
+                            <i class="fas fa-circle-check stat-icon"></i>
+                        </div>
+                    </div>
+                    <div class="stat-card approved">
+                        <div class="stat-content">
+                            <div>
+                                <div class="stat-label">Cleared</div>
+                                <div class="stat-value" id="dashboardClearedCount">0</div>
+                            </div>
+                            <i class="fas fa-check-double stat-icon"></i>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-content">
+                            <div>
+                                <div class="stat-label">Total Commission</div>
+                                <div class="stat-value" id="dashboardTotalCommission">NGN 0</div>
+                            </div>
+                            <i class="fas fa-money-bill-wave stat-icon"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="table-section">
+                    <h2>Workflow Overview</h2>
+                    <p style="color:#64748b;margin:0 0 14px;">Use the tabs to move from `Sent to PFA` to `Paid` and then `Cleared`. This dashboard gives the payment team a quick overview of the current workload.</p>
+                </div>
+            </div>
+
+            <div id="sent-to-pfaTab" class="tab-content">
+                <div class="table-section">
+                    <h2 style="margin:0 0 12px;">Sent to PFA</h2>
+                    <p style="color:#64748b;margin:0 0 14px;">Every application forwarded from RSA appears here. Once PFA pays for an application, mark that specific record as paid.</p>
                     <div class="table-container">
                         <table class="customers-table">
                             <thead>
                                 <tr>
+                                    <th>Customer</th>
                                     <th>Agent</th>
                                     <th>Uploader</th>
-                                    <th>Customers</th>
-                                    <th>Total 25% Balance</th>
-                                    <th>Total 2% Commission</th>
+                                    <th>PFA</th>
+                                    <th>25% Balance</th>
+                                    <th>Commission</th>
+                                    <th>Sent Date</th>
                                     <th>Status</th>
                                     <th>Action</th>
                                 </tr>
@@ -108,7 +163,7 @@
                                     <th>Uploader</th>
                                     <th>Customers</th>
                                     <th>Total 25% Balance</th>
-                                    <th>Total 2% Commission</th>
+                                    <th>Total Commission</th>
                                     <th>Status</th>
                                     <th>Action</th>
                                 </tr>
@@ -139,6 +194,54 @@
                 </div>
             </div>
 
+            <div id="leaveTab" class="tab-content">
+                <div class="table-section">
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+                        <button type="button" class="action-btn" id="paymentLeaveMineBtn" style="background:#003366;color:#fff;border:none;">My Leave History</button>
+                        <button type="button" class="action-btn" id="paymentLeaveReliefBtn">Relief History</button>
+                    </div>
+                    <div id="paymentLeaveMineSection">
+                        <div class="table-container">
+                            <table class="customers-table" style="min-width:980px;">
+                                <thead><tr><th>Leave Start</th><th>Leave End</th><th>Status</th><th>Assigned Reliever</th><th>Moved</th><th>Returned/Finalized</th><th>View</th></tr></thead>
+                                <tbody id="paymentMyLeaveTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div id="paymentLeaveReliefSection" style="display:none;">
+                        <div class="table-container">
+                            <table class="customers-table" style="min-width:980px;">
+                                <thead><tr><th>Original User</th><th>Leave Start</th><th>Leave End</th><th>Status</th><th>Assigned Reliever</th><th>Moved</th><th>Returned/Finalized</th><th>View</th></tr></thead>
+                                <tbody id="paymentReliefLeaveTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="cleared-customersTab" class="tab-content">
+                <div class="table-section">
+                    <h2 style="margin:0 0 12px;">Cleared</h2>
+                    <p style="color:#64748b;margin:0 0 14px;">These are fully settled agent batches. They remain here as cleared payment history.</p>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Agent</th>
+                                    <th>Uploader</th>
+                                    <th>Customers</th>
+                                    <th>Total 25% Balance</th>
+                                    <th>Total Commission</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="clearedCustomersTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
         </main>
     </div>
 
@@ -155,8 +258,8 @@
             <div class="modal-body">
                 <div class="sop-topics">
                     <div class="sop-topic">
-                        <h4>1. Payment Queue</h4>
-                        <p>Process only verified records in <strong>Payment Queue</strong> and confirm status is ready for payout confirmation.</p>
+                        <h4>1. Sent to PFA</h4>
+                        <p>Process only verified records in <strong>Sent to PFA</strong> and confirm status is ready for payout confirmation.</p>
                         <p>Check customer, PFA, agent, and amount fields before any payment action.</p>
                     </div>
                     <div class="sop-topic">
@@ -184,11 +287,28 @@
 
     <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
 
-    <script src="js/table-enhancer.js?v=20260412"></script>
-    <script type="module" src="js/payment-dashboard.js?v=20260423b"></script>
-    <script type="module" src="js/profile-completion-guard.js?v=20260415"></script>
-    <link rel="stylesheet" href="css/app-chat.css?v=20260416q">
-    <script type="module" src="js/app-chat.js?v=20260423a"></script>
+    <div id="paymentLeaveApplicationsModal" class="modal">
+        <div class="modal-content" style="max-width:900px;">
+            <div class="modal-header">
+                <h2 id="paymentLeaveApplicationsTitle">Leave Applications</h2>
+                <button class="close-btn" id="closePaymentLeaveApplicationsBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="table-container">
+                    <table class="customers-table">
+                        <thead><tr><th>Customer</th><th>Status</th><th>Moved At</th><th>Returned At</th><th>Finalized At</th></tr></thead>
+                        <tbody id="paymentLeaveApplicationsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/table-enhancer.js?v=20260512b"></script>
+    <script type="module" src="js/payment-dashboard.js?v=20260518a"></script>
+    <script type="module" src="js/profile-completion-guard.js?v=20260518a"></script>
+    <link rel="stylesheet" href="css/app-chat.css?v=20260518a">
+    <script type="module" src="js/app-chat.js?v=20260518a"></script>
     <link rel="stylesheet" href="css/pwa-install.css">
     <script src="js/pwa-install.js?v=20260423a"></script>
     <link rel="stylesheet" href="css/profile-card.css">
