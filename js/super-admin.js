@@ -33,6 +33,7 @@ let allAudits = [];
 let allRoutingRules = [];
 let allAgents = [];
 let currentTab = 'global';
+let currentAgentSubTab = 'application-agents';
 let currentRoutingSubTab = 'normal';
 let selectedSuperUserId = '';
 let selectedSuperAgentId = '';
@@ -397,8 +398,7 @@ function switchTab(tabId) {
         global: 'Global View',
         admins: 'User Management',
         'routing-rules': 'Uploader Routing',
-        'application-agents': 'Application Agents',
-        'agent-records': 'Agent Records',
+        agents: 'Agent',
         audit: 'Audit',
         security: 'Security',
         'round-robin': 'Round Robin',
@@ -408,6 +408,39 @@ function switchTab(tabId) {
     if (pageTitle) pageTitle.textContent = titles[tabId] || 'Super Admin';
     renderCurrentTab();
 }
+
+function renderAgentSubTabState() {
+    const isApplication = currentAgentSubTab === 'application-agents';
+    const isRecords = currentAgentSubTab === 'agent-records';
+    const isReroute = currentAgentSubTab === 'agent-reroute';
+
+    const setButtonState = (id, active) => {
+        const button = document.getElementById(id);
+        if (!button) return;
+        button.style.background = active ? '#003366' : '';
+        button.style.color = active ? '#fff' : '';
+        button.style.border = active ? 'none' : '';
+    };
+
+    const setSectionState = (id, active) => {
+        const section = document.getElementById(id);
+        if (section) section.style.display = active ? '' : 'none';
+    };
+
+    setButtonState('agentApplicationSubTabBtn', isApplication);
+    setButtonState('agentRecordsSubTabBtn', isRecords);
+    setButtonState('agentRerouteSubTabBtn', isReroute);
+    setSectionState('agentApplicationSection', isApplication);
+    setSectionState('agentRecordsSection', isRecords);
+    setSectionState('agentRerouteSection', isReroute);
+}
+
+window.switchAgentSubTab = (tabId) => {
+    const allowedTabs = ['application-agents', 'agent-records', 'agent-reroute'];
+    currentAgentSubTab = allowedTabs.includes(String(tabId || '').trim()) ? String(tabId).trim() : 'application-agents';
+    renderAgentSubTabState();
+    renderCurrentTab();
+};
 
 function renderGlobalView() {
     const usersCount = allUsers.length;
@@ -949,8 +982,12 @@ function renderCurrentTab() {
     if (currentTab === 'global') return renderGlobalView();
     if (currentTab === 'admins') return renderAdminManagement();
     if (currentTab === 'routing-rules') return renderRoutingRules();
-    if (currentTab === 'application-agents') return renderApplicationAgentModule();
-    if (currentTab === 'agent-records') return renderAgentRecords();
+    if (currentTab === 'agents') {
+        renderAgentSubTabState();
+        if (currentAgentSubTab === 'agent-records') return renderAgentRecords();
+        if (currentAgentSubTab === 'agent-reroute') return renderApplicationAgentRerouteModule();
+        return renderApplicationAgentModule();
+    }
     if (currentTab === 'audit') return renderAudit();
     if (currentTab === 'security') return renderSecurity();
     if (currentTab === 'round-robin') return renderRoundRobin();
@@ -1612,7 +1649,7 @@ function renderApplicationAgentModule() {
 
     const rows = allSubmissions
         .filter((sub) => String(sub.status || '').toLowerCase() !== 'draft')
-        .filter((sub) => !String(sub.agentId || '').trim() && !String(sub.agentName || '').trim())
+        .filter((sub) => !String(sub.agentId || '').trim())
         .slice(0, 300);
 
     if (!rows.length) {
@@ -1641,6 +1678,65 @@ function renderApplicationAgentModule() {
                 <td>
                     <button class="action-btn" style="background:#003366;color:#fff;border:none;" onclick="window.assignApplicationAgent('${sub.id}')">
                         <i class="fas fa-save"></i> Update Agent
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function getApplicationLinkedAgentLabel(sub = {}) {
+    if (!String(sub.agentId || '').trim()) return 'No Agent';
+    return String(sub.agentName || '').trim() || 'Unknown Agent';
+}
+
+function renderApplicationAgentRerouteModule() {
+    const body = document.getElementById('superAgentRerouteTableBody');
+    if (!body) return;
+
+    const search = String(document.getElementById('superAgentRerouteSearch')?.value || '').trim().toLowerCase();
+    const rows = allSubmissions
+        .filter((sub) => String(sub.status || '').toLowerCase() !== 'draft')
+        .filter((sub) => String(sub.agentId || '').trim())
+        .filter((sub) => {
+            const currentAgentLabel = getApplicationLinkedAgentLabel(sub);
+            const searchable = [
+                sub.customerName || '',
+                sub.uploadedBy || '',
+                currentAgentLabel,
+                sub.status || ''
+            ].join(' ').toLowerCase();
+            return !search || searchable.includes(search);
+        })
+        .slice(0, 300);
+
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6" class="no-data">No linked applications match this search</td></tr>';
+        return;
+    }
+
+    body.innerHTML = rows.map((sub) => {
+        const uploaderEmail = normalizeEmail(sub.uploadedBy);
+        const options = getUploaderOwnedApprovedAgents(uploaderEmail)
+            .filter((agent) => String(agent.id || '').trim() !== String(sub.agentId || '').trim());
+        const selectOptions = options.length
+            ? options.map((agent) => `<option value="${escapeHtml(agent.id)}">${escapeHtml(agent.fullName || 'Unnamed')} (${escapeHtml(agent.contactNumber || '-')})</option>`).join('')
+            : '<option value="">No other approved agents for this uploader</option>';
+        return `
+            <tr>
+                <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
+                <td>${escapeHtml(uploaderEmail || '-')}</td>
+                <td>${escapeHtml(String(sub.status || '-'))}</td>
+                <td>${escapeHtml(getApplicationLinkedAgentLabel(sub))}</td>
+                <td>
+                    <select id="sa-reroute-agent-${sub.id}" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;width:100%;">
+                        <option value="">Select replacement agent...</option>
+                        ${selectOptions}
+                    </select>
+                </td>
+                <td>
+                    <button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.rerouteApplicationAgent('${sub.id}')">
+                        <i class="fas fa-right-left"></i> Re-route
                     </button>
                 </td>
             </tr>
@@ -2598,6 +2694,58 @@ window.assignApplicationAgent = async (submissionId) => {
     }
 };
 
+window.rerouteApplicationAgent = async (submissionId) => {
+    const submission = allSubmissions.find((item) => item.id === submissionId);
+    if (!submission) return showNotification('Submission not found', 'error');
+
+    const currentAgentId = String(submission.agentId || '').trim();
+    if (!currentAgentId) return showNotification('This application has no linked agent to re-route', 'warning');
+
+    const select = document.getElementById(`sa-reroute-agent-${submissionId}`);
+    const agentId = String(select?.value || '').trim();
+    if (!agentId) return showNotification('Select a replacement agent first', 'warning');
+    if (agentId === currentAgentId) return showNotification('Select a different agent to re-route this application', 'warning');
+
+    const allowedAgents = getUploaderOwnedApprovedAgents(submission.uploadedBy);
+    const selectedAgent = allowedAgents.find((agent) => String(agent.id || '').trim() === agentId);
+    if (!selectedAgent) {
+        showNotification('Selected agent is not registered by this uploader', 'error');
+        return;
+    }
+
+    const currentAgentName = getApplicationLinkedAgentLabel(submission);
+    const nextAgentName = String(selectedAgent.fullName || '').trim() || 'Selected Agent';
+    const confirmed = window.confirm(`Re-route ${submission.customerName || 'this application'} from ${currentAgentName} to ${nextAgentName}?`);
+    if (!confirmed) return;
+
+    try {
+        await updateDoc(doc(db, 'submissions', submissionId), {
+            agentId: selectedAgent.id,
+            agentName: selectedAgent.fullName || '',
+            agentContactNumber: selectedAgent.contactNumber || '',
+            agentAccountNumber: selectedAgent.accountNumber || '',
+            agentAccountBank: selectedAgent.accountBank || '',
+            updatedAt: serverTimestamp(),
+            updatedBy: currentUser?.email || ''
+        });
+        await addDoc(collection(db, 'audit'), {
+            action: 'submission_agent_rerouted_by_super_admin',
+            submissionId,
+            customerName: submission.customerName || '',
+            uploaderEmail: submission.uploadedBy || '',
+            previousAgentId: currentAgentId,
+            previousAgentName: currentAgentName,
+            nextAgentId: selectedAgent.id,
+            nextAgentName: selectedAgent.fullName || '',
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        });
+        showNotification('Application re-routed successfully', 'success');
+    } catch (error) {
+        showNotification('Failed to re-route application agent', 'error');
+    }
+};
+
 window.clearAppCacheForAllUsers = async () => {
     const confirmed = await openClearCacheConfirmModal();
     if (!confirmed) return;
@@ -2724,8 +2872,7 @@ function setupRealtimeData() {
 
     onSnapshot(query(collection(db, 'agents')), (snap) => {
         allAgents = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        if (currentTab === 'application-agents') renderApplicationAgentModule();
-        if (currentTab === 'agent-records') renderAgentRecords();
+        if (currentTab === 'agents') renderCurrentTab();
     });
 }
 
@@ -2811,10 +2958,13 @@ document.getElementById('agentBankNameInput')?.addEventListener('keydown', (even
     }
 });
 document.getElementById('superAgentSearch')?.addEventListener('input', () => {
-    if (currentTab === 'agent-records') renderAgentRecords();
+    if (currentTab === 'agents' && currentAgentSubTab === 'agent-records') renderAgentRecords();
+});
+document.getElementById('superAgentRerouteSearch')?.addEventListener('input', () => {
+    if (currentTab === 'agents' && currentAgentSubTab === 'agent-reroute') renderApplicationAgentRerouteModule();
 });
 document.getElementById('superAgentStatusFilter')?.addEventListener('change', () => {
-    if (currentTab === 'agent-records') renderAgentRecords();
+    if (currentTab === 'agents' && currentAgentSubTab === 'agent-records') renderAgentRecords();
 });
 document.getElementById('superUserForm')?.addEventListener('submit', saveSuperUser);
 document.getElementById('closeSuperUserModalBtn')?.addEventListener('click', closeSuperUserModal);

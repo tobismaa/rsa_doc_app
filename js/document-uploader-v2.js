@@ -1013,21 +1013,76 @@ function collectSubmissionDocuments() {
 
 function getStoredAgentSelectionValue(submission = {}) {
   const storedAgentId = String(submission?.agentId || '').trim();
-  if (storedAgentId) return storedAgentId;
-  if (String(submission?.agentName || '').trim()) return '__stored_agent__';
-  return '';
+  return storedAgentId || '';
+}
+
+function getKnownAgentById(agentId = '') {
+  const normalizedId = String(agentId || '').trim();
+  if (!normalizedId) return null;
+  return approvedAgents.find((agent) => String(agent?.id || '').trim() === normalizedId)
+    || registeredAgents.find((agent) => String(agent?.id || '').trim() === normalizedId)
+    || null;
+}
+
+function buildAgentSnapshotFromRecord(agent = null) {
+  if (!agent) {
+    return {
+      agentId: '',
+      agentName: '',
+      agentContactNumber: '',
+      agentAccountNumber: '',
+      agentAccountBank: ''
+    };
+  }
+  return {
+    agentId: String(agent?.id || agent?.agentId || '').trim(),
+    agentName: String(agent?.fullName || agent?.agentName || '').trim(),
+    agentContactNumber: String(agent?.contactNumber || agent?.agentContactNumber || '').trim(),
+    agentAccountNumber: String(agent?.accountNumber || agent?.agentAccountNumber || '').trim(),
+    agentAccountBank: String(agent?.accountBank || agent?.agentAccountBank || '').trim()
+  };
+}
+
+function getSubmissionAgentSnapshot(submission = {}) {
+  const agentId = String(submission?.agentId || '').trim();
+  if (!agentId) return buildAgentSnapshotFromRecord(null);
+  const linkedAgent = getKnownAgentById(agentId);
+  if (linkedAgent) return buildAgentSnapshotFromRecord(linkedAgent);
+  return {
+    agentId,
+    agentName: String(submission?.agentName || '').trim(),
+    agentContactNumber: String(submission?.agentContactNumber || '').trim(),
+    agentAccountNumber: String(submission?.agentAccountNumber || '').trim(),
+    agentAccountBank: String(submission?.agentAccountBank || '').trim()
+  };
+}
+
+function normalizeSubmissionAgentFields(submission = {}) {
+  const snapshot = getSubmissionAgentSnapshot(submission);
+  return {
+    ...submission,
+    agentId: snapshot.agentId,
+    agentName: snapshot.agentName,
+    agentContactNumber: snapshot.agentContactNumber,
+    agentAccountNumber: snapshot.agentAccountNumber,
+    agentAccountBank: snapshot.agentAccountBank
+  };
+}
+
+function getSubmissionAgentDisplayName(submission = {}) {
+  return String(getSubmissionAgentSnapshot(submission).agentName || '').trim() || 'No Agent';
 }
 
 function syncCurrentSubmissionAgentFallbackFromSubmission(submission = {}) {
-  const selectionValue = getStoredAgentSelectionValue(submission);
-  currentSubmissionAgentFallback = selectionValue
+  const snapshot = getSubmissionAgentSnapshot(submission);
+  currentSubmissionAgentFallback = snapshot.agentId
     ? {
-        value: selectionValue,
-        id: String(submission?.agentId || '').trim(),
-        fullName: String(submission?.agentName || '').trim(),
-        contactNumber: String(submission?.agentContactNumber || '').trim(),
-        accountNumber: String(submission?.agentAccountNumber || '').trim(),
-        accountBank: String(submission?.agentAccountBank || '').trim()
+        value: snapshot.agentId,
+        id: snapshot.agentId,
+        fullName: snapshot.agentName,
+        contactNumber: snapshot.agentContactNumber,
+        accountNumber: snapshot.agentAccountNumber,
+        accountBank: snapshot.agentAccountBank
       }
     : null;
 }
@@ -3741,10 +3796,11 @@ async function buildImportedDraftPayload(rowMap) {
     documentTypes: [],
     houseNumber: customerDetails.houseNumber || '',
     agentId: '',
-    agentName: getCellText(rowMap.agentname),
+    agentName: '',
     agentContactNumber: '',
     agentAccountNumber: '',
     agentAccountBank: '',
+    importedAgentName: getCellText(rowMap.agentname),
     draftSource: 'excel',
     draftSavedAt: serverTimestamp()
   };
@@ -3837,7 +3893,7 @@ async function loadSubmissions() {
     const emails = new Set();
     snapshot.forEach((doc) => {
       const data = doc.data();
-      allSubmissions.push({ id: doc.id, ...data });
+      allSubmissions.push(normalizeSubmissionAgentFields({ id: doc.id, ...data }));
       if (data.uploadedBy) emails.add(data.uploadedBy);
       if (data.reviewedBy) emails.add(data.reviewedBy);
       if (data.assignedTo) emails.add(data.assignedTo);
@@ -3964,10 +4020,11 @@ function renderDraftTable() {
 
   draftTableBody.innerHTML = drafts.map((sub) => {
     const docCount = Array.isArray(sub.documents) ? sub.documents.length : 0;
+    const agentName = getSubmissionAgentDisplayName(sub);
     return `
       <tr data-submission-id="${sub.id}">
         <td><strong>${escapeHtml(sub.customerName || 'Untitled Draft')}</strong></td>
-        <td>${escapeHtml(sub.agentName || 'No Agent')}</td>
+        <td>${escapeHtml(agentName)}</td>
         <td>${docCount}</td>
         <td>${safeFormatDate(sub.draftSavedAt || sub.uploadedAt)}</td>
         <td><span class="status-badge status-pending">Draft</span></td>
@@ -4051,7 +4108,7 @@ async function renderPendingTable() {
     const date = safeFormatDate(sub.uploadedAt);
     const assignedName = await getCurrentHandlerName(sub);
     const whatsapp = await renderStageContactLink(sub);
-    const agentName = escapeHtml(sub.agentName || sub.customerDetails?.agent || 'No Agent');
+    const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
     html += `<tr><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td><span class="status-badge status-pending">Pending</span></td><td>${escapeHtml(sub.comment || '-')}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   pendingTableBody.innerHTML = html;
@@ -4069,7 +4126,7 @@ async function renderApprovedTable() {
     const approvedBy = (approvedByKey && userFullNames.get(approvedByKey)) ? userFullNames.get(approvedByKey) : (sub.reviewedBy || '-');
     const assignedName = await getCurrentHandlerName(sub);
     const whatsapp = await renderStageContactLink(sub);
-    const agentName = escapeHtml(sub.agentName || sub.customerDetails?.agent || 'No Agent');
+    const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
     const lifecycleLabel = escapeHtml(formatSubmissionStatusLabel(sub.status || (sub.finalSubmitted ? 'sent_to_pfa' : 'approved')));
     const lifecycleClass = String(sub.status || '').toLowerCase() === 'cleared'
       ? 'status-cleared'
@@ -4095,7 +4152,7 @@ async function renderRejectedTable() {
     const rejectedBy = (rejectedByKey && userFullNames.get(rejectedByKey)) ? userFullNames.get(rejectedByKey) : (rejectedActor || '-');
     const rejectedStatusLabel = String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? 'Rejected by RSA' : 'Rejected';
     const assignedName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned';
-    const agentName = escapeHtml(sub.agentName || sub.customerDetails?.agent || 'No Agent');
+    const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
     const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button>`;
     const reasonBtn = hasRejectionHistory(sub)
       ? `<button class="action-btn reason-btn" onclick="window.openUploaderRejectionReasonModal('${sub.id}')"><i class="fas fa-eye"></i> View</button>`
@@ -4282,10 +4339,7 @@ function getUploaderCommissionStatusBucket(sub) {
 
 function getUploaderAgentCommissionKey(subOrAgent) {
   const agentId = String(subOrAgent?.agentId || subOrAgent?.id || '').trim();
-  if (agentId) return `agent:${agentId}`;
-  const agentName = String(subOrAgent?.agentName || subOrAgent?.fullName || '').trim().toLowerCase();
-  const uploaderEmail = normalizeEmail(subOrAgent?.uploadedBy || subOrAgent?.createdBy);
-  return `fallback:${uploaderEmail}::${agentName || 'no-agent'}`;
+  return agentId ? `agent:${agentId}` : '';
 }
 
 function buildUploaderAgentCommissionGroups() {
@@ -4310,14 +4364,16 @@ function buildUploaderAgentCommissionGroups() {
 
   allSubmissions.forEach((sub) => {
     if (!isUploaderCommissionTrackable(sub)) return;
-    if (!String(sub?.agentId || '').trim() && !String(sub?.agentName || '').trim()) return;
+    if (!String(sub?.agentId || '').trim()) return;
 
     const key = getUploaderAgentCommissionKey(sub);
+    if (!key) return;
+    const snapshot = getSubmissionAgentSnapshot(sub);
     const group = groups.get(key) || {
       key,
-      agentName: String(sub?.agentName || 'No Agent').trim() || 'No Agent',
-      bank: String(sub?.agentAccountBank || '-').trim() || '-',
-      accountNumber: String(sub?.agentAccountNumber || '-').trim() || '-',
+      agentName: String(snapshot.agentName || 'No Agent').trim() || 'No Agent',
+      bank: String(snapshot.agentAccountBank || '-').trim() || '-',
+      accountNumber: String(snapshot.agentAccountNumber || '-').trim() || '-',
       totalCommission: 0,
       sentToPfaSubmissions: [],
       activeSubmissions: [],
@@ -4340,8 +4396,8 @@ function buildUploaderAgentCommissionGroups() {
       group.sentToPfaCommission += commission2;
     }
     group.totalCommission = group.sentToPfaCommission + group.activeCommission + group.clearedCommission;
-    if (group.bank === '-' && String(sub?.agentAccountBank || '').trim()) group.bank = String(sub.agentAccountBank).trim();
-    if (group.accountNumber === '-' && String(sub?.agentAccountNumber || '').trim()) group.accountNumber = String(sub.agentAccountNumber).trim();
+    if (group.bank === '-' && String(snapshot.agentAccountBank || '').trim()) group.bank = String(snapshot.agentAccountBank).trim();
+    if (group.accountNumber === '-' && String(snapshot.agentAccountNumber || '').trim()) group.accountNumber = String(snapshot.agentAccountNumber).trim();
     groups.set(key, group);
   });
 
@@ -4580,6 +4636,7 @@ window.viewSubmissionDetails = (submissionId) => {
     showNotification('Submission details not found', 'error');
     return;
   }
+  const agentSnapshot = getSubmissionAgentSnapshot(sub);
   const detailSections = [
     {
       title: 'Customer Details',
@@ -4619,10 +4676,10 @@ window.viewSubmissionDetails = (submissionId) => {
     {
       title: 'Agent Details',
       fields: [
-        ['Agent Name', String(sub.agentName || '').trim() || 'No Agent'],
-        ['Agent Contact', String(sub.agentContactNumber || '').trim() || '-'],
-        ['Agent Account Number', String(sub.agentAccountNumber || '').trim() || '-'],
-        ['Agent Account Bank', String(sub.agentAccountBank || '').trim() || '-']
+        ['Agent Name', String(agentSnapshot.agentName || '').trim() || 'No Agent'],
+        ['Agent Contact', String(agentSnapshot.agentContactNumber || '').trim() || '-'],
+        ['Agent Account Number', String(agentSnapshot.agentAccountNumber || '').trim() || '-'],
+        ['Agent Account Bank', String(agentSnapshot.agentAccountBank || '').trim() || '-']
       ]
     }
   ];
@@ -4787,11 +4844,11 @@ function populateApprovedAgentSelect() {
     return;
   }
   if (currentSubmissionAgentFallback && !approvedAgents.some((a) => a.id === currentSubmissionAgentFallback.value)) {
-    const labelName = currentSubmissionAgentFallback.fullName || 'Stored Agent';
+    const labelName = currentSubmissionAgentFallback.fullName || 'Linked Agent';
     const labelPhone = currentSubmissionAgentFallback.contactNumber || '-';
     const opt = document.createElement('option');
     opt.value = currentSubmissionAgentFallback.value;
-    opt.textContent = `${labelName} - ${labelPhone} (stored)`;
+    opt.textContent = `${labelName} - ${labelPhone} (linked)`;
     customerAgentSelect.appendChild(opt);
     if (current === currentSubmissionAgentFallback.value) {
       customerAgentSelect.value = currentSubmissionAgentFallback.value;

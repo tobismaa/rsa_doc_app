@@ -1,5 +1,5 @@
-import { EMAIL_API_BASE_URL } from '../email-api-config.js';
-import { ADMIN_API_BASE_URL } from '../admin-api-config.js';
+import { auth, db } from '../firebase-config.js';
+import { doc, getDoc, serverTimestamp, setDoc } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
 
 export const APP_TIME_ZONE = 'Africa/Lagos';
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-NG', {
@@ -28,19 +28,6 @@ let cachedServerEpochMs = 0;
 let cachedFetchPerfMs = 0;
 let lastFetchAttemptPerfMs = 0;
 const SERVER_TIME_TTL_MS = 60 * 1000;
-
-function resolveConfiguredBaseUrl(raw) {
-  const value = String(raw || '').trim();
-  if (!value || value.includes('YOUR-RENDER-URL')) return '';
-  return value.replace(/\/+$/, '');
-}
-
-function getTrustedTimeApiBaseUrl() {
-  return resolveConfiguredBaseUrl(window.__EMAIL_API_BASE_URL__)
-    || resolveConfiguredBaseUrl(window.__ADMIN_API_BASE_URL__)
-    || resolveConfiguredBaseUrl(EMAIL_API_BASE_URL)
-    || resolveConfiguredBaseUrl(ADMIN_API_BASE_URL);
-}
 
 function getPerfNow() {
   if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
@@ -97,40 +84,22 @@ export async function getTrustedNow({ force = false } = {}) {
     return new Date(cachedServerEpochMs + (nowPerfMs - cachedFetchPerfMs));
   }
 
-  const baseUrl = getTrustedTimeApiBaseUrl();
   lastFetchAttemptPerfMs = nowPerfMs;
 
-  if (baseUrl) {
-    try {
-      const response = await fetch(`${baseUrl}/api/server-time`, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' }
-      });
-      if (response.ok) {
-        const payload = await response.json();
-        const epochMs = Number(payload?.epochMs || 0);
-        if (Number.isFinite(epochMs) && epochMs > 0) {
-          cachedServerEpochMs = epochMs;
-          cachedFetchPerfMs = getPerfNow();
-          return new Date(epochMs);
-        }
-      }
-    } catch (_) {}
-  }
-
   try {
-    const response = await fetch('/api/server-time', {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-    if (response.ok) {
-      const payload = await response.json();
-      const epochMs = Number(payload?.epochMs || 0);
-      if (Number.isFinite(epochMs) && epochMs > 0) {
-        cachedServerEpochMs = epochMs;
-        cachedFetchPerfMs = getPerfNow();
-        return new Date(epochMs);
-      }
+    const currentUid = String(auth.currentUser?.uid || 'public').trim() || 'public';
+    const clockRef = doc(db, 'runtimeServerClock', currentUid);
+    await setDoc(clockRef, {
+      serverNow: serverTimestamp(),
+      syncedAt: serverTimestamp()
+    }, { merge: true });
+    const snap = await getDoc(clockRef);
+    const serverNow = snap.exists() ? snap.data()?.serverNow : null;
+    const resolvedDate = normalizeToDate(serverNow);
+    if (resolvedDate) {
+      cachedServerEpochMs = resolvedDate.getTime();
+      cachedFetchPerfMs = getPerfNow();
+      return resolvedDate;
     }
   } catch (_) {}
 

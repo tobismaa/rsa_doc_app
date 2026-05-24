@@ -1801,7 +1801,7 @@ function renderPaymentQueue() {
                 <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
                 <td>${escapeHtml(pfa)}</td>
                 <td>${escapeHtml(uploaderName)}</td>
-                <td>${escapeHtml(sub.agentName || '-')}</td>
+                <td>${escapeHtml(getSubmissionAgentLabel(sub) || '-')}</td>
                 <td>${escapeHtml(paymentName)}</td>
                 <td>${formatCurrency(twentyFive)}</td>
                 <td>${formatCurrency(commission2)}</td>
@@ -1812,7 +1812,12 @@ function renderPaymentQueue() {
 }
 
 function getSubmissionHasAgent(sub) {
-    return Boolean(String(sub?.agentId || '').trim() || String(sub?.agentName || '').trim());
+    return Boolean(String(sub?.agentId || '').trim());
+}
+
+function getSubmissionAgentLabel(sub) {
+    if (!String(sub?.agentId || '').trim()) return 'No Agent';
+    return String(sub?.agentName || '').trim() || 'Unknown Agent';
 }
 
 function isSubmissionCommissionTrackable(sub) {
@@ -1822,8 +1827,7 @@ function isSubmissionCommissionTrackable(sub) {
 
 function getSubmissionAgentCommissionKey(sub) {
     const agentId = String(sub?.agentId || '').trim();
-    if (agentId) return `agent:${agentId}`;
-    return `name:${String(sub?.agentName || '').trim().toLowerCase()}`;
+    return agentId ? `agent:${agentId}` : '';
 }
 
 function getAgentCommissionKey(agent) {
@@ -1859,10 +1863,11 @@ function buildAgentCommissionGroups() {
         if (!getSubmissionHasAgent(sub) || !isSubmissionCommissionTrackable(sub)) return;
 
         const key = getSubmissionAgentCommissionKey(sub);
+        if (!key) return;
         const existing = groups.get(key) || {
             key,
             agentId: String(sub.agentId || '').trim(),
-            agentName: String(sub.agentName || 'Unknown Agent').trim() || 'Unknown Agent',
+            agentName: getSubmissionAgentLabel(sub),
             registeredByEmail: String(sub.uploadedBy || '').trim(),
             registeredByName: String(sub.uploadedBy || '').trim() ? getDisplayNameByEmail(String(sub.uploadedBy || '').trim()) : '-',
             bankName: String(sub.agentAccountBank || '').trim() || '-',
@@ -3051,7 +3056,10 @@ async function confirmActivateLeave() {
     }
 
     try {
-        const submissionsSnap = await getDocs(collection(db, 'submissions'));
+        const submissionsSnap = await getDocs(query(
+            collection(db, 'submissions'),
+            where(stage.assignmentField, '==', userEmail)
+        ));
         const activeDocs = submissionsSnap.docs.filter((docSnap) => isSubmissionActiveForLeave(stage.key, docSnap.data() || {}, userEmail));
 
         await updateDoc(doc(db, 'users', user.id), {
@@ -3103,16 +3111,15 @@ window.resumeUserFromLeave = (userId) => {
     if (!stage) return showNotification('Invalid leave stage', 'error');
 
     showConfirmModal('Resume User from Leave', 'Unfinished applications covered by the reliever will return to this user. Finalized applications will remain completed.', async () => {
-        closeConfirmModal();
         try {
             const userEmail = normalizeEmailValue(user.email);
-            const submissionsSnap = await getDocs(collection(db, 'submissions'));
-            const coveredDocs = submissionsSnap.docs.filter((docSnap) => {
-                const data = docSnap.data() || {};
-                return data.leaveCoverActive === true &&
-                    data.leaveCoverStage === stage.key &&
-                    normalizeEmailValue(data.leaveCoverOriginalEmail) === userEmail;
-            });
+            const submissionsSnap = await getDocs(query(
+                collection(db, 'submissions'),
+                where('leaveCoverActive', '==', true),
+                where('leaveCoverStage', '==', stage.key),
+                where('leaveCoverOriginalEmail', '==', userEmail)
+            ));
+            const coveredDocs = submissionsSnap.docs;
             const returnDocs = coveredDocs.filter((docSnap) => !isSubmissionFinalizedForLeave(stage.key, docSnap.data() || {}));
             const finalizedDocs = coveredDocs.filter((docSnap) => isSubmissionFinalizedForLeave(stage.key, docSnap.data() || {}));
 
@@ -3148,9 +3155,11 @@ window.resumeUserFromLeave = (userId) => {
                 timestamp: serverTimestamp()
             });
 
+            closeConfirmModal();
             showNotification(`User resumed. ${returnDocs.length} unfinished application(s) returned; ${finalizedDocs.length} finalized application(s) left closed.`, 'success');
         } catch (error) {
             showNotification('Failed to resume user: ' + (error?.message || 'Unknown error'), 'error');
+            throw error;
         }
     });
 };
@@ -3552,7 +3561,7 @@ function filterDraftDocs() {
         const matchesSearch = searchTerm === '' ||
             String(sub.customerName || '').toLowerCase().includes(searchTerm) ||
             String(sub.uploadedBy || '').toLowerCase().includes(searchTerm) ||
-            String(sub.agentName || '').toLowerCase().includes(searchTerm);
+            getSubmissionAgentLabel(sub).toLowerCase().includes(searchTerm);
         const relevantDate = sub.draftSavedAt || sub.uploadedAt || sub.updatedAt;
         const matchesDate = matchesExactDate(relevantDate, dateFilter);
         return matchesSearch && matchesDate;
@@ -3574,7 +3583,7 @@ function filterDraftDocs() {
             <tr>
                 <td><strong>${escapeHtml(sub.customerName || 'Untitled Draft')}</strong></td>
                 <td>${escapeHtml(uploaderLabel)}</td>
-                <td>${escapeHtml(sub.agentName || 'No Agent')}</td>
+                <td>${escapeHtml(getSubmissionAgentLabel(sub))}</td>
                 <td>${docCount}</td>
                 <td>${formatDate(lastSaved)}</td>
                 <td><span class="status-badge status-pending">Draft</span></td>

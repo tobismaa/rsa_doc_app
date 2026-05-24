@@ -37,8 +37,7 @@
             <a href="#" class="nav-item active" data-tab="global"><i class="fas fa-chart-line"></i><span>Global View</span><span class="badge" id="globalNavCount">0</span></a>
             <a href="#" class="nav-item" data-tab="admins"><i class="fas fa-users-cog"></i><span>User Management</span><span class="badge" id="adminsNavCount">0</span></a>
             <a href="#" class="nav-item" data-tab="routing-rules"><i class="fas fa-route"></i><span>Uploader Routing</span><span class="badge" id="routingRulesNavCount">0</span></a>
-            <a href="#" class="nav-item" data-tab="application-agents"><i class="fas fa-user-pen"></i><span>Application Agents</span></a>
-            <a href="#" class="nav-item" data-tab="agent-records"><i class="fas fa-address-card"></i><span>Agent Records</span></a>
+            <a href="#" class="nav-item" data-tab="agents"><i class="fas fa-user-tie"></i><span>Agent</span></a>
             <a href="#" class="nav-item" data-tab="audit"><i class="fas fa-file-shield"></i><span>Audit</span><span class="badge" id="auditNavCount">0</span></a>
             <a href="#" class="nav-item" data-tab="security"><i class="fas fa-lock"></i><span>Security</span><span class="badge" id="securityNavCount">0</span></a>
             <a href="#" class="nav-item" data-tab="round-robin"><i class="fas fa-rotate"></i><span>Round Robin</span></a>
@@ -151,57 +150,85 @@
             </div>
         </div>
 
-        <div id="application-agentsTab" class="tab-content">
+        <div id="agentsTab" class="tab-content">
             <div class="table-section">
-                <h2>Attach Missing Agent</h2>
-                <p style="color:#64748b;margin:0 0 12px;">Update submissions that were created without an agent. Only agents registered by that same uploader are eligible.</p>
-                <div class="table-container">
-                    <table class="documents-table">
-                        <thead>
-                            <tr>
-                                <th>Customer</th>
-                                <th>Uploader</th>
-                                <th>Status</th>
-                                <th>Current Agent</th>
-                                <th>Registered Agent Options</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="superApplicationAgentTableBody"></tbody>
-                    </table>
+                <h2>Agent</h2>
+                <p style="color:#64748b;margin:0 0 12px;">Manage missing application agents, re-route linked applications, and maintain agent records from one workspace.</p>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px;">
+                    <button id="agentApplicationSubTabBtn" class="action-btn" type="button" style="background:#003366;color:#fff;border:none;" onclick="window.switchAgentSubTab('application-agents')">Application Agent</button>
+                    <button id="agentRecordsSubTabBtn" class="action-btn" type="button" onclick="window.switchAgentSubTab('agent-records')">Agent Records</button>
+                    <button id="agentRerouteSubTabBtn" class="action-btn" type="button" onclick="window.switchAgentSubTab('agent-reroute')">Agent Re-route</button>
                 </div>
-            </div>
-        </div>
 
-        <div id="agent-recordsTab" class="tab-content">
-            <div class="table-section">
-                <h2>Agent Records</h2>
-                <p style="color:#64748b;margin:0 0 12px;">Correct registered agent details and sync the updated name, phone, and bank details across linked applications.</p>
-                <div class="filters" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
-                    <input type="text" id="superAgentSearch" placeholder="Search agent name, phone, bank, account number, uploader..." style="min-width:280px;flex:1;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
-                    <select id="superAgentStatusFilter" style="padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
-                        <option value="">All Status</option>
-                        <option value="approved">Approved</option>
-                        <option value="pending">Pending</option>
-                        <option value="rejected">Rejected</option>
-                    </select>
+                <div id="agentApplicationSection">
+                    <p style="color:#64748b;margin:0 0 12px;">Update submissions that were created without an agent. Only agents registered by that same uploader are eligible.</p>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Uploader</th>
+                                    <th>Status</th>
+                                    <th>Current Agent</th>
+                                    <th>Registered Agent Options</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="superApplicationAgentTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
-                <div class="table-container">
-                    <table class="documents-table">
-                        <thead>
-                            <tr>
-                                <th>Agent</th>
-                                <th>Contact</th>
-                                <th>Bank</th>
-                                <th>Account Number</th>
-                                <th>Registered By</th>
-                                <th>Status</th>
-                                <th>Linked Apps</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="superAgentRecordsTableBody"></tbody>
-                    </table>
+
+                <div id="agentRecordsSection" style="display:none;">
+                    <p style="color:#64748b;margin:0 0 12px;">Correct registered agent details and sync the updated name, phone, and bank details across linked applications.</p>
+                    <div class="filters" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+                        <input type="text" id="superAgentSearch" placeholder="Search agent name, phone, bank, account number, uploader..." style="min-width:280px;flex:1;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
+                        <select id="superAgentStatusFilter" style="padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
+                            <option value="">All Status</option>
+                            <option value="approved">Approved</option>
+                            <option value="pending">Pending</option>
+                            <option value="rejected">Rejected</option>
+                        </select>
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Agent</th>
+                                    <th>Contact</th>
+                                    <th>Bank</th>
+                                    <th>Account Number</th>
+                                    <th>Registered By</th>
+                                    <th>Status</th>
+                                    <th>Linked Apps</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="superAgentRecordsTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="agentRerouteSection" style="display:none;">
+                    <p style="color:#64748b;margin:0 0 12px;">Move an application from its current linked agent to another approved agent registered by the same uploader. This updates the linked <code>agentId</code> and synced agent details together.</p>
+                    <div class="filters" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+                        <input type="text" id="superAgentRerouteSearch" placeholder="Search customer, uploader, current agent..." style="min-width:280px;flex:1;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Uploader</th>
+                                    <th>Status</th>
+                                    <th>Current Agent</th>
+                                    <th>New Agent</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="superAgentRerouteTableBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
