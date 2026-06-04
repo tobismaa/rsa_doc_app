@@ -26,6 +26,10 @@ let allSubmissions = [];
 let paymentLeaveHistoryLoaded = false;
 let paymentMyLeaveHistory = [];
 let paymentReliefLeaveHistory = [];
+let paymentReconciliationSourceRows = [];
+let paymentReconciliationResult = null;
+let paymentReconciliationFileName = '';
+let paymentReconciliationSelectedIds = new Set();
 const uploaderNameCache = new Map();
 
 const pageTitle = document.getElementById('pageTitle');
@@ -48,6 +52,24 @@ const profileLocationEl = document.getElementById('profileLocation');
 const profileRoleEl = document.getElementById('profileRole');
 const profileStatusEl = document.getElementById('profileStatus');
 const notification = document.getElementById('notification');
+const paymentReconciliationFileInput = document.getElementById('paymentReconciliationFileInput');
+const openPaymentReconciliationModalBtn = document.getElementById('openPaymentReconciliationModalBtn');
+const paymentReconciliationModal = document.getElementById('paymentReconciliationModal');
+const closePaymentReconciliationModalBtn = document.getElementById('closePaymentReconciliationModalBtn');
+const closePaymentReconciliationModalFooterBtn = document.getElementById('closePaymentReconciliationModalFooterBtn');
+const paymentReconciliationTemplateBtn = document.getElementById('paymentReconciliationTemplateBtn');
+const paymentReconciliationSelectBtn = document.getElementById('paymentReconciliationSelectBtn');
+const paymentReconciliationRunBtn = document.getElementById('paymentReconciliationRunBtn');
+const paymentReconciliationMarkMatchedBtn = document.getElementById('paymentReconciliationMarkMatchedBtn');
+const paymentReconciliationClearBtn = document.getElementById('paymentReconciliationClearBtn');
+const paymentReconciliationFileMeta = document.getElementById('paymentReconciliationFileMeta');
+const paymentReconciliationSummary = document.getElementById('paymentReconciliationSummary');
+const paymentReconciliationNotes = document.getElementById('paymentReconciliationNotes');
+const paymentReconciliationMatchedWrap = document.getElementById('paymentReconciliationMatchedWrap');
+const paymentReconciliationMatchedBody = document.getElementById('paymentReconciliationMatchedBody');
+const paymentReconciliationSelectAll = document.getElementById('paymentReconciliationSelectAll');
+const paymentReconciliationUnmatchedWrap = document.getElementById('paymentReconciliationUnmatchedWrap');
+const paymentReconciliationUnmatchedBody = document.getElementById('paymentReconciliationUnmatchedBody');
 
 function showNotification(message, type = 'info') {
     if (!notification) return;
@@ -86,6 +108,40 @@ function formatCurrency(value) {
 
 function formatDateValue(value) {
     return formatAppDateTime(value, '-');
+}
+
+function getCellText(value) {
+    if (value === undefined || value === null) return '';
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+    if (typeof value === 'object') {
+        if (value.text) return String(value.text).trim();
+        if (value.result !== undefined && value.result !== null) return String(value.result).trim();
+    }
+    return String(value).trim();
+}
+
+function normalizeImportHeader(header) {
+    return String(header || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function normalizeCustomerName(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
+function normalizeMatchAmount(value) {
+    return roundDownToNearestThousand(parseMoney(value));
+}
+
+function buildReconciliationKey(name, amount) {
+    return `${normalizeCustomerName(name)}::${normalizeMatchAmount(amount)}`;
+}
+
+function buildNameOnlyKey(name) {
+    return normalizeCustomerName(name);
+}
+
+function getSelectedPaymentReconciliationFile() {
+    return paymentReconciliationFileInput?.files?.[0] || null;
 }
 
 function getSubmissionFinancials(sub) {
@@ -203,6 +259,10 @@ function renderAgentBreakdownTable(group, mode = 'queue') {
         const { pfa, twentyFive, commission2 } = getSubmissionFinancials(sub);
         const status = String(sub?.status || '').toLowerCase();
         const statusLabel = status === 'cleared' ? 'Cleared' : status === 'paid' ? 'Paid' : 'Sent to PFA';
+        const reconciliationMatch = getPaymentReconciliationMatch(sub.id);
+        const reconciliationBadge = reconciliationMatch
+            ? `<div style="margin-top:6px;"><span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;"><i class="fas fa-link"></i> Excel matched</span></div>`
+            : '';
         const dateLabel = mode === 'cleared'
             ? formatDateValue(sub?.clearedAt || sub?.updatedAt)
             : mode === 'paid'
@@ -210,8 +270,8 @@ function renderAgentBreakdownTable(group, mode = 'queue') {
                 : formatDateValue(sub?.rsaSubmittedAt || sub?.updatedAt);
 
         return `
-            <tr>
-                <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
+            <tr style="${reconciliationMatch ? 'background:rgba(220,252,231,0.28);' : ''}">
+                <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong>${reconciliationBadge}</td>
                 <td>${escapeHtml(sub.agentName || group.agentName || 'No Agent')}</td>
                 <td>${escapeHtml(pfa)}</td>
                 <td>${formatCurrency(twentyFive)}</td>
@@ -444,6 +504,318 @@ function getClearedRecords() {
     return allSubmissions.filter((sub) => String(sub.status || '').toLowerCase() === 'cleared');
 }
 
+function resetPaymentReconciliationState() {
+    paymentReconciliationSourceRows = [];
+    paymentReconciliationResult = null;
+    paymentReconciliationFileName = '';
+    paymentReconciliationSelectedIds = new Set();
+    if (paymentReconciliationFileInput) paymentReconciliationFileInput.value = '';
+    renderPaymentReconciliation();
+}
+
+function getSelectableMatchedItems() {
+    return paymentReconciliationResult?.matchedRows?.filter((item) => hasCommissionEligibleAgent(item.submission)) || [];
+}
+
+function syncPaymentReconciliationSelection() {
+    const selectableIds = new Set(getSelectableMatchedItems().map((item) => item.submissionId));
+    paymentReconciliationSelectedIds = new Set(
+        [...paymentReconciliationSelectedIds].filter((id) => selectableIds.has(id))
+    );
+}
+
+function updatePaymentReconciliationSelectAllState() {
+    if (!paymentReconciliationSelectAll) return;
+    const selectableItems = getSelectableMatchedItems();
+    const selectableCount = selectableItems.length;
+    const selectedCount = selectableItems.filter((item) => paymentReconciliationSelectedIds.has(item.submissionId)).length;
+    paymentReconciliationSelectAll.checked = selectableCount > 0 && selectedCount === selectableCount;
+    paymentReconciliationSelectAll.indeterminate = selectedCount > 0 && selectedCount < selectableCount;
+    paymentReconciliationSelectAll.disabled = selectableCount === 0;
+}
+
+function togglePaymentReconciliationSelection(submissionId, checked) {
+    if (!submissionId) return;
+    if (checked) paymentReconciliationSelectedIds.add(submissionId);
+    else paymentReconciliationSelectedIds.delete(submissionId);
+    renderPaymentReconciliation();
+}
+
+function setPaymentReconciliationSelectionForAll(checked) {
+    const selectableItems = getSelectableMatchedItems();
+    paymentReconciliationSelectedIds = checked
+        ? new Set(selectableItems.map((item) => item.submissionId))
+        : new Set();
+    renderPaymentReconciliation();
+}
+
+function openPaymentReconciliationModal() {
+    paymentReconciliationModal?.classList.add('active');
+}
+
+function closePaymentReconciliationModal() {
+    paymentReconciliationModal?.classList.remove('active');
+}
+
+async function downloadPaymentReconciliationTemplate() {
+    try {
+        if (!window.ExcelJS) throw new Error('Excel library is not available right now.');
+        const workbook = new window.ExcelJS.Workbook();
+        const sheet = workbook.addWorksheet('Payment Reconciliation');
+        sheet.columns = [
+            { header: 'Customer Name', key: 'customerName', width: 34 },
+            { header: '25% Balance', key: 'balance', width: 18 }
+        ];
+        sheet.getRow(1).font = { bold: true };
+        sheet.getRow(1).fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'DCEBFA' }
+        };
+        sheet.addRow({ customerName: 'Sample Customer', balance: 250000 });
+        sheet.addRow({ customerName: '', balance: '' });
+        sheet.getCell('C1').value = 'Instruction';
+        sheet.getCell('C2').value = 'Fill only Customer Name and 25% Balance columns.';
+        sheet.getColumn(3).width = 55;
+
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'payment-reconciliation-template.xlsx';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        showNotification('Template downloaded successfully.', 'success');
+    } catch (error) {
+        showNotification(error?.message || 'Failed to download template', 'error');
+    }
+}
+
+function resolveReconciliationHeaderKey(headerMap, acceptedKeys = []) {
+    for (const key of acceptedKeys) {
+        for (const [colNumber, headerKey] of headerMap.entries()) {
+            if (headerKey === key) return colNumber;
+        }
+    }
+    return 0;
+}
+
+async function parsePaymentReconciliationFile(file) {
+    if (!window.ExcelJS) throw new Error('Excel library is not available right now.');
+    if (!file) throw new Error('Select an Excel file first.');
+    const workbook = new window.ExcelJS.Workbook();
+    await workbook.xlsx.load(await file.arrayBuffer());
+    const sheet = workbook.worksheets[0];
+    if (!sheet) throw new Error('No worksheet found in this Excel file.');
+
+    const headerRow = sheet.getRow(1);
+    const headerMap = new Map();
+    headerRow.eachCell((cell, colNumber) => {
+        const normalized = normalizeImportHeader(getCellText(cell.value));
+        if (normalized) headerMap.set(colNumber, normalized);
+    });
+
+    const nameColumn = resolveReconciliationHeaderKey(headerMap, ['customername', 'customer', 'name', 'customerfullname']);
+    const balanceColumn = resolveReconciliationHeaderKey(headerMap, ['25balance', '25percentbalance', 'rsa25percent', '25percent', 'twentyfivebalance', 'twentyfivepercent', 'balance25', '25rsabalance', 'rsa25balance']);
+    if (!nameColumn || !balanceColumn) {
+        throw new Error('Excel must contain customer name and 25% balance columns.');
+    }
+
+    const rows = [];
+    for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
+        const row = sheet.getRow(rowNumber);
+        const customerName = getCellText(row.getCell(nameColumn).value);
+        const rawBalance = getCellText(row.getCell(balanceColumn).value);
+        if (!customerName && !rawBalance) continue;
+        rows.push({
+            rowNumber,
+            customerName,
+            rawBalance,
+            normalizedName: normalizeCustomerName(customerName),
+            normalizedAmount: normalizeMatchAmount(rawBalance)
+        });
+    }
+
+    if (!rows.length) throw new Error('The Excel file does not contain any usable rows.');
+    return rows;
+}
+
+function computePaymentReconciliationResult(rows = []) {
+    const queue = getSentToPfaRecords();
+    const queueBuckets = new Map();
+    const nameBuckets = new Map();
+    queue.forEach((sub) => {
+        const { twentyFive } = getSubmissionFinancials(sub);
+        const entry = {
+            submission: sub,
+            normalizedAmount: normalizeMatchAmount(twentyFive)
+        };
+        const key = buildReconciliationKey(sub?.customerName || '', twentyFive);
+        const nameKey = buildNameOnlyKey(sub?.customerName || '');
+        if (!queueBuckets.has(key)) queueBuckets.set(key, []);
+        if (!nameBuckets.has(nameKey)) nameBuckets.set(nameKey, []);
+        queueBuckets.get(key).push(entry);
+        nameBuckets.get(nameKey).push(entry);
+    });
+
+    const matchedRows = [];
+    const unmatchedRows = [];
+    const matchedIds = new Set();
+    const matchedBySubmissionId = new Map();
+
+    rows.forEach((row) => {
+        const exactKey = buildReconciliationKey(row.customerName, row.rawBalance);
+        const exactMatches = queueBuckets.get(exactKey) || [];
+        if (exactMatches.length) {
+            const match = exactMatches.shift();
+            matchedRows.push({
+                ...row,
+                submissionId: match.submission.id,
+                submission: match.submission,
+                queueAmount: match.normalizedAmount
+            });
+            matchedIds.add(match.submission.id);
+            matchedBySubmissionId.set(match.submission.id, {
+                rowNumber: row.rowNumber,
+                customerName: row.customerName,
+                normalizedAmount: row.normalizedAmount
+            });
+            return;
+        }
+
+        const nameMatches = nameBuckets.get(row.normalizedName) || [];
+        unmatchedRows.push({
+            ...row,
+            reason: nameMatches.length
+                ? 'Customer name exists, but the 25% balance does not match.'
+                : 'Customer not found in the current Sent to PFA table.'
+        });
+    });
+
+    return {
+        totalRows: rows.length,
+        matchedRows,
+        unmatchedRows,
+        matchedIds,
+        matchedBySubmissionId,
+        queueCount: queue.length
+    };
+}
+
+function rerunPaymentReconciliation() {
+    paymentReconciliationResult = paymentReconciliationSourceRows.length
+        ? computePaymentReconciliationResult(paymentReconciliationSourceRows)
+        : null;
+    renderPaymentReconciliation();
+}
+
+function getPaymentReconciliationMatch(submissionId) {
+    return paymentReconciliationResult?.matchedBySubmissionId?.get(submissionId) || null;
+}
+
+function renderPaymentReconciliation() {
+    const selectedFile = getSelectedPaymentReconciliationFile();
+    if (paymentReconciliationFileMeta) {
+        paymentReconciliationFileMeta.textContent = paymentReconciliationFileName
+            ? `Selected file: ${paymentReconciliationFileName}`
+            : (selectedFile ? `Selected file: ${selectedFile.name}` : 'No Excel file selected.');
+    }
+    if (paymentReconciliationRunBtn) paymentReconciliationRunBtn.disabled = !selectedFile;
+    if (paymentReconciliationClearBtn) paymentReconciliationClearBtn.disabled = !selectedFile && !paymentReconciliationResult;
+
+    if (!paymentReconciliationResult) {
+        if (paymentReconciliationSummary) {
+            paymentReconciliationSummary.style.display = 'none';
+            paymentReconciliationSummary.innerHTML = '';
+        }
+        if (paymentReconciliationNotes) {
+            paymentReconciliationNotes.style.display = 'none';
+            paymentReconciliationNotes.textContent = '';
+        }
+        if (paymentReconciliationMatchedWrap) paymentReconciliationMatchedWrap.style.display = 'none';
+        if (paymentReconciliationMatchedBody) paymentReconciliationMatchedBody.innerHTML = '';
+        if (paymentReconciliationUnmatchedWrap) paymentReconciliationUnmatchedWrap.style.display = 'none';
+        if (paymentReconciliationUnmatchedBody) paymentReconciliationUnmatchedBody.innerHTML = '';
+        if (paymentReconciliationMarkMatchedBtn) paymentReconciliationMarkMatchedBtn.disabled = true;
+        return;
+    }
+
+    const matchedCount = paymentReconciliationResult.matchedRows.length;
+    const unmatchedCount = paymentReconciliationResult.unmatchedRows.length;
+    const actionableCount = paymentReconciliationResult.matchedRows.filter((item) => hasCommissionEligibleAgent(item.submission)).length;
+    syncPaymentReconciliationSelection();
+    const selectedCount = paymentReconciliationResult.matchedRows.filter((item) => paymentReconciliationSelectedIds.has(item.submissionId)).length;
+
+    if (paymentReconciliationSummary) {
+        paymentReconciliationSummary.style.display = 'flex';
+        paymentReconciliationSummary.innerHTML = [
+            { label: 'Excel Rows', value: paymentReconciliationResult.totalRows, bg: '#e2e8f0', color: '#334155' },
+            { label: 'Matched', value: matchedCount, bg: '#dcfce7', color: '#166534' },
+            { label: 'Not Found', value: unmatchedCount, bg: '#fee2e2', color: '#b91c1c' },
+            { label: 'Queue Records', value: paymentReconciliationResult.queueCount, bg: '#dbeafe', color: '#1d4ed8' }
+        ].map((item) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:${item.bg};color:${item.color};font-size:12px;font-weight:700;"><span>${escapeHtml(String(item.label))}</span><span>${escapeHtml(String(item.value))}</span></span>`).join('');
+    }
+
+    if (paymentReconciliationNotes) {
+        paymentReconciliationNotes.style.display = 'block';
+        paymentReconciliationNotes.textContent = matchedCount
+            ? `${matchedCount} row(s) matched automatically. Tick the applications you want to bulk mark as paid, or use single-row action for one-off handling.`
+            : 'No queue rows matched this Excel file.';
+    }
+
+    if (paymentReconciliationMarkMatchedBtn) {
+        paymentReconciliationMarkMatchedBtn.disabled = selectedCount === 0;
+        paymentReconciliationMarkMatchedBtn.innerHTML = `<i class="fas fa-check-circle"></i> Mark Selected Paid${selectedCount ? ` (${selectedCount})` : ''}`;
+    }
+    updatePaymentReconciliationSelectAllState();
+    if (paymentReconciliationMatchedWrap) paymentReconciliationMatchedWrap.style.display = matchedCount ? 'block' : 'none';
+    if (paymentReconciliationMatchedBody) {
+        paymentReconciliationMatchedBody.innerHTML = matchedCount
+            ? paymentReconciliationResult.matchedRows.map((item) => {
+                const sub = item.submission || {};
+                const { pfa, twentyFive } = getSubmissionFinancials(sub);
+                const canMarkPaid = hasCommissionEligibleAgent(sub);
+                const checked = paymentReconciliationSelectedIds.has(sub.id) ? 'checked' : '';
+                const checkboxHtml = canMarkPaid
+                    ? `<input type="checkbox" class="payment-reconciliation-row-check" data-submission-id="${escapeHtml(sub.id)}" ${checked}>`
+                    : `<span style="color:#94a3b8;font-size:12px;">N/A</span>`;
+                const actionHtml = canMarkPaid
+                    ? `<button class="action-btn" style="background:#16a34a;color:#fff;border:none;" onclick="window.markMatchedPaymentReconciliationRecord('${sub.id}')"><i class="fas fa-check-circle"></i> Mark Paid</button>`
+                    : `<button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.markMatchedPaymentReconciliationRecord('${sub.id}')"><i class="fas fa-check-double"></i> Clear</button>`;
+                return `
+                    <tr>
+                        <td>${checkboxHtml}</td>
+                        <td>${escapeHtml(String(item.rowNumber))}</td>
+                        <td><strong>${escapeHtml(sub.customerName || item.customerName || '-')}</strong></td>
+                        <td>${escapeHtml(String(sub.agentName || '').trim() || 'No Agent')}</td>
+                        <td>${escapeHtml(pfa)}</td>
+                        <td>${formatCurrency(item.normalizedAmount || 0)}</td>
+                        <td>${formatCurrency(twentyFive || 0)}</td>
+                        <td><span class="status-badge status-approved">Matched</span></td>
+                        <td>${actionHtml}</td>
+                    </tr>
+                `;
+            }).join('')
+            : '';
+    }
+    if (paymentReconciliationUnmatchedWrap) paymentReconciliationUnmatchedWrap.style.display = unmatchedCount ? 'block' : 'none';
+    if (paymentReconciliationUnmatchedBody) {
+        paymentReconciliationUnmatchedBody.innerHTML = unmatchedCount
+            ? paymentReconciliationResult.unmatchedRows.map((row) => `
+                <tr>
+                    <td>${escapeHtml(String(row.rowNumber))}</td>
+                    <td>${escapeHtml(row.customerName || '-')}</td>
+                    <td>${escapeHtml(formatCurrency(row.normalizedAmount || 0))}</td>
+                    <td>${escapeHtml(row.reason || 'Not found')}</td>
+                </tr>
+            `).join('')
+            : '';
+    }
+}
+
 function renderPaymentQueue() {
     if (!paymentsTableBody) return;
 
@@ -464,6 +836,10 @@ function renderPaymentQueue() {
         const queueDate = formatDateValue(sub?.rsaSubmittedAt || sub?.updatedAt);
         const uploaderLabel = getUploaderDisplayName(sub?.uploadedBy);
         const agentName = String(sub?.agentName || '').trim() || 'No Agent';
+        const reconciliationMatch = getPaymentReconciliationMatch(sub.id);
+        const reconciliationBadge = reconciliationMatch
+            ? `<div style="margin-top:6px;"><span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;"><i class="fas fa-link"></i> Excel matched</span></div>`
+            : '';
         const actionHtml = hasCommissionEligibleAgent(sub)
             ? `<button class="action-btn" style="background:#16a34a;color:#fff;border:none;" onclick="window.markSubmissionPaid('${sub.id}')"><i class="fas fa-check-circle"></i> Mark Paid</button>`
             : `<button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.clearSubmissionWithoutAgent('${sub.id}')"><i class="fas fa-check-double"></i> Clear</button>`;
@@ -564,11 +940,24 @@ function renderClearedCustomers() {
 }
 
 function loadSubmissions() {
-    const q = query(collection(db, 'submissions'), orderBy('uploadedAt', 'desc'));
+    const paymentEmail = normalizeEmail(currentUser?.email);
+    if (!paymentEmail) return;
+
+    const q = query(
+        collection(db, 'submissions'),
+        where('assignedToPayment', '==', paymentEmail)
+    );
     onSnapshot(q, async (snapshot) => {
-        allSubmissions = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        allSubmissions = snapshot.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => {
+                const aMs = a?.uploadedAt?.toMillis ? a.uploadedAt.toMillis() : new Date(a?.uploadedAt || 0).getTime();
+                const bMs = b?.uploadedAt?.toMillis ? b.uploadedAt.toMillis() : new Date(b?.uploadedAt || 0).getTime();
+                return bMs - aMs;
+            });
         await primeUploaderNames(allSubmissions);
         renderDashboardOverview();
+        rerunPaymentReconciliation();
         renderPaymentQueue();
         renderPaidCustomers();
         renderClearedCustomers();
@@ -671,6 +1060,63 @@ window.markSubmissionPaid = async (submissionId) => {
     } catch (error) {
         showNotification('Failed to mark application as paid', 'error');
     }
+};
+
+window.markMatchedPaymentReconciliationRecords = async () => {
+    if (!paymentReconciliationResult?.matchedRows?.length) {
+        showNotification('Run reconciliation first.', 'warning');
+        return;
+    }
+
+    const matchedItems = paymentReconciliationResult.matchedRows.filter((item) => (
+        hasCommissionEligibleAgent(item.submission) && paymentReconciliationSelectedIds.has(item.submissionId)
+    ));
+    if (!matchedItems.length) {
+        showNotification('Tick at least one matched application to continue.', 'warning');
+        return;
+    }
+
+    const confirmed = confirm(`Mark ${matchedItems.length} selected application(s) as paid?`);
+    if (!confirmed) return;
+
+    try {
+        await Promise.all(matchedItems.map((item) => updateDoc(doc(db, 'submissions', item.submissionId), {
+            status: 'paid',
+            paidAt: serverTimestamp(),
+            paidBy: currentUser?.email || '',
+            paymentReconciliationFileName: paymentReconciliationFileName || '',
+            paymentReconciledAt: serverTimestamp()
+        })));
+
+        await addDoc(collection(db, 'audit'), {
+            action: 'payment_reconciliation_bulk_paid',
+            count: matchedItems.length,
+            fileName: paymentReconciliationFileName || '',
+            submissionIds: matchedItems.map((item) => item.submissionId),
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        });
+
+        paymentReconciliationSelectedIds = new Set(
+            [...paymentReconciliationSelectedIds].filter((id) => !matchedItems.some((item) => item.submissionId === id))
+        );
+        showNotification(`Marked ${matchedItems.length} matched record(s) as paid`, 'success');
+    } catch (error) {
+        showNotification('Failed to mark matched records as paid', 'error');
+    }
+};
+
+window.markMatchedPaymentReconciliationRecord = async (submissionId) => {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub) {
+        showNotification('Matched application no longer exists in your queue.', 'warning');
+        return;
+    }
+    if (hasCommissionEligibleAgent(sub)) {
+        await window.markSubmissionPaid(submissionId);
+        return;
+    }
+    await window.clearSubmissionWithoutAgent(submissionId);
 };
 
 window.clearPaidAgent = async (groupKey) => {
@@ -850,6 +1296,71 @@ document.getElementById('forceRefreshBtn')?.addEventListener('click', (e) => {
     e.preventDefault();
     forceHardRefresh();
 });
+openPaymentReconciliationModalBtn?.addEventListener('click', () => {
+    openPaymentReconciliationModal();
+});
+closePaymentReconciliationModalBtn?.addEventListener('click', () => {
+    closePaymentReconciliationModal();
+});
+closePaymentReconciliationModalFooterBtn?.addEventListener('click', () => {
+    closePaymentReconciliationModal();
+});
+paymentReconciliationTemplateBtn?.addEventListener('click', () => {
+    downloadPaymentReconciliationTemplate();
+});
+paymentReconciliationSelectBtn?.addEventListener('click', () => {
+    paymentReconciliationFileInput?.click();
+});
+paymentReconciliationFileInput?.addEventListener('change', () => {
+    paymentReconciliationFileName = getSelectedPaymentReconciliationFile()?.name || '';
+    paymentReconciliationSourceRows = [];
+    paymentReconciliationResult = null;
+    paymentReconciliationSelectedIds = new Set();
+    renderPaymentReconciliation();
+    renderPaymentQueue();
+});
+paymentReconciliationRunBtn?.addEventListener('click', async () => {
+    const file = getSelectedPaymentReconciliationFile();
+    if (!file) {
+        showNotification('Select an Excel file first.', 'warning');
+        return;
+    }
+    try {
+        paymentReconciliationRunBtn.disabled = true;
+        paymentReconciliationRunBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Matching...';
+        paymentReconciliationFileName = file.name;
+        paymentReconciliationSourceRows = await parsePaymentReconciliationFile(file);
+        rerunPaymentReconciliation();
+        renderPaymentQueue();
+        showNotification(`Reconciliation complete. ${paymentReconciliationResult?.matchedRows?.length || 0} row(s) matched.`, 'success');
+    } catch (error) {
+        paymentReconciliationSourceRows = [];
+        paymentReconciliationResult = null;
+        renderPaymentReconciliation();
+        renderPaymentQueue();
+        showNotification(error?.message || 'Failed to process Excel file', 'error');
+    } finally {
+        paymentReconciliationRunBtn.innerHTML = '<i class="fas fa-play"></i> Run Match';
+        renderPaymentReconciliation();
+    }
+});
+paymentReconciliationMarkMatchedBtn?.addEventListener('click', () => {
+    window.markMatchedPaymentReconciliationRecords();
+});
+paymentReconciliationSelectAll?.addEventListener('change', (e) => {
+    setPaymentReconciliationSelectionForAll(Boolean(e.target?.checked));
+});
+paymentReconciliationClearBtn?.addEventListener('click', () => {
+    resetPaymentReconciliationState();
+    renderPaymentQueue();
+    showNotification('Reconciliation result cleared.', 'info');
+});
+paymentReconciliationMatchedBody?.addEventListener('change', (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (!target.classList.contains('payment-reconciliation-row-check')) return;
+    togglePaymentReconciliationSelection(target.dataset.submissionId || '', target.checked);
+});
 document.getElementById('paymentLeaveMineBtn')?.addEventListener('click', () => {
     document.getElementById('paymentLeaveMineSection')?.style.setProperty('display', '');
     document.getElementById('paymentLeaveReliefSection')?.style.setProperty('display', 'none');
@@ -864,6 +1375,9 @@ document.getElementById('closePaymentLeaveApplicationsBtn')?.addEventListener('c
 window.addEventListener('click', (e) => {
     if (e.target === document.getElementById('paymentLeaveApplicationsModal')) {
         document.getElementById('paymentLeaveApplicationsModal')?.classList.remove('active');
+    }
+    if (e.target === paymentReconciliationModal) {
+        closePaymentReconciliationModal();
     }
 });
 
@@ -902,6 +1416,7 @@ auth.onAuthStateChanged(async (user) => {
 
         currentUserData = userData;
         renderProfile();
+        renderPaymentReconciliation();
         loadSubmissions();
     } catch (error) {
         showNotification('Could not validate session', 'error');

@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
     <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 </head>
 <body>
     <script src="js/security-utils.js?v=20260416f"></script>
@@ -125,6 +126,17 @@
                 <div class="table-section">
                     <h2 style="margin:0 0 12px;">Sent to PFA</h2>
                     <p style="color:#64748b;margin:0 0 14px;">Every application forwarded from RSA appears here. Once PFA pays for an application, mark that specific record as paid.</p>
+                    <div style="border:1px solid #dbe2ea;border-radius:16px;padding:16px 18px;margin:0 0 16px;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
+                        <div>
+                            <h3 style="margin:0 0 6px;font-size:16px;color:#0f3b67;">Payment Reconciliation</h3>
+                            <p style="margin:0;color:#64748b;font-size:13px;">Open the reconciliation workspace to download the template, upload Excel, review matched rows, and bulk mark verified records.</p>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button type="button" class="action-btn" id="openPaymentReconciliationModalBtn" style="background:#0f766e;color:#fff;border:none;">
+                                <i class="fas fa-table-list"></i> Open Reconciliation
+                            </button>
+                        </div>
+                    </div>
                     <div class="table-container">
                         <table class="customers-table">
                             <thead>
@@ -300,6 +312,89 @@
                         <tbody id="paymentLeaveApplicationsBody"></tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="paymentReconciliationModal" class="modal">
+        <div class="modal-content large-modal" style="max-width:1200px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-file-invoice-dollar"></i> Payment Reconciliation</h2>
+                <button class="close-btn" id="closePaymentReconciliationModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px;padding:16px;border:1px solid #dbe2ea;border-radius:16px;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);">
+                    <div style="max-width:640px;">
+                        <h3 style="margin:0 0 8px;font-size:17px;color:#0f3b67;">Upload And Match Payment Report</h3>
+                        <p style="margin:0;color:#64748b;font-size:13px;line-height:1.6;">Download the template, upload a completed Excel report, and let the system match rows against the current <strong>Sent to PFA</strong> queue using customer name and 25% balance.</p>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                        <input type="file" id="paymentReconciliationFileInput" accept=".xlsx" hidden>
+                        <button type="button" class="action-btn" id="paymentReconciliationTemplateBtn">
+                            <i class="fas fa-download"></i> Download Template
+                        </button>
+                        <button type="button" class="action-btn" id="paymentReconciliationSelectBtn">
+                            <i class="fas fa-file-excel"></i> Choose Excel
+                        </button>
+                        <button type="button" class="action-btn" id="paymentReconciliationRunBtn" style="background:#0f766e;color:#fff;border:none;" disabled>
+                            <i class="fas fa-play"></i> Run Match
+                        </button>
+                        <button type="button" class="action-btn" id="paymentReconciliationClearBtn" disabled>
+                            <i class="fas fa-eraser"></i> Clear
+                        </button>
+                    </div>
+                </div>
+
+                <div id="paymentReconciliationFileMeta" style="font-size:13px;color:#475569;margin-bottom:10px;">No Excel file selected.</div>
+                <div id="paymentReconciliationSummary" style="display:none;gap:10px;flex-wrap:wrap;margin-bottom:12px;"></div>
+                <div id="paymentReconciliationNotes" style="display:none;font-size:13px;color:#475569;margin-bottom:18px;"></div>
+
+                <div id="paymentReconciliationMatchedWrap" style="display:none;margin-bottom:18px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+                        <h4 style="margin:0;color:#0f3b67;font-size:15px;">Matched Records</h4>
+                        <button type="button" class="action-btn" id="paymentReconciliationMarkMatchedBtn" style="background:#16a34a;color:#fff;border:none;" disabled>
+                            <i class="fas fa-check-circle"></i> Bulk Mark Matched
+                        </button>
+                    </div>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox" id="paymentReconciliationSelectAll"></th>
+                                    <th>Excel Row</th>
+                                    <th>Customer</th>
+                                    <th>Agent</th>
+                                    <th>PFA</th>
+                                    <th>Excel 25%</th>
+                                    <th>Queue 25%</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paymentReconciliationMatchedBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="paymentReconciliationUnmatchedWrap" style="display:none;">
+                    <h4 style="margin:0 0 8px;color:#0f3b67;font-size:15px;">Rows Not Matched</h4>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Excel Row</th>
+                                    <th>Customer Name</th>
+                                    <th>25% Balance</th>
+                                    <th>Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paymentReconciliationUnmatchedBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="closePaymentReconciliationModalFooterBtn">Close</button>
             </div>
         </div>
     </div>

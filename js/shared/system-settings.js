@@ -277,6 +277,13 @@ export function getDefaultSystemSettings() {
     agentEditSyncEnabled: true,
     notificationsEmailEnabled: true,
     notificationsPushEnabled: true,
+    scheduledReportEmail: {
+      enabled: false,
+      subject: 'Daily RSA Report',
+      body: 'Hello,\n\nPlease find the attached daily RSA report.\n\nRegards,\nCMBank RSA Portal',
+      recipients: [],
+      sendTime: '08:00'
+    },
     agentBankOptions,
     pfaOptions,
     documentRequirements,
@@ -350,6 +357,17 @@ function normalizeSystemSettings(data = {}) {
     agentEditSyncEnabled: parseBoolean(data.agentEditSyncEnabled, defaults.agentEditSyncEnabled),
     notificationsEmailEnabled: parseBoolean(data.notificationsEmailEnabled, defaults.notificationsEmailEnabled),
     notificationsPushEnabled: parseBoolean(data.notificationsPushEnabled, defaults.notificationsPushEnabled),
+    scheduledReportEmail: {
+      ...defaults.scheduledReportEmail,
+      ...parseObject(data.scheduledReportEmail, defaults.scheduledReportEmail),
+      enabled: parseBoolean(data?.scheduledReportEmail?.enabled, defaults.scheduledReportEmail.enabled),
+      subject: parseText(data?.scheduledReportEmail?.subject, defaults.scheduledReportEmail.subject),
+      body: parseText(data?.scheduledReportEmail?.body, defaults.scheduledReportEmail.body),
+      recipients: parseStringArray(data?.scheduledReportEmail?.recipients, defaults.scheduledReportEmail.recipients),
+      sendTime: /^\d{2}:\d{2}$/.test(String(data?.scheduledReportEmail?.sendTime || '').trim())
+        ? String(data?.scheduledReportEmail?.sendTime || '').trim()
+        : defaults.scheduledReportEmail.sendTime
+    },
     agentBankOptions: normalizeAgentBankOptions(data.agentBankOptions, defaults.agentBankOptions),
     pfaOptions: parseStringArray([
       ...(defaults.pfaOptions || []),

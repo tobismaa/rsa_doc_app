@@ -30,11 +30,12 @@ function getProfileRoleRank(profile = {}) {
   const role = String(profile.role || '').trim().toLowerCase();
   if (role === 'super_admin') return 0;
   if (role === 'admin') return 1;
-  if (role === 'reviewer') return 2;
-  if (role === 'rsa') return 3;
-  if (role === 'payment') return 4;
-  if (role === 'uploader') return 5;
-  return 6;
+  if (role === 'reports_monitoring') return 2;
+  if (role === 'reviewer') return 3;
+  if (role === 'rsa') return 4;
+  if (role === 'payment') return 5;
+  if (role === 'uploader') return 6;
+  return 7;
 }
 
 function chooseBestUserDoc(docs = [], preferredUid = '') {

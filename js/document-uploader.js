@@ -1282,6 +1282,7 @@ function getDefaultDashboardForRole(role) {
   if (normalized === 'rsa') return 'rsa-dashboard.html';
   if (normalized === 'payment') return 'payment-dashboard.html';
   if (normalized === 'admin') return 'admin-dashboard.html';
+  if (normalized === 'reports_monitoring') return 'reports-monitoring-dashboard.html';
   if (normalized === 'super_admin') return 'super-admin-dashboard.html';
   return '';
 }
@@ -3273,7 +3274,10 @@ async function submitCustomer() {
     let subRef;
     if (currentDraftId) {
       subRef = doc(db, 'submissions', currentDraftId);
-      await updateDoc(subRef, submissionPayload);
+      await updateDoc(subRef, {
+        ...submissionPayload,
+        uploadedAt: serverTimestamp()
+      });
     } else {
       subRef = await addDoc(collection(db, 'submissions'), {
         ...submissionPayload,

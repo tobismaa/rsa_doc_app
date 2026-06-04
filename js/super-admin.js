@@ -52,6 +52,8 @@ let settingsCardsInitialized = false;
 let activeSettingsModalPanelId = '';
 let currentAccessUserSearch = '';
 let activeSettingsDropdownTab = '';
+let settingsModalSourceDropdownTab = '';
+let currentScheduledReportPreview = null;
 
 const ROLE_PERMISSION_FIELDS = [
     { key: 'uploaderCanUpload', label: 'Uploader Can Upload' },
@@ -134,6 +136,7 @@ const SETTINGS_CARD_ICON_MAP = {
     'Property Type Amount Range': 'fa-chart-column',
     'House Number Rules': 'fa-house-circle-check',
     'Messages and Alerts': 'fa-bell',
+    'Scheduled Report Emails': 'fa-paper-plane',
     'Notification Templates': 'fa-envelope-open-text',
     'Access Levels': 'fa-user-shield',
     'RSA Round Robin Control': 'fa-user-check',
@@ -165,7 +168,7 @@ function updateNavigationCounts() {
     const securityUsers = allUsers.filter((u) => {
         const role = String(u.role || '').toLowerCase();
         const status = String(u.status || 'active').toLowerCase();
-        return ['super_admin', 'admin', 'reviewer', 'rsa', 'payment'].includes(role) && status !== 'active';
+        return ['super_admin', 'admin', 'reports_monitoring', 'reviewer', 'rsa', 'payment'].includes(role) && status !== 'active';
     }).length;
     setCountBadge('globalNavCount', allSubmissions.length);
     setCountBadge('adminsNavCount', allUsers.length);
@@ -266,6 +269,18 @@ function parseLinesTextarea(id) {
         .filter(Boolean);
 }
 
+function normalizeEmailList(values = []) {
+    const seen = new Set();
+    const emails = [];
+    values.forEach((value) => {
+        const email = normalizeEmail(value);
+        if (!email || seen.has(email)) return;
+        seen.add(email);
+        emails.push(email);
+    });
+    return emails;
+}
+
 function slugifyDocumentRequirementId(value) {
     return String(value || '')
         .trim()
@@ -297,6 +312,7 @@ function getRoleLabel(role) {
     const normalized = String(role || 'uploader').toLowerCase();
     if (normalized === 'super_admin') return 'Super Admin';
     if (normalized === 'admin') return 'Admin';
+    if (normalized === 'reports_monitoring') return 'Reports Monitoring';
     if (normalized === 'reviewer' || normalized === 'viewer') return 'Reviewer';
     if (normalized === 'rsa') return 'RSA';
     if (normalized === 'payment') return 'Payment';
@@ -357,7 +373,7 @@ async function ensureCurrentSuperAdminWritableProfile() {
     const normalizedEmail = normalizeEmail(currentUser.email);
     const normalizedRole = String(currentUserData?.role || 'super_admin').trim().toLowerCase();
     const normalizedStatus = String(currentUserData?.status || 'active').trim().toLowerCase();
-    const allowedRoles = new Set(['uploader', 'admin', 'super_admin', 'reviewer', 'rsa', 'payment']);
+    const allowedRoles = new Set(['uploader', 'admin', 'super_admin', 'reviewer', 'rsa', 'payment', 'reports_monitoring']);
     const allowedStatuses = new Set(['pending', 'active', 'deactivated']);
 
     await setDoc(uidRef, {
@@ -376,10 +392,458 @@ function formatDate(ts) {
     return formatAppDateTime(ts, '-');
 }
 
+const reportDateKeyFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+});
+
+function getTimestampMillis(value) {
+    if (!value) return 0;
+    try {
+        if (typeof value.toMillis === 'function') return value.toMillis();
+        if (typeof value.seconds === 'number') return value.seconds * 1000;
+        if (typeof value.toDate === 'function') return value.toDate().getTime();
+    } catch (_) {}
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getDateKey(value) {
+    const ms = getTimestampMillis(value);
+    if (!ms) return '';
+    return reportDateKeyFormatter.format(new Date(ms));
+}
+
+function isSameReportDate(value, dateKey) {
+    return getDateKey(value) === String(dateKey || '').trim();
+}
+
+function parseMoneyValue(value) {
+    const num = Number(String(value ?? '').replace(/[^0-9.\-]/g, ''));
+    return Number.isFinite(num) ? num : 0;
+}
+
+function roundDownToThousand(value) {
+    return Math.max(0, Math.floor(Number(value || 0) / 1000) * 1000);
+}
+
+function getSubmissionRsaBalance(sub = {}) {
+    return parseMoneyValue(sub?.customerDetails?.rsaBalance || sub?.rsaBalance || 0);
+}
+
+function getSubmissionTwentyFivePercent(sub = {}) {
+    const stored = parseMoneyValue(sub?.customerDetails?.rsa25Percent || sub?.rsa25Percent || 0);
+    if (stored > 0) return roundDownToThousand(stored);
+    return roundDownToThousand(getSubmissionRsaBalance(sub) * 0.25);
+}
+
+function getSubmissionCommissionOnePercent(sub = {}) {
+    const base = getSubmissionTwentyFivePercent(sub);
+    return Number((base * 0.01).toFixed(2));
+}
+
+function getUserDisplayNameByEmail(email = '') {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return 'Unassigned';
+    const user = allUsers.find((entry) => normalizeEmail(entry.email) === normalized);
+    return String(user?.fullName || normalized).trim();
+}
+
+function getRejectionReason(sub = {}) {
+    return String(sub?.latestRejectionReason || sub?.previousRejectionReason || sub?.comment || '').trim();
+}
+
+function getRejectionCount(sub = {}) {
+    const history = Array.isArray(sub?.rejectionHistory) ? sub.rejectionHistory.filter((entry) => {
+        if (typeof entry === 'string') return String(entry).trim();
+        return String(entry?.reason || '').trim();
+    }) : [];
+    if (history.length) return history.length;
+    return getRejectionReason(sub) ? 1 : 0;
+}
+
+function formatMoneyForSheet(value) {
+    const num = Number(value || 0);
+    return num ? num : '';
+}
+
+function formatMoneyPreview(value) {
+    const num = Number(value || 0);
+    if (!Number.isFinite(num) || num === 0) return '-';
+    return num.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function getPreviewStatus(sub = {}) {
+    return String(sub.status || '').replace(/_/g, ' ');
+}
+
+function buildUploaderSheetRows(records = []) {
+    return records.map((sub) => ({
+        owner: getUserDisplayNameByEmail(sub.uploadedBy),
+        customerName: sub.customerName || '',
+        rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
+        rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
+        commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
+        status: String(sub.status || '').replace(/_/g, ' '),
+        uploadedAt: formatDate(sub.uploadedAt),
+        stageTime: formatDate(sub.reviewedAt),
+        rejectionReason: getRejectionReason(sub),
+        rejectionCount: getRejectionCount(sub)
+    }));
+}
+
+function buildReviewerSheetRows(records = []) {
+    return records
+        .filter((sub) => normalizeEmail(sub.assignedTo))
+        .map((sub) => ({
+            owner: getUserDisplayNameByEmail(sub.assignedTo),
+            customerName: sub.customerName || '',
+            rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
+            rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
+            commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
+            status: String(sub.status || '').replace(/_/g, ' '),
+            assignedAt: formatDate(sub.uploadedAt),
+            stageTime: formatDate(sub.reviewedAt),
+            rejectionReason: getRejectionReason(sub),
+            rejectionCount: getRejectionCount(sub)
+        }));
+}
+
+function buildRsaSheetRows(records = []) {
+    return records
+        .filter((sub) => normalizeEmail(sub.assignedToRSA))
+        .map((sub) => ({
+            owner: getUserDisplayNameByEmail(sub.assignedToRSA),
+            customerName: sub.customerName || '',
+            rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
+            rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
+            commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
+            status: String(sub.status || '').replace(/_/g, ' '),
+            assignedAt: formatDate(sub.reviewedAt),
+            stageTime: formatDate(sub.finalSubmittedAt || sub.rsaSubmittedAt),
+            rejectionReason: String(String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? getRejectionReason(sub) : ''),
+            rejectionCount: Number(String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? getRejectionCount(sub) : 0)
+        }));
+}
+
+function buildPaymentSheetRows(records = []) {
+    return records
+        .filter((sub) => normalizeEmail(sub.assignedToPayment))
+        .map((sub) => ({
+            owner: getUserDisplayNameByEmail(sub.assignedToPayment),
+            customerName: sub.customerName || '',
+            rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
+            rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
+            commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
+            status: String(sub.status || '').replace(/_/g, ' '),
+            assignedAt: formatDate(sub.paymentAssignedAt || sub.finalSubmittedAt || sub.rsaSubmittedAt),
+            paidAt: formatDate(sub.paidAt),
+            clearedAt: formatDate(sub.clearedAt),
+            remarks: sub.clearedWithoutAgentCommission ? 'Cleared without agent commission' : String(sub.paymentReconciliationFileName || '').trim()
+        }));
+}
+
+function applySheetHeaderStyle(row) {
+    row.eachCell((cell) => {
+        cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3B67' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        cell.border = {
+            top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+        };
+    });
+}
+
+function applySheetBodyStyle(row) {
+    row.eachCell((cell) => {
+        cell.font = { name: 'Calibri', size: 11 };
+        cell.alignment = { vertical: 'middle', wrapText: true };
+        cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        };
+    });
+}
+
+function renderGroupedSheet({ worksheet, reportTitle, summaryRows = [], groupRows = [], tableHeaders = [], columns = [], decimalColumns = [], integerColumns = [] }) {
+    worksheet.columns = columns;
+    const titleRow = worksheet.addRow([reportTitle]);
+    worksheet.mergeCells(`A${titleRow.number}:${String.fromCharCode(64 + tableHeaders.length)}${titleRow.number}`);
+    titleRow.getCell(1).font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FF0F3B67' } };
+
+    summaryRows.forEach(([label, value]) => {
+        const row = worksheet.addRow([label, value]);
+        row.getCell(1).font = { bold: true };
+    });
+
+    worksheet.addRow([]);
+
+    if (!groupRows.length) {
+        worksheet.addRow(['No records found for the selected date.']);
+        return;
+    }
+
+    let currentOwner = '';
+    groupRows.forEach((item) => {
+        if (item.owner !== currentOwner) {
+            if (currentOwner) worksheet.addRow([]);
+            currentOwner = item.owner;
+            const ownerRow = worksheet.addRow([currentOwner]);
+            worksheet.mergeCells(`A${ownerRow.number}:${String.fromCharCode(64 + tableHeaders.length)}${ownerRow.number}`);
+            ownerRow.getCell(1).font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF166534' } };
+            ownerRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
+
+            const headerRow = worksheet.addRow(tableHeaders);
+            applySheetHeaderStyle(headerRow);
+        }
+
+        const dataRow = worksheet.addRow(Object.values(item).slice(1));
+        applySheetBodyStyle(dataRow);
+        dataRow.eachCell((cell, colNumber) => {
+            if (decimalColumns.includes(colNumber) && typeof cell.value === 'number') {
+                cell.numFmt = '#,##0.00';
+            }
+            if (integerColumns.includes(colNumber) && typeof cell.value === 'number') {
+                cell.numFmt = '0';
+            }
+        });
+    });
+}
+
+function buildDailyReportPreviewTable(sheet = {}) {
+    const rows = Array.isArray(sheet.previewRows) ? sheet.previewRows : [];
+    const headers = Array.isArray(sheet.previewHeaders) ? sheet.previewHeaders : [];
+    if (!rows.length) {
+        return '<div style="padding:18px;color:#64748b;">No records found for this sheet.</div>';
+    }
+    let currentOwner = '';
+    const parts = [];
+    rows.forEach((row) => {
+        if (row.owner !== currentOwner) {
+            if (currentOwner) parts.push('</tbody></table></div><div style="height:12px;"></div>');
+            currentOwner = row.owner;
+            parts.push(`
+                <div style="padding:10px 12px;border:1px solid #dbe6f2;border-bottom:none;border-radius:12px 12px 0 0;background:#eefbf3;font-weight:700;color:#166534;">
+                    ${escapeHtml(currentOwner)}
+                </div>
+                <div class="table-container" style="margin-bottom:0;">
+                    <table class="documents-table">
+                        <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead>
+                        <tbody>
+            `);
+        }
+        parts.push(`
+            <tr>
+                ${row.previewValues.map((value) => `<td>${escapeHtml(String(value ?? '-'))}</td>`).join('')}
+            </tr>
+        `);
+    });
+    parts.push('</tbody></table></div>');
+    return parts.join('');
+}
+
+function renderScheduledReportPreviewTab(tabId) {
+    if (!currentScheduledReportPreview) return;
+    const tabsHost = document.getElementById('scheduledReportPreviewTabs');
+    const summaryHost = document.getElementById('scheduledReportPreviewSummary');
+    const contentHost = document.getElementById('scheduledReportPreviewContent');
+    const titleEl = document.getElementById('scheduledReportPreviewTitle');
+    const sheet = currentScheduledReportPreview.sheets.find((item) => item.id === tabId) || currentScheduledReportPreview.sheets[0];
+    if (!sheet || !tabsHost || !summaryHost || !contentHost) return;
+
+    currentScheduledReportPreview.activeTab = sheet.id;
+    if (titleEl) titleEl.innerHTML = `<i class="fas fa-file-excel"></i> ${escapeHtml(sheet.title)}`;
+
+    tabsHost.innerHTML = currentScheduledReportPreview.sheets.map((item) => `
+        <button
+            type="button"
+            class="action-btn"
+            data-report-tab="${escapeHtml(item.id)}"
+            style="${item.id === sheet.id ? 'background:#003366;color:#fff;border:none;' : 'background:#e2e8f0;color:#0f172a;border:none;'}"
+        >
+            ${escapeHtml(item.tabLabel)}
+        </button>
+    `).join('');
+    tabsHost.querySelectorAll('[data-report-tab]').forEach((button) => {
+        button.addEventListener('click', () => renderScheduledReportPreviewTab(button.getAttribute('data-report-tab')));
+    });
+
+    summaryHost.innerHTML = sheet.summaryRows.map(([label, value]) => `
+        <div style="padding:12px 14px;border:1px solid #dbe6f2;border-radius:12px;background:#f8fbff;">
+            <div style="font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;">${escapeHtml(label)}</div>
+            <div style="font-size:22px;font-weight:800;color:#0f3b67;margin-top:4px;">${escapeHtml(String(value))}</div>
+        </div>
+    `).join('');
+
+    contentHost.innerHTML = buildDailyReportPreviewTable(sheet);
+}
+
+function openScheduledReportPreviewModal() {
+    document.getElementById('scheduledReportPreviewModal')?.classList.add('active');
+}
+
+function closeScheduledReportPreviewModal() {
+    document.getElementById('scheduledReportPreviewModal')?.classList.remove('active');
+}
+
+function buildDailyReportDefinition(reportDate) {
+    const dateKey = String(reportDate || '').trim();
+    if (!dateKey) {
+        return null;
+    }
+
+    const submittedRecords = allSubmissions.filter((sub) => String(sub.status || '').toLowerCase() !== 'draft');
+    const uploaderRecords = submittedRecords.filter((sub) => isSameReportDate(sub.uploadedAt, dateKey));
+    const reviewerRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedTo) && isSameReportDate(sub.uploadedAt, dateKey));
+    const rsaRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToRSA) && isSameReportDate(sub.reviewedAt, dateKey));
+    const paymentRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToPayment) && isSameReportDate(sub.paymentAssignedAt || sub.finalSubmittedAt || sub.rsaSubmittedAt, dateKey));
+
+    const uploaderRows = buildUploaderSheetRows(uploaderRecords);
+    const reviewerRows = buildReviewerSheetRows(reviewerRecords);
+    const rsaRows = buildRsaSheetRows(rsaRecords);
+    const paymentRows = buildPaymentSheetRows(paymentRecords);
+
+    return {
+        dateKey,
+        activeTab: 'uploader',
+        sheets: [
+            {
+                id: 'uploader',
+                tabLabel: 'Uploader',
+                title: `Uploader Report - ${dateKey}`,
+                summaryRows: [
+                    ['Total Uploaded', uploaderRecords.length],
+                    ['Pending', uploaderRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length]
+                ],
+                rows: uploaderRows,
+                excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Uploaded Time', 'Reviewer Time', 'Reject Reason', 'Reject Count'],
+                previewHeaders: ['Customer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Uploaded', 'Reviewer', 'Reject Count'],
+                previewRows: uploaderRows.map((row) => ({
+                    owner: row.owner,
+                    previewValues: [row.customerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.uploadedAt, row.stageTime, String(row.rejectionCount || 0)]
+                })),
+                columns: [{ width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
+                decimalColumns: [2, 3, 4],
+                integerColumns: [9]
+            },
+            {
+                id: 'reviewer',
+                tabLabel: 'Reviewer',
+                title: `Reviewer Report - ${dateKey}`,
+                summaryRows: [
+                    ['Total Received', reviewerRecords.length],
+                    ['Attending To', reviewerRecords.filter((sub) => normalizeEmail(sub.assignedTo)).length],
+                    ['Pending', reviewerRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length]
+                ],
+                rows: reviewerRows,
+                excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Decision Time', 'Reject Reason', 'Reject Count'],
+                previewHeaders: ['Customer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned', 'Decision', 'Reject Count'],
+                previewRows: reviewerRows.map((row) => ({
+                    owner: row.owner,
+                    previewValues: [row.customerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, row.stageTime, String(row.rejectionCount || 0)]
+                })),
+                columns: [{ width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
+                decimalColumns: [2, 3, 4],
+                integerColumns: [9]
+            },
+            {
+                id: 'rsa',
+                tabLabel: 'RSA',
+                title: `RSA Report - ${dateKey}`,
+                summaryRows: [
+                    ['Total Received', rsaRecords.length],
+                    ['Attending To', rsaRecords.filter((sub) => ['approved', 'processing_to_pfa'].includes(String(sub.status || '').toLowerCase()) && !sub.finalSubmitted && !sub.rsaSubmitted).length],
+                    ['Pending', rsaRecords.filter((sub) => ['approved', 'processing_to_pfa'].includes(String(sub.status || '').toLowerCase()) && !sub.finalSubmitted && !sub.rsaSubmitted).length]
+                ],
+                rows: rsaRows,
+                excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time', 'RSA Done Time', 'RSA Reject Reason', 'RSA Reject Count'],
+                previewHeaders: ['Customer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned', 'Done', 'Reject Count'],
+                previewRows: rsaRows.map((row) => ({
+                    owner: row.owner,
+                    previewValues: [row.customerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, row.stageTime, String(row.rejectionCount || 0)]
+                })),
+                columns: [{ width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
+                decimalColumns: [2, 3, 4],
+                integerColumns: [9]
+            },
+            {
+                id: 'payment',
+                tabLabel: 'Payment',
+                title: `Payment Report - ${dateKey}`,
+                summaryRows: [
+                    ['Total Received', paymentRecords.length],
+                    ['Attending To', paymentRecords.filter((sub) => normalizeEmail(sub.assignedToPayment)).length],
+                    ['Pending', paymentRecords.filter((sub) => ['sent_to_pfa', 'rsa_submitted'].includes(String(sub.status || '').toLowerCase())).length]
+                ],
+                rows: paymentRows,
+                excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Payment Assigned Time', 'Paid Time', 'Cleared Time', 'Remarks'],
+                previewHeaders: ['Customer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned', 'Paid', 'Cleared'],
+                previewRows: paymentRows.map((row) => ({
+                    owner: row.owner,
+                    previewValues: [row.customerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, row.paidAt, row.clearedAt]
+                })),
+                columns: [{ width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 20 }, { width: 20 }, { width: 28 }],
+                decimalColumns: [2, 3, 4],
+                integerColumns: []
+            }
+        ]
+    };
+}
+
+async function downloadDailyReportWorkbook(reportInput) {
+    if (!window.ExcelJS) {
+        showNotification('Excel export library is not available right now.', 'error');
+        return;
+    }
+
+    const report = typeof reportInput === 'string' ? buildDailyReportDefinition(reportInput) : reportInput;
+    if (!report) {
+        showNotification('Choose a report date first.', 'warning');
+        return;
+    }
+
+    const workbook = new window.ExcelJS.Workbook();
+    workbook.creator = 'CMBank RSA Super Admin';
+    workbook.created = new Date();
+
+    report.sheets.forEach((sheet) => {
+        renderGroupedSheet({
+            worksheet: workbook.addWorksheet(sheet.tabLabel + ' Report'),
+            reportTitle: sheet.title,
+            summaryRows: sheet.summaryRows,
+            groupRows: sheet.rows,
+            tableHeaders: sheet.excelHeaders,
+            columns: sheet.columns,
+            decimalColumns: sheet.decimalColumns,
+            integerColumns: sheet.integerColumns
+        });
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `cmbank_daily_report_${report.dateKey}.xlsx`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showNotification('Daily report Excel downloaded.', 'success');
+}
+
 function roleHome(role) {
     const r = String(role || '').toLowerCase();
     if (r === 'super_admin') return 'super-admin-dashboard.html';
     if (r === 'admin') return 'admin-dashboard.html';
+    if (r === 'reports_monitoring') return 'reports-monitoring-dashboard.html';
     if (r === 'reviewer') return 'reviewer-dashboard.html';
     if (r === 'rsa') return 'rsa-dashboard.html';
     if (r === 'payment') return 'payment-dashboard.html';
@@ -512,6 +976,7 @@ function renderAdminManagement() {
                 <td>
                     <select id="sa-role-${u.id}" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
                         <option value="uploader" ${role === 'uploader' ? 'selected' : ''}>Uploader</option>
+                        <option value="reports_monitoring" ${role === 'reports_monitoring' ? 'selected' : ''}>Reports Monitoring</option>
                         <option value="reviewer" ${role === 'reviewer' ? 'selected' : ''}>Reviewer</option>
                         <option value="rsa" ${role === 'rsa' ? 'selected' : ''}>RSA</option>
                         <option value="payment" ${role === 'payment' ? 'selected' : ''}>Payment</option>
@@ -851,7 +1316,7 @@ async function renderAudit() {
 }
 
 function renderSecurity() {
-    const privileged = allUsers.filter((u) => ['super_admin', 'admin', 'reviewer', 'rsa', 'payment'].includes(String(u.role || '').toLowerCase()));
+    const privileged = allUsers.filter((u) => ['super_admin', 'admin', 'reports_monitoring', 'reviewer', 'rsa', 'payment'].includes(String(u.role || '').toLowerCase()));
     const activePrivileged = privileged.filter((u) => String(u.status || 'active').toLowerCase() === 'active').length;
     const deactivated = allUsers.filter((u) => String(u.status || '').toLowerCase() === 'deactivated').length;
     const c1 = document.getElementById('securityPrivilegedCount');
@@ -914,6 +1379,12 @@ async function loadSettings() {
     const agentEditSyncEnabled = document.getElementById('settingAgentEditSyncEnabled');
     const notificationsEmailEnabled = document.getElementById('settingNotificationsEmailEnabled');
     const notificationsPushEnabled = document.getElementById('settingNotificationsPushEnabled');
+    const scheduledReportEmailEnabled = document.getElementById('settingScheduledReportEmailEnabled');
+    const scheduledReportSendTime = document.getElementById('settingScheduledReportSendTime');
+    const scheduledReportSubject = document.getElementById('settingScheduledReportSubject');
+    const scheduledReportRecipients = document.getElementById('settingScheduledReportRecipients');
+    const scheduledReportBody = document.getElementById('settingScheduledReportBody');
+    const scheduledReportDownloadDate = document.getElementById('scheduledReportDownloadDate');
     const announcementEnabled = document.getElementById('settingAnnouncementEnabled');
     const announcementTone = document.getElementById('settingAnnouncementTone');
     const announcementMessage = document.getElementById('settingAnnouncementMessage');
@@ -941,6 +1412,12 @@ async function loadSettings() {
     if (agentEditSyncEnabled) agentEditSyncEnabled.value = String((data.agentEditSyncEnabled ?? defaultSystemSettings.agentEditSyncEnabled) ? 'true' : 'false');
     if (notificationsEmailEnabled) notificationsEmailEnabled.value = String((data.notificationsEmailEnabled ?? defaultSystemSettings.notificationsEmailEnabled) ? 'true' : 'false');
     if (notificationsPushEnabled) notificationsPushEnabled.value = String((data.notificationsPushEnabled ?? defaultSystemSettings.notificationsPushEnabled) ? 'true' : 'false');
+    if (scheduledReportEmailEnabled) scheduledReportEmailEnabled.value = String(systemSettings.scheduledReportEmail?.enabled ? 'true' : 'false');
+    if (scheduledReportSendTime) scheduledReportSendTime.value = String(systemSettings.scheduledReportEmail?.sendTime || defaultSystemSettings.scheduledReportEmail.sendTime || '08:00');
+    if (scheduledReportSubject) scheduledReportSubject.value = String(systemSettings.scheduledReportEmail?.subject || defaultSystemSettings.scheduledReportEmail.subject || '');
+    if (scheduledReportRecipients) scheduledReportRecipients.value = Array.isArray(systemSettings.scheduledReportEmail?.recipients) ? systemSettings.scheduledReportEmail.recipients.join('\n') : '';
+    if (scheduledReportBody) scheduledReportBody.value = String(systemSettings.scheduledReportEmail?.body || defaultSystemSettings.scheduledReportEmail.body || '');
+    if (scheduledReportDownloadDate && !scheduledReportDownloadDate.value) scheduledReportDownloadDate.value = reportDateKeyFormatter.format(new Date());
     if (announcementEnabled) announcementEnabled.value = String(systemSettings.dashboardAnnouncement.enabled ? 'true' : 'false');
     if (announcementTone) announcementTone.value = String(systemSettings.dashboardAnnouncement.tone || 'info');
     if (announcementMessage) announcementMessage.value = String(systemSettings.dashboardAnnouncement.message || '');
@@ -1282,8 +1759,6 @@ function renderSettingsDropdownNav() {
         button.addEventListener('click', (event) => {
             event.stopPropagation();
             const panelId = String(button.getAttribute('data-settings-panel-open') || '').trim();
-            activeSettingsDropdownTab = '';
-            renderSettingsSubTabState();
             openSettingsSectionModal(panelId);
         });
     });
@@ -1300,6 +1775,11 @@ function returnActiveSettingsPanelToStorage() {
 function closeSettingsSectionModal() {
     returnActiveSettingsPanelToStorage();
     settingsSectionModal?.classList.remove('active');
+    if (settingsModalSourceDropdownTab) {
+        activeSettingsDropdownTab = settingsModalSourceDropdownTab;
+        settingsModalSourceDropdownTab = '';
+        if (currentTab === 'settings') renderSettingsSubTabState();
+    }
 }
 
 function openSettingsSectionModal(panelId) {
@@ -1307,6 +1787,7 @@ function openSettingsSectionModal(panelId) {
     if (!panel || !settingsSectionModalContentHost) return;
 
     returnActiveSettingsPanelToStorage();
+    settingsModalSourceDropdownTab = activeSettingsDropdownTab || currentSettingsSubTab || '';
     activeSettingsModalPanelId = panelId;
     const title = String(panel.dataset.settingsPanelTitle || 'Settings Section').trim();
     const description = String(panel.dataset.settingsPanelDescription || 'Manage this settings section in a larger workspace, then save your changes.').trim();
@@ -2420,6 +2901,11 @@ window.saveSuperSettings = async (triggerButton = null) => {
     const agentEditSyncEnabled = String(document.getElementById('settingAgentEditSyncEnabled')?.value || 'true') === 'true';
     const notificationsEmailEnabled = String(document.getElementById('settingNotificationsEmailEnabled')?.value || 'true') === 'true';
     const notificationsPushEnabled = String(document.getElementById('settingNotificationsPushEnabled')?.value || 'true') === 'true';
+    const scheduledReportEmailEnabled = String(document.getElementById('settingScheduledReportEmailEnabled')?.value || 'false') === 'true';
+    const scheduledReportSendTime = String(document.getElementById('settingScheduledReportSendTime')?.value || getDefaultSystemSettings().scheduledReportEmail.sendTime || '08:00').trim();
+    const scheduledReportSubject = String(document.getElementById('settingScheduledReportSubject')?.value || '').trim() || getDefaultSystemSettings().scheduledReportEmail.subject;
+    const scheduledReportRecipients = normalizeEmailList(parseLinesTextarea('settingScheduledReportRecipients'));
+    const scheduledReportBody = String(document.getElementById('settingScheduledReportBody')?.value || '').trim() || getDefaultSystemSettings().scheduledReportEmail.body;
     const announcementEnabled = String(document.getElementById('settingAnnouncementEnabled')?.value || 'false') === 'true';
     const announcementTone = String(document.getElementById('settingAnnouncementTone')?.value || 'info').trim() || 'info';
     const announcementMessage = String(document.getElementById('settingAnnouncementMessage')?.value || '').trim();
@@ -2445,6 +2931,14 @@ window.saveSuperSettings = async (triggerButton = null) => {
     }
     if (!Number.isFinite(auditRetentionDays) || auditRetentionDays <= 0) {
         showNotification('Audit retention days must be greater than 0', 'warning');
+        return false;
+    }
+    if (!/^\d{2}:\d{2}$/.test(scheduledReportSendTime)) {
+        showNotification('Enter a valid report send time', 'warning');
+        return false;
+    }
+    if (scheduledReportEmailEnabled && !scheduledReportRecipients.length) {
+        showNotification('Add at least one recipient email for the scheduled report', 'warning');
         return false;
     }
     const commissionRate = commissionRatePercent / 100;
@@ -2554,6 +3048,13 @@ window.saveSuperSettings = async (triggerButton = null) => {
             agentEditSyncEnabled,
             notificationsEmailEnabled,
             notificationsPushEnabled,
+            scheduledReportEmail: {
+                enabled: scheduledReportEmailEnabled,
+                sendTime: scheduledReportSendTime,
+                subject: scheduledReportSubject,
+                recipients: scheduledReportRecipients,
+                body: scheduledReportBody
+            },
             pfaOptions,
             documentRequirements,
             documentRequirementRoles,
@@ -2626,6 +3127,9 @@ window.saveSuperSettings = async (triggerButton = null) => {
             agentEditSyncEnabled,
             notificationsEmailEnabled,
             notificationsPushEnabled,
+            scheduledReportEmailEnabled,
+            scheduledReportSendTime,
+            scheduledReportRecipientCount: scheduledReportRecipients.length,
             announcementEnabled,
             defaultRouteMode,
             agentRegistrationApprovalRequired,
@@ -2898,6 +3402,53 @@ document.getElementById('forceLogoutAllUsersBtn')?.addEventListener('click', () 
 document.getElementById('exportAuditCsvBtn')?.addEventListener('click', () => {
     window.exportAuditCsv?.();
 });
+document.getElementById('previewScheduledReportBtn')?.addEventListener('click', async () => {
+    const button = document.getElementById('previewScheduledReportBtn');
+    const originalHtml = button?.innerHTML || '';
+    const reportDate = String(document.getElementById('scheduledReportDownloadDate')?.value || '').trim();
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing...';
+        }
+        const report = buildDailyReportDefinition(reportDate);
+        if (!report) {
+            showNotification('Choose a report date first.', 'warning');
+            return;
+        }
+        currentScheduledReportPreview = report;
+        renderScheduledReportPreviewTab(report.activeTab || report.sheets[0]?.id || 'uploader');
+        openScheduledReportPreviewModal();
+    } catch (_) {
+        showNotification('Failed to prepare daily report preview.', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+});
+document.getElementById('downloadScheduledReportFromModalBtn')?.addEventListener('click', async () => {
+    try {
+        await downloadDailyReportWorkbook(currentScheduledReportPreview);
+    } catch (_) {
+        showNotification('Failed to download daily report workbook.', 'error');
+    }
+});
+document.getElementById('closeScheduledReportPreviewModalBtn')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeScheduledReportPreviewModal();
+});
+document.getElementById('cancelScheduledReportPreviewModalBtn')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeScheduledReportPreviewModal();
+});
+document.getElementById('scheduledReportPreviewModal')?.addEventListener('click', (event) => {
+    if (event.target?.id === 'scheduledReportPreviewModal') {
+        event.stopPropagation();
+        closeScheduledReportPreviewModal();
+    }
+});
 document.getElementById('saveSettingsBtn')?.addEventListener('click', () => {
     window.saveSuperSettings?.();
 });
@@ -2905,15 +3456,23 @@ document.getElementById('saveSettingsSectionModalBtn')?.addEventListener('click'
     const ok = await window.saveSuperSettings?.(event.currentTarget);
     if (ok) closeSettingsSectionModal();
 });
-document.getElementById('closeSettingsSectionModalBtn')?.addEventListener('click', closeSettingsSectionModal);
-document.getElementById('cancelSettingsSectionModalBtn')?.addEventListener('click', closeSettingsSectionModal);
+document.getElementById('closeSettingsSectionModalBtn')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeSettingsSectionModal();
+});
+document.getElementById('cancelSettingsSectionModalBtn')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeSettingsSectionModal();
+});
 document.getElementById('settingsSectionModal')?.addEventListener('click', (event) => {
     if (event.target?.id === 'settingsSectionModal') {
+        event.stopPropagation();
         closeSettingsSectionModal();
     }
 });
 document.addEventListener('click', (event) => {
     if (!settingsDropdownNav) return;
+    if (settingsSectionModal?.classList.contains('active')) return;
     if (!settingsDropdownNav.contains(event.target)) {
         if (activeSettingsDropdownTab) {
             activeSettingsDropdownTab = '';
@@ -2922,8 +3481,13 @@ document.addEventListener('click', (event) => {
     }
 });
 document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && document.getElementById('scheduledReportPreviewModal')?.classList.contains('active')) {
+        closeScheduledReportPreviewModal();
+        return;
+    }
     if (event.key === 'Escape' && settingsSectionModal?.classList.contains('active')) {
         closeSettingsSectionModal();
+        return;
     }
     if (event.key === 'Escape' && activeSettingsDropdownTab) {
         activeSettingsDropdownTab = '';

@@ -33,6 +33,10 @@ service cloud.firestore {
       return isAnyRole(['admin', 'super_admin']);
     }
 
+    function canMonitorAll() {
+      return isAnyRole(['admin', 'super_admin', 'reports_monitoring']);
+    }
+
     function systemSettingsPath() {
       return /databases/$(database)/documents/settings/system;
     }
@@ -82,7 +86,7 @@ service cloud.firestore {
       return signedIn()
         && exists(submissionDocPath(submissionId))
         && (
-          isAdminLike() ||
+          canMonitorAll() ||
           get(submissionDocPath(submissionId)).data.uploadedBy == myEmail() ||
           get(submissionDocPath(submissionId)).data.assignedTo == myEmail() ||
           get(submissionDocPath(submissionId)).data.reviewedBy == myEmail() ||
@@ -107,7 +111,7 @@ service cloud.firestore {
 
     function canReadSubmission() {
       return signedIn() && (
-        isAdminLike() ||
+        canMonitorAll() ||
         resource.data.uploadedBy == myEmail() ||
         resource.data.assignedTo == myEmail() ||
         resource.data.reviewedBy == myEmail() ||
@@ -122,7 +126,7 @@ service cloud.firestore {
         && maintenanceWriteAllowed()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.email == myEmail()
-        && request.resource.data.role in ['uploader', 'admin', 'super_admin', 'reviewer', 'rsa', 'payment']
+        && request.resource.data.role in ['uploader', 'admin', 'super_admin', 'reviewer', 'rsa', 'payment', 'reports_monitoring']
         && request.resource.data.status in ['pending', 'active', 'deactivated']
         && hasMatchingUniqueKeyAfter('email', request.resource.data.email, userId)
         && hasMatchingUniqueKeyAfter('whatsapp', request.resource.data.whatsappNumber, userId);
@@ -189,7 +193,7 @@ service cloud.firestore {
     }
 
     match /audit/{docId} {
-      allow read: if isAdminLike();
+      allow read: if canMonitorAll();
       allow create: if signedIn() && maintenanceWriteAllowed() && isAnyRole(['admin', 'super_admin', 'payment', 'rsa', 'reviewer']);
       allow update, delete: if false;
     }

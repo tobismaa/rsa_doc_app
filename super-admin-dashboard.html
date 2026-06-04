@@ -78,6 +78,7 @@
                     <select id="superUserRoleFilter" style="padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
                         <option value="">All Roles</option>
                         <option value="uploader">Uploader</option>
+                        <option value="reports_monitoring">Reports Monitoring</option>
                         <option value="reviewer">Reviewer</option>
                         <option value="rsa">RSA</option>
                         <option value="payment">Payment</option>
@@ -573,6 +574,45 @@
                         </div>
                     </div>
                     <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Scheduled Report Emails</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Set up the daily report email body, recipient list, and send time. The sender job can use these saved values later.</p>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+                            <label>Daily Report Email
+                                <select id="settingScheduledReportEmailEnabled" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                            </label>
+                            <label>Send Time
+                                <input id="settingScheduledReportSendTime" type="time" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                            </label>
+                            <label style="grid-column:1/-1;">Email Subject
+                                <input id="settingScheduledReportSubject" type="text" placeholder="Daily RSA Report" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                            </label>
+                            <label style="grid-column:1/-1;">Recipient Emails
+                                <textarea id="settingScheduledReportRecipients" rows="6" placeholder="Enter one email per line" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;"></textarea>
+                            </label>
+                            <label style="grid-column:1/-1;">Email Body
+                                <textarea id="settingScheduledReportBody" rows="8" placeholder="Write the message body to send with the report" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;"></textarea>
+                            </label>
+                        </div>
+                        <div style="margin-top:12px;padding:12px 14px;border-radius:12px;background:#eef6ff;color:#4b5563;font-size:13px;line-height:1.6;">
+                            Saved time is interpreted in the app time zone: <strong>Africa/Lagos</strong>.
+                        </div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
+                        <h3 style="margin:0 0 8px;color:#0f3b67;">Download Daily Report</h3>
+                        <p style="margin:0 0 12px;color:#64748b;">Generate the same multi-sheet daily report workbook directly from Super Admin.</p>
+                        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;">
+                            <label style="min-width:220px;">Report Date
+                                <input id="scheduledReportDownloadDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                            </label>
+                            <button id="previewScheduledReportBtn" class="action-btn" type="button" style="background:#0f766e;color:#fff;border:none;">
+                                <i class="fas fa-table"></i> Preview Report
+                            </button>
+                        </div>
+                    </div>
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
                         <h3 style="margin:0 0 8px;color:#0f3b67;">Notification Templates</h3>
                         <p style="margin:0 0 12px;color:#64748b;">Change common notification messages with normal text fields.</p>
                         <div id="notificationTemplatesGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;"></div>
@@ -770,6 +810,35 @@
     </div>
 </div>
 
+<div id="scheduledReportPreviewModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content settings-section-modal-content" style="max-width:1200px;width:min(1200px,96vw);">
+        <div class="modal-header settings-section-modal-header">
+            <h2 id="scheduledReportPreviewTitle"><i class="fas fa-file-excel"></i> Daily Report Preview</h2>
+            <button id="closeScheduledReportPreviewModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body settings-section-modal-body">
+            <div class="settings-section-modal-hero" style="margin-bottom:14px;">
+                <div class="settings-section-modal-icon">
+                    <i class="fas fa-table-columns"></i>
+                </div>
+                <div>
+                    <strong>Preview report by worksheet</strong>
+                    <p>Review each tab first, then download the full Excel workbook.</p>
+                </div>
+            </div>
+            <div id="scheduledReportPreviewTabs" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;"></div>
+            <div id="scheduledReportPreviewSummary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px;"></div>
+            <div id="scheduledReportPreviewContent" class="table-container" style="max-height:60vh;overflow:auto;"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelScheduledReportPreviewModalBtn" type="button" class="cancel-btn">Close</button>
+            <button id="downloadScheduledReportFromModalBtn" type="button" class="confirm-btn">
+                <i class="fas fa-download"></i> Download Excel
+            </button>
+        </div>
+    </div>
+</div>
+
 <div id="settingsModalStorage" style="display:none;" aria-hidden="true"></div>
 
 <button type="button" id="helpFab" class="sop-fab" title="Open SOP">
@@ -841,6 +910,7 @@
                 <label>Role
                     <select id="superModalRole">
                         <option value="uploader">Uploader</option>
+                        <option value="reports_monitoring">Reports Monitoring</option>
                         <option value="reviewer">Reviewer</option>
                         <option value="rsa">RSA</option>
                         <option value="payment">Payment</option>
@@ -923,6 +993,7 @@
 </div>
 
 <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="js/table-enhancer.js?v=20260512b"></script>
 <script type="module" src="js/super-admin.js?v=20260518a"></script>
 <script type="module" src="js/profile-completion-guard.js?v=20260518a"></script>

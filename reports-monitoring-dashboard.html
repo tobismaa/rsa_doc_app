@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=0.8, maximum-scale=1.0, user-scalable=yes">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="theme-color" content="#0f3b67">
+    <link rel="manifest" href="manifest.webmanifest?v=20260416f">
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=20260416f">
+    <link rel="icon" type="image/png" href="favicon.png?v=20260416f">
+    <link rel="apple-touch-icon" href="icons/icon-192.png?v=20260416f">
+    <title>Reports & Monitoring Dashboard - CMBank RSA</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+</head>
+<body>
+    <script src="js/security-utils.js?v=20260416f"></script>
+
+    <div class="app-container">
+        <header class="mobile-header">
+            <button class="menu-toggle" id="menuToggle" aria-label="Toggle navigation" aria-expanded="false">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="mobile-logo">
+                <i class="fas fa-chart-line"></i>
+                <span>Reports & Monitoring</span>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <button class="sign-out-btn mobile" id="forceRefreshBtnMobile" title="Refresh">
+                    <i class="fas fa-arrows-rotate"></i>
+                </button>
+                <button class="sign-out-btn mobile" id="signOutBtnMobile" title="Sign Out">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+        </header>
+
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+        <aside class="sidebar admin-sidebar" id="sidebar">
+            <div class="logo">
+                <i class="fas fa-chart-line"></i>
+                <span>Reports & Monitoring</span>
+            </div>
+
+            <div class="user-profile">
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='14'%3ERM%3C/text%3E%3C/svg%3E" alt="Reports Monitoring" id="monitorAvatar">
+                <div class="user-info">
+                    <span id="monitorName">Loading...</span>
+                    <small>Reports & Monitoring</small>
+                </div>
+                <button class="sign-out-btn" id="signOutBtnSidebar" title="Sign Out">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-tab="overview">
+                    <i class="fas fa-chart-pie"></i>
+                    <span>Overview</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="users">
+                    <i class="fas fa-users"></i>
+                    <span>Users</span>
+                    <span class="badge" id="usersCountBadge">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="applications">
+                    <i class="fas fa-folder-open"></i>
+                    <span>Applications</span>
+                    <span class="badge" id="applicationsCountBadge">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="reports">
+                    <i class="fas fa-file-lines"></i>
+                    <span>Reports</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="profile">
+                    <i class="fas fa-user-circle"></i>
+                    <span>My Profile</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="help">
+                    <i class="fas fa-book-open"></i>
+                    <span>Help & SOP</span>
+                </a>
+            </nav>
+
+            <button class="sidebar-close" id="sidebarClose" aria-label="Close menu">
+                <i class="fas fa-times"></i>
+            </button>
+        </aside>
+
+        <main class="main-content">
+            <header class="content-header desktop-only">
+                <h1 id="pageTitle">Overview</h1>
+                <button id="forceRefreshBtn" class="action-btn" style="padding:10px 14px;font-size:13px;" title="Refresh">
+                    <i class="fas fa-arrows-rotate"></i> Refresh
+                </button>
+            </header>
+
+            <div id="overviewTab" class="tab-content active">
+                <div class="dashboard-grid">
+                    <div class="stat-card">
+                        <div>
+                            <div class="stat-label">Registered Users</div>
+                            <div class="stat-value" id="overviewUsersCount">0</div>
+                        </div>
+                        <i class="fas fa-users stat-icon"></i>
+                    </div>
+                    <div class="stat-card">
+                        <div>
+                            <div class="stat-label">Applications</div>
+                            <div class="stat-value" id="overviewApplicationsCount">0</div>
+                        </div>
+                        <i class="fas fa-folder-open stat-icon"></i>
+                    </div>
+                    <div class="stat-card">
+                        <div>
+                            <div class="stat-label">Sent to PFA</div>
+                            <div class="stat-value" id="overviewSentCount">0</div>
+                        </div>
+                        <i class="fas fa-paper-plane stat-icon"></i>
+                    </div>
+                    <div class="stat-card">
+                        <div>
+                            <div class="stat-label">Paid + Cleared</div>
+                            <div class="stat-value" id="overviewPaidClearedCount">0</div>
+                        </div>
+                        <i class="fas fa-money-check-dollar stat-icon"></i>
+                    </div>
+                </div>
+
+                <div class="table-section">
+                    <h2>Workflow Snapshot</h2>
+                    <p style="color:#64748b;margin:0 0 14px;">Monitor the full pipeline from review through RSA and payment. This page is intended for centralized reporting and operational visibility.</p>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Stage</th>
+                                    <th>Count</th>
+                                    <th>Notes</th>
+                                </tr>
+                            </thead>
+                            <tbody id="overviewWorkflowBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="table-section">
+                    <h2>Recent Applications</h2>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Status</th>
+                                    <th>Stage</th>
+                                    <th>Uploader</th>
+                                    <th>Assigned Chain</th>
+                                    <th>Updated</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recentApplicationsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="usersTab" class="tab-content">
+                <div class="filters-bar">
+                    <div class="search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="usersSearch" placeholder="Search users..." aria-label="Search users">
+                    </div>
+                    <select id="usersRoleFilter" aria-label="Filter users by role">
+                        <option value="">All Roles</option>
+                        <option value="uploader">Uploader</option>
+                        <option value="reviewer">Reviewer</option>
+                        <option value="rsa">RSA</option>
+                        <option value="payment">Payment</option>
+                        <option value="reports_monitoring">Reports Monitoring</option>
+                        <option value="admin">Admin</option>
+                        <option value="super_admin">Super Admin</option>
+                    </select>
+                    <select id="usersStatusFilter" aria-label="Filter users by status">
+                        <option value="">All Status</option>
+                        <option value="active">Active</option>
+                        <option value="pending">Pending</option>
+                        <option value="deactivated">Deactivated</option>
+                    </select>
+                </div>
+                <div class="table-container">
+                    <table class="users-table">
+                        <thead>
+                            <tr>
+                                <th>Full Name</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                                <th>Location</th>
+                                <th>WhatsApp</th>
+                                <th>Joined</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="applicationsTab" class="tab-content">
+                <div class="filters-bar">
+                    <div class="search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="applicationsSearch" placeholder="Search by customer, uploader, agent, or ID..." aria-label="Search applications">
+                    </div>
+                    <select id="applicationsStatusFilter" aria-label="Filter applications by status">
+                        <option value="">All Status</option>
+                        <option value="pending">Pending</option>
+                        <option value="approved">Approved</option>
+                        <option value="processing_to_pfa">Processing to PFA</option>
+                        <option value="sent_to_pfa">Sent to PFA</option>
+                        <option value="paid">Paid</option>
+                        <option value="cleared">Cleared</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="rejected_by_rsa">Rejected by RSA</option>
+                    </select>
+                    <select id="applicationsStageFilter" aria-label="Filter applications by stage">
+                        <option value="">All Stages</option>
+                        <option value="Review">Review</option>
+                        <option value="RSA">RSA</option>
+                        <option value="Payment">Payment</option>
+                        <option value="Closed">Closed</option>
+                        <option value="Draft">Draft</option>
+                    </select>
+                </div>
+                <div class="table-container">
+                    <table class="documents-table">
+                        <thead>
+                            <tr>
+                                <th>Customer</th>
+                                <th>Application ID</th>
+                                <th>Status</th>
+                                <th>Stage</th>
+                                <th>Uploader</th>
+                                <th>Reviewer</th>
+                                <th>RSA</th>
+                                <th>Payment</th>
+                                <th>Updated</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="applicationsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="reportsTab" class="tab-content">
+                <div class="table-section">
+                    <h2>RSA Report Monitor</h2>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Report</th>
+                                    <th>Count</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rsaReportsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="table-section">
+                    <h2>Payment Report Monitor</h2>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Report</th>
+                                    <th>Count</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paymentReportsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="table-section">
+                    <h2>Officer Workload</h2>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Officer</th>
+                                    <th>Role</th>
+                                    <th>Assigned Count</th>
+                                    <th>Completed Count</th>
+                                    <th>Active Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="officerWorkloadBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="table-section">
+                    <h2>Exceptions Monitor</h2>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Issue</th>
+                                    <th>Status</th>
+                                    <th>Stage</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="exceptionsTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="profileTab" class="tab-content">
+                <div class="profile-card-wrap">
+                    <div class="profile-card">
+                        <div class="profile-card-head">
+                            <h2>My Profile</h2>
+                            <p>Reports & monitoring access details</p>
+                        </div>
+                        <div class="profile-grid">
+                            <div class="profile-item"><span class="profile-label">Full Name</span><span id="profileName" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Email</span><span id="profileEmail" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">WhatsApp</span><span id="profileWhatsapp" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Location</span><span id="profileLocation" class="profile-value">-</span></div>
+                            <div class="profile-item"><span class="profile-label">Role</span><span id="profileRole" class="profile-value">Reports Monitoring</span></div>
+                            <div class="profile-item"><span class="profile-label">Status</span><span id="profileStatus" class="profile-value">-</span></div>
+                            <div class="profile-item profile-item-wide"><span class="profile-label">Date Registered</span><span id="profileRegisteredAt" class="profile-value">-</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="helpTab" class="tab-content">
+                <div class="table-section">
+                    <h2>Help & SOP</h2>
+                    <div style="display:grid;gap:16px;">
+                        <div>
+                            <h4 style="margin:0 0 6px;color:#0f3b67;">1. Overview</h4>
+                            <p style="margin:0;color:#64748b;">Use Overview for fast pipeline visibility across the whole workflow.</p>
+                        </div>
+                        <div>
+                            <h4 style="margin:0 0 6px;color:#0f3b67;">2. Users</h4>
+                            <p style="margin:0;color:#64748b;">Use Users to monitor registered staff, their roles, and account status.</p>
+                        </div>
+                        <div>
+                            <h4 style="margin:0 0 6px;color:#0f3b67;">3. Applications</h4>
+                            <p style="margin:0;color:#64748b;">Use Applications to track customer records by status, stage, and assigned officers.</p>
+                        </div>
+                        <div>
+                            <h4 style="margin:0 0 6px;color:#0f3b67;">4. Reports</h4>
+                            <p style="margin:0;color:#64748b;">Use Reports to monitor RSA flow, payment flow, workload balance, and workflow exceptions.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
+
+    <div id="applicationDetailsModal" class="modal">
+        <div class="modal-content large-modal" style="max-width:1000px;">
+            <div class="modal-header">
+                <h2 id="applicationDetailsTitle">Application Details</h2>
+                <button class="close-btn" id="closeApplicationDetailsModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="table-container">
+                    <table class="documents-table">
+                        <tbody id="applicationDetailsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="closeApplicationDetailsModalFooterBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/table-enhancer.js?v=20260512b"></script>
+    <script type="module" src="js/reports-monitoring.js?v=20260601a"></script>
+    <script type="module" src="js/profile-completion-guard.js?v=20260518a"></script>
+    <link rel="stylesheet" href="css/profile-card.css">
+</body>
+</html>

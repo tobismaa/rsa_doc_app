@@ -715,7 +715,9 @@ if (loginFormElement) {
                         window.location.href = 'super-admin-dashboard.html';
                     } else if (userData.role === 'admin') {
                         window.location.href = 'admin-dashboard.html';
-                } else if (userData.role === 'reviewer') {
+                    } else if (userData.role === 'reports_monitoring') {
+                        window.location.href = 'reports-monitoring-dashboard.html';
+                    } else if (userData.role === 'reviewer') {
                         window.location.href = 'reviewer-dashboard.html';
                     } else if (userData.role === 'payment') {
                         window.location.href = 'payment-dashboard.html';

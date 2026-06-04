@@ -160,6 +160,7 @@ function normalizeUserRole(role) {
 function getRoleLabel(role) {
     const normalized = normalizeUserRole(role);
     if (normalized === 'super_admin') return 'Super Admin';
+    if (normalized === 'reports_monitoring') return 'Reports Monitoring';
     if (normalized === 'rsa') return 'RSA';
     if (normalized === 'payment') return 'Payment';
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
@@ -748,6 +749,11 @@ async function checkAdminAuth() {
 
             if (userData.role === 'super_admin') {
                 window.location.href = 'super-admin-dashboard.html';
+                return;
+            }
+
+            if (userData.role === 'reports_monitoring') {
+                window.location.href = 'reports-monitoring-dashboard.html';
                 return;
             }
 
