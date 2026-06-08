@@ -623,6 +623,9 @@
                             <button id="sendScheduledReportNowBtn" class="action-btn" type="button" style="background:#1d4ed8;color:#fff;border:none;">
                                 <i class="fas fa-paper-plane"></i> Send Previous Day Now
                             </button>
+                            <button id="sendCustomScheduledReportBtn" class="action-btn" type="button" style="background:#7c3aed;color:#fff;border:none;">
+                                <i class="fas fa-calendar-days"></i> Send Custom Report
+                            </button>
                             <button id="checkScheduledReportStatusBtn" class="action-btn" type="button" style="background:#0f766e;color:#fff;border:none;">
                                 <i class="fas fa-heart-pulse"></i> Check Sender Status
                             </button>
@@ -834,6 +837,54 @@
             <button id="cancelSettingsSectionModalBtn" type="button" class="cancel-btn">Close</button>
             <button id="saveSettingsSectionModalBtn" type="button" class="confirm-btn">
                 <i class="fas fa-save"></i> Save Changes
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="scheduledReportSendModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content settings-section-modal-content" style="max-width:720px;width:min(720px,94vw);">
+        <div class="modal-header settings-section-modal-header">
+            <h2><i class="fas fa-paper-plane"></i> Send Custom Report</h2>
+            <button id="closeScheduledReportSendModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body settings-section-modal-body">
+            <div class="settings-section-modal-hero" style="margin-bottom:14px;">
+                <div class="settings-section-modal-icon">
+                    <i class="fas fa-calendar-check"></i>
+                </div>
+                <div>
+                    <strong>Choose another report date or date range</strong>
+                    <p>This manual send still uses your saved recipients, subject, and mail body.</p>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+                <label>Send Mode
+                    <select id="scheduledReportSendMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                        <option value="single_day">Specific Day</option>
+                        <option value="date_range">Date Range</option>
+                    </select>
+                </label>
+                <div id="scheduledReportSingleDateWrap">
+                    <label>Report Date
+                        <input id="scheduledReportManualDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                    </label>
+                </div>
+            </div>
+            <div id="scheduledReportRangeWrap" style="display:none;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px;">
+                <label>Start Date
+                    <input id="scheduledReportRangeStartDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                </label>
+                <label>End Date
+                    <input id="scheduledReportRangeEndDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                </label>
+            </div>
+            <div id="scheduledReportSendModalStatus" style="display:none;margin-top:14px;padding:12px 14px;border-radius:12px;border:1px solid #dbe6f2;background:#fff;color:#334155;font-size:13px;line-height:1.6;"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelScheduledReportSendModalBtn" type="button" class="cancel-btn">Close</button>
+            <button id="confirmScheduledReportSendBtn" type="button" class="confirm-btn">
+                <i class="fas fa-paper-plane"></i> Send Report
             </button>
         </div>
     </div>

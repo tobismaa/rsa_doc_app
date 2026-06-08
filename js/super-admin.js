@@ -90,6 +90,88 @@ function setScheduledReportSendStatus(message = '', type = 'info', details = [])
     `;
 }
 
+function setScheduledReportSendModalStatus(message = '', type = 'info', details = []) {
+    const host = document.getElementById('scheduledReportSendModalStatus');
+    if (!host) return;
+    const safeType = ['success', 'error', 'warning', 'info'].includes(type) ? type : 'info';
+    const toneMap = {
+        success: { border: '#86efac', background: '#f0fdf4', color: '#166534', title: 'Report Ready' },
+        error: { border: '#fca5a5', background: '#fef2f2', color: '#991b1b', title: 'Report Error' },
+        warning: { border: '#fcd34d', background: '#fffbeb', color: '#92400e', title: 'Report Attention' },
+        info: { border: '#bfdbfe', background: '#eff6ff', color: '#1d4ed8', title: 'Report Info' }
+    };
+    if (!String(message || '').trim() && (!Array.isArray(details) || !details.length)) {
+        host.style.display = 'none';
+        host.innerHTML = '';
+        return;
+    }
+    const tone = toneMap[safeType];
+    host.style.display = 'block';
+    host.style.borderColor = tone.border;
+    host.style.background = tone.background;
+    host.style.color = tone.color;
+    host.innerHTML = `
+        <div style="font-weight:700;margin-bottom:${details.length ? '6px' : '0'};">${escapeHtml(tone.title)}</div>
+        <div>${escapeHtml(message)}</div>
+        ${details.length ? `<div style="margin-top:8px;">${details.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>` : ''}
+    `;
+}
+
+function openScheduledReportSendModal() {
+    const modal = document.getElementById('scheduledReportSendModal');
+    if (!modal) return;
+    modal.classList.add('active');
+    const previousDay = getPreviousScheduledReportDateKey();
+    const manualDate = document.getElementById('scheduledReportManualDate');
+    const rangeStart = document.getElementById('scheduledReportRangeStartDate');
+    const rangeEnd = document.getElementById('scheduledReportRangeEndDate');
+    const mode = document.getElementById('scheduledReportSendMode');
+    if (manualDate && !manualDate.value) manualDate.value = previousDay;
+    if (rangeStart && !rangeStart.value) rangeStart.value = previousDay;
+    if (rangeEnd && !rangeEnd.value) rangeEnd.value = previousDay;
+    if (mode && !mode.value) mode.value = 'single_day';
+    updateScheduledReportSendModeVisibility();
+    setScheduledReportSendModalStatus();
+}
+
+function closeScheduledReportSendModal() {
+    document.getElementById('scheduledReportSendModal')?.classList.remove('active');
+    setScheduledReportSendModalStatus();
+}
+
+function updateScheduledReportSendModeVisibility() {
+    const mode = String(document.getElementById('scheduledReportSendMode')?.value || 'single_day').trim();
+    const singleWrap = document.getElementById('scheduledReportSingleDateWrap');
+    const rangeWrap = document.getElementById('scheduledReportRangeWrap');
+    if (singleWrap) singleWrap.style.display = mode === 'date_range' ? 'none' : '';
+    if (rangeWrap) rangeWrap.style.display = mode === 'date_range' ? 'grid' : 'none';
+}
+
+function buildManualScheduledReportPayload() {
+    const mode = String(document.getElementById('scheduledReportSendMode')?.value || 'single_day').trim();
+    if (mode === 'date_range') {
+        const rangeStartDateKey = String(document.getElementById('scheduledReportRangeStartDate')?.value || '').trim();
+        const rangeEndDateKey = String(document.getElementById('scheduledReportRangeEndDate')?.value || '').trim();
+        if (!rangeStartDateKey || !rangeEndDateKey) {
+            throw new Error('Choose both start date and end date for the report range.');
+        }
+        return {
+            mode: 'date_range',
+            payload: { rangeStartDateKey, rangeEndDateKey },
+            label: `${rangeStartDateKey} to ${rangeEndDateKey}`
+        };
+    }
+    const reportDateKey = String(document.getElementById('scheduledReportManualDate')?.value || '').trim();
+    if (!reportDateKey) {
+        throw new Error('Choose the report date you want to send.');
+    }
+    return {
+        mode: 'single_day',
+        payload: { reportDateKey },
+        label: reportDateKey
+    };
+}
+
 async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 20000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -3677,6 +3759,26 @@ document.getElementById('addAllScheduledReportRecipientsBtn')?.addEventListener(
 document.getElementById('settingScheduledReportRecipients')?.addEventListener('input', () => {
     refreshScheduledReportRecipientPicker();
 });
+document.getElementById('sendCustomScheduledReportBtn')?.addEventListener('click', () => {
+    openScheduledReportSendModal();
+});
+document.getElementById('scheduledReportSendMode')?.addEventListener('change', () => {
+    updateScheduledReportSendModeVisibility();
+});
+document.getElementById('closeScheduledReportSendModalBtn')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeScheduledReportSendModal();
+});
+document.getElementById('cancelScheduledReportSendModalBtn')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeScheduledReportSendModal();
+});
+document.getElementById('scheduledReportSendModal')?.addEventListener('click', (event) => {
+    if (event.target?.id === 'scheduledReportSendModal') {
+        event.stopPropagation();
+        closeScheduledReportSendModal();
+    }
+});
 document.getElementById('checkScheduledReportStatusBtn')?.addEventListener('click', async () => {
     const button = document.getElementById('checkScheduledReportStatusBtn');
     const originalHtml = button?.innerHTML || '';
@@ -3699,6 +3801,79 @@ document.getElementById('checkScheduledReportStatusBtn')?.addEventListener('clic
     } catch (error) {
         const message = String(error?.name === 'AbortError' ? 'Timed out while checking sender status.' : (error?.message || 'Failed to check sender status.'));
         setScheduledReportSendStatus(message, 'error');
+        showNotification(message, 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+});
+document.getElementById('confirmScheduledReportSendBtn')?.addEventListener('click', async () => {
+    const button = document.getElementById('confirmScheduledReportSendBtn');
+    const originalHtml = button?.innerHTML || '';
+    try {
+        const selection = buildManualScheduledReportPayload();
+        setScheduledReportSendModalStatus('Running checks before sending the selected report...', 'info');
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+        }
+        const status = await getScheduledReportBackendStatus();
+        if (status.enabled !== true) {
+            setScheduledReportSendModalStatus('Daily report email is disabled in settings.', 'warning', describeScheduledReportStatus(status));
+            return;
+        }
+        if (!Array.isArray(status.recipients) || !status.recipients.length) {
+            setScheduledReportSendModalStatus('No recipients are configured for scheduled report emails.', 'warning', describeScheduledReportStatus(status));
+            return;
+        }
+
+        const apiBaseUrl = getEmailApiBaseUrl();
+        const idToken = await currentUser.getIdToken(true);
+        setScheduledReportSendModalStatus(`Sending report for ${selection.label}...`, 'info', describeScheduledReportStatus(status));
+
+        let requestResult = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-now`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`
+            },
+            body: JSON.stringify(selection.payload)
+        }, 45000);
+
+        if (requestResult.response.status === 409 || String(requestResult.data?.error || '').trim() === 'already-sent') {
+            const confirmed = window.confirm(`A report for ${selection.label} has already been sent. Do you still want to resend it?`);
+            if (!confirmed) {
+                setScheduledReportSendModalStatus(`Manual resend cancelled for ${selection.label}.`, 'info', describeScheduledReportStatus(status));
+                return;
+            }
+            requestResult = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-now`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({ ...selection.payload, forceResend: true })
+            }, 45000);
+        }
+
+        const result = requestResult.data || {};
+        if (!requestResult.response.ok || result?.ok === false) {
+            throw new Error(String(result?.error || 'Failed to send selected report.'));
+        }
+
+        const details = [
+            `Report sent: ${String(result?.reportLabel || selection.label).trim() || selection.label}`,
+            `Sent count: ${Number(result?.sentCount || 0)}`,
+            `Failed count: ${Number(result?.failedCount || 0)}`
+        ];
+        setScheduledReportSendModalStatus('Selected report sent successfully.', 'success', details);
+        setScheduledReportSendStatus('Custom report email sent successfully.', 'success', details);
+        showNotification('Custom report email sent successfully.', 'success');
+    } catch (error) {
+        const message = String(error?.name === 'AbortError' ? 'Timed out while sending the selected report.' : (error?.message || 'Failed to send selected report.'));
+        setScheduledReportSendModalStatus(message, 'error');
         showNotification(message, 'error');
     } finally {
         if (button) {
@@ -3847,6 +4022,10 @@ document.addEventListener('click', (event) => {
     }
 });
 document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && document.getElementById('scheduledReportSendModal')?.classList.contains('active')) {
+        closeScheduledReportSendModal();
+        return;
+    }
     if (event.key === 'Escape' && document.getElementById('scheduledReportPreviewModal')?.classList.contains('active')) {
         closeScheduledReportPreviewModal();
         return;

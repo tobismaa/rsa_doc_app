@@ -221,7 +221,7 @@ function isEmailJsConfigured() {
     return Boolean(EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_REPORT_TEMPLATE_ID);
 }
 
-async function sendEmailViaEmailJs({ to, subject, text, reportDateKey, attachmentDataUri, attachmentFileName }) {
+async function sendEmailViaEmailJs({ to, subject, text, reportDateKey, reportIntro, attachmentDataUri, attachmentFileName }) {
     if (!isEmailJsConfigured()) {
         throw new Error('EmailJS is not configured on this service');
     }
@@ -233,7 +233,7 @@ async function sendEmailViaEmailJs({ to, subject, text, reportDateKey, attachmen
         reply_to: 'no-reply@cmbankrsa.com',
         report_date: reportDateKey,
         report_title: 'Daily Report',
-        report_intro: 'Your previous-day operational report is ready and attached for review.',
+        report_intro: String(reportIntro || 'Your operational report is ready and attached for review.').trim(),
         attachment_note: 'The Excel report workbook is attached to this email for download and review.',
         portal_name: 'CMBank RSA Portal',
         [EMAILJS_ATTACHMENT_PARAM]: attachmentDataUri,
@@ -263,8 +263,39 @@ async function sendEmailViaEmailJs({ to, subject, text, reportDateKey, attachmen
     }
 }
 
-async function reserveScheduledReportRun(reportDateKey, trigger, forceResend = false) {
-    const runRef = adminDb.collection('scheduledReportRuns').doc(reportDateKey);
+function normalizeDateKey(value) {
+    const text = String(value || '').trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+}
+
+function resolveManualReportScope({ reportDateKey, rangeStartDateKey, rangeEndDateKey } = {}) {
+    const singleDate = normalizeDateKey(reportDateKey);
+    const rangeStart = normalizeDateKey(rangeStartDateKey);
+    const rangeEnd = normalizeDateKey(rangeEndDateKey);
+    if (rangeStart && rangeEnd) {
+        const start = rangeStart <= rangeEnd ? rangeStart : rangeEnd;
+        const end = rangeStart <= rangeEnd ? rangeEnd : rangeStart;
+        return {
+            mode: 'date_range',
+            reportDateKey: '',
+            rangeStartDateKey: start,
+            rangeEndDateKey: end,
+            label: `${start} to ${end}`,
+            runKey: `range_${start}_to_${end}`
+        };
+    }
+    return {
+        mode: 'single_day',
+        reportDateKey: singleDate || getPreviousDateKeyInLagos(),
+        rangeStartDateKey: '',
+        rangeEndDateKey: '',
+        label: singleDate || getPreviousDateKeyInLagos(),
+        runKey: singleDate || getPreviousDateKeyInLagos()
+    };
+}
+
+async function reserveScheduledReportRun(runKey, trigger, forceResend = false) {
+    const runRef = adminDb.collection('scheduledReportRuns').doc(runKey);
     let shouldSend = false;
     await adminDb.runTransaction(async (tx) => {
         const snap = await tx.get(runRef);
@@ -274,7 +305,7 @@ async function reserveScheduledReportRun(reportDateKey, trigger, forceResend = f
         }
         shouldSend = true;
         tx.set(runRef, {
-            reportDateKey,
+            runKey,
             status: 'sending',
             trigger,
             resendRequested: forceResend === true,
@@ -288,7 +319,8 @@ async function reserveScheduledReportRun(reportDateKey, trigger, forceResend = f
 }
 
 async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', forceResend = false }) {
-    const normalizedDateKey = String(reportDateKey || '').trim() || getPreviousDateKeyInLagos();
+    const scope = resolveManualReportScope({ reportDateKey });
+    const normalizedDateKey = scope.reportDateKey || getPreviousDateKeyInLagos();
     const settingsSnap = await adminDb.collection('settings').doc('system').get();
     const settings = settingsSnap.exists ? (settingsSnap.data() || {}) : {};
     const scheduled = settings.scheduledReportEmail || {};
@@ -309,9 +341,9 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', f
         return { ok: false, skipped: true, reason: 'no-recipients' };
     }
 
-    const { shouldSend, runRef } = await reserveScheduledReportRun(normalizedDateKey, trigger, forceResend);
+    const { shouldSend, runRef } = await reserveScheduledReportRun(scope.runKey, trigger, forceResend);
     if (!shouldSend) {
-        return { ok: true, skipped: true, reason: 'already-sent', reportDateKey: normalizedDateKey };
+        return { ok: true, skipped: true, reason: 'already-sent', reportDateKey: normalizedDateKey, reportLabel: scope.label };
     }
 
     try {
@@ -339,6 +371,7 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', f
                     subject: `${subject} - ${normalizedDateKey}`,
                     text,
                     reportDateKey: normalizedDateKey,
+                    reportIntro: 'Your previous-day operational report is ready and attached for review.',
                     attachmentDataUri,
                     attachmentFileName
                 });
@@ -350,7 +383,9 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', f
 
         await runRef.set({
             status: failures.length ? 'partial' : 'sent',
+            runKey: scope.runKey,
             reportDateKey: normalizedDateKey,
+            reportLabel: scope.label,
             trigger,
             resendRequested: forceResend === true,
             sendTime,
@@ -365,6 +400,7 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', f
         return {
             ok: failures.length === 0,
             reportDateKey: normalizedDateKey,
+            reportLabel: scope.label,
             sentCount,
             failedCount: failures.length,
             failures
@@ -372,7 +408,116 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', f
     } catch (err) {
         await runRef.set({
             status: 'failed',
+            runKey: scope.runKey,
             reportDateKey: normalizedDateKey,
+            trigger,
+            error: String(err?.message || 'scheduled-report-failed'),
+            failedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        throw err;
+    }
+}
+
+async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDateKey, trigger = 'manual_custom', forceResend = false }) {
+    const scope = resolveManualReportScope({ reportDateKey, rangeStartDateKey, rangeEndDateKey });
+    const settingsSnap = await adminDb.collection('settings').doc('system').get();
+    const settings = settingsSnap.exists ? (settingsSnap.data() || {}) : {};
+    const scheduled = settings.scheduledReportEmail || {};
+    const enabled = scheduled.enabled === true;
+    const subject = String(scheduled.subject || 'Daily RSA Report').trim() || 'Daily RSA Report';
+    const bodyText = String(scheduled.body || 'Hello,\n\nPlease find the attached daily RSA report.\n\nRegards,\nCMBank RSA Portal').trim();
+    const recipients = normalizeEmailList(scheduled.recipients || []);
+
+    if (!enabled) {
+        return { ok: false, skipped: true, reason: 'scheduled-report-disabled' };
+    }
+    if (!recipients.length) {
+        return { ok: false, skipped: true, reason: 'no-recipients' };
+    }
+
+    const { shouldSend, runRef } = await reserveScheduledReportRun(scope.runKey, trigger, forceResend);
+    if (!shouldSend) {
+        return { ok: true, skipped: true, reason: 'already-sent', reportDateKey: scope.reportDateKey, reportLabel: scope.label };
+    }
+
+    try {
+        const [usersSnap, submissionsSnap] = await Promise.all([
+            adminDb.collection('users').get(),
+            adminDb.collection('submissions').get()
+        ]);
+        const users = usersSnap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
+        const submissions = submissionsSnap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
+        const workbookBuffer = Buffer.from(await createDailyReportWorkbookBuffer({
+            submissions,
+            users,
+            reportDateKey: scope.reportDateKey,
+            rangeStartDateKey: scope.rangeStartDateKey,
+            rangeEndDateKey: scope.rangeEndDateKey
+        }));
+        const attachmentSuffix = scope.mode === 'date_range'
+            ? `${scope.rangeStartDateKey}_to_${scope.rangeEndDateKey}`
+            : scope.reportDateKey;
+        const attachmentFileName = `cmbank_daily_report_${attachmentSuffix}.xlsx`;
+        const attachmentDataUri = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${workbookBuffer.toString('base64')}`;
+        const text = bodyText;
+
+        let sentCount = 0;
+        const failures = [];
+        for (const recipient of recipients) {
+            try {
+                await sendEmailViaEmailJs({
+                    to: recipient,
+                    subject: `${subject} - ${scope.label}`,
+                    text,
+                    reportDateKey: scope.label,
+                    reportIntro: scope.mode === 'date_range'
+                        ? 'Your selected report range is ready and attached for review.'
+                        : 'Your selected report day is ready and attached for review.',
+                    attachmentDataUri,
+                    attachmentFileName
+                });
+                sentCount += 1;
+            } catch (err) {
+                failures.push({ recipient, error: String(err?.message || 'send-failed') });
+            }
+        }
+
+        await runRef.set({
+            status: failures.length ? 'partial' : 'sent',
+            runKey: scope.runKey,
+            reportDateKey: scope.reportDateKey,
+            rangeStartDateKey: scope.rangeStartDateKey,
+            rangeEndDateKey: scope.rangeEndDateKey,
+            reportLabel: scope.label,
+            trigger,
+            resendRequested: forceResend === true,
+            recipients,
+            sentCount,
+            failedCount: failures.length,
+            failures,
+            completedAt: admin.firestore.FieldValue.serverTimestamp(),
+            subject
+        }, { merge: true });
+
+        return {
+            ok: failures.length === 0,
+            mode: scope.mode,
+            reportDateKey: scope.reportDateKey,
+            rangeStartDateKey: scope.rangeStartDateKey,
+            rangeEndDateKey: scope.rangeEndDateKey,
+            reportLabel: scope.label,
+            sentCount,
+            failedCount: failures.length,
+            failures
+        };
+    } catch (err) {
+        await runRef.set({
+            status: 'failed',
+            runKey: scope.runKey,
+            reportDateKey: scope.reportDateKey,
+            rangeStartDateKey: scope.rangeStartDateKey,
+            rangeEndDateKey: scope.rangeEndDateKey,
+            reportLabel: scope.label,
             trigger,
             error: String(err?.message || 'scheduled-report-failed'),
             failedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -534,13 +679,23 @@ app.get('/api/scheduled-report/status', authMiddleware, requireAdminOrSuperAdmin
 
 app.post('/api/scheduled-report/send-now', authMiddleware, requireAdminOrSuperAdminRole, async (req, res) => {
     try {
-        const reportDateKey = String(req.body?.reportDateKey || '').trim() || getPreviousDateKeyInLagos();
         const forceResend = req.body?.forceResend === true;
-        const result = await sendScheduledReportForDate({
-            reportDateKey,
-            trigger: `manual:${normalizeEmail(req.user?.email) || 'admin'}`,
-            forceResend
-        });
+        const reportDateKey = normalizeDateKey(req.body?.reportDateKey);
+        const rangeStartDateKey = normalizeDateKey(req.body?.rangeStartDateKey);
+        const rangeEndDateKey = normalizeDateKey(req.body?.rangeEndDateKey);
+        const result = (reportDateKey || (rangeStartDateKey && rangeEndDateKey))
+            ? await sendManualReport({
+                reportDateKey,
+                rangeStartDateKey,
+                rangeEndDateKey,
+                trigger: `manual:${normalizeEmail(req.user?.email) || 'admin'}`,
+                forceResend
+            })
+            : await sendScheduledReportForDate({
+                reportDateKey: getPreviousDateKeyInLagos(),
+                trigger: `manual:${normalizeEmail(req.user?.email) || 'admin'}`,
+                forceResend
+            });
         if (result?.skipped) {
             const reason = String(result?.reason || 'scheduled-report-skipped');
             const statusCode = reason === 'already-sent' ? 409 : 400;
