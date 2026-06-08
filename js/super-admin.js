@@ -752,6 +752,22 @@ function getPreviewStatus(sub = {}) {
     return String(sub.status || '').replace(/_/g, ' ');
 }
 
+function compareGroupedRows(a = {}, b = {}) {
+    const ownerA = String(a.owner || '').toLowerCase();
+    const ownerB = String(b.owner || '').toLowerCase();
+    if (ownerA !== ownerB) return ownerA.localeCompare(ownerB);
+
+    const assignedA = String(a.assignedAt || a.uploadedAt || '').toLowerCase();
+    const assignedB = String(b.assignedAt || b.uploadedAt || '').toLowerCase();
+    if (assignedA !== assignedB) return assignedA.localeCompare(assignedB);
+
+    const stageA = String(a.stageTime || a.paidAt || a.clearedAt || '').toLowerCase();
+    const stageB = String(b.stageTime || b.paidAt || b.clearedAt || '').toLowerCase();
+    if (stageA !== stageB) return stageA.localeCompare(stageB);
+
+    return String(a.customerName || '').toLowerCase().localeCompare(String(b.customerName || '').toLowerCase());
+}
+
 function buildUploaderSheetRows(records = []) {
     return records.map((sub) => ({
         owner: getUserDisplayNameByEmail(sub.uploadedBy),
@@ -978,10 +994,10 @@ function buildDailyReportDefinition(reportDate) {
     const rsaRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToRSA) && isSameReportDate(sub.reviewedAt, dateKey));
     const paymentRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToPayment) && isSameReportDate(sub.paymentAssignedAt || sub.finalSubmittedAt || sub.rsaSubmittedAt, dateKey));
 
-    const uploaderRows = buildUploaderSheetRows(uploaderRecords);
-    const reviewerRows = buildReviewerSheetRows(reviewerRecords);
-    const rsaRows = buildRsaSheetRows(rsaRecords);
-    const paymentRows = buildPaymentSheetRows(paymentRecords);
+    const uploaderRows = buildUploaderSheetRows(uploaderRecords).sort(compareGroupedRows);
+    const reviewerRows = buildReviewerSheetRows(reviewerRecords).sort(compareGroupedRows);
+    const rsaRows = buildRsaSheetRows(rsaRecords).sort(compareGroupedRows);
+    const paymentRows = buildPaymentSheetRows(paymentRecords).sort(compareGroupedRows);
 
     return {
         dateKey,
