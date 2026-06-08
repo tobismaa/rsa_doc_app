@@ -282,7 +282,8 @@ export function getDefaultSystemSettings() {
       subject: 'Daily RSA Report',
       body: 'Hello,\n\nPlease find the attached daily RSA report.\n\nRegards,\nCMBank RSA Portal',
       recipients: [],
-      sendTime: '08:00'
+      sendTime: '08:00',
+      reportDateMode: 'previous_day'
     },
     agentBankOptions,
     pfaOptions,
@@ -364,6 +365,9 @@ function normalizeSystemSettings(data = {}) {
       subject: parseText(data?.scheduledReportEmail?.subject, defaults.scheduledReportEmail.subject),
       body: parseText(data?.scheduledReportEmail?.body, defaults.scheduledReportEmail.body),
       recipients: parseStringArray(data?.scheduledReportEmail?.recipients, defaults.scheduledReportEmail.recipients),
+      reportDateMode: String(data?.scheduledReportEmail?.reportDateMode || defaults.scheduledReportEmail.reportDateMode).trim() === 'previous_day'
+        ? 'previous_day'
+        : defaults.scheduledReportEmail.reportDateMode,
       sendTime: /^\d{2}:\d{2}$/.test(String(data?.scheduledReportEmail?.sendTime || '').trim())
         ? String(data?.scheduledReportEmail?.sendTime || '').trim()
         : defaults.scheduledReportEmail.sendTime

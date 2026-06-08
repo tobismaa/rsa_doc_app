@@ -1,4 +1,5 @@
 import { auth, db } from './firebase-config.js';
+import { EMAIL_API_BASE_URL } from './email-api-config.js';
 import { formatAppDateTime } from './shared/app-time.js';
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
@@ -54,6 +55,13 @@ let currentAccessUserSearch = '';
 let activeSettingsDropdownTab = '';
 let settingsModalSourceDropdownTab = '';
 let currentScheduledReportPreview = null;
+
+function getEmailApiBaseUrl() {
+    const runtime = String(window.__EMAIL_API_BASE_URL__ || '').trim();
+    const configured = runtime || String(EMAIL_API_BASE_URL || '').trim();
+    if (!configured || configured.includes('YOUR-RENDER-URL')) return '';
+    return configured.replace(/\/+$/, '');
+}
 
 const ROLE_PERMISSION_FIELDS = [
     { key: 'uploaderCanUpload', label: 'Uploader Can Upload' },
@@ -281,6 +289,102 @@ function normalizeEmailList(values = []) {
     return emails;
 }
 
+function getScheduledReportRecipients() {
+    return normalizeEmailList(parseLinesTextarea('settingScheduledReportRecipients'));
+}
+
+function syncScheduledReportRecipientsTextarea(emails = []) {
+    const field = document.getElementById('settingScheduledReportRecipients');
+    if (!field) return;
+    field.value = normalizeEmailList(emails).join('\n');
+}
+
+function getScheduledReportSelectableUsers(searchTerm = '') {
+    const term = String(searchTerm || '').trim().toLowerCase();
+    return allUsers
+        .filter((user) => normalizeEmail(user?.email))
+        .filter((user) => {
+            if (!term) return true;
+            const haystack = [
+                user?.fullName,
+                user?.email,
+                user?.role,
+                user?.department,
+                user?.location
+            ].map((value) => String(value || '').toLowerCase()).join(' ');
+            return haystack.includes(term);
+        })
+        .sort((a, b) => {
+            const emailCompare = normalizeEmail(a?.email).localeCompare(normalizeEmail(b?.email));
+            if (emailCompare !== 0) return emailCompare;
+            return String(a?.fullName || '').localeCompare(String(b?.fullName || ''));
+        });
+}
+
+function renderScheduledReportAvailableUsers(searchTerm = '') {
+    const select = document.getElementById('scheduledReportAvailableUsers');
+    if (!select) return;
+    const selectedRecipients = new Set(getScheduledReportRecipients());
+    const users = getScheduledReportSelectableUsers(searchTerm);
+    if (!users.length) {
+        select.innerHTML = '<option value="">No matching users found</option>';
+        return;
+    }
+    select.innerHTML = users.map((user) => {
+        const email = normalizeEmail(user?.email);
+        const fullName = String(user?.fullName || email.split('@')[0] || 'User').trim();
+        const role = String(user?.role || 'user').trim() || 'user';
+        const selectedTag = selectedRecipients.has(email) ? ' [Added]' : '';
+        return `<option value="${escapeHtml(email)}">${escapeHtml(fullName)} - ${escapeHtml(email)} - ${escapeHtml(role)}${escapeHtml(selectedTag)}</option>`;
+    }).join('');
+}
+
+function renderScheduledReportSelectedRecipients() {
+    const host = document.getElementById('scheduledReportSelectedRecipients');
+    if (!host) return;
+    const recipients = getScheduledReportRecipients();
+    if (!recipients.length) {
+        host.innerHTML = '<div style="color:#94a3b8;font-size:13px;">No recipients selected yet.</div>';
+        return;
+    }
+    host.innerHTML = recipients.map((email) => {
+        const user = allUsers.find((entry) => normalizeEmail(entry?.email) === email);
+        const label = String(user?.fullName || email).trim();
+        return `
+            <span style="display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border-radius:999px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-size:13px;">
+                <span><strong>${escapeHtml(label)}</strong><br><span style="font-size:11px;color:#64748b;">${escapeHtml(email)}</span></span>
+                <button type="button" data-scheduled-report-remove="${escapeHtml(email)}" style="border:none;background:transparent;color:#b91c1c;font-weight:700;cursor:pointer;">x</button>
+            </span>
+        `;
+    }).join('');
+    host.querySelectorAll('[data-scheduled-report-remove]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const email = normalizeEmail(btn.getAttribute('data-scheduled-report-remove'));
+            if (!email) return;
+            removeScheduledReportRecipients([email]);
+        });
+    });
+}
+
+function refreshScheduledReportRecipientPicker() {
+    const searchInput = document.getElementById('scheduledReportRecipientSearch');
+    renderScheduledReportAvailableUsers(searchInput?.value || '');
+    renderScheduledReportSelectedRecipients();
+}
+
+function addScheduledReportRecipients(emails = []) {
+    const recipients = normalizeEmailList([...getScheduledReportRecipients(), ...emails]);
+    syncScheduledReportRecipientsTextarea(recipients);
+    refreshScheduledReportRecipientPicker();
+}
+
+function removeScheduledReportRecipients(emails = []) {
+    const blocked = new Set(normalizeEmailList(emails));
+    const recipients = getScheduledReportRecipients().filter((email) => !blocked.has(email));
+    syncScheduledReportRecipientsTextarea(recipients);
+    refreshScheduledReportRecipientPicker();
+}
+
 function slugifyDocumentRequirementId(value) {
     return String(value || '')
         .trim()
@@ -399,6 +503,16 @@ const reportDateKeyFormatter = new Intl.DateTimeFormat('en-CA', {
     day: '2-digit'
 });
 
+function getLagosDateKey(date = new Date()) {
+    return reportDateKeyFormatter.format(date);
+}
+
+function getPreviousScheduledReportDateKey(baseDate = new Date()) {
+    const prior = new Date(baseDate);
+    prior.setDate(prior.getDate() - 1);
+    return getLagosDateKey(prior);
+}
+
 function getTimestampMillis(value) {
     if (!value) return 0;
     try {
@@ -413,7 +527,7 @@ function getTimestampMillis(value) {
 function getDateKey(value) {
     const ms = getTimestampMillis(value);
     if (!ms) return '';
-    return reportDateKeyFormatter.format(new Date(ms));
+    return getLagosDateKey(new Date(ms));
 }
 
 function isSameReportDate(value, dateKey) {
@@ -1417,7 +1531,8 @@ async function loadSettings() {
     if (scheduledReportSubject) scheduledReportSubject.value = String(systemSettings.scheduledReportEmail?.subject || defaultSystemSettings.scheduledReportEmail.subject || '');
     if (scheduledReportRecipients) scheduledReportRecipients.value = Array.isArray(systemSettings.scheduledReportEmail?.recipients) ? systemSettings.scheduledReportEmail.recipients.join('\n') : '';
     if (scheduledReportBody) scheduledReportBody.value = String(systemSettings.scheduledReportEmail?.body || defaultSystemSettings.scheduledReportEmail.body || '');
-    if (scheduledReportDownloadDate && !scheduledReportDownloadDate.value) scheduledReportDownloadDate.value = reportDateKeyFormatter.format(new Date());
+    if (scheduledReportDownloadDate && !scheduledReportDownloadDate.value) scheduledReportDownloadDate.value = getPreviousScheduledReportDateKey();
+    refreshScheduledReportRecipientPicker();
     if (announcementEnabled) announcementEnabled.value = String(systemSettings.dashboardAnnouncement.enabled ? 'true' : 'false');
     if (announcementTone) announcementTone.value = String(systemSettings.dashboardAnnouncement.tone || 'info');
     if (announcementMessage) announcementMessage.value = String(systemSettings.dashboardAnnouncement.message || '');
@@ -3053,7 +3168,8 @@ window.saveSuperSettings = async (triggerButton = null) => {
                 sendTime: scheduledReportSendTime,
                 subject: scheduledReportSubject,
                 recipients: scheduledReportRecipients,
-                body: scheduledReportBody
+                body: scheduledReportBody,
+                reportDateMode: 'previous_day'
             },
             pfaOptions,
             documentRequirements,
@@ -3350,6 +3466,7 @@ window.signOutUser = async () => {
 function setupRealtimeData() {
     onSnapshot(query(collection(db, 'users')), (snap) => {
         allUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        refreshScheduledReportRecipientPicker();
         updateNavigationCounts();
         renderCurrentTab();
         if (currentTab !== 'global') renderGlobalView();
@@ -3405,8 +3522,13 @@ document.getElementById('exportAuditCsvBtn')?.addEventListener('click', () => {
 document.getElementById('previewScheduledReportBtn')?.addEventListener('click', async () => {
     const button = document.getElementById('previewScheduledReportBtn');
     const originalHtml = button?.innerHTML || '';
-    const reportDate = String(document.getElementById('scheduledReportDownloadDate')?.value || '').trim();
+    const reportDateInput = document.getElementById('scheduledReportDownloadDate');
+    let reportDate = String(reportDateInput?.value || '').trim();
     try {
+        if (!reportDate) {
+            reportDate = getPreviousScheduledReportDateKey();
+            if (reportDateInput) reportDateInput.value = reportDate;
+        }
         if (button) {
             button.disabled = true;
             button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing...';
@@ -3447,6 +3569,82 @@ document.getElementById('scheduledReportPreviewModal')?.addEventListener('click'
     if (event.target?.id === 'scheduledReportPreviewModal') {
         event.stopPropagation();
         closeScheduledReportPreviewModal();
+    }
+});
+document.getElementById('scheduledReportRecipientSearch')?.addEventListener('input', (event) => {
+    renderScheduledReportAvailableUsers(event.target?.value || '');
+});
+document.getElementById('addScheduledReportRecipientsBtn')?.addEventListener('click', () => {
+    const select = document.getElementById('scheduledReportAvailableUsers');
+    if (!select) return;
+    const selectedEmails = Array.from(select.selectedOptions || [])
+        .map((option) => normalizeEmail(option.value))
+        .filter(Boolean);
+    if (!selectedEmails.length) {
+        showNotification('Select at least one user email to add.', 'warning');
+        return;
+    }
+    addScheduledReportRecipients(selectedEmails);
+});
+document.getElementById('addAllScheduledReportRecipientsBtn')?.addEventListener('click', () => {
+    const searchInput = document.getElementById('scheduledReportRecipientSearch');
+    const emails = getScheduledReportSelectableUsers(searchInput?.value || '')
+        .map((user) => normalizeEmail(user?.email))
+        .filter(Boolean);
+    if (!emails.length) {
+        showNotification('No user emails available to add.', 'warning');
+        return;
+    }
+    addScheduledReportRecipients(emails);
+});
+document.getElementById('settingScheduledReportRecipients')?.addEventListener('input', () => {
+    refreshScheduledReportRecipientPicker();
+});
+document.getElementById('sendScheduledReportNowBtn')?.addEventListener('click', async () => {
+    const apiBaseUrl = getEmailApiBaseUrl();
+    if (!apiBaseUrl) {
+        showNotification('Scheduled report sender backend URL is not configured.', 'warning');
+        return;
+    }
+    if (!currentUser) {
+        showNotification('You must be signed in to trigger the scheduled report.', 'warning');
+        return;
+    }
+    const button = document.getElementById('sendScheduledReportNowBtn');
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+        }
+        const idToken = await currentUser.getIdToken();
+        const response = await fetch(`${apiBaseUrl}/api/scheduled-report/send-now`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`
+            },
+            body: JSON.stringify({})
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result?.ok === false) {
+            throw new Error(String(result?.error || 'Failed to send scheduled report'));
+        }
+        const sentCount = Number(result?.sentCount || 0);
+        const failedCount = Number(result?.failedCount || 0);
+        showNotification(
+            failedCount > 0
+                ? `Scheduled report sent with ${sentCount} success and ${failedCount} failure(s).`
+                : `Scheduled report sent successfully to ${sentCount} recipient(s).`,
+            failedCount > 0 ? 'warning' : 'success'
+        );
+    } catch (error) {
+        showNotification(String(error?.message || 'Failed to send scheduled report'), 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
     }
 });
 document.getElementById('saveSettingsBtn')?.addEventListener('click', () => {

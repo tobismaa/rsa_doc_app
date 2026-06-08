@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
 const sgMail = require('@sendgrid/mail');
+const { createDailyReportWorkbookBuffer, getPreviousDateKeyInLagos, getLagosDateKey } = require('./scheduled-report');
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -20,6 +21,13 @@ const allowedTypes = new Set([
     'submission_approved_uploader',
     'submission_final_uploader'
 ]);
+const EMAILJS_PUBLIC_KEY = String(process.env.EMAILJS_PUBLIC_KEY || '').trim();
+const EMAILJS_SERVICE_ID = String(process.env.EMAILJS_SERVICE_ID || '').trim();
+const EMAILJS_TEMPLATE_ID = String(process.env.EMAILJS_TEMPLATE_ID || '').trim();
+const EMAILJS_PRIVATE_KEY = String(process.env.EMAILJS_PRIVATE_KEY || '').trim();
+const EMAILJS_ATTACHMENT_PARAM = String(process.env.EMAILJS_ATTACHMENT_PARAM || 'report_attachment').trim() || 'report_attachment';
+const EMAILJS_ATTACHMENT_FILENAME_PARAM = String(process.env.EMAILJS_ATTACHMENT_FILENAME_PARAM || 'report_attachment_filename').trim() || 'report_attachment_filename';
+const ENABLE_SCHEDULED_REPORT_SENDER = String(process.env.ENABLE_SCHEDULED_REPORT_SENDER || 'true').toLowerCase() !== 'false';
 
 function initFirebaseAdmin() {
     if (admin.apps.length > 0) return;
@@ -56,6 +64,18 @@ function escapeHtml(value) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+function normalizeEmailList(values = []) {
+    const seen = new Set();
+    const out = [];
+    values.forEach((value) => {
+        const email = normalizeEmail(value);
+        if (!email || seen.has(email)) return;
+        seen.add(email);
+        out.push(email);
+    });
+    return out;
 }
 
 function resolveAllowedOrigin(req) {
@@ -100,6 +120,17 @@ const lagosDateKeyFormatter = new Intl.DateTimeFormat('en-CA', {
     month: '2-digit',
     day: '2-digit'
 });
+
+const lagosTimeFormatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Lagos',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+});
+
+function getLagosTimeKey(date = new Date()) {
+    return lagosTimeFormatter.format(date);
+}
 
 async function resolveUserMapByEmail(emails) {
     const out = new Map();
@@ -185,6 +216,189 @@ app.get('/api/server-time', (_req, res) => {
     });
 });
 
+function isEmailJsConfigured() {
+    return Boolean(EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID);
+}
+
+async function sendEmailViaEmailJs({ to, subject, text, html, attachmentDataUri, attachmentFileName }) {
+    if (!isEmailJsConfigured()) {
+        throw new Error('EmailJS is not configured on this service');
+    }
+
+    const templateParams = {
+        to_email: to,
+        email_subject: subject,
+        email_message: text,
+        email_html: html,
+        report_date: subject,
+        [EMAILJS_ATTACHMENT_PARAM]: attachmentDataUri,
+        [EMAILJS_ATTACHMENT_FILENAME_PARAM]: attachmentFileName
+    };
+
+    const payload = {
+        service_id: EMAILJS_SERVICE_ID,
+        template_id: EMAILJS_TEMPLATE_ID,
+        user_id: EMAILJS_PUBLIC_KEY,
+        template_params: templateParams
+    };
+
+    if (EMAILJS_PRIVATE_KEY) {
+        payload.accessToken = EMAILJS_PRIVATE_KEY;
+    }
+
+    const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        throw new Error(body || `EmailJS returned ${response.status}`);
+    }
+}
+
+function buildScheduledReportEmailHtml({ bodyText, reportDateKey, sendTime }) {
+    const paragraphs = String(bodyText || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => `<p style="margin:0 0 12px;color:#1f2937;font-size:15px;line-height:1.6;">${escapeHtml(line)}</p>`)
+        .join('');
+
+    return `
+<div style="margin:0;padding:20px;background:#f4f7fb;font-family:Segoe UI,Arial,sans-serif;">
+  <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #dbe4f0;border-radius:14px;overflow:hidden;">
+    <div style="background:linear-gradient(135deg,#003366 0%,#0b5cab 100%);padding:18px 22px;">
+      <div style="color:#e2ecff;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;">CMBank RSA</div>
+      <h2 style="margin:6px 0 0;color:#ffffff;font-size:21px;line-height:1.3;">Daily Report - ${escapeHtml(reportDateKey)}</h2>
+    </div>
+    <div style="padding:22px;">
+      ${paragraphs}
+      <p style="margin:16px 0 0;color:#475569;font-size:13px;line-height:1.6;">
+        Scheduled send time: <strong>${escapeHtml(sendTime)}</strong> Africa/Lagos<br>
+        Report date covered: <strong>${escapeHtml(reportDateKey)}</strong>
+      </p>
+    </div>
+  </div>
+</div>`;
+}
+
+async function reserveScheduledReportRun(reportDateKey, trigger) {
+    const runRef = adminDb.collection('scheduledReportRuns').doc(reportDateKey);
+    let shouldSend = false;
+    await adminDb.runTransaction(async (tx) => {
+        const snap = await tx.get(runRef);
+        const data = snap.exists ? (snap.data() || {}) : {};
+        if (String(data.status || '').toLowerCase() === 'sent') {
+            return;
+        }
+        shouldSend = true;
+        tx.set(runRef, {
+            reportDateKey,
+            status: 'sending',
+            trigger,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            startedAt: data.startedAt || admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+    });
+    return { shouldSend, runRef };
+}
+
+async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual' }) {
+    const normalizedDateKey = String(reportDateKey || '').trim() || getPreviousDateKeyInLagos();
+    const settingsSnap = await adminDb.collection('settings').doc('system').get();
+    const settings = settingsSnap.exists ? (settingsSnap.data() || {}) : {};
+    const scheduled = settings.scheduledReportEmail || {};
+    const enabled = scheduled.enabled === true;
+    const sendTime = String(scheduled.sendTime || '08:00').trim() || '08:00';
+    const subject = String(scheduled.subject || 'Daily RSA Report').trim() || 'Daily RSA Report';
+    const bodyText = String(scheduled.body || 'Hello,\n\nPlease find the attached daily RSA report.\n\nRegards,\nCMBank RSA Portal').trim();
+    const recipients = normalizeEmailList(scheduled.recipients || []);
+    const reportDateMode = String(scheduled.reportDateMode || 'previous_day').trim() || 'previous_day';
+
+    if (!enabled) {
+        return { ok: false, skipped: true, reason: 'scheduled-report-disabled' };
+    }
+    if (reportDateMode !== 'previous_day') {
+        return { ok: false, skipped: true, reason: 'unsupported-report-date-mode' };
+    }
+    if (!recipients.length) {
+        return { ok: false, skipped: true, reason: 'no-recipients' };
+    }
+
+    const { shouldSend, runRef } = await reserveScheduledReportRun(normalizedDateKey, trigger);
+    if (!shouldSend) {
+        return { ok: true, skipped: true, reason: 'already-sent', reportDateKey: normalizedDateKey };
+    }
+
+    try {
+        const [usersSnap, submissionsSnap] = await Promise.all([
+            adminDb.collection('users').get(),
+            adminDb.collection('submissions').get()
+        ]);
+        const users = usersSnap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
+        const submissions = submissionsSnap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
+        const workbookBuffer = Buffer.from(await createDailyReportWorkbookBuffer({
+            submissions,
+            users,
+            reportDateKey: normalizedDateKey
+        }));
+        const attachmentFileName = `cmbank_daily_report_${normalizedDateKey}.xlsx`;
+        const attachmentDataUri = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${workbookBuffer.toString('base64')}`;
+        const html = buildScheduledReportEmailHtml({ bodyText, reportDateKey: normalizedDateKey, sendTime });
+        const text = `${bodyText}\n\nReport date covered: ${normalizedDateKey}\nScheduled send time: ${sendTime} Africa/Lagos`;
+
+        let sentCount = 0;
+        const failures = [];
+        for (const recipient of recipients) {
+            try {
+                await sendEmailViaEmailJs({
+                    to: recipient,
+                    subject: `${subject} - ${normalizedDateKey}`,
+                    text,
+                    html,
+                    attachmentDataUri,
+                    attachmentFileName
+                });
+                sentCount += 1;
+            } catch (err) {
+                failures.push({ recipient, error: String(err?.message || 'send-failed') });
+            }
+        }
+
+        await runRef.set({
+            status: failures.length ? 'partial' : 'sent',
+            reportDateKey: normalizedDateKey,
+            trigger,
+            sendTime,
+            recipients,
+            sentCount,
+            failedCount: failures.length,
+            failures,
+            completedAt: admin.firestore.FieldValue.serverTimestamp(),
+            subject
+        }, { merge: true });
+
+        return {
+            ok: failures.length === 0,
+            reportDateKey: normalizedDateKey,
+            sentCount,
+            failedCount: failures.length,
+            failures
+        };
+    } catch (err) {
+        await runRef.set({
+            status: 'failed',
+            reportDateKey: normalizedDateKey,
+            trigger,
+            error: String(err?.message || 'scheduled-report-failed'),
+            failedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        throw err;
+    }
+}
+
 async function requireAdminRole(req, res, next) {
     if (!req.user?.uid && !req.user?.email) {
         return res.status(401).json({ ok: false, error: 'Missing authenticated user context' });
@@ -214,6 +428,44 @@ async function requireAdminRole(req, res, next) {
         }
 
         if (role !== 'admin' || (status && status !== 'active')) {
+            return res.status(403).json({ ok: false, error: 'Admin access required' });
+        }
+
+        return next();
+    } catch (err) {
+        return res.status(500).json({ ok: false, error: 'Failed to validate admin role' });
+    }
+}
+
+async function requireAdminOrSuperAdminRole(req, res, next) {
+    if (!req.user?.uid && !req.user?.email) {
+        return res.status(401).json({ ok: false, error: 'Missing authenticated user context' });
+    }
+
+    try {
+        let role = '';
+        let status = '';
+
+        if (req.user?.uid) {
+            const byUid = await adminDb.collection('users').where('uid', '==', req.user.uid).limit(1).get();
+            if (!byUid.empty) {
+                const data = byUid.docs[0].data() || {};
+                role = normalizeRole(data.role);
+                status = String(data.status || '').toLowerCase();
+            }
+        }
+
+        if (!role && req.user?.email) {
+            const normalizedEmail = normalizeEmail(req.user.email);
+            const byEmail = await adminDb.collection('users').where('email', '==', normalizedEmail).limit(1).get();
+            if (!byEmail.empty) {
+                const data = byEmail.docs[0].data() || {};
+                role = normalizeRole(data.role);
+                status = String(data.status || '').toLowerCase();
+            }
+        }
+
+        if (!['admin', 'super_admin'].includes(role) || (status && status !== 'active')) {
             return res.status(403).json({ ok: false, error: 'Admin access required' });
         }
 
@@ -267,6 +519,48 @@ app.post('/api/send-alert', authMiddleware, async (req, res) => {
         return res.status(500).json({
             ok: false,
             error: String(err?.message || 'Failed to send alert email')
+        });
+    }
+});
+
+app.get('/api/scheduled-report/status', authMiddleware, requireAdminOrSuperAdminRole, async (_req, res) => {
+    try {
+        const settingsSnap = await adminDb.collection('settings').doc('system').get();
+        const settings = settingsSnap.exists ? (settingsSnap.data() || {}) : {};
+        const scheduled = settings.scheduledReportEmail || {};
+        const reportDateKey = getPreviousDateKeyInLagos();
+        const runSnap = await adminDb.collection('scheduledReportRuns').doc(reportDateKey).get();
+        return res.json({
+            ok: true,
+            reportDateKey,
+            currentLagosDateKey: getLagosDateKey(),
+            currentLagosTime: getLagosTimeKey(),
+            enabled: scheduled.enabled === true,
+            sendTime: String(scheduled.sendTime || '08:00').trim() || '08:00',
+            reportDateMode: String(scheduled.reportDateMode || 'previous_day').trim() || 'previous_day',
+            recipients: normalizeEmailList(scheduled.recipients || []),
+            lastRun: runSnap.exists ? (runSnap.data() || {}) : null
+        });
+    } catch (err) {
+        return res.status(500).json({
+            ok: false,
+            error: String(err?.message || 'Failed to load scheduled report status')
+        });
+    }
+});
+
+app.post('/api/scheduled-report/send-now', authMiddleware, requireAdminOrSuperAdminRole, async (req, res) => {
+    try {
+        const reportDateKey = String(req.body?.reportDateKey || '').trim() || getPreviousDateKeyInLagos();
+        const result = await sendScheduledReportForDate({
+            reportDateKey,
+            trigger: `manual:${normalizeEmail(req.user?.email) || 'admin'}`
+        });
+        return res.json({ ok: true, ...result });
+    } catch (err) {
+        return res.status(500).json({
+            ok: false,
+            error: String(err?.message || 'Failed to send scheduled report')
         });
     }
 });
@@ -863,6 +1157,43 @@ app.post('/api/admin/push-event', authMiddleware, async (req, res) => {
             error: String(err?.message || 'Failed to send admin push event')
         });
     }
+});
+
+let lastScheduledMinuteKey = '';
+
+async function tickScheduledReportSender() {
+    if (!ENABLE_SCHEDULED_REPORT_SENDER) return;
+    const settingsSnap = await adminDb.collection('settings').doc('system').get();
+    const settings = settingsSnap.exists ? (settingsSnap.data() || {}) : {};
+    const scheduled = settings.scheduledReportEmail || {};
+    if (scheduled.enabled !== true) return;
+
+    const sendTime = String(scheduled.sendTime || '08:00').trim() || '08:00';
+    const now = new Date();
+    const lagosTime = getLagosTimeKey(now);
+    const lagosDateKey = getLagosDateKey(now);
+    const minuteKey = `${lagosDateKey}:${lagosTime}`;
+    if (lagosTime !== sendTime || minuteKey === lastScheduledMinuteKey) return;
+
+    lastScheduledMinuteKey = minuteKey;
+    try {
+        await sendScheduledReportForDate({
+            reportDateKey: getPreviousDateKeyInLagos(now),
+            trigger: 'auto'
+        });
+    } catch (err) {
+        console.error('[scheduled-report] auto send failed:', err?.message || err);
+    }
+}
+
+setInterval(() => {
+    tickScheduledReportSender().catch((err) => {
+        console.error('[scheduled-report] tick failed:', err?.message || err);
+    });
+}, 30000);
+
+tickScheduledReportSender().catch((err) => {
+    console.error('[scheduled-report] initial tick failed:', err?.message || err);
 });
 
 app.listen(port);

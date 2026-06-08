@@ -16,6 +16,8 @@
     <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
     <script src="js/security-utils.js?v=20260416f"></script>
@@ -57,6 +59,10 @@
                     <i class="fas fa-check-double"></i>
                     <span>Cleared</span>
                     <span class="badge" id="clearedCustomerCount">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="report">
+                    <i class="fas fa-file-export"></i>
+                    <span>Report</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="leave">
                     <i class="fas fa-person-walking-luggage"></i>
@@ -124,18 +130,26 @@
 
             <div id="sent-to-pfaTab" class="tab-content">
                 <div class="table-section">
-                    <h2 style="margin:0 0 12px;">Sent to PFA</h2>
-                    <p style="color:#64748b;margin:0 0 14px;">Every application forwarded from RSA appears here. Once PFA pays for an application, mark that specific record as paid.</p>
-                    <div style="border:1px solid #dbe2ea;border-radius:16px;padding:16px 18px;margin:0 0 16px;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
-                        <div>
-                            <h3 style="margin:0 0 6px;font-size:16px;color:#0f3b67;">Payment Reconciliation</h3>
-                            <p style="margin:0;color:#64748b;font-size:13px;">Open the reconciliation workspace to download the template, upload Excel, review matched rows, and bulk mark verified records.</p>
-                        </div>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                            <button type="button" class="action-btn" id="openPaymentReconciliationModalBtn" style="background:#0f766e;color:#fff;border:none;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 14px;">
+                        <h2 style="margin:0;">Sent to PFA</h2>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid #dbe2ea;border-radius:16px;background:linear-gradient(180deg,#f8fbff 0%,#eef6ff 100%);box-shadow:0 10px 24px rgba(15,59,103,0.08);">
+                            <button type="button" class="action-btn" id="generateSentToPfaReportBtn" style="background:linear-gradient(135deg,#0f3b67 0%,#1d4ed8 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(29,78,216,0.28);">
+                                <i class="fas fa-file-export"></i> Generate Report
+                            </button>
+                            <button type="button" class="action-btn" id="openPaymentReconciliationModalBtn" style="background:linear-gradient(135deg,#0f766e 0%,#16a34a 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(22,163,74,0.24);">
                                 <i class="fas fa-table-list"></i> Open Reconciliation
                             </button>
                         </div>
+                    </div>
+                    <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;">
+                        <label for="paymentQueueSortFilter" style="font-size:13px;font-weight:600;color:#334155;">Sort / Filter</label>
+                        <select id="paymentQueueSortFilter" style="min-width:220px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;color:#0f172a;">
+                            <option value="all">All Applications</option>
+                            <option value="agent">Agent Name</option>
+                            <option value="uploader">Uploader Name</option>
+                            <option value="rate_7">7% Rate Only</option>
+                            <option value="rate_10">10% Rate Only</option>
+                        </select>
                     </div>
                     <div class="table-container">
                         <table class="customers-table">
@@ -161,21 +175,37 @@
             <div id="paid-customersTab" class="tab-content">
                 <div class="table-section">
                     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-                        <h2 style="margin:0;">Paid Agents</h2>
-                        <button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.clearPaidSubmissions()">
-                            <i class="fas fa-check-double"></i> Settle Commission
-                        </button>
+                        <h2 style="margin:0;">Paid Applications</h2>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid #dbe2ea;border-radius:16px;background:linear-gradient(180deg,#f8fbff 0%,#eef6ff 100%);box-shadow:0 10px 24px rgba(15,59,103,0.08);">
+                            <button type="button" class="action-btn" id="generatePaidReportBtn" style="background:linear-gradient(135deg,#0f3b67 0%,#1d4ed8 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(29,78,216,0.28);">
+                                <i class="fas fa-file-export"></i> Generate Report
+                            </button>
+                            <button class="action-btn" style="background:linear-gradient(135deg,#0f766e 0%,#16a34a 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(22,163,74,0.24);" onclick="window.clearPaidSubmissions()">
+                                <i class="fas fa-check-double"></i> Clear All Paid
+                            </button>
+                        </div>
                     </div>
-                    <p style="color:#64748b;margin:0 0 14px;">Paid agent batches waiting for final commission settlement and clearing.</p>
+                    <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;">
+                        <label for="paymentPaidSortFilter" style="font-size:13px;font-weight:600;color:#334155;">Sort / Filter</label>
+                        <select id="paymentPaidSortFilter" style="min-width:220px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;color:#0f172a;">
+                            <option value="all">All Applications</option>
+                            <option value="agent">Agent Name</option>
+                            <option value="uploader">Uploader Name</option>
+                            <option value="rate_7">7% Rate Only</option>
+                            <option value="rate_10">10% Rate Only</option>
+                        </select>
+                    </div>
                     <div class="table-container">
                         <table class="customers-table">
                             <thead>
                                 <tr>
+                                    <th>Customer</th>
                                     <th>Agent</th>
                                     <th>Uploader</th>
-                                    <th>Customers</th>
-                                    <th>Total 25% Balance</th>
-                                    <th>Total Commission</th>
+                                    <th>PFA</th>
+                                    <th>25% Balance</th>
+                                    <th>1% Commission</th>
+                                    <th>Paid Date</th>
                                     <th>Status</th>
                                     <th>Action</th>
                                 </tr>
@@ -208,9 +238,9 @@
 
             <div id="leaveTab" class="tab-content">
                 <div class="table-section">
-                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
-                        <button type="button" class="action-btn" id="paymentLeaveMineBtn" style="background:#003366;color:#fff;border:none;">My Leave History</button>
-                        <button type="button" class="action-btn" id="paymentLeaveReliefBtn">Relief History</button>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;padding:10px 12px;border:1px solid #dbe2ea;border-radius:16px;background:linear-gradient(180deg,#f8fbff 0%,#eef6ff 100%);box-shadow:0 10px 24px rgba(15,59,103,0.08);width:max-content;max-width:100%;">
+                        <button type="button" class="action-btn" id="paymentLeaveMineBtn" style="background:linear-gradient(135deg,#0f3b67 0%,#1d4ed8 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(29,78,216,0.28);">My Leave History</button>
+                        <button type="button" class="action-btn" id="paymentLeaveReliefBtn" style="background:linear-gradient(135deg,#334155 0%,#475569 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(51,65,85,0.24);">Relief History</button>
                     </div>
                     <div id="paymentLeaveMineSection">
                         <div class="table-container">
@@ -233,8 +263,24 @@
 
             <div id="cleared-customersTab" class="tab-content">
                 <div class="table-section">
-                    <h2 style="margin:0 0 12px;">Cleared</h2>
-                    <p style="color:#64748b;margin:0 0 14px;">These are fully settled agent batches. They remain here as cleared payment history.</p>
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 12px;">
+                        <h2 style="margin:0;">Cleared</h2>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid #dbe2ea;border-radius:16px;background:linear-gradient(180deg,#f8fbff 0%,#eef6ff 100%);box-shadow:0 10px 24px rgba(15,59,103,0.08);">
+                            <button type="button" class="action-btn" id="generateClearedReportBtn" style="background:linear-gradient(135deg,#0f3b67 0%,#1d4ed8 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(29,78,216,0.28);">
+                                <i class="fas fa-file-export"></i> Generate Report
+                            </button>
+                        </div>
+                    </div>
+                    <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;">
+                        <label for="paymentClearedSortFilter" style="font-size:13px;font-weight:600;color:#334155;">Sort / Filter</label>
+                        <select id="paymentClearedSortFilter" style="min-width:220px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;color:#0f172a;">
+                            <option value="all">All Applications</option>
+                            <option value="agent">Agent Name</option>
+                            <option value="uploader">Uploader Name</option>
+                            <option value="rate_7">7% Rate Only</option>
+                            <option value="rate_10">10% Rate Only</option>
+                        </select>
+                    </div>
                     <div class="table-container">
                         <table class="customers-table">
                             <thead>
@@ -251,6 +297,13 @@
                             <tbody id="clearedCustomersTableBody"></tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <div id="reportTab" class="tab-content">
+                <div class="table-section">
+                    <h2 style="margin:0 0 12px;">Payment Report</h2>
+                    <p style="color:#64748b;margin:0;">Use the Report tab to choose a date range, preview the payment report, and export it to Excel or PDF.</p>
                 </div>
             </div>
 
@@ -395,6 +448,109 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="cancel-btn" id="closePaymentReconciliationModalFooterBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="paymentReportRangeModal" class="modal">
+        <div class="modal-content" style="max-width:540px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-calendar-range"></i> Payment Report Range</h2>
+                <button class="close-btn" id="closePaymentReportRangeModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin:0 0 16px;color:#64748b;font-size:14px;line-height:1.6;">Choose the date range for the payment report. The report will summarize applications received per day and show the application breakdown with attendance status.</p>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;">
+                    <label style="display:flex;flex-direction:column;gap:6px;">
+                        <span style="font-size:13px;font-weight:600;color:#334155;">Start Date</span>
+                        <input type="date" id="paymentReportStartDate" class="form-control" style="padding:12px;border:1px solid #cbd5e1;border-radius:12px;">
+                    </label>
+                    <label style="display:flex;flex-direction:column;gap:6px;">
+                        <span style="font-size:13px;font-weight:600;color:#334155;">End Date</span>
+                        <input type="date" id="paymentReportEndDate" class="form-control" style="padding:12px;border:1px solid #cbd5e1;border-radius:12px;">
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="cancelPaymentReportRangeBtn">Cancel</button>
+                <button type="button" class="action-btn" id="generatePaymentReportBtn" style="background:#0f766e;color:#fff;border:none;">
+                    <i class="fas fa-chart-column"></i> Generate Report
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="paymentReportPreviewModal" class="modal">
+        <div class="modal-content large-modal" style="max-width:1280px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-file-lines"></i> Payment Report Preview</h2>
+                <button class="close-btn" id="closePaymentReportPreviewModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px;padding:16px;border:1px solid #dbe2ea;border-radius:16px;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);">
+                    <div style="max-width:760px;">
+                        <h3 style="margin:0 0 8px;font-size:17px;color:#0f3b67;">Payment Report</h3>
+                        <p id="paymentReportPreviewMeta" style="margin:0;color:#64748b;font-size:13px;line-height:1.6;">Select a date range to preview report data.</p>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                        <button type="button" class="action-btn" id="exportPaymentReportExcelBtn">
+                            <i class="fas fa-file-excel"></i> Export Excel
+                        </button>
+                        <button type="button" class="action-btn" id="exportPaymentReportPdfBtn" style="background:#b91c1c;color:#fff;border:none;">
+                            <i class="fas fa-file-pdf"></i> Export PDF
+                        </button>
+                    </div>
+                </div>
+
+                <div id="paymentReportSummaryChips" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;"></div>
+
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+                    <button type="button" class="action-btn payment-report-preview-tab active" data-payment-report-view="summary" style="background:linear-gradient(135deg,#0f3b67 0%,#1d4ed8 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(29,78,216,0.28);">Daily Summary</button>
+                    <button type="button" class="action-btn payment-report-preview-tab" data-payment-report-view="details" style="background:linear-gradient(135deg,#334155 0%,#475569 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(51,65,85,0.24);">Application Breakdown</button>
+                </div>
+
+                <div id="paymentReportSummaryView" class="payment-report-preview-view">
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Received</th>
+                                    <th>Attended</th>
+                                    <th>Pending</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paymentReportSummaryBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="paymentReportDetailsView" class="payment-report-preview-view" style="display:none;">
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Received Date</th>
+                                    <th>Customer</th>
+                                    <th>Agent</th>
+                                    <th>Uploader</th>
+                                    <th>PFA</th>
+                                    <th>25% Balance</th>
+                                    <th>Rate</th>
+                                    <th>Commission</th>
+                                    <th>Status</th>
+                                    <th>Attended</th>
+                                    <th>Paid Date</th>
+                                    <th>Cleared Date</th>
+                                </tr>
+                            </thead>
+                            <tbody id="paymentReportDetailsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="closePaymentReportPreviewFooterBtn">Close</button>
             </div>
         </div>
     </div>

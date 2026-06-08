@@ -217,6 +217,83 @@ function getWritableUserRefFromProfile(user, profile) {
     return preferredUid ? doc(db, 'users', preferredUid) : null;
 }
 
+function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function resolveLoginUserProfile(user, { attempts = 3 } = {}) {
+    if (!user) {
+        return { profile: null, state: 'missing', error: null };
+    }
+
+    const preferredUid = String(user.uid || '').trim();
+    const normalizedEmail = String(user.email || '').trim().toLowerCase();
+    let lastError = null;
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        let hadReadError = false;
+
+        try {
+            const sharedProfile = await getCurrentUserProfileShared(db, user);
+            if (sharedProfile) {
+                return { profile: sharedProfile, state: 'found', error: null };
+            }
+        } catch (error) {
+            lastError = error;
+            hadReadError = true;
+        }
+
+        if (preferredUid) {
+            try {
+                const uidRef = doc(db, 'users', preferredUid);
+                const uidSnap = await getDoc(uidRef);
+                if (uidSnap.exists()) {
+                    return {
+                        profile: { __docId: uidSnap.id, ...(uidSnap.data() || {}) },
+                        state: 'found',
+                        error: null
+                    };
+                }
+            } catch (error) {
+                lastError = error;
+                hadReadError = true;
+            }
+        }
+
+        if (normalizedEmail) {
+            try {
+                const emailQuery = query(collection(db, 'users'), where('email', '==', normalizedEmail));
+                const emailSnapshot = await getDocs(emailQuery);
+                if (!emailSnapshot.empty) {
+                    const matchedDoc = emailSnapshot.docs.find((snap) => {
+                        const data = snap.data() || {};
+                        return String(data.uid || '').trim() === preferredUid || String(snap.id || '').trim() === preferredUid;
+                    }) || emailSnapshot.docs[0];
+
+                    return {
+                        profile: { __docId: matchedDoc.id, ...(matchedDoc.data() || {}) },
+                        state: 'found',
+                        error: null
+                    };
+                }
+            } catch (error) {
+                lastError = error;
+                hadReadError = true;
+            }
+        }
+
+        if (!hadReadError) {
+            return { profile: null, state: 'missing', error: null };
+        }
+
+        if (attempt < attempts - 1) {
+            await wait(300 * (attempt + 1));
+        }
+    }
+
+    return { profile: null, state: 'error', error: lastError };
+}
+
 // Close modal when clicking close button or outside
 if (modalCloseBtn) {
     modalCloseBtn.addEventListener('click', hideModal);
@@ -674,7 +751,8 @@ if (loginFormElement) {
             const user = userCredential.user;
 
             // Check user status in Firestore
-            const userData = await getCurrentUserProfileShared(db, user);
+            const profileResolution = await resolveLoginUserProfile(user);
+            const userData = profileResolution.profile;
 
             if (userData) {
 
@@ -707,29 +785,29 @@ if (loginFormElement) {
                     // Fail open so an analytics timestamp issue does not block login.
                 }
 
-                // Redirect based on role
-                showSuccess('Login successful! Redirecting...');
-                
-                setTimeout(() => {
-                    if (userData.role === 'super_admin') {
-                        window.location.href = 'super-admin-dashboard.html';
-                    } else if (userData.role === 'admin') {
-                        window.location.href = 'admin-dashboard.html';
-                    } else if (userData.role === 'reports_monitoring') {
-                        window.location.href = 'reports-monitoring-dashboard.html';
-                    } else if (userData.role === 'reviewer') {
-                        window.location.href = 'reviewer-dashboard.html';
-                    } else if (userData.role === 'payment') {
-                        window.location.href = 'payment-dashboard.html';
-                    } else if (userData.role === 'rsa') {
-                        window.location.href = 'rsa-dashboard.html';
-                    } else {
-                        window.location.href = 'dashboard.html';
-                    }
-                }, 1500);
+                // Keep the sign-in spinner visible and route straight to the dashboard.
+                if (userData.role === 'super_admin') {
+                    window.location.href = 'super-admin-dashboard.html';
+                } else if (userData.role === 'admin') {
+                    window.location.href = 'admin-dashboard.html';
+                } else if (userData.role === 'reports_monitoring') {
+                    window.location.href = 'reports-monitoring-dashboard.html';
+                } else if (userData.role === 'reviewer') {
+                    window.location.href = 'reviewer-dashboard.html';
+                } else if (userData.role === 'payment') {
+                    window.location.href = 'payment-dashboard.html';
+                } else if (userData.role === 'rsa') {
+                    window.location.href = 'rsa-dashboard.html';
+                } else {
+                    window.location.href = 'dashboard.html';
+                }
             } else {
                 // Security hardening: never auto-provision app roles from client login.
-                showError('User record not found. Please contact admin.');
+                if (profileResolution.state === 'missing') {
+                    showError('Your app profile is missing. Please contact admin.');
+                } else {
+                    showError('We could not load your profile right now. Please try again.');
+                }
                 await signOut(auth);
             }
 

@@ -575,7 +575,7 @@
                     </div>
                     <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
                         <h3 style="margin:0 0 8px;color:#0f3b67;">Scheduled Report Emails</h3>
-                        <p style="margin:0 0 12px;color:#64748b;">Set up the daily report email body, recipient list, and send time. The sender job can use these saved values later.</p>
+                        <p style="margin:0 0 12px;color:#64748b;">Set up the daily report email body, recipient list, and send time. Scheduled send time is intended to deliver the <strong>previous day's</strong> report in Africa/Lagos time.</p>
                         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
                             <label>Daily Report Email
                                 <select id="settingScheduledReportEmailEnabled" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
@@ -589,20 +589,45 @@
                             <label style="grid-column:1/-1;">Email Subject
                                 <input id="settingScheduledReportSubject" type="text" placeholder="Daily RSA Report" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
                             </label>
-                            <label style="grid-column:1/-1;">Recipient Emails
-                                <textarea id="settingScheduledReportRecipients" rows="6" placeholder="Enter one email per line" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;"></textarea>
-                            </label>
+                            <div style="grid-column:1/-1;">
+                                <label style="display:block;margin-bottom:8px;">Recipient Emails</label>
+                                <div style="display:grid;grid-template-columns:minmax(0,1.2fr) auto minmax(0,1fr);gap:12px;align-items:start;">
+                                    <div style="display:flex;flex-direction:column;gap:8px;">
+                                        <input id="scheduledReportRecipientSearch" type="text" placeholder="Search user by name, email, or role" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                        <select id="scheduledReportAvailableUsers" multiple size="8" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;"></select>
+                                        <div style="font-size:12px;color:#64748b;">Loaded from all user accounts. Use <kbd>Ctrl</kbd> or <kbd>Cmd</kbd> to select multiple.</div>
+                                    </div>
+                                    <div style="display:flex;flex-direction:column;gap:8px;justify-content:center;align-self:center;">
+                                        <button id="addScheduledReportRecipientsBtn" type="button" class="action-btn" style="background:#0f766e;color:#fff;border:none;min-width:120px;">
+                                            <i class="fas fa-plus"></i> Add Selected
+                                        </button>
+                                        <button id="addAllScheduledReportRecipientsBtn" type="button" class="action-btn" style="background:#1d4ed8;color:#fff;border:none;min-width:120px;">
+                                            <i class="fas fa-users"></i> Add All
+                                        </button>
+                                    </div>
+                                    <div style="display:flex;flex-direction:column;gap:8px;">
+                                        <div id="scheduledReportSelectedRecipients" style="min-height:164px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start;"></div>
+                                        <textarea id="settingScheduledReportRecipients" rows="6" placeholder="Enter one email per line" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;"></textarea>
+                                        <div style="font-size:12px;color:#64748b;">You can still type extra emails manually here if needed.</div>
+                                    </div>
+                                </div>
+                            </div>
                             <label style="grid-column:1/-1;">Email Body
                                 <textarea id="settingScheduledReportBody" rows="8" placeholder="Write the message body to send with the report" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;"></textarea>
                             </label>
                         </div>
                         <div style="margin-top:12px;padding:12px 14px;border-radius:12px;background:#eef6ff;color:#4b5563;font-size:13px;line-height:1.6;">
-                            Saved time is interpreted in the app time zone: <strong>Africa/Lagos</strong>.
+                            Saved time is interpreted in the app time zone: <strong>Africa/Lagos</strong>. Example: selecting <strong>8:00 AM</strong> means the report sent at 8:00 AM should cover <strong>the previous day</strong>.
+                        </div>
+                        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;">
+                            <button id="sendScheduledReportNowBtn" class="action-btn" type="button" style="background:#1d4ed8;color:#fff;border:none;">
+                                <i class="fas fa-paper-plane"></i> Send Previous Day Now
+                            </button>
                         </div>
                     </div>
                     <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
                         <h3 style="margin:0 0 8px;color:#0f3b67;">Download Daily Report</h3>
-                        <p style="margin:0 0 12px;color:#64748b;">Generate the same multi-sheet daily report workbook directly from Super Admin.</p>
+                        <p style="margin:0 0 12px;color:#64748b;">Generate the same multi-sheet daily report workbook directly from Super Admin. This date defaults to the previous day.</p>
                         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;">
                             <label style="min-width:220px;">Report Date
                                 <input id="scheduledReportDownloadDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
