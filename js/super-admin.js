@@ -989,10 +989,23 @@ function buildDailyReportDefinition(reportDate) {
     }
 
     const submittedRecords = allSubmissions.filter((sub) => String(sub.status || '').toLowerCase() !== 'draft');
+    const uploaderOutstandingRecords = submittedRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending');
+    const reviewerOutstandingRecords = submittedRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending');
+    const rsaOutstandingRecords = submittedRecords.filter((sub) => {
+        const status = String(sub.status || '').toLowerCase();
+        return ['approved', 'processing_to_pfa'].includes(status) && !sub.finalSubmitted && !sub.rsaSubmitted;
+    });
+    const paymentOutstandingRecords = submittedRecords.filter((sub) => {
+        const status = String(sub.status || '').toLowerCase();
+        return ['sent_to_pfa', 'rsa_submitted'].includes(status);
+    });
     const uploaderRecords = submittedRecords.filter((sub) => isSameReportDate(sub.uploadedAt, dateKey));
     const reviewerRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedTo) && isSameReportDate(sub.uploadedAt, dateKey));
     const rsaRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToRSA) && isSameReportDate(sub.reviewedAt, dateKey));
     const paymentRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToPayment) && isSameReportDate(sub.paymentAssignedAt || sub.finalSubmittedAt || sub.rsaSubmittedAt, dateKey));
+    const reviewerAttendedRecords = reviewerRecords.filter((sub) => !!tsToMillis(sub.reviewedAt));
+    const rsaAttendedRecords = rsaRecords.filter((sub) => !!tsToMillis(sub.finalSubmittedAt || sub.rsaSubmittedAt) || String(sub.status || '').toLowerCase() === 'rejected_by_rsa');
+    const paymentAttendedRecords = paymentRecords.filter((sub) => !!tsToMillis(sub.paidAt) || !!tsToMillis(sub.clearedAt) || String(sub.status || '').toLowerCase() === 'cleared');
 
     const uploaderRows = buildUploaderSheetRows(uploaderRecords).sort(compareGroupedRows);
     const reviewerRows = buildReviewerSheetRows(reviewerRecords).sort(compareGroupedRows);
@@ -1009,7 +1022,8 @@ function buildDailyReportDefinition(reportDate) {
                 title: `Uploader Report - ${dateKey}`,
                 summaryRows: [
                     ['Total Uploaded', uploaderRecords.length],
-                    ['Pending', uploaderRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length]
+                    ['Pending', uploaderRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length],
+                    ['Total Outstanding', uploaderOutstandingRecords.length]
                 ],
                 rows: uploaderRows,
                 excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Uploaded Time', 'Reviewer Time', 'Reject Reason', 'Reject Count'],
@@ -1028,8 +1042,9 @@ function buildDailyReportDefinition(reportDate) {
                 title: `Reviewer Report - ${dateKey}`,
                 summaryRows: [
                     ['Total Received', reviewerRecords.length],
-                    ['Attending To', reviewerRecords.filter((sub) => normalizeEmail(sub.assignedTo)).length],
-                    ['Pending', reviewerRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length]
+                    ['Attended To', reviewerAttendedRecords.length],
+                    ['Pending', reviewerRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length],
+                    ['Total Outstanding', reviewerOutstandingRecords.length]
                 ],
                 rows: reviewerRows,
                 excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Decision Time', 'Reject Reason', 'Reject Count'],
@@ -1048,8 +1063,9 @@ function buildDailyReportDefinition(reportDate) {
                 title: `RSA Report - ${dateKey}`,
                 summaryRows: [
                     ['Total Received', rsaRecords.length],
-                    ['Attending To', rsaRecords.filter((sub) => ['approved', 'processing_to_pfa'].includes(String(sub.status || '').toLowerCase()) && !sub.finalSubmitted && !sub.rsaSubmitted).length],
-                    ['Pending', rsaRecords.filter((sub) => ['approved', 'processing_to_pfa'].includes(String(sub.status || '').toLowerCase()) && !sub.finalSubmitted && !sub.rsaSubmitted).length]
+                    ['Attended To', rsaAttendedRecords.length],
+                    ['Pending', rsaRecords.filter((sub) => ['approved', 'processing_to_pfa'].includes(String(sub.status || '').toLowerCase()) && !sub.finalSubmitted && !sub.rsaSubmitted).length],
+                    ['Total Outstanding', rsaOutstandingRecords.length]
                 ],
                 rows: rsaRows,
                 excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time', 'RSA Done Time', 'RSA Reject Reason', 'RSA Reject Count'],
@@ -1068,8 +1084,9 @@ function buildDailyReportDefinition(reportDate) {
                 title: `Payment Report - ${dateKey}`,
                 summaryRows: [
                     ['Total Received', paymentRecords.length],
-                    ['Attending To', paymentRecords.filter((sub) => normalizeEmail(sub.assignedToPayment)).length],
-                    ['Pending', paymentRecords.filter((sub) => ['sent_to_pfa', 'rsa_submitted'].includes(String(sub.status || '').toLowerCase())).length]
+                    ['Attended To', paymentAttendedRecords.length],
+                    ['Pending', paymentRecords.filter((sub) => ['sent_to_pfa', 'rsa_submitted'].includes(String(sub.status || '').toLowerCase())).length],
+                    ['Total Outstanding', paymentOutstandingRecords.length]
                 ],
                 rows: paymentRows,
                 excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Payment Assigned Time', 'Paid Time', 'Cleared Time', 'Remarks'],

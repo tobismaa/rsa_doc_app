@@ -317,6 +317,22 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
 
     const scope = normalizeReportScope({ reportDateKey, rangeStartDateKey, rangeEndDateKey });
     const submittedRecords = submissions.filter((sub) => String(sub.status || '').toLowerCase() !== 'draft');
+    const uploaderOutstandingRecords = submittedRecords.filter((sub) => {
+        const status = String(sub.status || '').toLowerCase();
+        return status === 'pending';
+    });
+    const reviewerOutstandingRecords = submittedRecords.filter((sub) => {
+        const status = String(sub.status || '').toLowerCase();
+        return status === 'pending';
+    });
+    const rsaOutstandingRecords = submittedRecords.filter((sub) => {
+        const status = String(sub.status || '').toLowerCase();
+        return ['approved', 'processing_to_pfa'].includes(status) && !sub.finalSubmitted && !sub.rsaSubmitted;
+    });
+    const paymentOutstandingRecords = submittedRecords.filter((sub) => {
+        const status = String(sub.status || '').toLowerCase();
+        return ['sent_to_pfa', 'rsa_submitted'].includes(status);
+    });
     const matchesScope = (value) => scope.mode === 'date_range'
         ? isDateKeyWithinRange(value, scope.rangeStartDateKey, scope.rangeEndDateKey)
         : isSameReportDate(value, scope.reportDateKey);
@@ -324,6 +340,9 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
     const reviewerRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedTo) && matchesScope(sub.uploadedAt));
     const rsaRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToRSA) && matchesScope(sub.reviewedAt));
     const paymentRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToPayment) && matchesScope(sub.paymentAssignedAt || sub.finalSubmittedAt || sub.rsaSubmittedAt));
+    const reviewerAttendedRecords = reviewerRecords.filter((sub) => !!tsToMillis(sub.reviewedAt));
+    const rsaAttendedRecords = rsaRecords.filter((sub) => !!tsToMillis(sub.finalSubmittedAt || sub.rsaSubmittedAt) || String(sub.status || '').toLowerCase() === 'rejected_by_rsa');
+    const paymentAttendedRecords = paymentRecords.filter((sub) => !!tsToMillis(sub.paidAt) || !!tsToMillis(sub.clearedAt) || String(sub.status || '').toLowerCase() === 'cleared');
     const dateHeaders = scope.includeDateColumn ? ['Report Date'] : [];
     const dateColumns = scope.includeDateColumn ? [{ width: 14 }] : [];
     const moneyDecimalColumns = scope.includeDateColumn ? [3, 4, 5] : [2, 3, 4];
@@ -341,7 +360,8 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
                 reportTitle: `Uploader Report - ${scope.label}`,
                 summaryRows: [
                     ['Total Uploaded', uploaderRecords.length],
-                    ['Pending', uploaderRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length]
+                    ['Pending', uploaderRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length],
+                    ['Total Outstanding', uploaderOutstandingRecords.length]
                 ],
                 groupRows: buildUploaderSheetRows(uploaderRecords, usersByEmail, scope.includeDateColumn).sort(compareGroupedRows),
                 tableHeaders: [...dateHeaders, 'Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Uploaded Time', 'Reviewer Time', 'Reject Reason', 'Reject Count'],
@@ -354,8 +374,9 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
                 reportTitle: `Reviewer Report - ${scope.label}`,
                 summaryRows: [
                     ['Total Received', reviewerRecords.length],
-                    ['Attending To', reviewerRecords.filter((sub) => normalizeEmail(sub.assignedTo)).length],
-                    ['Pending', reviewerRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length]
+                    ['Attended To', reviewerAttendedRecords.length],
+                    ['Pending', reviewerRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length],
+                    ['Total Outstanding', reviewerOutstandingRecords.length]
                 ],
                 groupRows: buildReviewerSheetRows(reviewerRecords, usersByEmail, scope.includeDateColumn).sort(compareGroupedRows),
                 tableHeaders: [...dateHeaders, 'Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Decision Time', 'Reject Reason', 'Reject Count'],
@@ -368,8 +389,9 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
                 reportTitle: `RSA Report - ${scope.label}`,
                 summaryRows: [
                     ['Total Received', rsaRecords.length],
-                    ['Attending To', rsaRecords.filter((sub) => ['approved', 'processing_to_pfa'].includes(String(sub.status || '').toLowerCase()) && !sub.finalSubmitted && !sub.rsaSubmitted).length],
-                    ['Pending', rsaRecords.filter((sub) => ['approved', 'processing_to_pfa'].includes(String(sub.status || '').toLowerCase()) && !sub.finalSubmitted && !sub.rsaSubmitted).length]
+                    ['Attended To', rsaAttendedRecords.length],
+                    ['Pending', rsaRecords.filter((sub) => ['approved', 'processing_to_pfa'].includes(String(sub.status || '').toLowerCase()) && !sub.finalSubmitted && !sub.rsaSubmitted).length],
+                    ['Total Outstanding', rsaOutstandingRecords.length]
                 ],
                 groupRows: buildRsaSheetRows(rsaRecords, usersByEmail, scope.includeDateColumn).sort(compareGroupedRows),
                 tableHeaders: [...dateHeaders, 'Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time', 'RSA Done Time', 'RSA Reject Reason', 'RSA Reject Count'],
@@ -382,8 +404,9 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
                 reportTitle: `Payment Report - ${scope.label}`,
                 summaryRows: [
                     ['Total Received', paymentRecords.length],
-                    ['Attending To', paymentRecords.filter((sub) => normalizeEmail(sub.assignedToPayment)).length],
-                    ['Pending', paymentRecords.filter((sub) => ['sent_to_pfa', 'rsa_submitted'].includes(String(sub.status || '').toLowerCase())).length]
+                    ['Attended To', paymentAttendedRecords.length],
+                    ['Pending', paymentRecords.filter((sub) => ['sent_to_pfa', 'rsa_submitted'].includes(String(sub.status || '').toLowerCase())).length],
+                    ['Total Outstanding', paymentOutstandingRecords.length]
                 ],
                 groupRows: buildPaymentSheetRows(paymentRecords, usersByEmail, scope.includeDateColumn).sort(compareGroupedRows),
                 tableHeaders: [...dateHeaders, 'Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Paid Time', 'Cleared Time', 'Remarks'],
