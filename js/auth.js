@@ -778,7 +778,9 @@ if (loginFormElement) {
                     const writableUserRef = getWritableUserRefFromProfile(user, userData) || await findWritableUserRef(user);
                     if (writableUserRef) {
                         await updateDoc(writableUserRef, {
-                            lastLoginAt: serverTimestamp()
+                            lastLoginAt: serverTimestamp(),
+                            isOnline: true,
+                            lastSeenAt: serverTimestamp()
                         });
                     }
                 } catch (_) {
@@ -821,6 +823,16 @@ if (loginFormElement) {
 // ==================== SIGN OUT FUNCTION ====================
 window.signOutUser = async () => {
     try {
+        const user = auth.currentUser;
+        if (user) {
+            const writableUserRef = await findWritableUserRef(user);
+            if (writableUserRef) {
+                await updateDoc(writableUserRef, {
+                    isOnline: false,
+                    lastSeenAt: serverTimestamp()
+                }).catch(() => {});
+            }
+        }
         await signOut(auth);
         window.location.href = 'index.html';
     } catch (error) {

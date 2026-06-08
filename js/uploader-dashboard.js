@@ -7,7 +7,7 @@ import {
 import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
 import { formatAppDateTime } from './shared/app-time.js';
 import {
-    collection, query, where, orderBy, onSnapshot, getDocs, getDoc, doc, limit
+    collection, query, where, orderBy, onSnapshot, getDocs, getDoc, doc, limit, serverTimestamp, updateDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 
@@ -115,7 +115,16 @@ function ensureSignOutUser() {
         // `js/auth.js` defines a non-writable `signOutUser`; reuse it when present.
         if (desc && desc.writable === false) return;
         window.signOutUser = async () => {
-            try { await signOut(auth); } catch (e) { }
+            try {
+                const userId = currentUser?.uid || '';
+                if (userId) {
+                    await updateDoc(doc(db, 'users', userId), {
+                        isOnline: false,
+                        lastSeenAt: serverTimestamp()
+                    }).catch(() => {});
+                }
+                await signOut(auth);
+            } catch (e) { }
             window.location.href = 'index.html';
         };
     } catch (e) { /* ignore */ }

@@ -2039,7 +2039,16 @@ auth.onAuthStateChanged(user=>{
 });
 
 window.signOutUser = async () => {
-    try { await signOut(auth); } catch (e) { }
+    try {
+        const userId = currentRsaProfileData?.id || currentUser?.uid || '';
+        if (userId) {
+            await updateDoc(doc(db, 'users', userId), {
+                isOnline: false,
+                lastSeenAt: serverTimestamp()
+            }).catch(() => {});
+        }
+        await signOut(auth);
+    } catch (e) { }
     window.location.href = 'index.html';
 };
 

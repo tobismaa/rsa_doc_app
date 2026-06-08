@@ -687,6 +687,12 @@ function formatDate(ts) {
     return formatAppDateTime(ts, '-');
 }
 
+function formatUserLastLogin(u = {}) {
+    return u.isOnline === true
+        ? '<span class="status-badge approved">Online</span>'
+        : escapeHtml(formatDate(u.lastLoginAt));
+}
+
 const reportDateKeyFormatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Lagos',
     year: 'numeric',
@@ -1295,7 +1301,7 @@ function renderAdminManagement() {
         .sort((a, b) => String(a.fullName || a.email || '').localeCompare(String(b.fullName || b.email || '')));
 
     if (!filteredUsers.length) {
-        body.innerHTML = '<tr><td colspan="7" class="no-data">No users found</td></tr>';
+        body.innerHTML = '<tr><td colspan="8" class="no-data">No users found</td></tr>';
         return;
     }
 
@@ -1328,6 +1334,7 @@ function renderAdminManagement() {
                     </select>
                 </td>
                 <td>${formatDate(u.createdAt)}</td>
+                <td>${formatUserLastLogin(u)}</td>
                 <td>
                     <button class="action-btn" style="background:#003366;color:#fff;border:none;" onclick="window.saveAdminManager('${u.id}')">
                         <i class="fas fa-save"></i> Save
@@ -3681,7 +3688,16 @@ window.exportAuditCsv = () => {
 };
 
 window.signOutUser = async () => {
-    try { await signOut(auth); } catch (_) {}
+    try {
+        const userId = currentUserData?.id || currentUser?.uid || '';
+        if (userId) {
+            await updateDoc(doc(db, 'users', userId), {
+                isOnline: false,
+                lastSeenAt: serverTimestamp()
+            }).catch(() => {});
+        }
+        await signOut(auth);
+    } catch (_) {}
     window.location.href = 'index.html';
 };
 

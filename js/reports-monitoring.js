@@ -2,7 +2,10 @@ import { auth, db } from './firebase-config.js';
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
     collection,
-    onSnapshot
+    doc,
+    onSnapshot,
+    serverTimestamp,
+    updateDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { formatAppDateTime } from './shared/app-time.js';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
@@ -494,6 +497,13 @@ function closeApplicationDetailsModal() {
 window.openMonitoringApplicationDetails = openApplicationDetailsModal;
 window.signOutUser = async () => {
     try {
+        const userId = currentUserData?.id || currentUser?.uid || '';
+        if (userId) {
+            await updateDoc(doc(db, 'users', userId), {
+                isOnline: false,
+                lastSeenAt: serverTimestamp()
+            }).catch(() => {});
+        }
         await signOut(auth);
         window.location.href = 'index.html';
     } catch (_) {

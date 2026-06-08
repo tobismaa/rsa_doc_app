@@ -834,7 +834,16 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 window.signOutUser = async () => {
-    try { await signOut(auth); } catch (e) { }
+    try {
+        const userId = currentUserData?.id || currentUser?.uid || '';
+        if (userId) {
+            await updateDoc(doc(db, 'users', userId), {
+                isOnline: false,
+                lastSeenAt: serverTimestamp()
+            }).catch(() => {});
+        }
+        await signOut(auth);
+    } catch (e) { }
     window.location.href = 'index.html';
 };
 
