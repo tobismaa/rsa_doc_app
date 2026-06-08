@@ -6,11 +6,16 @@ import {
     EMAILJS_TEMPLATE_ID
 } from './emailjs-config.js';
 import {
+    collection,
+    getDocs,
     doc,
     increment,
+    limit,
+    query,
     runTransaction,
     serverTimestamp,
-    updateDoc
+    updateDoc,
+    where
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
 function normalizeEmail(email) {
@@ -33,10 +38,24 @@ function titleCaseWord(word) {
     return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
 }
 
+function titleCaseWords(value) {
+    return String(value || '')
+        .split(/\s+/)
+        .map((word) => titleCaseWord(word))
+        .filter(Boolean)
+        .join(' ');
+}
+
 function getFirstNameFromEmail(email) {
     const local = String(email || '').split('@')[0] || '';
     const firstChunk = local.split(/[._\-\s]+/)[0] || '';
     return titleCaseWord(firstChunk);
+}
+
+function getFullNameFromEmail(email) {
+    const local = String(email || '').split('@')[0] || '';
+    const cleaned = local.replace(/[._\-]+/g, ' ').trim();
+    return titleCaseWords(cleaned) || titleCaseWord(local) || 'N/A';
 }
 
 function getRecipientFirstName({ recipientEmail, preferredName }) {
@@ -48,9 +67,74 @@ function getRecipientFirstName({ recipientEmail, preferredName }) {
 
 const PORTAL_URL = window.location.origin;
 const ALERT_REPLY_TO = 'alert@cmbankrsa.com';
+const userDisplayNameCache = new Map();
 // Optional: set to a hosted GIF URL if you want anime-style motion in emails.
 // Keep empty to disable.
 const ANIME_GIF_URL = '';
+
+function formatNotificationTypeLabel(value) {
+    const text = String(value || '').trim();
+    if (!text) return 'General Alert';
+    return text.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getAlertTemplateMeta(type, subject) {
+    const normalized = String(type || '').trim().toLowerCase();
+    const fallbackTitle = String(subject || 'Portal Alert').trim() || 'Portal Alert';
+    switch (normalized) {
+    case 'submission_assigned_viewer':
+        return {
+            alert_header_title: 'Review Assignment',
+            alert_intro: 'A new application has been routed for reviewer action.'
+        };
+    case 'submission_rejected_uploader':
+        return {
+            alert_header_title: 'Submission Rejected',
+            alert_intro: 'An application needs correction before it can move forward.'
+        };
+    case 'submission_approved_rsa':
+        return {
+            alert_header_title: 'RSA Processing Assignment',
+            alert_intro: 'A reviewed application is now ready for RSA processing.'
+        };
+    case 'submission_approved_uploader':
+        return {
+            alert_header_title: 'Submission Approved',
+            alert_intro: 'Your application has cleared reviewer approval and moved forward.'
+        };
+    case 'submission_final_uploader':
+        return {
+            alert_header_title: 'Final Approval Completed',
+            alert_intro: 'RSA processing has been completed for this application.'
+        };
+    default:
+        return {
+            alert_header_title: fallbackTitle,
+            alert_intro: 'Workflow notification from the CMBank RSA document portal.'
+        };
+    }
+}
+
+async function resolveUserDisplayName(email, fallback = 'N/A') {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return fallback;
+    if (userDisplayNameCache.has(normalized)) {
+        return userDisplayNameCache.get(normalized);
+    }
+    let resolved = '';
+    try {
+        const snap = await getDocs(query(collection(db, 'users'), where('email', '==', normalized), limit(1)));
+        if (!snap.empty) {
+            resolved = String(snap.docs[0]?.data()?.fullName || '').trim();
+        }
+    } catch (_) {}
+    if (!resolved) {
+        resolved = getFullNameFromEmail(normalized);
+    }
+    const finalName = resolved || fallback;
+    userDisplayNameCache.set(normalized, finalName);
+    return finalName;
+}
 
 function isEmailJsConfigured() {
     const parts = [EMAILJS_PUBLIC_KEY, EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID]
@@ -58,7 +142,8 @@ function isEmailJsConfigured() {
     return parts.every(v => v && !v.includes('REPLACE_WITH_'));
 }
 
-async function sendEmailViaEmailJs({ eventKey, to, subject, text, html, meta = {} }) {
+async function sendEmailViaEmailJs({ eventKey, to, subject, text, html, meta = {}, quickReferenceText = '' }) {
+    const templateMeta = getAlertTemplateMeta(meta.type, subject);
     const templateParams = {
         to_email: to,
         reply_to: ALERT_REPLY_TO,
@@ -67,9 +152,13 @@ async function sendEmailViaEmailJs({ eventKey, to, subject, text, html, meta = {
         email_subject: subject,
         email_message: text,
         email_html: html,
-        customer_name: meta.customerName || '',
-        submission_id: meta.submissionId || '',
-        notification_type: meta.type || '',
+        alert_header_title: templateMeta.alert_header_title,
+        alert_intro: templateMeta.alert_intro,
+        customer_name: String(meta.customerName || '').trim() || 'N/A',
+        submission_id: String(meta.submissionId || '').trim() || 'N/A',
+        notification_type: formatNotificationTypeLabel(meta.type),
+        quick_reference_text: String(quickReferenceText || '').trim() || 'No additional reference details.',
+        portal_url: PORTAL_URL,
         event_key: eventKey || '',
         subject,
         message: text,
@@ -109,7 +198,7 @@ async function sendEmailViaEmailJs({ eventKey, to, subject, text, html, meta = {
     }
 }
 
-async function queueEmailNotification({ eventKey, to, subject, textLines, htmlLines, meta = {} }) {
+async function queueEmailNotification({ eventKey, to, subject, textLines, htmlLines, quickReferenceLines = [], meta = {} }) {
     const systemSettings = await getSystemSettings(db);
     if (!systemSettings.notificationsEmailEnabled) {
         return { queued: false, reason: 'email-disabled' };
@@ -126,6 +215,10 @@ async function queueEmailNotification({ eventKey, to, subject, textLines, htmlLi
     const coreTextLines = (Array.isArray(textLines) ? textLines : [])
         .map(line => String(line || '').trim())
         .filter(Boolean);
+    const quickReferenceText = (Array.isArray(quickReferenceLines) ? quickReferenceLines : [])
+        .map((line) => String(line || '').trim())
+        .filter(Boolean)
+        .join('\n');
     const text = [`Dear ${firstName},`, '', ...coreTextLines, '', `Portal: ${PORTAL_URL}`, '', 'Best regards,', 'Admin']
         .join('\n');
     const coreHtmlLines = (Array.isArray(htmlLines) ? htmlLines : [])
@@ -215,7 +308,8 @@ async function queueEmailNotification({ eventKey, to, subject, textLines, htmlLi
             subject: safeSubject,
             text,
             html,
-            meta
+            meta,
+            quickReferenceText
         });
 
         try {
@@ -238,6 +332,7 @@ async function queueEmailNotification({ eventKey, to, subject, textLines, htmlLi
 }
 
 export async function queueViewerAssignmentEmail({ submissionId, viewerEmail, customerName, uploaderEmail }) {
+    const uploaderName = await resolveUserDisplayName(uploaderEmail);
     return queueEmailNotification({
         eventKey: `submission-assigned-viewer-${submissionId}`,
         to: viewerEmail,
@@ -245,20 +340,27 @@ export async function queueViewerAssignmentEmail({ submissionId, viewerEmail, cu
         textLines: [
             'A new submission has been assigned to you for review.',
             `Customer: ${customerName || 'N/A'}`,
-            `Uploaded by: ${uploaderEmail || 'N/A'}`,
+            `Uploaded by: ${uploaderName}`,
       'Please login to the Reviewer Dashboard to process it.'
         ],
         htmlLines: [
             'A new submission has been assigned to you for review.',
             `Customer: ${customerName || 'N/A'}`,
-            `Uploaded by: ${uploaderEmail || 'N/A'}`,
+            `Uploaded by: ${uploaderName}`,
       'Please login to the Reviewer Dashboard to process it.'
+        ],
+        quickReferenceLines: [
+            `Customer: ${customerName || 'N/A'}`,
+            'Notification Type: New Submission Assigned',
+            `Submission ID: ${submissionId || 'N/A'}`,
+            `Uploaded By: ${uploaderName}`
         ],
         meta: { type: 'submission_assigned_viewer', submissionId, customerName }
     });
 }
 
 export async function queueUploaderRejectedEmail({ submissionId, uploaderEmail, customerName, reviewerEmail, rejectionReason }) {
+    const reviewerName = await resolveUserDisplayName(reviewerEmail);
     return queueEmailNotification({
         eventKey: `submission-rejected-uploader-${submissionId}`,
         to: uploaderEmail,
@@ -266,22 +368,30 @@ export async function queueUploaderRejectedEmail({ submissionId, uploaderEmail, 
         textLines: [
             'Your submission has been rejected.',
             `Customer: ${customerName || 'N/A'}`,
-            `Rejected by: ${reviewerEmail || 'N/A'}`,
+            `Rejected by: ${reviewerName}`,
             `Reason: ${rejectionReason || 'No reason provided'}`,
             'Please login to the Uploader Dashboard to correct and re-submit.'
         ],
         htmlLines: [
             'Your submission has been rejected.',
             `Customer: ${customerName || 'N/A'}`,
-            `Rejected by: ${reviewerEmail || 'N/A'}`,
+            `Rejected by: ${reviewerName}`,
             `Reason: ${rejectionReason || 'No reason provided'}`,
             'Please login to the Uploader Dashboard to correct and re-submit.'
+        ],
+        quickReferenceLines: [
+            `Customer: ${customerName || 'N/A'}`,
+            'Notification Type: Submission Rejected',
+            `Submission ID: ${submissionId || 'N/A'}`,
+            `Rejected By: ${reviewerName}`
         ],
         meta: { type: 'submission_rejected_uploader', submissionId, customerName }
     });
 }
 
 export async function queueRsaApprovalEmail({ submissionId, rsaEmail, customerName, reviewerEmail, uploaderEmail }) {
+    const reviewerName = await resolveUserDisplayName(reviewerEmail);
+    const uploaderName = await resolveUserDisplayName(uploaderEmail);
     return queueEmailNotification({
         eventKey: `submission-approved-rsa-${submissionId}`,
         to: rsaEmail,
@@ -289,22 +399,31 @@ export async function queueRsaApprovalEmail({ submissionId, rsaEmail, customerNa
         textLines: [
             'A submission has been approved and assigned to you for RSA processing.',
             `Customer: ${customerName || 'N/A'}`,
-            `Reviewed by: ${reviewerEmail || 'N/A'}`,
-            `Uploaded by: ${uploaderEmail || 'N/A'}`,
+            `Reviewed by: ${reviewerName}`,
+            `Uploaded by: ${uploaderName}`,
             'Please login to the RSA Dashboard to continue.'
         ],
         htmlLines: [
             'A submission has been approved and assigned to you for RSA processing.',
             `Customer: ${customerName || 'N/A'}`,
-            `Reviewed by: ${reviewerEmail || 'N/A'}`,
-            `Uploaded by: ${uploaderEmail || 'N/A'}`,
+            `Reviewed by: ${reviewerName}`,
+            `Uploaded by: ${uploaderName}`,
             'Please login to the RSA Dashboard to continue.'
+        ],
+        quickReferenceLines: [
+            `Customer: ${customerName || 'N/A'}`,
+            'Notification Type: Approved Submission Assigned',
+            `Submission ID: ${submissionId || 'N/A'}`,
+            `Reviewed By: ${reviewerName}`,
+            `Uploaded By: ${uploaderName}`
         ],
         meta: { type: 'submission_approved_rsa', submissionId, customerName }
     });
 }
 
 export async function queueUploaderApprovedEmail({ submissionId, uploaderEmail, customerName, reviewerEmail, rsaEmail }) {
+    const reviewerName = await resolveUserDisplayName(reviewerEmail);
+    const rsaName = await resolveUserDisplayName(rsaEmail, 'Pending');
     return queueEmailNotification({
         eventKey: `submission-approved-uploader-${submissionId}`,
         to: uploaderEmail,
@@ -312,22 +431,30 @@ export async function queueUploaderApprovedEmail({ submissionId, uploaderEmail, 
         textLines: [
             'Your submission has been approved.',
             `Customer: ${customerName || 'N/A'}`,
-            `Approved by: ${reviewerEmail || 'N/A'}`,
-            rsaEmail ? `Assigned to RSA: ${rsaEmail}` : 'Assigned to RSA: Pending',
+            `Approved by: ${reviewerName}`,
+            rsaEmail ? `Assigned to RSA: ${rsaName}` : 'Assigned to RSA: Pending',
             'You can track progress in the Uploader Dashboard.'
         ],
         htmlLines: [
             'Your submission has been approved.',
             `Customer: ${customerName || 'N/A'}`,
-            `Approved by: ${reviewerEmail || 'N/A'}`,
-            rsaEmail ? `Assigned to RSA: ${rsaEmail}` : 'Assigned to RSA: Pending',
+            `Approved by: ${reviewerName}`,
+            rsaEmail ? `Assigned to RSA: ${rsaName}` : 'Assigned to RSA: Pending',
             'You can track progress in the Uploader Dashboard.'
+        ],
+        quickReferenceLines: [
+            `Customer: ${customerName || 'N/A'}`,
+            'Notification Type: Submission Approved',
+            `Submission ID: ${submissionId || 'N/A'}`,
+            `Approved By: ${reviewerName}`,
+            rsaEmail ? `Assigned To RSA: ${rsaName}` : 'Assigned To RSA: Pending'
         ],
         meta: { type: 'submission_approved_uploader', submissionId, customerName }
     });
 }
 
 export async function queueUploaderFinalSubmissionEmail({ submissionId, uploaderEmail, customerName, rsaEmail }) {
+    const rsaName = await resolveUserDisplayName(rsaEmail);
     return queueEmailNotification({
         eventKey: `submission-final-uploader-${submissionId}`,
         to: uploaderEmail,
@@ -335,14 +462,20 @@ export async function queueUploaderFinalSubmissionEmail({ submissionId, uploader
         textLines: [
             'RSA processing has been completed for your submission.',
             `Customer: ${customerName || 'N/A'}`,
-            `Finalized by RSA: ${rsaEmail || 'N/A'}`,
+            `Finalized by RSA: ${rsaName}`,
             'Please login to the Uploader Dashboard to view the final status.'
         ],
         htmlLines: [
             'RSA processing has been completed for your submission.',
             `Customer: ${customerName || 'N/A'}`,
-            `Finalized by RSA: ${rsaEmail || 'N/A'}`,
+            `Finalized by RSA: ${rsaName}`,
             'Please login to the Uploader Dashboard to view the final status.'
+        ],
+        quickReferenceLines: [
+            `Customer: ${customerName || 'N/A'}`,
+            'Notification Type: Final Approval Completed',
+            `Submission ID: ${submissionId || 'N/A'}`,
+            `Finalized By RSA: ${rsaName}`
         ],
         meta: { type: 'submission_final_uploader', submissionId, customerName }
     });
