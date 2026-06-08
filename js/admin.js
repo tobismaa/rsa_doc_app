@@ -1,6 +1,7 @@
 ﻿// js/admin.js - COMPLETE UPDATED VERSION WITH FIXED DOWNLOAD ALL
 import { auth, db } from './firebase-config.js';
 import { ADMIN_API_BASE_URL } from './admin-api-config.js';
+import { notifyUserPushEvent } from './push-alerts.js';
 import { formatAppDateTime, getTrustedDateKey } from './shared/app-time.js';
 import {
     collection,
@@ -2699,6 +2700,22 @@ window.approveAgentRegistration = async (agentId, btnEl = null) => {
                 agentName: selected.fullName || '',
                 performedBy: currentAdmin?.email || '',
                 timestamp: serverTimestamp()
+            });
+            await notifyUserPushEvent({
+                currentUser: auth.currentUser,
+                recipientUserId: String(selected.createdByUid || '').trim(),
+                recipientEmail: String(selected.createdBy || '').trim(),
+                eventType: 'agent_registration_approved',
+                title: 'Agent Registration Approved',
+                body: `${selected.fullName || 'Your agent'} has been approved and is now available for submissions.`,
+                clickUrl: '/dashboard.html',
+                meta: {
+                    agentId,
+                    agentName: selected.fullName || '',
+                    approvedBy: currentAdmin?.email || '',
+                    createdBy: selected.createdBy || '',
+                    createdByUid: selected.createdByUid || ''
+                }
             });
             showAgentActionSuccessModal('Agent Approval Successful', `${selected.fullName || 'Agent'} has been approved.`);
         } catch (_) {

@@ -4888,7 +4888,7 @@ async function handleAgentRegistration(e) {
     }
     const systemSettings = await getSystemSettings(db, { force: true });
     const approvalRequired = systemSettings.agentRegistrationRules?.approvalRequired !== false;
-    await addDoc(collection(db, 'agents'), {
+    const agentRef = await addDoc(collection(db, 'agents'), {
       fullName,
       contactNumber,
       accountNumber,
@@ -4907,6 +4907,7 @@ async function handleAgentRegistration(e) {
         : `${fullName} was registered successfully.`,
       clickUrl: '/admin-dashboard.html',
       meta: {
+        agentId: agentRef.id,
         fullName,
         contactNumber,
         accountNumber,

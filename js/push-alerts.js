@@ -127,3 +127,45 @@ export async function notifyAdminPushEvent({
     return { ok: false, reason: 'request-failed' };
   }
 }
+
+export async function notifyUserPushEvent({
+  currentUser,
+  recipientUserId = '',
+  recipientEmail = '',
+  eventType,
+  title,
+  body,
+  clickUrl = '/dashboard.html',
+  meta = {}
+}) {
+  try {
+    if (!currentUser || !eventType || !title || !body) return { ok: false, reason: 'missing-fields' };
+    if (!String(recipientUserId || '').trim() && !String(recipientEmail || '').trim()) {
+      return { ok: false, reason: 'missing-recipient' };
+    }
+    const settings = await getSystemSettings(db);
+    if (!settings.notificationsPushEnabled) return { ok: false, reason: 'push-disabled' };
+    const base = getEmailApiBaseUrl();
+    if (!base) return { ok: false, reason: 'missing-api-base' };
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch(`${base}/api/user/push-event`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`
+      },
+      body: JSON.stringify({
+        recipientUserId: String(recipientUserId || '').trim(),
+        recipientEmail: String(recipientEmail || '').trim(),
+        eventType: String(eventType || '').trim(),
+        title: String(title || '').trim(),
+        body: String(body || '').trim(),
+        clickUrl: String(clickUrl || '/dashboard.html').trim(),
+        meta: meta && typeof meta === 'object' ? meta : {}
+      })
+    });
+    return { ok: response.ok };
+  } catch (_) {
+    return { ok: false, reason: 'request-failed' };
+  }
+}

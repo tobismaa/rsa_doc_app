@@ -1464,6 +1464,136 @@ app.post('/api/admin/push-event', authMiddleware, async (req, res) => {
     }
 });
 
+app.post('/api/user/push-event', authMiddleware, async (req, res) => {
+    try {
+        const recipientUserId = String(req.body?.recipientUserId || '').trim();
+        const recipientEmail = safeLowerEmail(req.body?.recipientEmail);
+        const eventType = String(req.body?.eventType || '').trim().toLowerCase();
+        const title = String(req.body?.title || '').trim();
+        const body = String(req.body?.body || '').trim();
+        const clickUrl = String(req.body?.clickUrl || '/dashboard.html').trim() || '/dashboard.html';
+        const meta = req.body?.meta || {};
+
+        if ((!recipientUserId && !recipientEmail) || !eventType || !title || !body) {
+            return res.status(400).json({ ok: false, error: 'recipient, eventType, title, and body are required' });
+        }
+
+        const allowedEventTypes = new Set([
+            'agent_registration_approved'
+        ]);
+        if (!allowedEventTypes.has(eventType)) {
+            return res.status(400).json({ ok: false, error: 'Unsupported user push event type' });
+        }
+
+        let targetDoc = null;
+        if (recipientUserId) {
+            const byIdSnap = await adminDb.collection('users').doc(recipientUserId).get();
+            if (byIdSnap.exists) {
+                targetDoc = { id: byIdSnap.id, ...(byIdSnap.data() || {}) };
+            }
+        }
+        if (!targetDoc && recipientEmail) {
+            const byEmailMap = await resolveUserMapByEmail([recipientEmail]);
+            targetDoc = byEmailMap.get(recipientEmail) || null;
+        }
+
+        if (!targetDoc) {
+            return res.status(404).json({ ok: false, error: 'Recipient user not found' });
+        }
+
+        const role = normalizeRole(targetDoc.role);
+        const status = String(targetDoc.status || '').toLowerCase();
+        if (role === 'super_admin' || status === 'pending' || status === 'deactivated') {
+            return res.json({ ok: true, sent: 0, reason: 'recipient-not-eligible' });
+        }
+
+        const tokenOwners = [];
+        const tokens = Array.isArray(targetDoc.fcmTokens) ? targetDoc.fcmTokens : [];
+        tokens.forEach((token) => {
+            const cleaned = String(token || '').trim();
+            if (cleaned) {
+                tokenOwners.push({
+                    email: safeLowerEmail(targetDoc.email),
+                    userId: targetDoc.id || recipientUserId,
+                    token: cleaned
+                });
+            }
+        });
+
+        const uniqueMap = new Map();
+        tokenOwners.forEach((entry) => {
+            if (!uniqueMap.has(entry.token)) uniqueMap.set(entry.token, entry);
+        });
+        const uniqueOwners = Array.from(uniqueMap.values());
+        const pushTokens = uniqueOwners.map((entry) => entry.token);
+
+        if (pushTokens.length === 0) {
+            return res.json({
+                ok: true,
+                sent: 0,
+                reason: 'no-device-tokens',
+                debug: {
+                    recipientUserId: targetDoc.id || recipientUserId,
+                    recipientEmail: safeLowerEmail(targetDoc.email) || recipientEmail
+                }
+            });
+        }
+
+        const response = await admin.messaging().sendEachForMulticast({
+            tokens: pushTokens,
+            data: {
+                eventType,
+                clickUrl,
+                title,
+                body,
+                meta: JSON.stringify(meta || {})
+            },
+            webpush: {
+                fcmOptions: { link: clickUrl }
+            }
+        });
+
+        const badTokens = [];
+        response.responses.forEach((r, idx) => {
+            if (r.success) return;
+            const code = String(r.error?.code || '');
+            if (
+                code.includes('registration-token-not-registered') ||
+                code.includes('invalid-argument')
+            ) {
+                badTokens.push(uniqueOwners[idx]);
+            }
+        });
+
+        for (const bad of badTokens) {
+            if (!bad?.userId) continue;
+            try {
+                const ref = adminDb.collection('users').doc(bad.userId);
+                const snap = await ref.get();
+                if (!snap.exists) continue;
+                const arr = Array.isArray(snap.data()?.fcmTokens) ? snap.data().fcmTokens : [];
+                const next = arr.filter((t) => String(t || '').trim() !== bad.token);
+                await ref.set({ fcmTokens: next, fcmTokenPrunedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+            } catch (_) {}
+        }
+
+        return res.json({
+            ok: true,
+            sent: response.successCount,
+            failed: response.failureCount,
+            debug: {
+                recipientUserId: targetDoc.id || recipientUserId,
+                recipientEmail: safeLowerEmail(targetDoc.email) || recipientEmail
+            }
+        });
+    } catch (err) {
+        return res.status(500).json({
+            ok: false,
+            error: String(err?.message || 'Failed to send user push event')
+        });
+    }
+});
+
 let lastScheduledMinuteKey = '';
 
 async function tickScheduledReportSender() {
