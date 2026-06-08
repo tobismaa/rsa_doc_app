@@ -117,7 +117,7 @@ function getAlertTemplateMeta(type, subject) {
 
 async function resolveUserDisplayName(email, fallback = 'N/A', preferredName = '') {
     const directName = String(preferredName || '').trim();
-    if (directName) return directName;
+    if (directName && !normalizeEmail(directName)) return directName;
     const normalized = normalizeEmail(email);
     if (!normalized) return fallback;
     if (userDisplayNameCache.has(normalized)) {

@@ -123,8 +123,8 @@ try {
 
   const messaging = firebase.messaging();
   messaging.onBackgroundMessage((payload) => {
-    const title = String(payload?.notification?.title || 'New Chat Message');
-    const body = String(payload?.notification?.body || 'You have a new message');
+    const title = String(payload?.data?.title || payload?.notification?.title || 'New Chat Message');
+    const body = String(payload?.data?.body || payload?.notification?.body || 'You have a new message');
     const clickUrl = String(payload?.data?.clickUrl || payload?.fcmOptions?.link || '/dashboard.html');
     incrementBadgeCount(1).catch(() => {});
     self.registration.showNotification(title, {

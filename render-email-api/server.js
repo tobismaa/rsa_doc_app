@@ -1047,20 +1047,14 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
 
         const response = await admin.messaging().sendEachForMulticast({
             tokens,
-            notification: { title, body },
             data: {
                 submissionId,
-                clickUrl
+                clickUrl,
+                title,
+                body
             },
             webpush: {
-                fcmOptions: { link: clickUrl },
-                notification: {
-                    title,
-                    body,
-          icon: '/favicon.png?v=20260416f',
-          badge: '/icons/icon-192.png?v=20260416f',
-                    data: { url: clickUrl }
-                }
+                fcmOptions: { link: clickUrl }
             }
         });
 
@@ -1192,22 +1186,16 @@ app.post('/api/submission/status-push', authMiddleware, async (req, res) => {
 
         const response = await admin.messaging().sendEachForMulticast({
             tokens,
-            notification: { title, body },
             data: {
                 submissionId,
                 clickUrl,
+                title,
+                body,
                 newStatus,
                 actionLabel: actionReadable
             },
             webpush: {
-                fcmOptions: { link: clickUrl },
-                notification: {
-                    title,
-                    body,
-          icon: '/favicon.png?v=20260416f',
-          badge: '/icons/icon-192.png?v=20260416f',
-                    data: { url: clickUrl }
-                }
+                fcmOptions: { link: clickUrl }
             }
         });
 
@@ -1283,7 +1271,6 @@ app.post('/api/admin/push-event', authMiddleware, async (req, res) => {
 
         const response = await admin.messaging().sendEachForMulticast({
             tokens,
-            notification: { title, body },
             data: {
                 eventType,
                 clickUrl,
@@ -1292,14 +1279,7 @@ app.post('/api/admin/push-event', authMiddleware, async (req, res) => {
                 meta: JSON.stringify(meta || {})
             },
             webpush: {
-                fcmOptions: { link: clickUrl },
-                notification: {
-                    title,
-                    body,
-                    icon: '/favicon.png?v=20260416f',
-                    badge: '/icons/icon-192.png?v=20260416f',
-                    data: { url: clickUrl }
-                }
+                fcmOptions: { link: clickUrl }
             }
         });
 

@@ -1,5 +1,5 @@
 import { getMessaging, getToken, isSupported as isMessagingSupported } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging.js';
-import { arrayUnion } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
+import { arrayRemove, arrayUnion } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
 import { app, db, doc, updateDoc, serverTimestamp } from './firebase-config.js';
 import { EMAIL_API_BASE_URL, FCM_WEB_VAPID_KEY } from './email-api-config.js';
 import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
@@ -22,6 +22,8 @@ function getServiceWorkerUrl() {
     : '/service-worker.js?v=20260508a';
 }
 
+const FCM_LOCAL_TOKEN_KEY = 'cmbank_fcm_token';
+
 export async function registerPushTokenForCurrentUser(currentUser, profileDocId) {
   try {
     if (!currentUser || !profileDocId) return { ok: false, reason: 'missing-context' };
@@ -41,11 +43,20 @@ export async function registerPushTokenForCurrentUser(currentUser, profileDocId)
     const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: reg });
     if (!token) return { ok: false, reason: 'empty-token' };
 
+    const previousToken = String(localStorage.getItem(FCM_LOCAL_TOKEN_KEY) || '').trim();
+    if (previousToken && previousToken !== token) {
+      await updateDoc(doc(db, 'users', profileDocId), {
+        fcmTokens: arrayRemove(previousToken),
+        fcmTokenPrunedAt: serverTimestamp()
+      }).catch(() => {});
+    }
+
     await updateDoc(doc(db, 'users', profileDocId), {
       fcmTokens: arrayUnion(token),
       fcmLastTokenAt: serverTimestamp(),
       fcmLastTokenPlatform: navigator.userAgent || ''
     });
+    localStorage.setItem(FCM_LOCAL_TOKEN_KEY, token);
     return { ok: true, token };
   } catch (error) {
     return { ok: false, reason: String(error?.message || 'registration-failed') };
