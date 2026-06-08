@@ -115,7 +115,9 @@ function getAlertTemplateMeta(type, subject) {
     }
 }
 
-async function resolveUserDisplayName(email, fallback = 'N/A') {
+async function resolveUserDisplayName(email, fallback = 'N/A', preferredName = '') {
+    const directName = String(preferredName || '').trim();
+    if (directName) return directName;
     const normalized = normalizeEmail(email);
     if (!normalized) return fallback;
     if (userDisplayNameCache.has(normalized)) {
@@ -219,7 +221,7 @@ async function queueEmailNotification({ eventKey, to, subject, textLines, htmlLi
         .map((line) => String(line || '').trim())
         .filter(Boolean)
         .join('\n');
-    const text = [`Dear ${firstName},`, '', ...coreTextLines, '', `Portal: ${PORTAL_URL}`, '', 'Best regards,', 'Admin']
+    const text = [`Dear ${firstName},`, '', ...coreTextLines, '', 'Best regards,', 'Admin']
         .join('\n');
     const coreHtmlLines = (Array.isArray(htmlLines) ? htmlLines : [])
         .map(line => `<p style="margin:0 0 12px;color:#1f2937;font-size:15px;line-height:1.6;">${escapeHtml(line)}</p>`)
@@ -331,8 +333,8 @@ async function queueEmailNotification({ eventKey, to, subject, textLines, htmlLi
     }
 }
 
-export async function queueViewerAssignmentEmail({ submissionId, viewerEmail, customerName, uploaderEmail }) {
-    const uploaderName = await resolveUserDisplayName(uploaderEmail);
+export async function queueViewerAssignmentEmail({ submissionId, viewerEmail, customerName, uploaderEmail, uploaderName = '' }) {
+    const resolvedUploaderName = await resolveUserDisplayName(uploaderEmail, 'N/A', uploaderName);
     return queueEmailNotification({
         eventKey: `submission-assigned-viewer-${submissionId}`,
         to: viewerEmail,
@@ -340,20 +342,20 @@ export async function queueViewerAssignmentEmail({ submissionId, viewerEmail, cu
         textLines: [
             'A new submission has been assigned to you for review.',
             `Customer: ${customerName || 'N/A'}`,
-            `Uploaded by: ${uploaderName}`,
+            `Uploaded by: ${resolvedUploaderName}`,
       'Please login to the Reviewer Dashboard to process it.'
         ],
         htmlLines: [
             'A new submission has been assigned to you for review.',
             `Customer: ${customerName || 'N/A'}`,
-            `Uploaded by: ${uploaderName}`,
+            `Uploaded by: ${resolvedUploaderName}`,
       'Please login to the Reviewer Dashboard to process it.'
         ],
         quickReferenceLines: [
             `Customer: ${customerName || 'N/A'}`,
             'Notification Type: New Submission Assigned',
             `Submission ID: ${submissionId || 'N/A'}`,
-            `Uploaded By: ${uploaderName}`
+            `Uploaded By: ${resolvedUploaderName}`
         ],
         meta: { type: 'submission_assigned_viewer', submissionId, customerName }
     });

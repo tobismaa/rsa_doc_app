@@ -3305,7 +3305,8 @@ async function submitCustomer() {
           submissionId: subRef.id,
           viewerEmail: assignedEmail,
           customerName,
-          uploaderEmail: currentUser?.email || ''
+          uploaderEmail: currentUser?.email || '',
+          uploaderName: currentUserProfile?.fullName || currentUser?.displayName || ''
         }).catch((emailErr) => {
           return { queued: true, sent: false, reason: 'send-failed' };
         });
