@@ -264,34 +264,59 @@ function buildScheduledReportEmailHtml({ bodyText, reportDateKey, sendTime }) {
         .split(/\r?\n/)
         .map((line) => line.trim())
         .filter(Boolean)
-        .map((line) => `<p style="margin:0 0 12px;color:#1f2937;font-size:15px;line-height:1.6;">${escapeHtml(line)}</p>`)
+        .map((line) => `<p style="margin:0 0 14px;color:#1f2937;font-size:15px;line-height:1.75;">${escapeHtml(line)}</p>`)
         .join('');
 
     return `
-<div style="margin:0;padding:20px;background:#f4f7fb;font-family:Segoe UI,Arial,sans-serif;">
-  <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #dbe4f0;border-radius:14px;overflow:hidden;">
-    <div style="background:linear-gradient(135deg,#003366 0%,#0b5cab 100%);padding:18px 22px;">
-      <div style="color:#e2ecff;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;">CMBank RSA</div>
-      <h2 style="margin:6px 0 0;color:#ffffff;font-size:21px;line-height:1.3;">Daily Report - ${escapeHtml(reportDateKey)}</h2>
-    </div>
-    <div style="padding:22px;">
-      ${paragraphs}
-      <p style="margin:16px 0 0;color:#475569;font-size:13px;line-height:1.6;">
-        Scheduled send time: <strong>${escapeHtml(sendTime)}</strong> Africa/Lagos<br>
-        Report date covered: <strong>${escapeHtml(reportDateKey)}</strong>
+<div style="margin:0;padding:32px 18px;background:#edf4fb;font-family:'Segoe UI',Arial,sans-serif;">
+  <div style="max-width:680px;margin:0 auto;background:#ffffff;border:1px solid #d7e3f2;border-radius:24px;overflow:hidden;box-shadow:0 18px 50px rgba(15,59,103,0.10);">
+    <div style="background:linear-gradient(135deg,#032b52 0%,#0f5fa8 58%,#18a0a7 100%);padding:28px 30px 24px;">
+      <div style="display:inline-block;padding:6px 12px;border-radius:999px;background:rgba(255,255,255,0.16);color:#e0efff;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;">
+        CMBank RSA Portal
+      </div>
+      <h1 style="margin:18px 0 8px;color:#ffffff;font-size:28px;line-height:1.2;font-weight:800;">
+        Daily Report
+      </h1>
+      <p style="margin:0;color:#d8ebff;font-size:15px;line-height:1.6;max-width:420px;">
+        Your previous-day operational report is ready and attached for review.
       </p>
+      <div style="margin-top:22px;display:inline-block;padding:10px 14px;border-radius:14px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.18);color:#ffffff;font-size:13px;font-weight:600;">
+        Report Date: ${escapeHtml(reportDateKey)}
+      </div>
+    </div>
+    <div style="height:6px;background:linear-gradient(90deg,#f59e0b 0%,#10b981 50%,#2563eb 100%);"></div>
+    <div style="padding:28px 30px 14px;">
+      <div style="padding:18px 20px;border:1px solid #dbe7f5;border-radius:18px;background:linear-gradient(180deg,#f9fbfe 0%,#f4f8fd 100%);">
+        <div style="margin:0 0 12px;color:#0f3b67;font-size:13px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;">
+          Message
+        </div>
+        ${paragraphs || '<p style="margin:0;color:#1f2937;font-size:15px;line-height:1.75;">Please find the attached daily report.</p>'}
+      </div>
+      <div style="margin-top:22px;padding:18px 20px;border-radius:18px;background:#0f172a;">
+        <div style="color:#e2e8f0;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px;">
+          Attachment Included
+        </div>
+        <div style="color:#cbd5e1;font-size:14px;line-height:1.7;">
+          The Excel report workbook is attached to this email for download and review.
+        </div>
+      </div>
+    </div>
+    <div style="padding:18px 30px 26px;border-top:1px solid #e6eef8;background:#fbfdff;">
+      <div style="color:#64748b;font-size:12px;line-height:1.7;">
+        Generated automatically by the CMBank RSA reporting workflow.
+      </div>
     </div>
   </div>
 </div>`;
 }
 
-async function reserveScheduledReportRun(reportDateKey, trigger) {
+async function reserveScheduledReportRun(reportDateKey, trigger, forceResend = false) {
     const runRef = adminDb.collection('scheduledReportRuns').doc(reportDateKey);
     let shouldSend = false;
     await adminDb.runTransaction(async (tx) => {
         const snap = await tx.get(runRef);
         const data = snap.exists ? (snap.data() || {}) : {};
-        if (String(data.status || '').toLowerCase() === 'sent') {
+        if (!forceResend && String(data.status || '').toLowerCase() === 'sent') {
             return;
         }
         shouldSend = true;
@@ -299,14 +324,17 @@ async function reserveScheduledReportRun(reportDateKey, trigger) {
             reportDateKey,
             status: 'sending',
             trigger,
+            resendRequested: forceResend === true,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            startedAt: data.startedAt || admin.firestore.FieldValue.serverTimestamp()
+            startedAt: data.startedAt || admin.firestore.FieldValue.serverTimestamp(),
+            resentAt: forceResend === true ? admin.firestore.FieldValue.serverTimestamp() : data.resentAt || null,
+            resendCount: forceResend === true ? Number(data.resendCount || 0) + 1 : Number(data.resendCount || 0)
         }, { merge: true });
     });
     return { shouldSend, runRef };
 }
 
-async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual' }) {
+async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', forceResend = false }) {
     const normalizedDateKey = String(reportDateKey || '').trim() || getPreviousDateKeyInLagos();
     const settingsSnap = await adminDb.collection('settings').doc('system').get();
     const settings = settingsSnap.exists ? (settingsSnap.data() || {}) : {};
@@ -328,7 +356,7 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual' })
         return { ok: false, skipped: true, reason: 'no-recipients' };
     }
 
-    const { shouldSend, runRef } = await reserveScheduledReportRun(normalizedDateKey, trigger);
+    const { shouldSend, runRef } = await reserveScheduledReportRun(normalizedDateKey, trigger, forceResend);
     if (!shouldSend) {
         return { ok: true, skipped: true, reason: 'already-sent', reportDateKey: normalizedDateKey };
     }
@@ -348,7 +376,7 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual' })
         const attachmentFileName = `cmbank_daily_report_${normalizedDateKey}.xlsx`;
         const attachmentDataUri = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${workbookBuffer.toString('base64')}`;
         const html = buildScheduledReportEmailHtml({ bodyText, reportDateKey: normalizedDateKey, sendTime });
-        const text = `${bodyText}\n\nReport date covered: ${normalizedDateKey}\nScheduled send time: ${sendTime} Africa/Lagos`;
+        const text = bodyText;
 
         let sentCount = 0;
         const failures = [];
@@ -372,6 +400,7 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual' })
             status: failures.length ? 'partial' : 'sent',
             reportDateKey: normalizedDateKey,
             trigger,
+            resendRequested: forceResend === true,
             sendTime,
             recipients,
             sentCount,
@@ -554,9 +583,11 @@ app.get('/api/scheduled-report/status', authMiddleware, requireAdminOrSuperAdmin
 app.post('/api/scheduled-report/send-now', authMiddleware, requireAdminOrSuperAdminRole, async (req, res) => {
     try {
         const reportDateKey = String(req.body?.reportDateKey || '').trim() || getPreviousDateKeyInLagos();
+        const forceResend = req.body?.forceResend === true;
         const result = await sendScheduledReportForDate({
             reportDateKey,
-            trigger: `manual:${normalizeEmail(req.user?.email) || 'admin'}`
+            trigger: `manual:${normalizeEmail(req.user?.email) || 'admin'}`,
+            forceResend
         });
         if (result?.skipped) {
             const reason = String(result?.reason || 'scheduled-report-skipped');

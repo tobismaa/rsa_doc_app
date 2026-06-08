@@ -3738,7 +3738,8 @@ document.getElementById('sendScheduledReportNowBtn')?.addEventListener('click', 
         }
         setScheduledReportSendStatus('Sending previous day report now...', 'info', describeScheduledReportStatus(status));
         const idToken = await currentUser.getIdToken(true);
-        const { response, data: result } = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-now`, {
+        let forceResend = false;
+        let requestResult = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-now`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -3746,6 +3747,33 @@ document.getElementById('sendScheduledReportNowBtn')?.addEventListener('click', 
             },
             body: JSON.stringify({})
         }, 60000);
+        if (requestResult.response.status === 409 || String(requestResult.data?.error || '').trim() === 'already-sent') {
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = originalHtml;
+            }
+            const confirmed = window.confirm('Previous day report has already been sent. Do you still want to resend it?');
+            if (!confirmed) {
+                setScheduledReportSendStatus('Manual resend cancelled. The previous day report had already been sent earlier.', 'info', describeScheduledReportStatus(status));
+                showNotification('Scheduled report resend cancelled.', 'info');
+                return;
+            }
+            forceResend = true;
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Resending...';
+            }
+            setScheduledReportSendStatus('Resending previous day report on your confirmation...', 'warning', describeScheduledReportStatus(status));
+            requestResult = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-now`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`
+                },
+                body: JSON.stringify({ forceResend: true })
+            }, 60000);
+        }
+        const { response, data: result } = requestResult;
         if (!response.ok || result?.ok === false) {
             throw new Error(String(result?.error || result?.reason || 'Failed to send scheduled report'));
         }
@@ -3763,15 +3791,17 @@ document.getElementById('sendScheduledReportNowBtn')?.addEventListener('click', 
         }
         setScheduledReportSendStatus(
             failedCount > 0
-                ? 'Scheduled report was sent, but some recipients failed.'
-                : 'Scheduled report sent successfully.',
+                ? (forceResend ? 'Scheduled report was resent, but some recipients failed.' : 'Scheduled report was sent, but some recipients failed.')
+                : (forceResend ? 'Scheduled report resent successfully.' : 'Scheduled report sent successfully.'),
             failedCount > 0 ? 'warning' : 'success',
             detailLines
         );
         showNotification(
             failedCount > 0
                 ? `Scheduled report sent with ${sentCount} success and ${failedCount} failure(s).`
-                : `Scheduled report sent successfully to ${sentCount} recipient(s).`,
+                : (forceResend
+                    ? `Scheduled report resent successfully to ${sentCount} recipient(s).`
+                    : `Scheduled report sent successfully to ${sentCount} recipient(s).`),
             failedCount > 0 ? 'warning' : 'success'
         );
     } catch (error) {
