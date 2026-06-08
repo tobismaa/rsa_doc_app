@@ -63,6 +63,83 @@ function getEmailApiBaseUrl() {
     return configured.replace(/\/+$/, '');
 }
 
+function setScheduledReportSendStatus(message = '', type = 'info', details = []) {
+    const host = document.getElementById('scheduledReportSendStatus');
+    if (!host) return;
+    const safeType = ['success', 'error', 'warning', 'info'].includes(type) ? type : 'info';
+    const toneMap = {
+        success: { border: '#86efac', background: '#f0fdf4', color: '#166534', title: 'Sender Ready' },
+        error: { border: '#fca5a5', background: '#fef2f2', color: '#991b1b', title: 'Sender Error' },
+        warning: { border: '#fcd34d', background: '#fffbeb', color: '#92400e', title: 'Sender Attention' },
+        info: { border: '#bfdbfe', background: '#eff6ff', color: '#1d4ed8', title: 'Sender Info' }
+    };
+    if (!String(message || '').trim() && (!Array.isArray(details) || !details.length)) {
+        host.style.display = 'none';
+        host.innerHTML = '';
+        return;
+    }
+    const tone = toneMap[safeType];
+    host.style.display = 'block';
+    host.style.borderColor = tone.border;
+    host.style.background = tone.background;
+    host.style.color = tone.color;
+    host.innerHTML = `
+        <div style="font-weight:700;margin-bottom:${details.length ? '6px' : '0'};">${escapeHtml(tone.title)}</div>
+        <div>${escapeHtml(message)}</div>
+        ${details.length ? `<div style="margin-top:8px;">${details.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>` : ''}
+    `;
+}
+
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 20000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        const data = await response.json().catch(() => ({}));
+        return { response, data };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function getScheduledReportBackendStatus() {
+    const apiBaseUrl = getEmailApiBaseUrl();
+    if (!apiBaseUrl) {
+        throw new Error('Scheduled report sender backend URL is not configured.');
+    }
+    if (!currentUser) {
+        throw new Error('You must be signed in to verify sender status.');
+    }
+    const idToken = await currentUser.getIdToken(true);
+    const { response, data } = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/status`, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${idToken}`
+        }
+    }, 15000);
+    if (!response.ok || data?.ok === false) {
+        throw new Error(String(data?.error || 'Failed to check scheduled report sender status.'));
+    }
+    return data;
+}
+
+function describeScheduledReportStatus(status = {}) {
+    const details = [
+        `Report date: ${String(status.reportDateKey || '-').trim() || '-'}`,
+        `Lagos time now: ${String(status.currentLagosTime || '-').trim() || '-'}`,
+        `Configured send time: ${String(status.sendTime || '-').trim() || '-'}`,
+        `Recipients loaded: ${Array.isArray(status.recipients) ? status.recipients.length : 0}`,
+        `EmailJS backend config: ${status.emailJsConfigured === true ? 'Ready' : 'Missing or incomplete'}`
+    ];
+    const lastRun = status.lastRun || null;
+    if (lastRun) {
+        details.push(`Last run status: ${String(lastRun.status || '-').trim() || '-'}`);
+        if (lastRun.sentCount !== undefined) details.push(`Last run sent count: ${Number(lastRun.sentCount || 0)}`);
+        if (lastRun.failedCount !== undefined) details.push(`Last run failed count: ${Number(lastRun.failedCount || 0)}`);
+    }
+    return details;
+}
+
 const ROLE_PERMISSION_FIELDS = [
     { key: 'uploaderCanUpload', label: 'Uploader Can Upload' },
     { key: 'reviewerCanApprove', label: 'Reviewer Can Approve' },
@@ -3600,38 +3677,97 @@ document.getElementById('addAllScheduledReportRecipientsBtn')?.addEventListener(
 document.getElementById('settingScheduledReportRecipients')?.addEventListener('input', () => {
     refreshScheduledReportRecipientPicker();
 });
+document.getElementById('checkScheduledReportStatusBtn')?.addEventListener('click', async () => {
+    const button = document.getElementById('checkScheduledReportStatusBtn');
+    const originalHtml = button?.innerHTML || '';
+    try {
+        setScheduledReportSendStatus('Checking scheduled report sender...', 'info');
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
+        }
+        const status = await getScheduledReportBackendStatus();
+        if (status.enabled !== true) {
+            setScheduledReportSendStatus('Scheduled report sender is reachable, but daily report email is disabled in settings.', 'warning', describeScheduledReportStatus(status));
+            return;
+        }
+        if (!Array.isArray(status.recipients) || !status.recipients.length) {
+            setScheduledReportSendStatus('Scheduled report sender is reachable, but no recipients are configured.', 'warning', describeScheduledReportStatus(status));
+            return;
+        }
+        setScheduledReportSendStatus('Scheduled report sender is connected and ready.', 'success', describeScheduledReportStatus(status));
+    } catch (error) {
+        const message = String(error?.name === 'AbortError' ? 'Timed out while checking sender status.' : (error?.message || 'Failed to check sender status.'));
+        setScheduledReportSendStatus(message, 'error');
+        showNotification(message, 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+});
 document.getElementById('sendScheduledReportNowBtn')?.addEventListener('click', async () => {
-    const apiBaseUrl = getEmailApiBaseUrl();
-    if (!apiBaseUrl) {
-        showNotification('Scheduled report sender backend URL is not configured.', 'warning');
-        return;
-    }
-    if (!currentUser) {
-        showNotification('You must be signed in to trigger the scheduled report.', 'warning');
-        return;
-    }
     const button = document.getElementById('sendScheduledReportNowBtn');
     const originalHtml = button?.innerHTML || '';
     try {
+        setScheduledReportSendStatus('Running preflight checks before sending previous day report...', 'info');
+        const status = await getScheduledReportBackendStatus();
+        if (status.enabled !== true) {
+            const message = 'Scheduled report email is disabled in settings.';
+            setScheduledReportSendStatus(message, 'warning', describeScheduledReportStatus(status));
+            showNotification(message, 'warning');
+            return;
+        }
+        if (!Array.isArray(status.recipients) || !status.recipients.length) {
+            const message = 'No scheduled report recipients are configured.';
+            setScheduledReportSendStatus(message, 'warning', describeScheduledReportStatus(status));
+            showNotification(message, 'warning');
+            return;
+        }
+        const apiBaseUrl = getEmailApiBaseUrl();
+        if (!apiBaseUrl) {
+            throw new Error('Scheduled report sender backend URL is not configured.');
+        }
+        if (!currentUser) {
+            throw new Error('You must be signed in to trigger the scheduled report.');
+        }
         if (button) {
             button.disabled = true;
             button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
         }
-        const idToken = await currentUser.getIdToken();
-        const response = await fetch(`${apiBaseUrl}/api/scheduled-report/send-now`, {
+        setScheduledReportSendStatus('Sending previous day report now...', 'info', describeScheduledReportStatus(status));
+        const idToken = await currentUser.getIdToken(true);
+        const { response, data: result } = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-now`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${idToken}`
             },
             body: JSON.stringify({})
-        });
-        const result = await response.json().catch(() => ({}));
+        }, 60000);
         if (!response.ok || result?.ok === false) {
-            throw new Error(String(result?.error || 'Failed to send scheduled report'));
+            throw new Error(String(result?.error || result?.reason || 'Failed to send scheduled report'));
         }
         const sentCount = Number(result?.sentCount || 0);
         const failedCount = Number(result?.failedCount || 0);
+        const detailLines = [
+            `Report date sent: ${String(result?.reportDateKey || status.reportDateKey || '-').trim() || '-'}`,
+            `Successful recipients: ${sentCount}`,
+            `Failed recipients: ${failedCount}`
+        ];
+        if (Array.isArray(result?.failures)) {
+            result.failures.slice(0, 5).forEach((entry) => {
+                detailLines.push(`${String(entry?.recipient || 'Recipient')}: ${String(entry?.error || 'failed')}`);
+            });
+        }
+        setScheduledReportSendStatus(
+            failedCount > 0
+                ? 'Scheduled report was sent, but some recipients failed.'
+                : 'Scheduled report sent successfully.',
+            failedCount > 0 ? 'warning' : 'success',
+            detailLines
+        );
         showNotification(
             failedCount > 0
                 ? `Scheduled report sent with ${sentCount} success and ${failedCount} failure(s).`
@@ -3639,7 +3775,9 @@ document.getElementById('sendScheduledReportNowBtn')?.addEventListener('click', 
             failedCount > 0 ? 'warning' : 'success'
         );
     } catch (error) {
-        showNotification(String(error?.message || 'Failed to send scheduled report'), 'error');
+        const message = String(error?.name === 'AbortError' ? 'Timed out while sending scheduled report.' : (error?.message || 'Failed to send scheduled report'));
+        setScheduledReportSendStatus(message, 'error');
+        showNotification(message, 'error');
     } finally {
         if (button) {
             button.disabled = false;

@@ -24,6 +24,7 @@ const allowedTypes = new Set([
 const EMAILJS_PUBLIC_KEY = String(process.env.EMAILJS_PUBLIC_KEY || '').trim();
 const EMAILJS_SERVICE_ID = String(process.env.EMAILJS_SERVICE_ID || '').trim();
 const EMAILJS_TEMPLATE_ID = String(process.env.EMAILJS_TEMPLATE_ID || '').trim();
+const EMAILJS_REPORT_TEMPLATE_ID = String(process.env.EMAILJS_REPORT_TEMPLATE_ID || EMAILJS_TEMPLATE_ID || '').trim();
 const EMAILJS_PRIVATE_KEY = String(process.env.EMAILJS_PRIVATE_KEY || '').trim();
 const EMAILJS_ATTACHMENT_PARAM = String(process.env.EMAILJS_ATTACHMENT_PARAM || 'report_attachment').trim() || 'report_attachment';
 const EMAILJS_ATTACHMENT_FILENAME_PARAM = String(process.env.EMAILJS_ATTACHMENT_FILENAME_PARAM || 'report_attachment_filename').trim() || 'report_attachment_filename';
@@ -217,7 +218,7 @@ app.get('/api/server-time', (_req, res) => {
 });
 
 function isEmailJsConfigured() {
-    return Boolean(EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID);
+    return Boolean(EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_REPORT_TEMPLATE_ID);
 }
 
 async function sendEmailViaEmailJs({ to, subject, text, html, attachmentDataUri, attachmentFileName }) {
@@ -237,7 +238,7 @@ async function sendEmailViaEmailJs({ to, subject, text, html, attachmentDataUri,
 
     const payload = {
         service_id: EMAILJS_SERVICE_ID,
-        template_id: EMAILJS_TEMPLATE_ID,
+        template_id: EMAILJS_REPORT_TEMPLATE_ID,
         user_id: EMAILJS_PUBLIC_KEY,
         template_params: templateParams
     };
@@ -536,6 +537,7 @@ app.get('/api/scheduled-report/status', authMiddleware, requireAdminOrSuperAdmin
             currentLagosDateKey: getLagosDateKey(),
             currentLagosTime: getLagosTimeKey(),
             enabled: scheduled.enabled === true,
+            emailJsConfigured: isEmailJsConfigured(),
             sendTime: String(scheduled.sendTime || '08:00').trim() || '08:00',
             reportDateMode: String(scheduled.reportDateMode || 'previous_day').trim() || 'previous_day',
             recipients: normalizeEmailList(scheduled.recipients || []),
@@ -556,6 +558,11 @@ app.post('/api/scheduled-report/send-now', authMiddleware, requireAdminOrSuperAd
             reportDateKey,
             trigger: `manual:${normalizeEmail(req.user?.email) || 'admin'}`
         });
+        if (result?.skipped) {
+            const reason = String(result?.reason || 'scheduled-report-skipped');
+            const statusCode = reason === 'already-sent' ? 409 : 400;
+            return res.status(statusCode).json({ ok: false, ...result, error: reason });
+        }
         return res.json({ ok: true, ...result });
     } catch (err) {
         return res.status(500).json({

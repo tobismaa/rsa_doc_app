@@ -1,5 +1,5 @@
 // Leave empty to use Firebase's built-in password reset email flow.
-export const EMAIL_API_BASE_URL = '';
+export const EMAIL_API_BASE_URL = 'https://rsa-email-api.onrender.com';
 
 // Firebase Cloud Messaging Web Push certificate key pair (public key)
 // Firebase Console -> Project Settings -> Cloud Messaging -> Web configuration
