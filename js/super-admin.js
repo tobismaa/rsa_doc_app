@@ -989,7 +989,6 @@ function buildDailyReportDefinition(reportDate) {
     }
 
     const submittedRecords = allSubmissions.filter((sub) => String(sub.status || '').toLowerCase() !== 'draft');
-    const uploaderOutstandingRecords = submittedRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending');
     const reviewerOutstandingRecords = submittedRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending');
     const rsaOutstandingRecords = submittedRecords.filter((sub) => {
         const status = String(sub.status || '').toLowerCase();
@@ -1022,8 +1021,7 @@ function buildDailyReportDefinition(reportDate) {
                 title: `Uploader Report - ${dateKey}`,
                 summaryRows: [
                     ['Total Uploaded', uploaderRecords.length],
-                    ['Pending', uploaderRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length],
-                    ['Total Outstanding', uploaderOutstandingRecords.length]
+                    ['Pending', uploaderRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length]
                 ],
                 rows: uploaderRows,
                 excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Uploaded Time', 'Reviewer Time', 'Reject Reason', 'Reject Count'],

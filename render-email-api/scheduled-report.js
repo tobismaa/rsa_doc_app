@@ -317,10 +317,6 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
 
     const scope = normalizeReportScope({ reportDateKey, rangeStartDateKey, rangeEndDateKey });
     const submittedRecords = submissions.filter((sub) => String(sub.status || '').toLowerCase() !== 'draft');
-    const uploaderOutstandingRecords = submittedRecords.filter((sub) => {
-        const status = String(sub.status || '').toLowerCase();
-        return status === 'pending';
-    });
     const reviewerOutstandingRecords = submittedRecords.filter((sub) => {
         const status = String(sub.status || '').toLowerCase();
         return status === 'pending';
@@ -360,8 +356,7 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
                 reportTitle: `Uploader Report - ${scope.label}`,
                 summaryRows: [
                     ['Total Uploaded', uploaderRecords.length],
-                    ['Pending', uploaderRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length],
-                    ['Total Outstanding', uploaderOutstandingRecords.length]
+                    ['Pending', uploaderRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length]
                 ],
                 groupRows: buildUploaderSheetRows(uploaderRecords, usersByEmail, scope.includeDateColumn).sort(compareGroupedRows),
                 tableHeaders: [...dateHeaders, 'Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Uploaded Time', 'Reviewer Time', 'Reject Reason', 'Reject Count'],
