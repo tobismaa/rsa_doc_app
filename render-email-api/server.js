@@ -221,7 +221,7 @@ function isEmailJsConfigured() {
     return Boolean(EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_REPORT_TEMPLATE_ID);
 }
 
-async function sendEmailViaEmailJs({ to, subject, text, html, attachmentDataUri, attachmentFileName }) {
+async function sendEmailViaEmailJs({ to, subject, text, reportDateKey, attachmentDataUri, attachmentFileName }) {
     if (!isEmailJsConfigured()) {
         throw new Error('EmailJS is not configured on this service');
     }
@@ -230,8 +230,12 @@ async function sendEmailViaEmailJs({ to, subject, text, html, attachmentDataUri,
         to_email: to,
         email_subject: subject,
         email_message: text,
-        email_html: html,
-        report_date: subject,
+        reply_to: 'no-reply@cmbankrsa.com',
+        report_date: reportDateKey,
+        report_title: 'Daily Report',
+        report_intro: 'Your previous-day operational report is ready and attached for review.',
+        attachment_note: 'The Excel report workbook is attached to this email for download and review.',
+        portal_name: 'CMBank RSA Portal',
         [EMAILJS_ATTACHMENT_PARAM]: attachmentDataUri,
         [EMAILJS_ATTACHMENT_FILENAME_PARAM]: attachmentFileName
     };
@@ -257,57 +261,6 @@ async function sendEmailViaEmailJs({ to, subject, text, html, attachmentDataUri,
         const body = await response.text().catch(() => '');
         throw new Error(body || `EmailJS returned ${response.status}`);
     }
-}
-
-function buildScheduledReportEmailHtml({ bodyText, reportDateKey, sendTime }) {
-    const paragraphs = String(bodyText || '')
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line) => `<p style="margin:0 0 14px;color:#1f2937;font-size:15px;line-height:1.75;">${escapeHtml(line)}</p>`)
-        .join('');
-
-    return `
-<div style="margin:0;padding:32px 18px;background:#edf4fb;font-family:'Segoe UI',Arial,sans-serif;">
-  <div style="max-width:680px;margin:0 auto;background:#ffffff;border:1px solid #d7e3f2;border-radius:24px;overflow:hidden;box-shadow:0 18px 50px rgba(15,59,103,0.10);">
-    <div style="background:linear-gradient(135deg,#032b52 0%,#0f5fa8 58%,#18a0a7 100%);padding:28px 30px 24px;">
-      <div style="display:inline-block;padding:6px 12px;border-radius:999px;background:rgba(255,255,255,0.16);color:#e0efff;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;">
-        CMBank RSA Portal
-      </div>
-      <h1 style="margin:18px 0 8px;color:#ffffff;font-size:28px;line-height:1.2;font-weight:800;">
-        Daily Report
-      </h1>
-      <p style="margin:0;color:#d8ebff;font-size:15px;line-height:1.6;max-width:420px;">
-        Your previous-day operational report is ready and attached for review.
-      </p>
-      <div style="margin-top:22px;display:inline-block;padding:10px 14px;border-radius:14px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.18);color:#ffffff;font-size:13px;font-weight:600;">
-        Report Date: ${escapeHtml(reportDateKey)}
-      </div>
-    </div>
-    <div style="height:6px;background:linear-gradient(90deg,#f59e0b 0%,#10b981 50%,#2563eb 100%);"></div>
-    <div style="padding:28px 30px 14px;">
-      <div style="padding:18px 20px;border:1px solid #dbe7f5;border-radius:18px;background:linear-gradient(180deg,#f9fbfe 0%,#f4f8fd 100%);">
-        <div style="margin:0 0 12px;color:#0f3b67;font-size:13px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;">
-          Message
-        </div>
-        ${paragraphs || '<p style="margin:0;color:#1f2937;font-size:15px;line-height:1.75;">Please find the attached daily report.</p>'}
-      </div>
-      <div style="margin-top:22px;padding:18px 20px;border-radius:18px;background:#0f172a;">
-        <div style="color:#e2e8f0;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px;">
-          Attachment Included
-        </div>
-        <div style="color:#cbd5e1;font-size:14px;line-height:1.7;">
-          The Excel report workbook is attached to this email for download and review.
-        </div>
-      </div>
-    </div>
-    <div style="padding:18px 30px 26px;border-top:1px solid #e6eef8;background:#fbfdff;">
-      <div style="color:#64748b;font-size:12px;line-height:1.7;">
-        Generated automatically by the CMBank RSA reporting workflow.
-      </div>
-    </div>
-  </div>
-</div>`;
 }
 
 async function reserveScheduledReportRun(reportDateKey, trigger, forceResend = false) {
@@ -375,7 +328,6 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', f
         }));
         const attachmentFileName = `cmbank_daily_report_${normalizedDateKey}.xlsx`;
         const attachmentDataUri = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${workbookBuffer.toString('base64')}`;
-        const html = buildScheduledReportEmailHtml({ bodyText, reportDateKey: normalizedDateKey, sendTime });
         const text = bodyText;
 
         let sentCount = 0;
@@ -386,7 +338,7 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', f
                     to: recipient,
                     subject: `${subject} - ${normalizedDateKey}`,
                     text,
-                    html,
+                    reportDateKey: normalizedDateKey,
                     attachmentDataUri,
                     attachmentFileName
                 });
