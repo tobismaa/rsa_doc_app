@@ -129,8 +129,48 @@ const lagosTimeFormatter = new Intl.DateTimeFormat('en-GB', {
     hour12: false
 });
 
+const lagosWeekdayFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Africa/Lagos',
+    weekday: 'short'
+});
+
 function getLagosTimeKey(date = new Date()) {
     return lagosTimeFormatter.format(date);
+}
+
+function getLagosWeekdayKey(date = new Date()) {
+    return lagosWeekdayFormatter.format(date).toLowerCase();
+}
+
+function shiftDateKey(dateKey, offsetDays) {
+    const text = String(dateKey || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
+    const [year, month, day] = text.split('-').map(Number);
+    const utcDate = new Date(Date.UTC(year, month - 1, day));
+    utcDate.setUTCDate(utcDate.getUTCDate() + Number(offsetDays || 0));
+    return utcDate.toISOString().slice(0, 10);
+}
+
+function resolveAutoScheduledScope(now = new Date()) {
+    const weekday = getLagosWeekdayKey(now);
+    const previousDateKey = getPreviousDateKeyInLagos(now);
+
+    if (weekday === 'sat' || weekday === 'sun') {
+        return { mode: 'skip', reason: 'weekend-no-send' };
+    }
+
+    if (weekday === 'mon') {
+        return {
+            mode: 'date_range',
+            rangeStartDateKey: shiftDateKey(previousDateKey, -2),
+            rangeEndDateKey: previousDateKey
+        };
+    }
+
+    return {
+        mode: 'single_day',
+        reportDateKey: previousDateKey
+    };
 }
 
 async function resolveUserMapByEmail(emails) {
@@ -1321,9 +1361,20 @@ async function tickScheduledReportSender() {
     if (lagosTime !== sendTime || minuteKey === lastScheduledMinuteKey) return;
 
     lastScheduledMinuteKey = minuteKey;
+    const autoScope = resolveAutoScheduledScope(now);
+    if (autoScope.mode === 'skip') return;
     try {
+        if (autoScope.mode === 'date_range') {
+            await sendManualReport({
+                rangeStartDateKey: autoScope.rangeStartDateKey,
+                rangeEndDateKey: autoScope.rangeEndDateKey,
+                trigger: 'auto_weekend_rollup'
+            });
+            return;
+        }
+
         await sendScheduledReportForDate({
-            reportDateKey: getPreviousDateKeyInLagos(now),
+            reportDateKey: autoScope.reportDateKey,
             trigger: 'auto'
         });
     } catch (err) {

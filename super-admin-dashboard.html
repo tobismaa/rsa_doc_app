@@ -890,6 +890,35 @@
     </div>
 </div>
 
+<div id="scheduledReportConfirmModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-content settings-section-modal-content" style="max-width:560px;width:min(560px,92vw);">
+        <div class="modal-header settings-section-modal-header">
+            <h2 id="scheduledReportConfirmModalTitle"><i class="fas fa-circle-question"></i> Confirm Action</h2>
+            <button id="closeScheduledReportConfirmModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body settings-section-modal-body">
+            <div class="settings-section-modal-hero" style="margin-bottom:14px;">
+                <div class="settings-section-modal-icon" style="background:linear-gradient(135deg,#f59e0b,#ea580c);">
+                    <i class="fas fa-triangle-exclamation"></i>
+                </div>
+                <div>
+                    <strong id="scheduledReportConfirmModalHeroTitle">Report already sent</strong>
+                    <p id="scheduledReportConfirmModalMessage">Do you still want to continue?</p>
+                </div>
+            </div>
+            <div id="scheduledReportConfirmModalNote" style="padding:12px 14px;border-radius:12px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:13px;line-height:1.6;">
+                This will resend the report to the configured recipients.
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelScheduledReportConfirmModalBtn" type="button" class="cancel-btn">Cancel</button>
+            <button id="confirmScheduledReportConfirmModalBtn" type="button" class="confirm-btn">
+                <i class="fas fa-paper-plane"></i> Continue
+            </button>
+        </div>
+    </div>
+</div>
+
 <div id="scheduledReportPreviewModal" class="modal" role="dialog" aria-modal="true">
     <div class="modal-content settings-section-modal-content" style="max-width:1200px;width:min(1200px,96vw);">
         <div class="modal-header settings-section-modal-header">

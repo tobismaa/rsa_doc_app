@@ -55,6 +55,7 @@ let currentAccessUserSearch = '';
 let activeSettingsDropdownTab = '';
 let settingsModalSourceDropdownTab = '';
 let currentScheduledReportPreview = null;
+let scheduledReportConfirmResolver = null;
 
 function getEmailApiBaseUrl() {
     const runtime = String(window.__EMAIL_API_BASE_URL__ || '').trim();
@@ -137,6 +138,37 @@ function openScheduledReportSendModal() {
 function closeScheduledReportSendModal() {
     document.getElementById('scheduledReportSendModal')?.classList.remove('active');
     setScheduledReportSendModalStatus();
+}
+
+function openScheduledReportConfirmModal({
+    title = 'Confirm Action',
+    heroTitle = 'Please confirm',
+    message = 'Do you want to continue?',
+    note = 'This action will continue with the selected report operation.',
+    confirmLabel = 'Continue'
+} = {}) {
+    const modal = document.getElementById('scheduledReportConfirmModal');
+    if (!modal) return Promise.resolve(false);
+    document.getElementById('scheduledReportConfirmModalTitle').innerHTML = `<i class="fas fa-circle-question"></i> ${escapeHtml(title)}`;
+    const heroTitleEl = document.getElementById('scheduledReportConfirmModalHeroTitle');
+    const messageEl = document.getElementById('scheduledReportConfirmModalMessage');
+    const noteEl = document.getElementById('scheduledReportConfirmModalNote');
+    const confirmBtn = document.getElementById('confirmScheduledReportConfirmModalBtn');
+    if (heroTitleEl) heroTitleEl.textContent = heroTitle;
+    if (messageEl) messageEl.textContent = message;
+    if (noteEl) noteEl.textContent = note;
+    if (confirmBtn) confirmBtn.innerHTML = `<i class="fas fa-paper-plane"></i> ${escapeHtml(confirmLabel)}`;
+    modal.classList.add('active');
+    return new Promise((resolve) => {
+        scheduledReportConfirmResolver = resolve;
+    });
+}
+
+function closeScheduledReportConfirmModal(confirmed = false) {
+    document.getElementById('scheduledReportConfirmModal')?.classList.remove('active');
+    const resolver = scheduledReportConfirmResolver;
+    scheduledReportConfirmResolver = null;
+    if (typeof resolver === 'function') resolver(confirmed === true);
 }
 
 function updateScheduledReportSendModeVisibility() {
@@ -3810,6 +3842,24 @@ document.getElementById('scheduledReportSendModal')?.addEventListener('click', (
         closeScheduledReportSendModal();
     }
 });
+document.getElementById('closeScheduledReportConfirmModalBtn')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeScheduledReportConfirmModal(false);
+});
+document.getElementById('cancelScheduledReportConfirmModalBtn')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeScheduledReportConfirmModal(false);
+});
+document.getElementById('confirmScheduledReportConfirmModalBtn')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeScheduledReportConfirmModal(true);
+});
+document.getElementById('scheduledReportConfirmModal')?.addEventListener('click', (event) => {
+    if (event.target?.id === 'scheduledReportConfirmModal') {
+        event.stopPropagation();
+        closeScheduledReportConfirmModal(false);
+    }
+});
 document.getElementById('checkScheduledReportStatusBtn')?.addEventListener('click', async () => {
     const button = document.getElementById('checkScheduledReportStatusBtn');
     const originalHtml = button?.innerHTML || '';
@@ -3874,7 +3924,13 @@ document.getElementById('confirmScheduledReportSendBtn')?.addEventListener('clic
         }, 45000);
 
         if (requestResult.response.status === 409 || String(requestResult.data?.error || '').trim() === 'already-sent') {
-            const confirmed = window.confirm(`A report for ${selection.label} has already been sent. Do you still want to resend it?`);
+            const confirmed = await openScheduledReportConfirmModal({
+                title: 'Report Already Sent',
+                heroTitle: 'Custom report was already sent',
+                message: `A report for ${selection.label} has already been sent. Do you still want to resend it?`,
+                note: 'Continuing will resend this same report to the configured recipient list.',
+                confirmLabel: 'Resend Report'
+            });
             if (!confirmed) {
                 setScheduledReportSendModalStatus(`Manual resend cancelled for ${selection.label}.`, 'info', describeScheduledReportStatus(status));
                 return;
@@ -3958,7 +4014,13 @@ document.getElementById('sendScheduledReportNowBtn')?.addEventListener('click', 
                 button.disabled = false;
                 button.innerHTML = originalHtml;
             }
-            const confirmed = window.confirm('Previous day report has already been sent. Do you still want to resend it?');
+            const confirmed = await openScheduledReportConfirmModal({
+                title: 'Report Already Sent',
+                heroTitle: 'Previous day report was already sent',
+                message: 'Previous day report has already been sent. Do you still want to resend it?',
+                note: 'Continuing will resend the previous day report to the configured recipient list.',
+                confirmLabel: 'Resend Report'
+            });
             if (!confirmed) {
                 setScheduledReportSendStatus('Manual resend cancelled. The previous day report had already been sent earlier.', 'info', describeScheduledReportStatus(status));
                 showNotification('Scheduled report resend cancelled.', 'info');
@@ -4053,6 +4115,10 @@ document.addEventListener('click', (event) => {
     }
 });
 document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && document.getElementById('scheduledReportConfirmModal')?.classList.contains('active')) {
+        closeScheduledReportConfirmModal(false);
+        return;
+    }
     if (event.key === 'Escape' && document.getElementById('scheduledReportSendModal')?.classList.contains('active')) {
         closeScheduledReportSendModal();
         return;
