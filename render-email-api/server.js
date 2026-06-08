@@ -79,6 +79,82 @@ function normalizeEmailList(values = []) {
     return out;
 }
 
+function uniqueEmails(values = []) {
+    return Array.from(new Set(values.map((value) => safeLowerEmail(value)).filter(Boolean)));
+}
+
+function getSubmissionParticipantEmails(sub = {}) {
+    return uniqueEmails([
+        sub.uploadedBy,
+        sub.assignedTo,
+        sub.assignedToRSA,
+        sub.assignedToPayment
+    ]);
+}
+
+function getStatusPushRecipientEmails(sub = {}, newStatus = '') {
+    const status = String(newStatus || sub.status || '').trim().toLowerCase();
+    const uploader = safeLowerEmail(sub.uploadedBy);
+    const reviewer = safeLowerEmail(sub.assignedTo);
+    const rsa = safeLowerEmail(sub.assignedToRSA);
+    const payment = safeLowerEmail(sub.assignedToPayment);
+
+    if (['pending', 'submitted', 'resubmitted'].includes(status)) {
+        return uniqueEmails([reviewer]);
+    }
+
+    if (['rejected', 'rejected_by_reviewer', 'rejected_by_rsa'].includes(status)) {
+        return uniqueEmails([uploader]);
+    }
+
+    if (['approved', 'processing_to_pfa'].includes(status)) {
+        return uniqueEmails([uploader, rsa]);
+    }
+
+    if (['sent_to_pfa', 'rsa_submitted'].includes(status)) {
+        return uniqueEmails([uploader]);
+    }
+
+    if (['paid', 'cleared'].includes(status)) {
+        return uniqueEmails([uploader]);
+    }
+
+    return uniqueEmails([uploader]);
+}
+
+function getSubmissionStageKey(sub = {}) {
+    const status = String(sub.status || '').trim().toLowerCase();
+    if (status === 'cleared') return 'closed';
+    if (['sent_to_pfa', 'rsa_submitted', 'paid'].includes(status)) return 'payment';
+    if (['processing_to_pfa', 'approved'].includes(status)) return 'rsa';
+    return 'review';
+}
+
+function getStageHandlerEmail(sub = {}, stageKey = '') {
+    const stage = String(stageKey || '').trim().toLowerCase();
+    if (stage === 'review') return safeLowerEmail(sub.assignedTo || sub.reviewedBy);
+    if (stage === 'rsa') return safeLowerEmail(sub.assignedToRSA);
+    if (stage === 'payment') return safeLowerEmail(sub.assignedToPayment);
+    return '';
+}
+
+function getChatPushRecipientEmails(sub = {}, chatMeta = {}) {
+    const stageKey = getSubmissionStageKey(sub);
+    if (stageKey === 'closed') return [];
+
+    const recipients = [
+        safeLowerEmail(sub.uploadedBy),
+        getStageHandlerEmail(sub, stageKey)
+    ];
+
+    if (chatMeta?.escalated === true) {
+        (Array.isArray(chatMeta.adminParticipants) ? chatMeta.adminParticipants : [])
+            .forEach((email) => recipients.push(email));
+    }
+
+    return uniqueEmails(recipients);
+}
+
 function resolveAllowedOrigin(req) {
     const reqOrigin = String(req.header('Origin') || '').trim();
     if (reqOrigin && (allowedOrigins.length === 0 || allowedOrigins.includes(reqOrigin))) {
@@ -914,6 +990,78 @@ app.post('/api/admin/reset-password', authMiddleware, requireAdminRole, async (r
     }
 });
 
+app.post('/api/push/register-token', authMiddleware, async (req, res) => {
+    try {
+        const token = String(req.body?.token || '').trim();
+        const previousToken = String(req.body?.previousToken || '').trim();
+        const profileDocId = String(req.body?.profileDocId || '').trim();
+        const senderEmail = safeLowerEmail(req.user?.email);
+        const senderUid = String(req.user?.uid || '').trim();
+
+        if (!token) {
+            return res.status(400).json({ ok: false, error: 'token is required' });
+        }
+        if (!senderEmail && !senderUid) {
+            return res.status(401).json({ ok: false, error: 'Authenticated user is required' });
+        }
+
+        let currentUserRef = null;
+        if (profileDocId) {
+            const candidateRef = adminDb.collection('users').doc(profileDocId);
+            const candidateSnap = await candidateRef.get();
+            if (candidateSnap.exists) {
+                const data = candidateSnap.data() || {};
+                const candidateEmail = safeLowerEmail(data.email);
+                const candidateUid = String(data.uid || '').trim();
+                if ((senderEmail && candidateEmail === senderEmail) || (senderUid && candidateUid === senderUid)) {
+                    currentUserRef = candidateRef;
+                }
+            }
+        }
+
+        if (!currentUserRef && senderEmail) {
+            const snap = await adminDb.collection('users').where('email', '==', senderEmail).limit(1).get();
+            if (!snap.empty) currentUserRef = snap.docs[0].ref;
+        }
+
+        if (!currentUserRef && senderUid) {
+            const snap = await adminDb.collection('users').where('uid', '==', senderUid).limit(1).get();
+            if (!snap.empty) currentUserRef = snap.docs[0].ref;
+        }
+
+        if (!currentUserRef) {
+            return res.status(404).json({ ok: false, error: 'User profile not found' });
+        }
+
+        const tokensToPrune = [];
+        if (token) tokensToPrune.push(token);
+        if (previousToken && previousToken !== token) tokensToPrune.push(previousToken);
+
+        for (const tokenToPrune of Array.from(new Set(tokensToPrune))) {
+            const ownersSnap = await adminDb.collection('users').where('fcmTokens', 'array-contains', tokenToPrune).get();
+            await Promise.all(ownersSnap.docs.map((docSnap) => (
+                docSnap.ref.update({
+                    fcmTokens: admin.firestore.FieldValue.arrayRemove(tokenToPrune),
+                    fcmTokenPrunedAt: admin.firestore.FieldValue.serverTimestamp()
+                }).catch(() => {})
+            )));
+        }
+
+        await currentUserRef.set({
+            fcmTokens: admin.firestore.FieldValue.arrayUnion(token),
+            fcmLastTokenAt: admin.firestore.FieldValue.serverTimestamp(),
+            fcmLastTokenPlatform: String(req.body?.platform || '').trim()
+        }, { merge: true });
+
+        return res.json({ ok: true });
+    } catch (err) {
+        return res.status(500).json({
+            ok: false,
+            error: String(err?.message || 'Failed to register push token')
+        });
+    }
+});
+
 app.post('/api/chat/push', authMiddleware, async (req, res) => {
     try {
         const submissionId = String(req.body?.submissionId || '').trim();
@@ -934,15 +1082,12 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
             return res.status(404).json({ ok: false, error: 'Submission not found' });
         }
         const sub = subSnap.data() || {};
+        const chatSnap = await adminDb.collection('applicationChats').doc(submissionId).get();
+        const chatMeta = chatSnap.exists ? (chatSnap.data() || {}) : {};
 
         // Strict live participant set only from current submission workflow.
         // Avoid stale historical chat/admin participant lists.
-        const participantEmails = Array.from(new Set([
-            safeLowerEmail(sub.uploadedBy),
-            safeLowerEmail(sub.assignedTo),
-            safeLowerEmail(sub.assignedToRSA),
-            safeLowerEmail(sub.assignedToPayment)
-        ].filter(Boolean)));
+        const participantEmails = getSubmissionParticipantEmails(sub);
 
         const senderCanAccess = participantEmails.includes(senderEmail);
         if (!senderCanAccess) {
@@ -953,7 +1098,7 @@ app.post('/api/chat/push', authMiddleware, async (req, res) => {
             }
         }
 
-        const recipientEmailsRaw = participantEmails.filter((e) => e !== senderEmail);
+        const recipientEmailsRaw = getChatPushRecipientEmails(sub, chatMeta).filter((e) => e !== senderEmail);
         let recipientEmails = [...recipientEmailsRaw];
         if (recipientEmails.length === 0) {
             return res.json({
@@ -1129,12 +1274,7 @@ app.post('/api/submission/status-push', authMiddleware, async (req, res) => {
         }
         const sub = subSnap.data() || {};
 
-        const participantEmails = Array.from(new Set([
-            safeLowerEmail(sub.uploadedBy),
-            safeLowerEmail(sub.assignedTo),
-            safeLowerEmail(sub.assignedToRSA),
-            safeLowerEmail(sub.assignedToPayment)
-        ].filter(Boolean)));
+        const participantEmails = getSubmissionParticipantEmails(sub);
 
         const senderCanAccess = participantEmails.includes(senderEmail);
         if (!senderCanAccess) {
@@ -1145,7 +1285,7 @@ app.post('/api/submission/status-push', authMiddleware, async (req, res) => {
             }
         }
 
-        let recipientEmails = participantEmails.filter((e) => e !== senderEmail);
+        let recipientEmails = getStatusPushRecipientEmails(sub, newStatus).filter((e) => e !== senderEmail);
         if (recipientEmails.length === 0) {
             return res.json({ ok: true, sent: 0, reason: 'no-recipients' });
         }

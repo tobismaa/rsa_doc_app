@@ -24,6 +24,30 @@ function getServiceWorkerUrl() {
 
 const FCM_LOCAL_TOKEN_KEY = 'cmbank_fcm_token';
 
+async function registerTokenWithBackend(currentUser, profileDocId, token, previousToken) {
+  const base = getEmailApiBaseUrl();
+  if (!base || !currentUser || !token) return false;
+  try {
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch(`${base}/api/push/register-token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`
+      },
+      body: JSON.stringify({
+        token,
+        previousToken: previousToken || '',
+        profileDocId: profileDocId || '',
+        platform: navigator.userAgent || ''
+      })
+    });
+    return response.ok;
+  } catch (_) {
+    return false;
+  }
+}
+
 export async function registerPushTokenForCurrentUser(currentUser, profileDocId) {
   try {
     if (!currentUser || !profileDocId) return { ok: false, reason: 'missing-context' };
@@ -44,6 +68,12 @@ export async function registerPushTokenForCurrentUser(currentUser, profileDocId)
     if (!token) return { ok: false, reason: 'empty-token' };
 
     const previousToken = String(localStorage.getItem(FCM_LOCAL_TOKEN_KEY) || '').trim();
+    const registeredByBackend = await registerTokenWithBackend(currentUser, profileDocId, token, previousToken);
+    if (registeredByBackend) {
+      localStorage.setItem(FCM_LOCAL_TOKEN_KEY, token);
+      return { ok: true, token };
+    }
+
     if (previousToken && previousToken !== token) {
       await updateDoc(doc(db, 'users', profileDocId), {
         fcmTokens: arrayRemove(previousToken),

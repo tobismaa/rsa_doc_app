@@ -383,7 +383,7 @@ async function displayTrackResults(results) {
         resultItem.onmouseover = () => { resultItem.style.backgroundColor = '#f8fafc'; };
         resultItem.onmouseout = () => { resultItem.style.backgroundColor = 'white'; };
         resultItem.onclick = () => {
-            // Use the existing showApplicationTrack from document-uploader.js
+            // Use the existing tracker exposed by the active uploader module.
             if (typeof window.showApplicationTrack === 'function') {
                 window.showApplicationTrack(sub.id);
             } else {
