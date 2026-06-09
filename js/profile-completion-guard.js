@@ -27,6 +27,7 @@ let inactivityHandlersBound = false;
 let forceLogoutNoticeActive = false;
 let forceLogoutTimerId = null;
 let forceLogoutIntervalId = null;
+let lastForceLogoutDebugState = null;
 
 const WHATSAPP_COUNTRY_CODES = [
   { code: '+234', label: 'Nigeria', flag: '🇳🇬' },
@@ -274,8 +275,71 @@ function ensureForceLogoutNoticeStyles() {
       gap: 8px;
       flex-wrap: wrap;
     }
+    .force-logout-debug {
+      position: fixed;
+      left: 16px;
+      bottom: 16px;
+      z-index: 23999;
+      width: min(420px, calc(100vw - 32px));
+      background: rgba(15, 23, 42, 0.96);
+      color: #e2e8f0;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 16px;
+      box-shadow: 0 20px 40px rgba(15, 23, 42, 0.28);
+      padding: 14px 16px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .force-logout-debug strong {
+      display: block;
+      color: #f8fafc;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .force-logout-debug-grid {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 4px 10px;
+    }
+    .force-logout-debug-grid code {
+      color: #93c5fd;
+      word-break: break-word;
+    }
   `;
   document.head.appendChild(style);
+}
+
+function renderForceLogoutDebugStrip(state = {}) {
+  lastForceLogoutDebugState = { ...state };
+  ensureForceLogoutNoticeStyles();
+  let host = document.getElementById('forceLogoutDebugStrip');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'forceLogoutDebugStrip';
+    host.className = 'force-logout-debug';
+    document.body.appendChild(host);
+  }
+
+  const tokenShort = String(state.forceLogoutToken || '').trim();
+  const activeShort = String(state.activeToken || '').trim();
+  const completedShort = String(state.completedToken || '').trim();
+  const dismissedShort = String(state.dismissedToken || '').trim();
+  host.innerHTML = `
+    <strong>Force Logout Debug</strong>
+    <div class="force-logout-debug-grid">
+      <div>Role</div><div><code>${String(state.role || '-')}</code></div>
+      <div>Status</div><div><code>${String(state.status || 'idle')}</code></div>
+      <div>Setting</div><div><code>${String(state.countdownSetting || '-')}</code></div>
+      <div>Remaining</div><div><code>${String(state.remaining || '-')}</code></div>
+      <div>Force Token</div><div><code>${tokenShort || '-'}</code></div>
+      <div>Active Token</div><div><code>${activeShort || '-'}</code></div>
+      <div>Dismissed</div><div><code>${dismissedShort || '-'}</code></div>
+      <div>Completed</div><div><code>${completedShort || '-'}</code></div>
+      <div>Deadline</div><div><code>${String(state.deadline || '-')}</code></div>
+      <div>Timer Running</div><div><code>${state.timerRunning ? 'yes' : 'no'}</code></div>
+      <div>Notice Open</div><div><code>${state.noticeOpen ? 'yes' : 'no'}</code></div>
+    </div>
+  `;
 }
 
 function parseForceLogoutDurationMs(value) {
@@ -313,6 +377,12 @@ function formatForceLogoutRemaining(deadlineMs) {
 function closeForceLogoutNotice() {
   document.getElementById('forceLogoutNoticeModal')?.remove();
   forceLogoutNoticeActive = false;
+  if (lastForceLogoutDebugState) {
+    renderForceLogoutDebugStrip({
+      ...lastForceLogoutDebugState,
+      noticeOpen: false
+    });
+  }
   if (!document.getElementById('profileGuardModal')) {
     document.body.style.overflow = '';
   }
@@ -357,6 +427,12 @@ function showForceLogoutNotice({ token = '', deadlineMs = 0 } = {}) {
   ensureForceLogoutNoticeStyles();
   closeForceLogoutNotice();
   forceLogoutNoticeActive = true;
+  if (lastForceLogoutDebugState) {
+    renderForceLogoutDebugStrip({
+      ...lastForceLogoutDebugState,
+      noticeOpen: true
+    });
+  }
 
   const backdrop = document.createElement('div');
   backdrop.id = 'forceLogoutNoticeModal';
@@ -396,6 +472,15 @@ function showForceLogoutNotice({ token = '', deadlineMs = 0 } = {}) {
 }
 
 async function executeForcedLogout(token) {
+  if (lastForceLogoutDebugState) {
+    renderForceLogoutDebugStrip({
+      ...lastForceLogoutDebugState,
+      status: 'executing logout',
+      timerRunning: false,
+      remaining: '0 seconds',
+      noticeOpen: false
+    });
+  }
   localStorage.setItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY, String(token || '').trim());
   localStorage.removeItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY);
   localStorage.removeItem(FORCE_LOGOUT_DEADLINE_KEY);
@@ -425,6 +510,14 @@ function startForceLogoutCountdown({ token = '', deadlineMs = 0 } = {}) {
     const message = `Automatic logout in ${formatForceLogoutRemaining(deadlineMs)}.`;
     if (bannerCountdownEl) bannerCountdownEl.textContent = message;
     if (modalCountdownEl) modalCountdownEl.textContent = message;
+    if (lastForceLogoutDebugState) {
+      renderForceLogoutDebugStrip({
+        ...lastForceLogoutDebugState,
+        remaining: formatForceLogoutRemaining(deadlineMs),
+        timerRunning: true,
+        noticeOpen: forceLogoutNoticeActive
+      });
+    }
   };
 
   updateCountdownUi();
@@ -564,6 +657,36 @@ function startSessionTimeout(minutes = 60) {
   }, timeoutMs);
 }
 
+function buildLiveSecuritySettings(source = {}, fallback = {}) {
+  const sourceSecurity = source?.securityControls && typeof source.securityControls === 'object'
+    ? source.securityControls
+    : {};
+  const fallbackSecurity = fallback?.securityControls && typeof fallback.securityControls === 'object'
+    ? fallback.securityControls
+    : {};
+  const sessionTimeoutMinutes = Math.max(
+    1,
+    Number(sourceSecurity.sessionTimeoutMinutes ?? fallbackSecurity.sessionTimeoutMinutes ?? 60) || 60
+  );
+  const forceLogoutCountdownRaw = sourceSecurity.forceLogoutCountdown
+    ?? sourceSecurity.forceLogoutCountdownMinutes
+    ?? fallbackSecurity.forceLogoutCountdown
+    ?? fallbackSecurity.forceLogoutCountdownMinutes
+    ?? '11m';
+  const forceLogoutToken = String(sourceSecurity.forceLogoutToken ?? fallbackSecurity.forceLogoutToken ?? '').trim();
+
+  return {
+    dashboardAnnouncement: source?.dashboardAnnouncement ?? fallback?.dashboardAnnouncement ?? {},
+    securityControls: {
+      sessionTimeoutMinutes,
+      forceLogoutCountdown: /^\d+\s*[smh]$/i.test(String(forceLogoutCountdownRaw || '').trim()) || /^\d+(\.\d+)?$/.test(String(forceLogoutCountdownRaw || '').trim())
+        ? String(forceLogoutCountdownRaw).trim()
+        : String(fallbackSecurity.forceLogoutCountdown || '11m').trim() || '11m',
+      forceLogoutToken
+    }
+  };
+}
+
 function bindInactivityHandlers(minutes = 60) {
   const restart = () => startSessionTimeout(minutes);
   if (!inactivityHandlersBound) {
@@ -615,11 +738,29 @@ function watchForSecuritySignals(userData = {}) {
 
     const forceLogoutToken = String(systemSettings.securityControls.forceLogoutToken || '').trim();
     const completed = String(localStorage.getItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY) || '').trim();
+    const role = String(userData.role || '-').trim() || '-';
+    const countdownSetting = String(systemSettings.securityControls.forceLogoutCountdown || '11m');
+    const activeTokenBefore = String(localStorage.getItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY) || '').trim();
+    const dismissedTokenBefore = String(localStorage.getItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY) || '').trim();
+    const deadlineBefore = Number(localStorage.getItem(FORCE_LOGOUT_DEADLINE_KEY) || 0);
     if (!forceLogoutToken || isMaintenanceExemptRole(userData.role) || forceLogoutToken === completed) {
+      renderForceLogoutDebugStrip({
+        role,
+        status: !forceLogoutToken ? 'waiting for token' : (forceLogoutToken === completed ? 'completed on this browser' : 'maintenance exempt'),
+        countdownSetting,
+        remaining: deadlineBefore > 0 ? formatForceLogoutRemaining(deadlineBefore) : '-',
+        forceLogoutToken,
+        activeToken: activeTokenBefore,
+        completedToken: completed,
+        dismissedToken: dismissedTokenBefore,
+        deadline: deadlineBefore > 0 ? new Date(deadlineBefore).toISOString() : '-',
+        timerRunning: Boolean(forceLogoutTimerId),
+        noticeOpen: forceLogoutNoticeActive
+      });
       return;
     }
 
-    const countdownDurationMs = parseForceLogoutDurationMs(systemSettings.securityControls.forceLogoutCountdown || '11m');
+    const countdownDurationMs = parseForceLogoutDurationMs(countdownSetting);
     const activeToken = String(localStorage.getItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY) || '').trim();
     let deadlineMs = Number(localStorage.getItem(FORCE_LOGOUT_DEADLINE_KEY) || 0);
     if (activeToken !== forceLogoutToken || !Number.isFinite(deadlineMs) || deadlineMs <= 0) {
@@ -629,6 +770,20 @@ function watchForSecuritySignals(userData = {}) {
       localStorage.removeItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY);
       forceLogoutNoticeActive = false;
     }
+
+    renderForceLogoutDebugStrip({
+      role,
+      status: 'token detected',
+      countdownSetting,
+      remaining: formatForceLogoutRemaining(deadlineMs),
+      forceLogoutToken,
+      activeToken: String(localStorage.getItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY) || '').trim(),
+      completedToken: completed,
+      dismissedToken: String(localStorage.getItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY) || '').trim(),
+      deadline: new Date(deadlineMs).toISOString(),
+      timerRunning: Boolean(forceLogoutTimerId),
+      noticeOpen: forceLogoutNoticeActive
+    });
 
     renderForceLogoutBanner({ token: forceLogoutToken, deadlineMs });
     startForceLogoutCountdown({ token: forceLogoutToken, deadlineMs });
@@ -644,9 +799,11 @@ function watchForSecuritySignals(userData = {}) {
     }
   };
 
-  onSnapshot(doc(db, 'settings', 'system'), async () => {
+  onSnapshot(doc(db, 'settings', 'system'), async (snap) => {
     try {
-      const systemSettings = await getSystemSettings(db, { force: true });
+      const fallbackSettings = await getSystemSettings(db, { force: true });
+      const rawSettings = snap.exists() ? (snap.data() || {}) : {};
+      const systemSettings = buildLiveSecuritySettings(rawSettings, fallbackSettings);
       await evaluateSecurityState(systemSettings);
     } catch (_) {}
   }, () => {});
@@ -654,7 +811,10 @@ function watchForSecuritySignals(userData = {}) {
   if (!securityPollTimer) {
     securityPollTimer = window.setInterval(async () => {
       try {
-        const systemSettings = await getSystemSettings(db, { force: true });
+        const settingsSnap = await getDoc(doc(db, 'settings', 'system'));
+        const fallbackSettings = await getSystemSettings(db, { force: true });
+        const rawSettings = settingsSnap.exists() ? (settingsSnap.data() || {}) : {};
+        const systemSettings = buildLiveSecuritySettings(rawSettings, fallbackSettings);
         await evaluateSecurityState(systemSettings);
       } catch (_) {}
     }, 5000);
@@ -766,14 +926,17 @@ onAuthStateChanged(auth, async (user) => {
   try {
     watchForCacheClearSignal();
     const userDoc = await findUserDocByUidOrEmail(user.uid, user.email);
-    if (!userDoc) return;
-
-    const userData = userDoc.data() || {};
+    const userData = userDoc?.data?.() || {
+      role: '',
+      email: String(user.email || '').trim().toLowerCase()
+    };
     const systemSettings = await getSystemSettings(db, { force: true });
     showDashboardAnnouncement(systemSettings.dashboardAnnouncement);
     bindInactivityHandlers(systemSettings.securityControls.sessionTimeoutMinutes);
     watchForSecuritySignals(userData);
-    await registerPushTokenForCurrentUser(user, userDoc.id);
+    if (userDoc?.id) {
+      await registerPushTokenForCurrentUser(user, userDoc.id);
+    }
     const maintenanceSettings = await getMaintenanceSettings(db, { force: true });
     if (maintenanceSettings.maintenanceMode && !isMaintenanceExemptRole(userData.role)) {
       showMaintenanceOverlay({
@@ -789,7 +952,9 @@ onAuthStateChanged(auth, async (user) => {
       return;
     }
 
-    await enforceProfileCompletion(user);
+    if (userDoc?.id) {
+      await enforceProfileCompletion(user);
+    }
   } catch (_err) {
     // Fail open to avoid blocking legitimate users on transient issues.
   }

@@ -3973,8 +3973,10 @@ window.forceLogoutAllUsers = async () => {
             ...(currentSettings.securityControls || {}),
             forceLogoutToken: new Date().toISOString()
         };
+        const refreshToken = `${Date.now()}`;
         await setDoc(doc(db, 'settings', 'system'), {
             securityControls,
+            cacheClearToken: refreshToken,
             updatedAt: serverTimestamp(),
             updatedBy: currentUser?.email || ''
         }, { merge: true });
@@ -3985,7 +3987,7 @@ window.forceLogoutAllUsers = async () => {
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         });
-        showNotification(`Force logout notice sent successfully. Automatic logout will happen in ${countdownLabel}.`, 'success');
+        showNotification(`Force logout notice sent successfully. Open dashboards will refresh and automatic logout will happen in ${countdownLabel}.`, 'success');
     } catch (_) {
         showNotification('Failed to send force logout signal', 'error');
     }
