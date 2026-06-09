@@ -14,11 +14,18 @@ const REQUIRED_FIELDS = [
 
 const CACHE_CLEAR_HANDLED_KEY = 'cmbank_app_cache_clear_handled_token';
 const CACHE_BUST_TOKEN_KEY = 'cmbank_app_cache_bust_token';
+const FORCE_LOGOUT_ACTIVE_TOKEN_KEY = 'cmbank_force_logout_active_token';
+const FORCE_LOGOUT_COMPLETED_TOKEN_KEY = 'cmbank_force_logout_completed_token';
+const FORCE_LOGOUT_DEADLINE_KEY = 'cmbank_force_logout_deadline_ms';
+const FORCE_LOGOUT_DISMISSED_TOKEN_KEY = 'cmbank_force_logout_dismissed_token';
 let cacheClearWatcherStarted = false;
 let cacheClearInProgress = false;
 let securityWatchStarted = false;
 let sessionTimeoutTimer = null;
 let inactivityHandlersBound = false;
+let forceLogoutNoticeActive = false;
+let forceLogoutTimerId = null;
+let forceLogoutIntervalId = null;
 
 const WHATSAPP_COUNTRY_CODES = [
   { code: '+234', label: 'Nigeria', flag: '🇳🇬' },
@@ -174,6 +181,268 @@ function buildModal(missing = [], existing = {}) {
     </div>
   `;
   document.body.appendChild(backdrop);
+}
+
+function ensureForceLogoutNoticeStyles() {
+  if (document.getElementById('forceLogoutNoticeStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'forceLogoutNoticeStyles';
+  style.textContent = `
+    .force-logout-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.82);
+      z-index: 25000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .force-logout-card {
+      width: min(540px, 100%);
+      background: #fff;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 24px 60px rgba(2, 6, 23, 0.38);
+    }
+    .force-logout-head {
+      padding: 18px 20px;
+      background: linear-gradient(135deg, #b91c1c, #dc2626);
+      color: #fff;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .force-logout-body {
+      padding: 20px;
+      color: #334155;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+    .force-logout-countdown {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #991b1b;
+      font-weight: 700;
+    }
+    .force-logout-actions {
+      margin-top: 16px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .force-logout-btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .force-logout-btn.secondary {
+      background: #e2e8f0;
+      color: #0f172a;
+    }
+    .force-logout-btn.primary {
+      background: #0f3b67;
+      color: #fff;
+    }
+    .force-logout-banner {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 24000;
+      width: min(420px, calc(100vw - 32px));
+      background: #fff7ed;
+      border: 1px solid #fdba74;
+      color: #9a3412;
+      border-radius: 16px;
+      box-shadow: 0 20px 40px rgba(15, 23, 42, 0.18);
+      padding: 14px 16px;
+    }
+    .force-logout-banner strong {
+      display: block;
+      color: #7c2d12;
+      margin-bottom: 6px;
+    }
+    .force-logout-banner-actions {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function parseForceLogoutDurationMs(value) {
+  const text = String(value || '').trim().toLowerCase();
+  const normalized = /^\d+\s*[smh]$/.test(text)
+    ? text.replace(/\s+/g, '')
+    : (/^\d+(\.\d+)?$/.test(text) ? `${text}m` : '');
+  const match = normalized.match(/^(\d+(?:\.\d+)?)([smh])$/);
+  if (!match) return 11 * 60 * 1000;
+  const amount = Number(match[1]);
+  const unit = match[2];
+  if (!Number.isFinite(amount) || amount <= 0) return 11 * 60 * 1000;
+  if (unit === 's') return amount * 1000;
+  if (unit === 'm') return amount * 60 * 1000;
+  return amount * 60 * 60 * 1000;
+}
+
+function getForceLogoutDeadlineMs(token, durationMsValue) {
+  const issuedAtMs = Date.parse(String(token || '').trim());
+  const baseMs = Number.isFinite(issuedAtMs) ? issuedAtMs : Date.now();
+  const durationMs = Math.max(1000, Number(durationMsValue) || (11 * 60 * 1000));
+  return baseMs + durationMs;
+}
+
+function formatForceLogoutRemaining(deadlineMs) {
+  const remainingMs = Math.max(0, Number(deadlineMs || 0) - Date.now());
+  const totalSeconds = Math.ceil(remainingMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  if (seconds === 0) return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  return `${minutes} minute${minutes === 1 ? '' : 's'} ${seconds} second${seconds === 1 ? '' : 's'}`;
+}
+
+function closeForceLogoutNotice() {
+  document.getElementById('forceLogoutNoticeModal')?.remove();
+  forceLogoutNoticeActive = false;
+  if (!document.getElementById('profileGuardModal')) {
+    document.body.style.overflow = '';
+  }
+}
+
+function renderForceLogoutBanner({ token = '', deadlineMs = 0 } = {}) {
+  ensureForceLogoutNoticeStyles();
+  let banner = document.getElementById('forceLogoutNoticeBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'forceLogoutNoticeBanner';
+    banner.className = 'force-logout-banner';
+    banner.innerHTML = `
+      <strong>Forced logout scheduled for system update</strong>
+      <div id="forceLogoutBannerMessage"></div>
+      <div class="force-logout-countdown" id="forceLogoutBannerCountdown" style="margin-top:10px;"></div>
+      <div class="force-logout-banner-actions">
+        <button id="forceLogoutReopenBtn" class="force-logout-btn primary" type="button">View Notice</button>
+      </div>
+    `;
+    document.body.appendChild(banner);
+  }
+  const messageEl = document.getElementById('forceLogoutBannerMessage');
+  const countdownEl = document.getElementById('forceLogoutBannerCountdown');
+  const reopenBtn = document.getElementById('forceLogoutReopenBtn');
+  if (messageEl) {
+    messageEl.textContent = 'Please finish your current work and save any new submission as draft so you do not lose it before logout.';
+  }
+  if (countdownEl) {
+    countdownEl.textContent = `Automatic logout in ${formatForceLogoutRemaining(deadlineMs)}.`;
+  }
+  if (reopenBtn) {
+    reopenBtn.onclick = () => {
+      localStorage.removeItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY);
+      showForceLogoutNotice({ token, deadlineMs });
+      forceLogoutNoticeActive = true;
+    };
+  }
+}
+
+function showForceLogoutNotice({ token = '', deadlineMs = 0 } = {}) {
+  ensureForceLogoutNoticeStyles();
+  closeForceLogoutNotice();
+  forceLogoutNoticeActive = true;
+
+  const backdrop = document.createElement('div');
+  backdrop.id = 'forceLogoutNoticeModal';
+  backdrop.className = 'force-logout-backdrop';
+  backdrop.innerHTML = `
+    <div class="force-logout-card" role="dialog" aria-modal="true" aria-labelledby="forceLogoutNoticeTitle">
+      <div class="force-logout-head" id="forceLogoutNoticeTitle">System Update Notice</div>
+      <div class="force-logout-body">
+        <div>A force logout has been scheduled so the latest system update can run properly.</div>
+        <div style="margin-top:10px;">You can close this notice and finish what you are doing first.</div>
+        <div style="margin-top:10px;">Please save any new submission as draft before the logout time so your work is not lost.</div>
+        <div class="force-logout-countdown" id="forceLogoutNoticeCountdown"></div>
+        <div class="force-logout-actions">
+          <button id="forceLogoutCloseNoticeBtn" class="force-logout-btn secondary" type="button">Close Notice</button>
+          <button id="forceLogoutKeepOpenBtn" class="force-logout-btn primary" type="button">Continue Working</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  document.body.style.overflow = 'hidden';
+
+  const dismiss = () => {
+    localStorage.setItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY, String(token || '').trim());
+    closeForceLogoutNotice();
+  };
+  document.getElementById('forceLogoutCloseNoticeBtn')?.addEventListener('click', dismiss);
+  document.getElementById('forceLogoutKeepOpenBtn')?.addEventListener('click', dismiss);
+  backdrop.addEventListener('click', (event) => {
+    if (event.target === backdrop) dismiss();
+  });
+
+  const countdownEl = document.getElementById('forceLogoutNoticeCountdown');
+  if (countdownEl) {
+    countdownEl.textContent = `Automatic logout in ${formatForceLogoutRemaining(deadlineMs)}.`;
+  }
+}
+
+async function executeForcedLogout(token) {
+  localStorage.setItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY, String(token || '').trim());
+  localStorage.removeItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY);
+  localStorage.removeItem(FORCE_LOGOUT_DEADLINE_KEY);
+  localStorage.removeItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY);
+  closeForceLogoutNotice();
+  document.getElementById('forceLogoutNoticeBanner')?.remove();
+  try {
+    await signOut(auth);
+  } finally {
+    window.location.href = 'index.html';
+  }
+}
+
+function startForceLogoutCountdown({ token = '', deadlineMs = 0 } = {}) {
+  if (forceLogoutTimerId) {
+    window.clearTimeout(forceLogoutTimerId);
+    forceLogoutTimerId = null;
+  }
+  if (forceLogoutIntervalId) {
+    window.clearInterval(forceLogoutIntervalId);
+    forceLogoutIntervalId = null;
+  }
+
+  const updateCountdownUi = () => {
+    const bannerCountdownEl = document.getElementById('forceLogoutBannerCountdown');
+    const modalCountdownEl = document.getElementById('forceLogoutNoticeCountdown');
+    const message = `Automatic logout in ${formatForceLogoutRemaining(deadlineMs)}.`;
+    if (bannerCountdownEl) bannerCountdownEl.textContent = message;
+    if (modalCountdownEl) modalCountdownEl.textContent = message;
+  };
+
+  updateCountdownUi();
+  forceLogoutIntervalId = window.setInterval(updateCountdownUi, 1000);
+
+  const remainingMs = Math.max(0, Number(deadlineMs || 0) - Date.now());
+  if (remainingMs <= 0) {
+    window.clearInterval(forceLogoutIntervalId);
+    forceLogoutIntervalId = null;
+    executeForcedLogout(token);
+    return;
+  }
+  forceLogoutTimerId = window.setTimeout(() => {
+    if (forceLogoutIntervalId) {
+      window.clearInterval(forceLogoutIntervalId);
+      forceLogoutIntervalId = null;
+    }
+    executeForcedLogout(token);
+  }, remainingMs);
 }
 
 async function clearBrowserAppCaches(cacheClearToken = '') {
@@ -348,14 +617,33 @@ function watchForSecuritySignals(userData = {}) {
     bindInactivityHandlers(systemSettings.securityControls.sessionTimeoutMinutes);
 
     const forceLogoutToken = String(systemSettings.securityControls.forceLogoutToken || '').trim();
-    const handled = String(localStorage.getItem('cmbank_force_logout_token') || '').trim();
-    if (forceLogoutToken && forceLogoutToken !== handled && !isMaintenanceExemptRole(userData.role)) {
-      localStorage.setItem('cmbank_force_logout_token', forceLogoutToken);
-      try {
-        await signOut(auth);
-      } finally {
-        window.location.href = 'index.html';
-      }
+    const completed = String(localStorage.getItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY) || '').trim();
+    if (!forceLogoutToken || isMaintenanceExemptRole(userData.role) || forceLogoutToken === completed) {
+      return;
+    }
+
+    const countdownDurationMs = parseForceLogoutDurationMs(systemSettings.securityControls.forceLogoutCountdown || '11m');
+    const activeToken = String(localStorage.getItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY) || '').trim();
+    let deadlineMs = Number(localStorage.getItem(FORCE_LOGOUT_DEADLINE_KEY) || 0);
+    if (activeToken !== forceLogoutToken || !Number.isFinite(deadlineMs) || deadlineMs <= 0) {
+      deadlineMs = getForceLogoutDeadlineMs(forceLogoutToken, countdownDurationMs);
+      localStorage.setItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY, forceLogoutToken);
+      localStorage.setItem(FORCE_LOGOUT_DEADLINE_KEY, String(deadlineMs));
+      localStorage.removeItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY);
+      forceLogoutNoticeActive = false;
+    }
+
+    renderForceLogoutBanner({ token: forceLogoutToken, deadlineMs });
+    startForceLogoutCountdown({ token: forceLogoutToken, deadlineMs });
+
+    const dismissedToken = String(localStorage.getItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY) || '').trim();
+    if (!forceLogoutNoticeActive && dismissedToken !== forceLogoutToken) {
+      forceLogoutNoticeActive = true;
+      showForceLogoutNotice({ token: forceLogoutToken, deadlineMs });
+    }
+
+    if (dismissedToken === forceLogoutToken) {
+      forceLogoutNoticeActive = false;
     }
   }, () => {});
 }

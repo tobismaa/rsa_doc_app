@@ -19,6 +19,11 @@ import {
     resolveSubmissionCommissionRate
 } from './shared/commission-config.js?v=20260507a';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
+import {
+    getSubmissionPaymentEntryAt,
+    getSubmissionPaidEntryAt,
+    getSubmissionClearedEntryAt
+} from './shared/submission-stage.js?v=20260609a';
 
 let currentUser = null;
 let currentUserData = null;
@@ -218,7 +223,14 @@ function getSubmissionUploadedAtMillis(sub) {
 }
 
 function getPaymentReceivedAtMillis(sub) {
-    return getTimestampMillis(sub?.rsaSubmittedAt || sub?.finalSubmittedAt || sub?.updatedAt || sub?.uploadedAt);
+    return getTimestampMillis(getSubmissionPaymentEntryAt(sub));
+}
+
+function getPaymentTableEntryMillis(sub) {
+    const status = String(sub?.status || '').toLowerCase();
+    if (status === 'paid') return getTimestampMillis(getSubmissionPaidEntryAt(sub));
+    if (status === 'cleared') return getTimestampMillis(getSubmissionClearedEntryAt(sub));
+    return getPaymentReceivedAtMillis(sub);
 }
 
 function getSubmissionRatePercent(sub) {
@@ -625,7 +637,9 @@ function getSortedFilteredSentToPfaRecords() {
 }
 
 function sortAndFilterPaymentRecords(records = [], mode = 'all') {
-    const queue = records.slice();
+    const queue = records
+        .slice()
+        .sort((a, b) => getPaymentTableEntryMillis(b) - getPaymentTableEntryMillis(a));
 
     if (mode === 'rate_7') {
         return queue.filter((sub) => getSubmissionRatePercent(sub) === 7);
@@ -1107,14 +1121,14 @@ function createStageReportFromDateRange(request, startDate, endDate) {
 
     if (request?.kind === 'paid') {
         const records = getSortedFilteredPaidRecords().filter((sub) => {
-            const dateMs = getTimestampMillis(sub?.paidAt || sub?.updatedAt);
+            const dateMs = getTimestampMillis(getSubmissionPaidEntryAt(sub));
             return dateMs >= startMs && dateMs <= endMs;
         });
         return buildPaymentStageReport(records, {
             title: 'Paid Report',
             exportKey: `paid-report-${startDate}-to-${endDate}`,
             dateLabel: 'paid date',
-            getDateMs: (sub) => getTimestampMillis(sub?.paidAt || sub?.updatedAt),
+            getDateMs: (sub) => getTimestampMillis(getSubmissionPaidEntryAt(sub)),
             statusResolver: () => 'Paid',
             attendedResolver: () => true
         });
@@ -1124,14 +1138,14 @@ function createStageReportFromDateRange(request, startDate, endDate) {
         const records = getSortedFilteredClearedGroups()
             .flatMap((group) => group.submissions || [])
             .filter((sub) => {
-                const dateMs = getTimestampMillis(sub?.clearedAt || sub?.updatedAt);
+                const dateMs = getTimestampMillis(getSubmissionClearedEntryAt(sub));
                 return dateMs >= startMs && dateMs <= endMs;
             });
         return buildPaymentStageReport(records, {
             title: 'Cleared Report',
             exportKey: `cleared-report-${startDate}-to-${endDate}`,
             dateLabel: 'cleared date',
-            getDateMs: (sub) => getTimestampMillis(sub?.clearedAt || sub?.updatedAt),
+            getDateMs: (sub) => getTimestampMillis(getSubmissionClearedEntryAt(sub)),
             statusResolver: () => 'Cleared',
             attendedResolver: () => true
         });
@@ -1469,7 +1483,7 @@ function renderPaymentQueue() {
 
     paymentsTableBody.innerHTML = paymentQueue.map((sub) => {
         const { pfa, twentyFive, commission2 } = getSubmissionFinancials(sub);
-        const queueDate = formatDateValue(sub?.rsaSubmittedAt || sub?.updatedAt);
+        const queueDate = formatDateValue(getSubmissionPaymentEntryAt(sub));
         const uploaderLabel = getUploaderDisplayName(sub?.uploadedBy);
         const agentName = String(sub?.agentName || '').trim() || 'No Agent';
         const rateLabel = getSubmissionRateLabel(sub);
@@ -1554,7 +1568,7 @@ function renderPaidCustomersSimpleTableLegacy() {
 
     paidCustomersTableBody.innerHTML = paidCustomers.map((sub) => {
         const { pfa, twentyFive, commission2 } = getSubmissionFinancials(sub);
-        const paidDate = formatDateValue(sub?.paidAt || sub?.updatedAt);
+        const paidDate = formatDateValue(getSubmissionPaidEntryAt(sub));
         const uploaderLabel = getUploaderDisplayName(sub?.uploadedBy);
         const agentName = String(sub?.agentName || '').trim() || 'No Agent';
         const rateLabel = getSubmissionRateLabel(sub);
@@ -1599,7 +1613,7 @@ function renderPaidCustomersSimpleTable() {
 
     paidCustomersTableBody.innerHTML = paidCustomers.map((sub) => {
         const { pfa, twentyFive, commission2 } = getSubmissionFinancials(sub);
-        const paidDate = formatDateValue(sub?.paidAt || sub?.updatedAt);
+        const paidDate = formatDateValue(getSubmissionPaidEntryAt(sub));
         const uploaderLabel = getUploaderDisplayName(sub?.uploadedBy);
         const agentName = String(sub?.agentName || '').trim() || 'No Agent';
         const rateLabel = getSubmissionRateLabel(sub);
@@ -1676,8 +1690,8 @@ function loadSubmissions() {
         allSubmissions = snapshot.docs
             .map((d) => ({ id: d.id, ...d.data() }))
             .sort((a, b) => {
-                const aMs = a?.uploadedAt?.toMillis ? a.uploadedAt.toMillis() : new Date(a?.uploadedAt || 0).getTime();
-                const bMs = b?.uploadedAt?.toMillis ? b.uploadedAt.toMillis() : new Date(b?.uploadedAt || 0).getTime();
+                const aMs = getPaymentTableEntryMillis(a);
+                const bMs = getPaymentTableEntryMillis(b);
                 return bMs - aMs;
             });
         await primeUploaderNames(allSubmissions);
@@ -2013,7 +2027,8 @@ window.signOutUser = async () => {
         if (userId) {
             await updateDoc(doc(db, 'users', userId), {
                 isOnline: false,
-                lastSeenAt: serverTimestamp()
+                lastSeenAt: serverTimestamp(),
+                lastLogoutAt: serverTimestamp()
             }).catch(() => {});
         }
         await signOut(auth);

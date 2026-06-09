@@ -162,6 +162,13 @@ function parseText(value, fallback = '') {
   return text || fallback;
 }
 
+function parseDurationSetting(value, fallback = '11m') {
+  const text = String(value || '').trim().toLowerCase();
+  if (/^\d+\s*[smh]$/.test(text)) return text.replace(/\s+/g, '');
+  if (/^\d+(\.\d+)?$/.test(text)) return `${text}m`;
+  return fallback;
+}
+
 function parseStringArray(value, fallback = []) {
   const source = Array.isArray(value) ? value : fallback;
   const seen = new Set();
@@ -332,6 +339,7 @@ export function getDefaultSystemSettings() {
     },
     securityControls: {
       sessionTimeoutMinutes: 60,
+      forceLogoutCountdown: '11m',
       forceLogoutToken: ''
     },
     notificationTemplates: {},
@@ -417,6 +425,10 @@ function normalizeSystemSettings(data = {}) {
       ...defaults.securityControls,
       ...parseObject(data.securityControls, defaults.securityControls),
       sessionTimeoutMinutes: Math.max(1, parseNumber(data?.securityControls?.sessionTimeoutMinutes, defaults.securityControls.sessionTimeoutMinutes)),
+      forceLogoutCountdown: parseDurationSetting(
+        data?.securityControls?.forceLogoutCountdown ?? data?.securityControls?.forceLogoutCountdownMinutes,
+        defaults.securityControls.forceLogoutCountdown
+      ),
       forceLogoutToken: parseText(data?.securityControls?.forceLogoutToken, defaults.securityControls.forceLogoutToken)
     },
     notificationTemplates: parseObject(data.notificationTemplates, defaults.notificationTemplates),

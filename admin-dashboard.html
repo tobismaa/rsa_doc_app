@@ -126,6 +126,11 @@
                         <option value="active">Active</option>
                         <option value="deactivated">Deactivated</option>
                     </select>
+                    <select id="userOnlineFilter" aria-label="Filter by online status">
+                        <option value="all">All Presence</option>
+                        <option value="online">Online</option>
+                        <option value="offline">Offline</option>
+                    </select>
                 </div>
 
                 <!-- Users Table -->
@@ -399,7 +404,7 @@
                                     <th>Customer</th>
                                     <th>Uploaded By</th>
                                     <th>Status</th>
-                                    <th>Uploaded At</th>
+                                    <th>Current Stage Entry</th>
                                     <th>Assigned Reviewer</th>
                                     <th>Attended At</th>
                                     <th>Assigned RSA</th>
@@ -1007,7 +1012,7 @@
     <script type="module" src="js/firebase-config.js"></script>
     <script type="module" src="js/admin.js?v=20260518a"></script>
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/profile-completion-guard.js?v=20260508b"></script>
+    <script type="module" src="js/profile-completion-guard.js?v=20260609b"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260518a">
     <script type="module" src="js/app-chat.js?v=20260518a"></script>
     <link rel="stylesheet" href="css/pwa-install.css">

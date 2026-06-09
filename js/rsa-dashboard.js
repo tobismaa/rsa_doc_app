@@ -25,6 +25,12 @@ import {
     normalizeEmail as normalizeEmailShared
 } from './shared/user-directory.js?v=20260518a';
 import {
+    getTimestampMillis as getStageTimestampMillis,
+    getSubmissionRsaEntryAt,
+    getSubmissionRejectionEntryAt,
+    getSubmissionFinalSubmissionEntryAt
+} from './shared/submission-stage.js?v=20260609a';
+import {
     getUploaderRoutingRule as getUploaderRoutingRuleShared,
     routingRuleDocId as routingRuleDocIdShared
 } from './shared/uploader-routing.js?v=20260427e';
@@ -163,8 +169,7 @@ function setWhatsAppContact(containerEl, rawPhone) {
 }
 
 function getApprovedTimestamp(sub) {
-    // Reviewer approval time is typically stored as reviewedAt/approvedAt.
-    return sub?.reviewedAt || sub?.approvedAt || sub?.statusUpdatedAt || sub?.updatedAt || null;
+    return getSubmissionRsaEntryAt(sub);
 }
 
 function normalizeEmail(email) {
@@ -745,8 +750,8 @@ async function getAllRsaExcelSubmissions() {
     }));
 }
 
-function getSubmissionUploadDateMillis(submission) {
-    return getTimestampMillis(submission?.uploadedAt);
+function getSubmissionRsaEntryDateMillis(submission) {
+    return getStageTimestampMillis(getSubmissionRsaEntryAt(submission));
 }
 
 function formatDateRangeLabel(startValue, endValue) {
@@ -887,9 +892,9 @@ async function handleRsaLevelTwoDateRangeSubmit() {
         const startMs = new Date(`${startValue}T00:00:00`).getTime();
         const endMs = new Date(`${endValue}T23:59:59`).getTime();
         currentRsaExcelResults = submissions.filter((sub) => {
-            const uploadedAtMs = getSubmissionUploadDateMillis(sub);
-            return uploadedAtMs >= startMs && uploadedAtMs <= endMs;
-        });
+            const entryAtMs = getSubmissionRsaEntryDateMillis(sub);
+            return entryAtMs >= startMs && entryAtMs <= endMs;
+        }).sort((a, b) => getSubmissionRsaEntryDateMillis(b) - getSubmissionRsaEntryDateMillis(a));
         currentRsaExcelSelectedIds = new Set();
         if (rsaExcelResultsSearch) rsaExcelResultsSearch.value = '';
         currentRsaExcelRange = { start: startValue, end: endValue };
@@ -1514,8 +1519,9 @@ function renderCurrentTab() {
         const end = rsaEndDate.value? new Date(rsaEndDate.value) : null;
         if (end) end.setHours(23,59,59,999);
         let list = allSubmissions.filter(s=>{
-            if (start && s.uploadedAt && s.uploadedAt.toDate().getTime() < start.getTime()) return false;
-            if (end && s.uploadedAt && s.uploadedAt.toDate().getTime() > end.getTime()) return false;
+            const entryAt = getSubmissionRsaEntryDateMillis(s);
+            if (start && entryAt < start.getTime()) return false;
+            if (end && entryAt > end.getTime()) return false;
             return true;
         });
         if (rsaSearch && rsaSearch.value.trim()) {
@@ -1533,6 +1539,7 @@ function renderCurrentTab() {
             const status = String(s.status || '').toLowerCase();
             return (status === 'processing_to_pfa' || status === 'approved') && !s.finalSubmitted && !s.rsaSubmitted;
         });
+        list = list.slice().sort((a, b) => getSubmissionRsaEntryDateMillis(b) - getSubmissionRsaEntryDateMillis(a));
         currentRsaDisplayedSubmissions = list;
         renderRsaRows(list);
     } else if (currentTab === 'finally-submitted') {
@@ -1669,7 +1676,10 @@ function renderRejectedRsaTab() {
     const body = document.getElementById('rsaRejectedTableBody');
     if (!body) return;
 
-    let list = allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'rejected_by_rsa');
+    let list = allSubmissions
+        .filter((s) => String(s.status || '').toLowerCase() === 'rejected_by_rsa')
+        .slice()
+        .sort((a, b) => getStageTimestampMillis(getSubmissionRejectionEntryAt(b)) - getStageTimestampMillis(getSubmissionRejectionEntryAt(a)));
     if (rsaSearch && rsaSearch.value.trim()) {
         const qstr = rsaSearch.value.trim().toLowerCase();
         list = list.filter((s) =>
@@ -1713,6 +1723,21 @@ function renderFinallySubmittedTab() {
     let list = allSubmissions.filter(s => {
         return s.finalSubmitted === true || s.rsaSubmitted === true;
     });
+    list = list.slice().sort((a, b) => getStageTimestampMillis(getSubmissionFinalSubmissionEntryAt(b)) - getStageTimestampMillis(getSubmissionFinalSubmissionEntryAt(a)));
+
+    const finalStartDate = document.getElementById('finalStartDate')?.value || '';
+    const finalEndDate = document.getElementById('finalEndDate')?.value || '';
+    const startMs = finalStartDate ? new Date(`${finalStartDate}T00:00:00`).getTime() : 0;
+    const endMs = finalEndDate ? new Date(`${finalEndDate}T23:59:59`).getTime() : 0;
+    if (startMs || endMs) {
+        list = list.filter((sub) => {
+            const entryMs = getStageTimestampMillis(getSubmissionFinalSubmissionEntryAt(sub));
+            if (!entryMs) return false;
+            if (startMs && entryMs < startMs) return false;
+            if (endMs && entryMs > endMs) return false;
+            return true;
+        });
+    }
 
     // Apply filters
     const finalSearch = document.getElementById('finalSearch');
@@ -2044,7 +2069,8 @@ window.signOutUser = async () => {
         if (userId) {
             await updateDoc(doc(db, 'users', userId), {
                 isOnline: false,
-                lastSeenAt: serverTimestamp()
+                lastSeenAt: serverTimestamp(),
+                lastLogoutAt: serverTimestamp()
             }).catch(() => {});
         }
         await signOut(auth);

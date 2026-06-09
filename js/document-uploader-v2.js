@@ -26,6 +26,13 @@ import {
   getSubmissionCommissionAmount,
   resolveSubmissionCommissionRate
 } from './shared/commission-config.js?v=20260507a';
+import {
+  getTimestampMillis as getStageTimestampMillis,
+  getSubmissionCurrentStageEntryAt,
+  getSubmissionReviewEntryAt,
+  getSubmissionApprovalEntryAt,
+  getSubmissionRejectionEntryAt
+} from './shared/submission-stage.js?v=20260609a';
 import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260508a';
 import {
   collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, doc,
@@ -3961,12 +3968,7 @@ async function getCurrentHandlerName(submission) {
 }
 
 function getSubmissionSortMillis(submission) {
-  const candidates = [submission?.draftSavedAt, submission?.submittedAt, submission?.uploadedAt, submission?.updatedAt];
-  for (const value of candidates) {
-    const date = getDateFromAny(value);
-    if (date) return date.getTime();
-  }
-  return 0;
+  return getStageTimestampMillis(getSubmissionCurrentStageEntryAt(submission));
 }
 
 function safeFormatDate(dateValue) {
@@ -4004,7 +4006,7 @@ async function renderRecentTable() {
   recentTableBody.innerHTML = recentItems.map((sub) => `
     <tr>
       <td><strong>${escapeHtml(sub.customerName || '-')}</strong></td>
-      <td>${safeFormatDate(sub.uploadedAt || sub.submittedAt || sub.draftSavedAt)}</td>
+      <td>${safeFormatDate(getSubmissionCurrentStageEntryAt(sub))}</td>
       <td><span class="status-badge status-${String(sub.status || 'pending').toLowerCase().replace(/[^a-z0-9_-]+/g, '-')}">${escapeHtml(String(sub.status || 'pending').replace(/_/g, ' '))}</span></td>
       <td>${escapeHtml(sub.uploadedBy || '-')}</td>
       <td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td>
@@ -4106,11 +4108,14 @@ function isUploaderApprovedLifecycleStatus(submission = {}) {
 
 async function renderPendingTable() {
   if (!pendingTableBody) { return; }
-  const pending = allSubmissions.filter(s => s.status === 'pending');
+  const pending = allSubmissions
+    .filter(s => s.status === 'pending')
+    .slice()
+    .sort((a, b) => getStageTimestampMillis(getSubmissionReviewEntryAt(b)) - getStageTimestampMillis(getSubmissionReviewEntryAt(a)));
   if (pending.length === 0) { pendingTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No pending documents</td></tr>'; return; }
   let html = '';
   for (const sub of pending) {
-    const date = safeFormatDate(sub.uploadedAt);
+    const date = safeFormatDate(getSubmissionReviewEntryAt(sub));
     const assignedName = await getCurrentHandlerName(sub);
     const whatsapp = await renderStageContactLink(sub);
     const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
@@ -4121,12 +4126,15 @@ async function renderPendingTable() {
 
 async function renderApprovedTable() {
   if (!approvedTableBody) { return; }
-  const approved = allSubmissions.filter((s) => isUploaderApprovedLifecycleStatus(s));
+  const approved = allSubmissions
+    .filter((s) => isUploaderApprovedLifecycleStatus(s))
+    .slice()
+    .sort((a, b) => getStageTimestampMillis(getSubmissionApprovalEntryAt(b)) - getStageTimestampMillis(getSubmissionApprovalEntryAt(a)));
   if (approved.length === 0) { approvedTableBody.innerHTML = '<tr><td colspan="10" class="no-data">No approved documents</td></tr>'; return; }
   let html = '';
   for (const sub of approved) {
     const uploadDate = safeFormatDate(sub.uploadedAt);
-    const approvedDate = safeFormatDate(sub.reviewedAt);
+    const approvedDate = safeFormatDate(getSubmissionApprovalEntryAt(sub));
     const approvedByKey = normalizeEmail(sub.reviewedBy);
     const approvedBy = (approvedByKey && userFullNames.get(approvedByKey)) ? userFullNames.get(approvedByKey) : (sub.reviewedBy || '-');
     const assignedName = await getCurrentHandlerName(sub);
@@ -4145,13 +4153,16 @@ async function renderApprovedTable() {
 
 async function renderRejectedTable() {
   if (!rejectedTableBody) { return; }
-  const rejected = allSubmissions.filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase()));
+  const rejected = allSubmissions
+    .filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase()))
+    .slice()
+    .sort((a, b) => getStageTimestampMillis(getSubmissionRejectionEntryAt(b)) - getStageTimestampMillis(getSubmissionRejectionEntryAt(a)));
   if (rejected.length === 0) { rejectedTableBody.innerHTML = '<tr><td colspan="13" class="no-data">No rejected documents</td></tr>'; return; }
   let html = '';
   for (const sub of rejected) {
     const fixCount = Number(sub.fixCount || 0);
-    const date = safeFormatDate(sub.uploadedAt);
-    const rejectedDate = safeFormatDate(sub.reviewedAt);
+    const date = safeFormatDate(getSubmissionReviewEntryAt(sub));
+    const rejectedDate = safeFormatDate(getSubmissionRejectionEntryAt(sub));
     const rejectedActor = sub.latestRejectedBy || sub.reviewedBy || '-';
     const rejectedByKey = normalizeEmail(rejectedActor);
     const rejectedBy = (rejectedByKey && userFullNames.get(rejectedByKey)) ? userFullNames.get(rejectedByKey) : (rejectedActor || '-');

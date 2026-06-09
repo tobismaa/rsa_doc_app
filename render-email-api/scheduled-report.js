@@ -43,6 +43,41 @@ function getPreviousDateKeyInLagos(baseDate = new Date()) {
     return getLagosDateKey(prior);
 }
 
+function pickTimestamp(...values) {
+    for (const value of values) {
+        if (tsToMillis(value) > 0) return value;
+    }
+    return null;
+}
+
+function getSubmissionReviewEntryAt(sub = {}) {
+    return pickTimestamp(sub.reuploadedAt, sub.uploadedAt, sub.submittedAt, sub.createdAt, sub.updatedAt);
+}
+
+function getSubmissionApprovalEntryAt(sub = {}) {
+    return pickTimestamp(sub.reviewedAt, sub.approvedAt, sub.statusUpdatedAt, sub.updatedAt);
+}
+
+function getSubmissionRsaEntryAt(sub = {}) {
+    return pickTimestamp(sub.reviewedAt, sub.approvedAt, sub.statusUpdatedAt, sub.updatedAt);
+}
+
+function getSubmissionFinalSubmissionEntryAt(sub = {}) {
+    return pickTimestamp(sub.finalSubmittedAt, sub.rsaSubmittedAt, sub.statusUpdatedAt, sub.updatedAt);
+}
+
+function getSubmissionPaymentEntryAt(sub = {}) {
+    return pickTimestamp(sub.paymentAssignedAt, sub.finalSubmittedAt, sub.rsaSubmittedAt, sub.statusUpdatedAt, sub.updatedAt);
+}
+
+function getSubmissionPaidEntryAt(sub = {}) {
+    return pickTimestamp(sub.paidAt, sub.statusUpdatedAt, sub.updatedAt);
+}
+
+function getSubmissionClearedEntryAt(sub = {}) {
+    return pickTimestamp(sub.clearedAt, sub.statusUpdatedAt, sub.updatedAt);
+}
+
 function formatDate(value) {
     const ms = tsToMillis(value);
     if (!ms) return '-';
@@ -142,14 +177,14 @@ function compareGroupedRows(a = {}, b = {}) {
 function buildUploaderSheetRows(records = [], usersByEmail, includeDateColumn = false) {
     return records.map((sub) => ({
         owner: getUserDisplayNameByEmail(usersByEmail, sub.uploadedBy),
-        ...(includeDateColumn ? { reportDate: getDateKey(sub.uploadedAt) || '-' } : {}),
+        ...(includeDateColumn ? { reportDate: getDateKey(getSubmissionReviewEntryAt(sub)) || '-' } : {}),
         customerName: sub.customerName || '',
         rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
         rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
         commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
         status: String(sub.status || '').replace(/_/g, ' '),
-        uploadedAt: formatDate(sub.uploadedAt),
-        stageTime: formatDate(sub.reviewedAt),
+        uploadedAt: formatDate(getSubmissionReviewEntryAt(sub)),
+        stageTime: formatDate(getSubmissionApprovalEntryAt(sub)),
         rejectionReason: getRejectionReason(sub),
         rejectionCount: getRejectionCount(sub)
     }));
@@ -160,14 +195,15 @@ function buildReviewerSheetRows(records = [], usersByEmail, includeDateColumn = 
         .filter((sub) => normalizeEmail(sub.assignedTo))
         .map((sub) => ({
             owner: getUserDisplayNameByEmail(usersByEmail, sub.assignedTo),
-            ...(includeDateColumn ? { reportDate: getDateKey(sub.uploadedAt) || '-' } : {}),
+            ...(includeDateColumn ? { reportDate: getDateKey(getSubmissionReviewEntryAt(sub)) || '-' } : {}),
             customerName: sub.customerName || '',
+            uploaderName: getUserDisplayNameByEmail(usersByEmail, sub.uploadedBy),
             rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
             rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
             commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
             status: String(sub.status || '').replace(/_/g, ' '),
-            assignedAt: formatDate(sub.uploadedAt),
-            stageTime: formatDate(sub.reviewedAt),
+            assignedAt: formatDate(getSubmissionReviewEntryAt(sub)),
+            stageTime: formatDate(getSubmissionApprovalEntryAt(sub)),
             rejectionReason: getRejectionReason(sub),
             rejectionCount: getRejectionCount(sub)
         }));
@@ -178,14 +214,15 @@ function buildRsaSheetRows(records = [], usersByEmail, includeDateColumn = false
         .filter((sub) => normalizeEmail(sub.assignedToRSA))
         .map((sub) => ({
             owner: getUserDisplayNameByEmail(usersByEmail, sub.assignedToRSA),
-            ...(includeDateColumn ? { reportDate: getDateKey(sub.reviewedAt) || '-' } : {}),
+            ...(includeDateColumn ? { reportDate: getDateKey(getSubmissionRsaEntryAt(sub)) || '-' } : {}),
             customerName: sub.customerName || '',
+            reviewerName: getUserDisplayNameByEmail(usersByEmail, sub.assignedTo || sub.reviewedBy),
             rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
             rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
             commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
             status: String(sub.status || '').replace(/_/g, ' '),
-            assignedAt: formatDate(sub.reviewedAt),
-            stageTime: formatDate(sub.finalSubmittedAt || sub.rsaSubmittedAt),
+            assignedAt: formatDate(getSubmissionRsaEntryAt(sub)),
+            stageTime: formatDate(getSubmissionFinalSubmissionEntryAt(sub)),
             rejectionReason: String(String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? getRejectionReason(sub) : ''),
             rejectionCount: Number(String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? getRejectionCount(sub) : 0)
         }));
@@ -196,15 +233,16 @@ function buildPaymentSheetRows(records = [], usersByEmail, includeDateColumn = f
         .filter((sub) => normalizeEmail(sub.assignedToPayment))
         .map((sub) => ({
             owner: getUserDisplayNameByEmail(usersByEmail, sub.assignedToPayment),
-            ...(includeDateColumn ? { reportDate: getDateKey(sub.paymentAssignedAt || sub.finalSubmittedAt || sub.rsaSubmittedAt) || '-' } : {}),
+            ...(includeDateColumn ? { reportDate: getDateKey(getSubmissionPaymentEntryAt(sub)) || '-' } : {}),
             customerName: sub.customerName || '',
+            rsaOfficerName: getUserDisplayNameByEmail(usersByEmail, sub.assignedToRSA),
             rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
             rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
             commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
             status: String(sub.status || '').replace(/_/g, ' '),
-            assignedAt: formatDate(sub.paymentAssignedAt || sub.finalSubmittedAt || sub.rsaSubmittedAt),
-            paidAt: formatDate(sub.paidAt),
-            clearedAt: formatDate(sub.clearedAt),
+            assignedAt: formatDate(getSubmissionPaymentEntryAt(sub)),
+            paidAt: formatDate(getSubmissionPaidEntryAt(sub)),
+            clearedAt: formatDate(getSubmissionClearedEntryAt(sub)),
             remarks: sub.clearedWithoutAgentCommission ? 'Cleared without agent commission' : String(sub.paymentReconciliationFileName || '').trim()
         }));
 }
@@ -332,18 +370,15 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
     const matchesScope = (value) => scope.mode === 'date_range'
         ? isDateKeyWithinRange(value, scope.rangeStartDateKey, scope.rangeEndDateKey)
         : isSameReportDate(value, scope.reportDateKey);
-    const uploaderRecords = submittedRecords.filter((sub) => matchesScope(sub.uploadedAt));
-    const reviewerRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedTo) && matchesScope(sub.uploadedAt));
-    const rsaRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToRSA) && matchesScope(sub.reviewedAt));
-    const paymentRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToPayment) && matchesScope(sub.paymentAssignedAt || sub.finalSubmittedAt || sub.rsaSubmittedAt));
-    const reviewerAttendedRecords = reviewerRecords.filter((sub) => !!tsToMillis(sub.reviewedAt));
-    const rsaAttendedRecords = rsaRecords.filter((sub) => !!tsToMillis(sub.finalSubmittedAt || sub.rsaSubmittedAt) || String(sub.status || '').toLowerCase() === 'rejected_by_rsa');
-    const paymentAttendedRecords = paymentRecords.filter((sub) => !!tsToMillis(sub.paidAt) || !!tsToMillis(sub.clearedAt) || String(sub.status || '').toLowerCase() === 'cleared');
+    const uploaderRecords = submittedRecords.filter((sub) => matchesScope(getSubmissionReviewEntryAt(sub)));
+    const reviewerRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedTo) && matchesScope(getSubmissionReviewEntryAt(sub)));
+    const rsaRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToRSA) && matchesScope(getSubmissionRsaEntryAt(sub)));
+    const paymentRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToPayment) && matchesScope(getSubmissionPaymentEntryAt(sub)));
+    const reviewerAttendedRecords = reviewerRecords.filter((sub) => !!tsToMillis(getSubmissionApprovalEntryAt(sub)));
+    const rsaAttendedRecords = rsaRecords.filter((sub) => !!tsToMillis(getSubmissionFinalSubmissionEntryAt(sub)) || String(sub.status || '').toLowerCase() === 'rejected_by_rsa');
+    const paymentAttendedRecords = paymentRecords.filter((sub) => !!tsToMillis(getSubmissionPaidEntryAt(sub)) || !!tsToMillis(getSubmissionClearedEntryAt(sub)) || String(sub.status || '').toLowerCase() === 'cleared');
     const dateHeaders = scope.includeDateColumn ? ['Report Date'] : [];
     const dateColumns = scope.includeDateColumn ? [{ width: 14 }] : [];
-    const moneyDecimalColumns = scope.includeDateColumn ? [3, 4, 5] : [2, 3, 4];
-    const rejectIntegerColumn = scope.includeDateColumn ? [10] : [9];
-
     return {
         reportDateKey: scope.reportDateKey,
         rangeStartDateKey: scope.rangeStartDateKey,
@@ -374,10 +409,10 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
                     ['Total Outstanding', reviewerOutstandingRecords.length]
                 ],
                 groupRows: buildReviewerSheetRows(reviewerRecords, usersByEmail, scope.includeDateColumn).sort(compareGroupedRows),
-                tableHeaders: [...dateHeaders, 'Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Decision Time', 'Reject Reason', 'Reject Count'],
-                columns: [...dateColumns, { width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
-                decimalColumns: moneyDecimalColumns,
-                integerColumns: rejectIntegerColumn
+                tableHeaders: [...dateHeaders, 'Customer Name', 'Uploader Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Decision Time', 'Reject Reason', 'Reject Count'],
+                columns: [...dateColumns, { width: 28 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
+                decimalColumns: scope.includeDateColumn ? [4, 5, 6] : [3, 4, 5],
+                integerColumns: scope.includeDateColumn ? [11] : [10]
             },
             {
                 worksheetName: 'RSA Report',
@@ -389,10 +424,10 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
                     ['Total Outstanding', rsaOutstandingRecords.length]
                 ],
                 groupRows: buildRsaSheetRows(rsaRecords, usersByEmail, scope.includeDateColumn).sort(compareGroupedRows),
-                tableHeaders: [...dateHeaders, 'Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time', 'RSA Done Time', 'RSA Reject Reason', 'RSA Reject Count'],
-                columns: [...dateColumns, { width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
-                decimalColumns: moneyDecimalColumns,
-                integerColumns: rejectIntegerColumn
+                tableHeaders: [...dateHeaders, 'Customer Name', 'Reviewer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time', 'RSA Done Time', 'RSA Reject Reason', 'RSA Reject Count'],
+                columns: [...dateColumns, { width: 28 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
+                decimalColumns: scope.includeDateColumn ? [4, 5, 6] : [3, 4, 5],
+                integerColumns: scope.includeDateColumn ? [11] : [10]
             },
             {
                 worksheetName: 'Payment Report',
@@ -404,9 +439,9 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
                     ['Total Outstanding', paymentOutstandingRecords.length]
                 ],
                 groupRows: buildPaymentSheetRows(paymentRecords, usersByEmail, scope.includeDateColumn).sort(compareGroupedRows),
-                tableHeaders: [...dateHeaders, 'Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Paid Time', 'Cleared Time', 'Remarks'],
-                columns: [...dateColumns, { width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 22 }, { width: 28 }],
-                decimalColumns: moneyDecimalColumns,
+                tableHeaders: [...dateHeaders, 'Customer Name', 'RSA Officer', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Paid Time', 'Cleared Time', 'Remarks'],
+                columns: [...dateColumns, { width: 28 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 22 }, { width: 28 }],
+                decimalColumns: scope.includeDateColumn ? [4, 5, 6] : [3, 4, 5],
                 integerColumns: []
             }
         ]

@@ -218,6 +218,29 @@ function getLagosWeekdayKey(date = new Date()) {
     return lagosWeekdayFormatter.format(date).toLowerCase();
 }
 
+function tsToMillis(value) {
+    if (!value) return 0;
+    try {
+        if (typeof value.toMillis === 'function') return value.toMillis();
+        if (typeof value.toDate === 'function') return value.toDate().getTime();
+        if (typeof value.seconds === 'number') return value.seconds * 1000;
+    } catch (_) {}
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatLagosDateTime(value) {
+    const ms = tsToMillis(value);
+    if (!ms) return '';
+    return lagosDateTimeFormatter.format(new Date(ms));
+}
+
+function getLagosDateKeyFromValue(value) {
+    const ms = tsToMillis(value);
+    if (!ms) return '';
+    return getLagosDateKey(new Date(ms));
+}
+
 function shiftDateKey(dateKey, offsetDays) {
     const text = String(dateKey || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
@@ -263,6 +286,85 @@ function resolveAutoScheduledScope(now = new Date()) {
     return {
         mode: 'single_day',
         reportDateKey: previousDateKey
+    };
+}
+
+function getRunEventTimestamp(run = {}) {
+    return run.completedAt || run.failedAt || run.updatedAt || run.startedAt || null;
+}
+
+function summarizeRunType(trigger = '') {
+    const text = String(trigger || '').trim().toLowerCase();
+    if (text === 'auto' || text === 'auto_weekend_rollup') return 'auto';
+    if (text.startsWith('manual:') || text.startsWith('manual_custom')) return 'manual';
+    return text ? 'other' : 'unknown';
+}
+
+function serializeRunSummary(run = {}) {
+    const eventTimestamp = getRunEventTimestamp(run);
+    return {
+        runKey: String(run.runKey || '').trim(),
+        reportDateKey: String(run.reportDateKey || '').trim(),
+        rangeStartDateKey: String(run.rangeStartDateKey || '').trim(),
+        rangeEndDateKey: String(run.rangeEndDateKey || '').trim(),
+        reportLabel: String(run.reportLabel || '').trim(),
+        status: String(run.status || '').trim(),
+        trigger: String(run.trigger || '').trim(),
+        triggerType: summarizeRunType(run.trigger),
+        resendRequested: run.resendRequested === true,
+        resendCount: Number(run.resendCount || 0),
+        sendTime: String(run.sendTime || '').trim(),
+        subject: String(run.subject || '').trim(),
+        attachmentFileName: String(run.attachmentFileName || '').trim(),
+        sentCount: Number(run.sentCount || 0),
+        failedCount: Number(run.failedCount || 0),
+        recipientsCount: Array.isArray(run.recipients) ? run.recipients.length : 0,
+        eventDateKey: getLagosDateKeyFromValue(eventTimestamp),
+        eventTime: formatLagosDateTime(eventTimestamp)
+    };
+}
+
+async function loadScheduledReportStatusSnapshot() {
+    const settingsSnap = await adminDb.collection('settings').doc('system').get();
+    const settings = settingsSnap.exists ? (settingsSnap.data() || {}) : {};
+    const scheduled = settings.scheduledReportEmail || {};
+    const reportDateKey = getPreviousDateKeyInLagos();
+    const todayDateKey = getLagosDateKey();
+    const [runSnap, recentRunsSnap] = await Promise.all([
+        adminDb.collection('scheduledReportRuns').doc(reportDateKey).get(),
+        adminDb.collection('scheduledReportRuns').orderBy('updatedAt', 'desc').limit(20).get()
+    ]);
+
+    const lastRun = runSnap.exists ? (runSnap.data() || {}) : null;
+    const recentRuns = recentRunsSnap.docs
+        .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))
+        .map((run) => serializeRunSummary(run));
+    const todayRuns = recentRuns.filter((run) => run.eventDateKey === todayDateKey);
+    const sentStatuses = new Set(['sent', 'partial']);
+
+    return {
+        ok: true,
+        reportDateKey,
+        currentLagosDateKey: todayDateKey,
+        currentLagosTime: getLagosTimeKey(),
+        enabled: scheduled.enabled === true,
+        emailJsConfigured: isEmailJsConfigured(),
+        sendTime: String(scheduled.sendTime || '08:00').trim() || '08:00',
+        reportDateMode: String(scheduled.reportDateMode || 'previous_day').trim() || 'previous_day',
+        recipients: normalizeEmailList(scheduled.recipients || []),
+        lastRun: lastRun ? serializeRunSummary(lastRun) : null,
+        todaySummary: {
+            hasSentForReportDate: sentStatuses.has(String(lastRun?.status || '').toLowerCase()),
+            hasAnyRunToday: todayRuns.length > 0,
+            totalRuns: todayRuns.length,
+            autoRuns: todayRuns.filter((run) => run.triggerType === 'auto').length,
+            manualRuns: todayRuns.filter((run) => run.triggerType === 'manual').length,
+            resendRuns: todayRuns.filter((run) => run.resendRequested === true).length,
+            successfulRuns: todayRuns.filter((run) => sentStatuses.has(String(run.status || '').toLowerCase())).length,
+            failedRuns: todayRuns.filter((run) => String(run.status || '').toLowerCase() === 'failed').length
+        },
+        todayRuns,
+        recentRuns
     };
 }
 
@@ -526,6 +628,7 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', f
             sentCount,
             failedCount: failures.length,
             failures,
+            attachmentFileName,
             completedAt: admin.firestore.FieldValue.serverTimestamp(),
             subject
         }, { merge: true });
@@ -534,6 +637,7 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', f
             ok: failures.length === 0,
             reportDateKey: normalizedDateKey,
             reportLabel: scope.label,
+            attachmentFileName,
             sentCount,
             failedCount: failures.length,
             failures
@@ -557,6 +661,7 @@ async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDate
     const settings = settingsSnap.exists ? (settingsSnap.data() || {}) : {};
     const scheduled = settings.scheduledReportEmail || {};
     const enabled = scheduled.enabled === true;
+    const sendTime = String(scheduled.sendTime || '08:00').trim() || '08:00';
     const subject = String(scheduled.subject || 'Daily RSA Report').trim() || 'Daily RSA Report';
     const bodyText = String(scheduled.body || 'Hello,\n\nPlease find the attached daily RSA report.\n\nRegards,\nCMBank RSA Portal').trim();
     const recipients = normalizeEmailList(scheduled.recipients || []);
@@ -624,10 +729,12 @@ async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDate
             reportLabel: scope.label,
             trigger,
             resendRequested: forceResend === true,
+            sendTime,
             recipients,
             sentCount,
             failedCount: failures.length,
             failures,
+            attachmentFileName,
             completedAt: admin.firestore.FieldValue.serverTimestamp(),
             subject
         }, { merge: true });
@@ -639,6 +746,7 @@ async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDate
             rangeStartDateKey: scope.rangeStartDateKey,
             rangeEndDateKey: scope.rangeEndDateKey,
             reportLabel: scope.label,
+            attachmentFileName,
             sentCount,
             failedCount: failures.length,
             failures
@@ -785,23 +893,7 @@ app.post('/api/send-alert', authMiddleware, async (req, res) => {
 
 app.get('/api/scheduled-report/status', authMiddleware, requireAdminOrSuperAdminRole, async (_req, res) => {
     try {
-        const settingsSnap = await adminDb.collection('settings').doc('system').get();
-        const settings = settingsSnap.exists ? (settingsSnap.data() || {}) : {};
-        const scheduled = settings.scheduledReportEmail || {};
-        const reportDateKey = getPreviousDateKeyInLagos();
-        const runSnap = await adminDb.collection('scheduledReportRuns').doc(reportDateKey).get();
-        return res.json({
-            ok: true,
-            reportDateKey,
-            currentLagosDateKey: getLagosDateKey(),
-            currentLagosTime: getLagosTimeKey(),
-            enabled: scheduled.enabled === true,
-            emailJsConfigured: isEmailJsConfigured(),
-            sendTime: String(scheduled.sendTime || '08:00').trim() || '08:00',
-            reportDateMode: String(scheduled.reportDateMode || 'previous_day').trim() || 'previous_day',
-            recipients: normalizeEmailList(scheduled.recipients || []),
-            lastRun: runSnap.exists ? (runSnap.data() || {}) : null
-        });
+        return res.json(await loadScheduledReportStatusSnapshot());
     } catch (err) {
         return res.status(500).json({
             ok: false,

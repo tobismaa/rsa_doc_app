@@ -9,6 +9,10 @@ import {
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { formatAppDateTime } from './shared/app-time.js';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
+import {
+    getTimestampMillis as getStageTimestampMillis,
+    getSubmissionCurrentStageEntryAt
+} from './shared/submission-stage.js?v=20260609a';
 
 let currentUser = null;
 let currentUserData = null;
@@ -241,8 +245,8 @@ function renderOverview() {
         const rows = allSubmissions
             .slice()
             .sort((a, b) => {
-                const aMs = a?.updatedAt?.toMillis ? a.updatedAt.toMillis() : new Date(a?.updatedAt || a?.uploadedAt || 0).getTime();
-                const bMs = b?.updatedAt?.toMillis ? b.updatedAt.toMillis() : new Date(b?.updatedAt || b?.uploadedAt || 0).getTime();
+                const aMs = getStageTimestampMillis(getSubmissionCurrentStageEntryAt(a));
+                const bMs = getStageTimestampMillis(getSubmissionCurrentStageEntryAt(b));
                 return bMs - aMs;
             })
             .slice(0, 10);
@@ -254,7 +258,7 @@ function renderOverview() {
                 <td>${escapeHtml(getApplicationStage(sub))}</td>
                 <td>${escapeHtml(sub.uploadedBy || '-')}</td>
                 <td>${escapeHtml([sub.assignedTo || '-', sub.assignedToRSA || '-', sub.assignedToPayment || '-'].join(' / '))}</td>
-                <td>${escapeHtml(formatDate(sub.updatedAt || sub.uploadedAt))}</td>
+                <td>${escapeHtml(formatDate(getSubmissionCurrentStageEntryAt(sub)))}</td>
                 <td><button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button></td>
             </tr>
         `).join('') : '<tr><td colspan="7" class="no-data">No applications available</td></tr>';
@@ -287,8 +291,8 @@ function renderApplications() {
     const rows = filteredApplications()
         .slice()
         .sort((a, b) => {
-            const aMs = a?.updatedAt?.toMillis ? a.updatedAt.toMillis() : new Date(a?.updatedAt || a?.uploadedAt || 0).getTime();
-            const bMs = b?.updatedAt?.toMillis ? b.updatedAt.toMillis() : new Date(b?.updatedAt || b?.uploadedAt || 0).getTime();
+            const aMs = getStageTimestampMillis(getSubmissionCurrentStageEntryAt(a));
+            const bMs = getStageTimestampMillis(getSubmissionCurrentStageEntryAt(b));
             return bMs - aMs;
         });
 
@@ -302,7 +306,7 @@ function renderApplications() {
             <td>${escapeHtml(sub.assignedTo || sub.reviewedBy || '-')}</td>
             <td>${escapeHtml(sub.assignedToRSA || '-')}</td>
             <td>${escapeHtml(sub.assignedToPayment || '-')}</td>
-            <td>${escapeHtml(formatDate(sub.updatedAt || sub.uploadedAt))}</td>
+            <td>${escapeHtml(formatDate(getSubmissionCurrentStageEntryAt(sub)))}</td>
             <td><button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button></td>
         </tr>
     `).join('') : '<tr><td colspan="10" class="no-data">No applications found</td></tr>';
@@ -501,7 +505,8 @@ window.signOutUser = async () => {
         if (userId) {
             await updateDoc(doc(db, 'users', userId), {
                 isOnline: false,
-                lastSeenAt: serverTimestamp()
+                lastSeenAt: serverTimestamp(),
+                lastLogoutAt: serverTimestamp()
             }).catch(() => {});
         }
         await signOut(auth);

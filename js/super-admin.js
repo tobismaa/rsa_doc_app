@@ -23,6 +23,14 @@ import {
     getDefaultCommissionSettings,
     resolveSubmissionCommissionRate
 } from './shared/commission-config.js?v=20260507a';
+import {
+    getSubmissionReviewEntryAt,
+    getSubmissionApprovalEntryAt,
+    getSubmissionRsaEntryAt,
+    getSubmissionPaymentEntryAt,
+    getSubmissionPaidEntryAt,
+    getSubmissionClearedEntryAt
+} from './shared/submission-stage.js?v=20260609a';
 import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260508a';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 
@@ -56,6 +64,38 @@ let activeSettingsDropdownTab = '';
 let settingsModalSourceDropdownTab = '';
 let currentScheduledReportPreview = null;
 let scheduledReportConfirmResolver = null;
+let lastScheduledReportLogSnapshot = null;
+
+function parseForceLogoutDurationInput(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (/^\d+\s*[smh]$/.test(text)) return text.replace(/\s+/g, '');
+    if (/^\d+(\.\d+)?$/.test(text)) return `${text}m`;
+    return '';
+}
+
+function forceLogoutDurationToSeconds(value) {
+    const normalized = parseForceLogoutDurationInput(value);
+    const match = normalized.match(/^(\d+(?:\.\d+)?)([smh])$/);
+    if (!match) return 0;
+    const amount = Number(match[1]);
+    const unit = match[2];
+    if (!Number.isFinite(amount) || amount <= 0) return 0;
+    if (unit === 's') return amount;
+    if (unit === 'm') return amount * 60;
+    if (unit === 'h') return amount * 3600;
+    return 0;
+}
+
+function describeForceLogoutDuration(value) {
+    const normalized = parseForceLogoutDurationInput(value);
+    const match = normalized.match(/^(\d+(?:\.\d+)?)([smh])$/);
+    if (!match) return normalized || '11m';
+    const amount = Number(match[1]);
+    const unit = match[2];
+    if (unit === 's') return `${amount} second${amount === 1 ? '' : 's'}`;
+    if (unit === 'm') return `${amount} minute${amount === 1 ? '' : 's'}`;
+    return `${amount} hour${amount === 1 ? '' : 's'}`;
+}
 
 function getEmailApiBaseUrl() {
     const runtime = String(window.__EMAIL_API_BASE_URL__ || '').trim();
@@ -64,7 +104,73 @@ function getEmailApiBaseUrl() {
     return configured.replace(/\/+$/, '');
 }
 
-function setScheduledReportSendStatus(message = '', type = 'info', details = []) {
+function humanizeScheduledReportTrigger(trigger = '') {
+    const text = String(trigger || '').trim();
+    if (!text) return 'Unknown';
+    if (text === 'auto') return 'Automatic daily send';
+    if (text === 'auto_weekend_rollup') return 'Automatic weekend rollup';
+    if (text.startsWith('manual:')) return `Manual send by ${text.slice(7) || 'admin'}`;
+    if (text.startsWith('manual_custom')) return 'Manual custom send';
+    return text.replace(/_/g, ' ');
+}
+
+function buildScheduledReportMiniReport(status = {}) {
+    if (!status || typeof status !== 'object') return '';
+    const summary = status.todaySummary || {};
+    const lastRun = status.lastRun || null;
+    const todayRuns = Array.isArray(status.todayRuns) ? status.todayRuns : [];
+    const statusTone = summary.hasSentForReportDate ? '#166534' : '#92400e';
+    const statusText = summary.hasSentForReportDate
+        ? `Yes, ${String(status.reportDateKey || '').trim() || 'today'} has been sent.`
+        : `No successful send yet for ${String(status.reportDateKey || '').trim() || 'today'}.`;
+    const summaryCards = [
+        ['Report day sent', statusText],
+        ['Today runs', String(Number(summary.totalRuns || 0))],
+        ['Manual runs', String(Number(summary.manualRuns || 0))],
+        ['Auto runs', String(Number(summary.autoRuns || 0))],
+        ['Resends', String(Number(summary.resendRuns || 0))]
+    ];
+    const recentRunsMarkup = todayRuns.length
+        ? todayRuns.slice(0, 6).map((run) => `
+            <div style="padding:10px 12px;border:1px solid #dbe6f2;border-radius:10px;background:#fff;">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+                    <strong style="color:#0f3b67;">${escapeHtml(run.reportLabel || run.reportDateKey || run.runKey || 'Scheduled report')}</strong>
+                    <span style="font-size:12px;color:#64748b;">${escapeHtml(run.eventTime || '-')}</span>
+                </div>
+                <div style="margin-top:6px;font-size:12px;color:#334155;">${escapeHtml(humanizeScheduledReportTrigger(run.trigger))}</div>
+                <div style="margin-top:4px;font-size:12px;color:#475569;">Status: ${escapeHtml(run.status || '-')} | Sent: ${Number(run.sentCount || 0)} | Failed: ${Number(run.failedCount || 0)}</div>
+                ${run.attachmentFileName ? `<div style="margin-top:4px;font-size:12px;color:#475569;">Excel: ${escapeHtml(run.attachmentFileName)}</div>` : ''}
+            </div>
+        `).join('')
+        : '<div style="padding:10px 12px;border:1px dashed #cbd5e1;border-radius:10px;background:#fff;color:#64748b;">No send activity logged yet for today.</div>';
+
+    return `
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(148,163,184,0.3);">
+            <div style="font-weight:700;color:#0f3b67;margin-bottom:8px;">Daily Send Report</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px;">
+                ${summaryCards.map(([label, value], index) => `
+                    <div style="padding:10px 12px;border:1px solid #dbe6f2;border-radius:10px;background:#fff;">
+                        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:#64748b;">${escapeHtml(label)}</div>
+                        <div style="margin-top:4px;font-size:${index === 0 ? '13px' : '18px'};font-weight:700;color:${index === 0 ? statusTone : '#0f172a'};">${escapeHtml(value)}</div>
+                    </div>
+                `).join('')}
+            </div>
+            ${lastRun ? `
+                <div style="padding:10px 12px;border:1px solid #dbe6f2;border-radius:10px;background:#ffffff;margin-bottom:10px;">
+                    <div style="font-weight:700;color:#0f3b67;margin-bottom:6px;">Latest report event</div>
+                    <div style="font-size:12px;color:#334155;">Trigger: ${escapeHtml(humanizeScheduledReportTrigger(lastRun.trigger))}</div>
+                    <div style="font-size:12px;color:#334155;">Configured send time: ${escapeHtml(lastRun.sendTime || status.sendTime || '-')}</div>
+                    <div style="font-size:12px;color:#334155;">Excel file: ${escapeHtml(lastRun.attachmentFileName || 'Not recorded')}</div>
+                    <div style="font-size:12px;color:#334155;">Completed: ${escapeHtml(lastRun.eventTime || '-')}</div>
+                </div>
+            ` : ''}
+            <div style="font-weight:700;color:#0f3b67;margin-bottom:8px;">Today's activity</div>
+            <div style="display:grid;gap:8px;">${recentRunsMarkup}</div>
+        </div>
+    `;
+}
+
+function setScheduledReportSendStatus(message = '', type = 'info', details = [], status = null) {
     const host = document.getElementById('scheduledReportSendStatus');
     if (!host) return;
     const safeType = ['success', 'error', 'warning', 'info'].includes(type) ? type : 'info';
@@ -74,7 +180,7 @@ function setScheduledReportSendStatus(message = '', type = 'info', details = [])
         warning: { border: '#fcd34d', background: '#fffbeb', color: '#92400e', title: 'Sender Attention' },
         info: { border: '#bfdbfe', background: '#eff6ff', color: '#1d4ed8', title: 'Sender Info' }
     };
-    if (!String(message || '').trim() && (!Array.isArray(details) || !details.length)) {
+    if (!String(message || '').trim() && (!Array.isArray(details) || !details.length) && !status) {
         host.style.display = 'none';
         host.innerHTML = '';
         return;
@@ -88,6 +194,7 @@ function setScheduledReportSendStatus(message = '', type = 'info', details = [])
         <div style="font-weight:700;margin-bottom:${details.length ? '6px' : '0'};">${escapeHtml(tone.title)}</div>
         <div>${escapeHtml(message)}</div>
         ${details.length ? `<div style="margin-top:8px;">${details.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>` : ''}
+        ${status ? buildScheduledReportMiniReport(status) : ''}
     `;
 }
 
@@ -138,6 +245,15 @@ function openScheduledReportSendModal() {
 function closeScheduledReportSendModal() {
     document.getElementById('scheduledReportSendModal')?.classList.remove('active');
     setScheduledReportSendModalStatus();
+}
+
+function openScheduledReportLogsModal() {
+    document.getElementById('scheduledReportLogsModal')?.classList.add('active');
+    renderScheduledReportLogs(Boolean(lastScheduledReportLogSnapshot)).catch(() => {});
+}
+
+function closeScheduledReportLogsModal() {
+    document.getElementById('scheduledReportLogsModal')?.classList.remove('active');
 }
 
 function openScheduledReportConfirmModal({
@@ -248,10 +364,203 @@ function describeScheduledReportStatus(status = {}) {
     const lastRun = status.lastRun || null;
     if (lastRun) {
         details.push(`Last run status: ${String(lastRun.status || '-').trim() || '-'}`);
+        if (lastRun.trigger) details.push(`Last run trigger: ${String(lastRun.trigger || '-').trim() || '-'}`);
+        if (lastRun.sendTime) details.push(`Last run configured time: ${String(lastRun.sendTime || '-').trim() || '-'}`);
         if (lastRun.sentCount !== undefined) details.push(`Last run sent count: ${Number(lastRun.sentCount || 0)}`);
         if (lastRun.failedCount !== undefined) details.push(`Last run failed count: ${Number(lastRun.failedCount || 0)}`);
     }
     return details;
+}
+
+function getScheduledReportLogTone(type = 'info') {
+    const tones = {
+        success: { border: '#86efac', background: '#f0fdf4', color: '#166534', title: 'Report Logs Ready' },
+        error: { border: '#fca5a5', background: '#fef2f2', color: '#991b1b', title: 'Report Logs Error' },
+        warning: { border: '#fcd34d', background: '#fffbeb', color: '#92400e', title: 'Report Logs Attention' },
+        info: { border: '#bfdbfe', background: '#eff6ff', color: '#1d4ed8', title: 'Report Logs Info' }
+    };
+    return tones[type] || tones.info;
+}
+
+function setScheduledReportLogsBanner(message = '', type = 'info', details = []) {
+    const host = document.getElementById('scheduledReportLogsBanner');
+    if (!host) return;
+    const text = String(message || '').trim();
+    if (!text && (!Array.isArray(details) || !details.length)) {
+        host.style.display = 'none';
+        host.innerHTML = '';
+        return;
+    }
+    const tone = getScheduledReportLogTone(type);
+    host.style.display = 'block';
+    host.style.borderColor = tone.border;
+    host.style.background = tone.background;
+    host.style.color = tone.color;
+    host.innerHTML = `
+        <div style="font-weight:700;margin-bottom:${details.length ? '6px' : '0'};">${escapeHtml(tone.title)}</div>
+        <div>${escapeHtml(text)}</div>
+        ${details.length ? `<div style="margin-top:8px;">${details.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>` : ''}
+    `;
+}
+
+function setScheduledReportLogsInlineStatus(message = '', type = 'info') {
+    const host = document.getElementById('scheduledReportLogsInlineStatus');
+    if (!host) return;
+    const text = String(message || '').trim();
+    if (!text && !lastScheduledReportLogSnapshot) {
+        host.style.display = 'none';
+        host.innerHTML = '';
+        return;
+    }
+    const tone = getScheduledReportLogTone(type);
+    const snapshotMarkup = lastScheduledReportLogSnapshot ? buildScheduledReportMiniReport(lastScheduledReportLogSnapshot) : '';
+    host.style.display = 'block';
+    host.innerHTML = `
+        <div style="padding:12px 14px;border-radius:12px;border:1px solid ${tone.border};background:${tone.background};color:${tone.color};font-size:13px;line-height:1.6;">
+            ${text ? `<div style="font-weight:700;margin-bottom:6px;">${escapeHtml(text)}</div>` : ''}
+            ${snapshotMarkup || '<div style="color:#64748b;">No scheduled report log snapshot available yet.</div>'}
+        </div>
+    `;
+}
+
+function buildScheduledReportLogSummaryCards(status = {}) {
+    const summary = status.todaySummary || {};
+    const lastRun = status.lastRun || null;
+    const cards = [
+        {
+            tone: summary.hasSentForReportDate ? 'approved' : 'pending',
+            label: 'Report Day Status',
+            value: summary.hasSentForReportDate ? 'Sent' : 'Not Sent',
+            icon: summary.hasSentForReportDate ? 'fa-circle-check' : 'fa-clock'
+        },
+        {
+            tone: 'pending',
+            label: 'Today Runs',
+            value: String(Number(summary.totalRuns || 0)),
+            icon: 'fa-list-check'
+        },
+        {
+            tone: 'approved',
+            label: 'Manual Runs',
+            value: String(Number(summary.manualRuns || 0)),
+            icon: 'fa-hand-pointer'
+        },
+        {
+            tone: 'approved',
+            label: 'Auto Runs',
+            value: String(Number(summary.autoRuns || 0)),
+            icon: 'fa-robot'
+        },
+        {
+            tone: Number(summary.failedRuns || 0) > 0 ? 'rejected' : 'approved',
+            label: 'Failed Runs',
+            value: String(Number(summary.failedRuns || 0)),
+            icon: Number(summary.failedRuns || 0) > 0 ? 'fa-triangle-exclamation' : 'fa-circle-check'
+        },
+        {
+            tone: 'pending',
+            label: 'Last Event',
+            value: lastRun?.eventTime || '-',
+            icon: 'fa-calendar-check'
+        }
+    ];
+    return cards.map((card) => `
+        <div class="stat-card ${card.tone}">
+            <div class="stat-content">
+                <div>
+                    <div class="stat-label">${escapeHtml(card.label)}</div>
+                    <div class="stat-value" style="font-size:${card.label === 'Last Event' ? '18px' : '28px'};">${escapeHtml(card.value)}</div>
+                </div>
+                <i class="fas ${card.icon} stat-icon"></i>
+            </div>
+        </div>
+    `).join('');
+}
+
+function buildScheduledReportLogRows(runs = []) {
+    if (!Array.isArray(runs) || !runs.length) {
+        return '<tr><td colspan="7" class="no-data">No scheduled report activity has been logged yet.</td></tr>';
+    }
+    return runs.map((run) => {
+        const statusText = String(run.status || '-').trim() || '-';
+        const statusLower = statusText.toLowerCase();
+        const badgeClass = statusLower === 'sent' || statusLower === 'partial'
+            ? 'approved'
+            : (statusLower === 'failed' ? 'rejected' : 'pending');
+        const reportWindow = run.rangeStartDateKey && run.rangeEndDateKey && run.rangeStartDateKey !== run.rangeEndDateKey
+            ? `${run.rangeStartDateKey} to ${run.rangeEndDateKey}`
+            : (run.reportDateKey || '-');
+        const recipientsText = `${Number(run.sentCount || 0)}/${Number(run.recipientsCount || 0)}`;
+        return `
+            <tr>
+                <td>${escapeHtml(run.eventTime || '-')}</td>
+                <td>
+                    <strong>${escapeHtml(run.reportLabel || reportWindow)}</strong>
+                    <div style="font-size:12px;color:#64748b;margin-top:4px;">Key: ${escapeHtml(run.runKey || run.reportDateKey || '-')}</div>
+                </td>
+                <td>
+                    <div>${escapeHtml(humanizeScheduledReportTrigger(run.trigger))}</div>
+                    ${run.resendRequested ? '<div style="font-size:12px;color:#b45309;margin-top:4px;">Resend requested</div>' : ''}
+                </td>
+                <td><span class="status-badge ${badgeClass}">${escapeHtml(statusText)}</span></td>
+                <td>
+                    <div>Sent: ${Number(run.sentCount || 0)}</div>
+                    <div style="font-size:12px;color:#64748b;margin-top:4px;">Failed: ${Number(run.failedCount || 0)} | Total: ${escapeHtml(recipientsText)}</div>
+                </td>
+                <td>${escapeHtml(run.attachmentFileName || '-')}</td>
+                <td>${escapeHtml(run.sendTime || '-')}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderScheduledReportLogsFromStatus(status = {}) {
+    const summaryHost = document.getElementById('scheduledReportLogsSummary');
+    const body = document.getElementById('scheduledReportLogsTableBody');
+    const updatedAt = document.getElementById('scheduledReportLogsUpdatedAt');
+    if (summaryHost) summaryHost.innerHTML = buildScheduledReportLogSummaryCards(status);
+    const runs = Array.isArray(status.recentRuns) && status.recentRuns.length
+        ? status.recentRuns
+        : (Array.isArray(status.todayRuns) ? status.todayRuns : []);
+    if (body) body.innerHTML = buildScheduledReportLogRows(runs);
+    if (updatedAt) updatedAt.textContent = `Last checked: ${status.currentLagosTime || '-'}`;
+}
+
+async function renderScheduledReportLogs(forceRefresh = false) {
+    if (!forceRefresh && lastScheduledReportLogSnapshot) {
+        renderScheduledReportLogsFromStatus(lastScheduledReportLogSnapshot);
+        return;
+    }
+    const summaryHost = document.getElementById('scheduledReportLogsSummary');
+    const body = document.getElementById('scheduledReportLogsTableBody');
+    const updatedAt = document.getElementById('scheduledReportLogsUpdatedAt');
+    if (summaryHost) summaryHost.innerHTML = '';
+    if (body) body.innerHTML = '<tr><td colspan="7" class="no-data">Loading scheduled report logs...</td></tr>';
+    if (updatedAt) updatedAt.textContent = 'Checking sender activity...';
+    setScheduledReportLogsBanner('Checking scheduled report log history...', 'info');
+    try {
+        const status = await getScheduledReportBackendStatus();
+        lastScheduledReportLogSnapshot = status;
+        renderScheduledReportLogsFromStatus(status);
+        setScheduledReportLogsInlineStatus('Report log snapshot updated.', 'success');
+        const detailLines = [
+            `Report day in focus: ${String(status.reportDateKey || '-').trim() || '-'}`,
+            `Configured send time: ${String(status.sendTime || '-').trim() || '-'}`,
+            `Recipients configured: ${Array.isArray(status.recipients) ? status.recipients.length : 0}`
+        ];
+        if (status.enabled !== true) {
+            setScheduledReportLogsInlineStatus('Scheduled daily report email is disabled right now.', 'warning');
+            setScheduledReportLogsBanner('Scheduled daily report email is currently disabled in settings.', 'warning', detailLines);
+            return;
+        }
+        setScheduledReportLogsBanner('Scheduled report logs loaded successfully.', 'success', detailLines);
+    } catch (error) {
+        const message = String(error?.name === 'AbortError' ? 'Timed out while loading scheduled report logs.' : (error?.message || 'Failed to load scheduled report logs.'));
+        if (body) body.innerHTML = `<tr><td colspan="7" class="no-data">${escapeHtml(message)}</td></tr>`;
+        if (updatedAt) updatedAt.textContent = 'Last checked: failed';
+        setScheduledReportLogsInlineStatus(message, 'error');
+        setScheduledReportLogsBanner(message, 'error');
+    }
 }
 
 const ROLE_PERMISSION_FIELDS = [
@@ -814,8 +1123,8 @@ function buildUploaderSheetRows(records = []) {
         rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
         commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
         status: String(sub.status || '').replace(/_/g, ' '),
-        uploadedAt: formatDate(sub.uploadedAt),
-        stageTime: formatDate(sub.reviewedAt),
+        uploadedAt: formatDate(getSubmissionReviewEntryAt(sub)),
+        stageTime: formatDate(getSubmissionApprovalEntryAt(sub)),
         rejectionReason: getRejectionReason(sub),
         rejectionCount: getRejectionCount(sub)
     }));
@@ -831,8 +1140,8 @@ function buildReviewerSheetRows(records = []) {
             rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
             commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
             status: String(sub.status || '').replace(/_/g, ' '),
-            assignedAt: formatDate(sub.uploadedAt),
-            stageTime: formatDate(sub.reviewedAt),
+            assignedAt: formatDate(getSubmissionReviewEntryAt(sub)),
+            stageTime: formatDate(getSubmissionApprovalEntryAt(sub)),
             rejectionReason: getRejectionReason(sub),
             rejectionCount: getRejectionCount(sub)
         }));
@@ -848,8 +1157,8 @@ function buildRsaSheetRows(records = []) {
             rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
             commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
             status: String(sub.status || '').replace(/_/g, ' '),
-            assignedAt: formatDate(sub.reviewedAt),
-            stageTime: formatDate(sub.finalSubmittedAt || sub.rsaSubmittedAt),
+            assignedAt: formatDate(getSubmissionRsaEntryAt(sub)),
+            stageTime: formatDate(getSubmissionFinalSubmissionEntryAt(sub)),
             rejectionReason: String(String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? getRejectionReason(sub) : ''),
             rejectionCount: Number(String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? getRejectionCount(sub) : 0)
         }));
@@ -865,9 +1174,9 @@ function buildPaymentSheetRows(records = []) {
             rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
             commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
             status: String(sub.status || '').replace(/_/g, ' '),
-            assignedAt: formatDate(sub.paymentAssignedAt || sub.finalSubmittedAt || sub.rsaSubmittedAt),
-            paidAt: formatDate(sub.paidAt),
-            clearedAt: formatDate(sub.clearedAt),
+            assignedAt: formatDate(getSubmissionPaymentEntryAt(sub)),
+            paidAt: formatDate(getSubmissionPaidEntryAt(sub)),
+            clearedAt: formatDate(getSubmissionClearedEntryAt(sub)),
             remarks: sub.clearedWithoutAgentCommission ? 'Cleared without agent commission' : String(sub.paymentReconciliationFileName || '').trim()
         }));
 }
@@ -1036,13 +1345,13 @@ function buildDailyReportDefinition(reportDate) {
         const status = String(sub.status || '').toLowerCase();
         return ['sent_to_pfa', 'rsa_submitted'].includes(status);
     });
-    const uploaderRecords = submittedRecords.filter((sub) => isSameReportDate(sub.uploadedAt, dateKey));
-    const reviewerRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedTo) && isSameReportDate(sub.uploadedAt, dateKey));
-    const rsaRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToRSA) && isSameReportDate(sub.reviewedAt, dateKey));
-    const paymentRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToPayment) && isSameReportDate(sub.paymentAssignedAt || sub.finalSubmittedAt || sub.rsaSubmittedAt, dateKey));
-    const reviewerAttendedRecords = reviewerRecords.filter((sub) => !!tsToMillis(sub.reviewedAt));
-    const rsaAttendedRecords = rsaRecords.filter((sub) => !!tsToMillis(sub.finalSubmittedAt || sub.rsaSubmittedAt) || String(sub.status || '').toLowerCase() === 'rejected_by_rsa');
-    const paymentAttendedRecords = paymentRecords.filter((sub) => !!tsToMillis(sub.paidAt) || !!tsToMillis(sub.clearedAt) || String(sub.status || '').toLowerCase() === 'cleared');
+    const uploaderRecords = submittedRecords.filter((sub) => isSameReportDate(getSubmissionReviewEntryAt(sub), dateKey));
+    const reviewerRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedTo) && isSameReportDate(getSubmissionReviewEntryAt(sub), dateKey));
+    const rsaRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToRSA) && isSameReportDate(getSubmissionRsaEntryAt(sub), dateKey));
+    const paymentRecords = submittedRecords.filter((sub) => normalizeEmail(sub.assignedToPayment) && isSameReportDate(getSubmissionPaymentEntryAt(sub), dateKey));
+    const reviewerAttendedRecords = reviewerRecords.filter((sub) => !!tsToMillis(getSubmissionApprovalEntryAt(sub)));
+    const rsaAttendedRecords = rsaRecords.filter((sub) => !!tsToMillis(getSubmissionFinalSubmissionEntryAt(sub)) || String(sub.status || '').toLowerCase() === 'rejected_by_rsa');
+    const paymentAttendedRecords = paymentRecords.filter((sub) => !!tsToMillis(getSubmissionPaidEntryAt(sub)) || !!tsToMillis(getSubmissionClearedEntryAt(sub)) || String(sub.status || '').toLowerCase() === 'cleared');
 
     const uploaderRows = buildUploaderSheetRows(uploaderRecords).sort(compareGroupedRows);
     const reviewerRows = buildReviewerSheetRows(reviewerRecords).sort(compareGroupedRows);
@@ -1280,11 +1589,13 @@ function renderAdminManagement() {
     const search = String(document.getElementById('superUserSearch')?.value || '').trim().toLowerCase();
     const roleFilter = String(document.getElementById('superUserRoleFilter')?.value || '').trim().toLowerCase();
     const statusFilter = String(document.getElementById('superUserStatusFilter')?.value || '').trim().toLowerCase();
+    const onlineFilter = String(document.getElementById('superUserOnlineFilter')?.value || '').trim().toLowerCase();
 
     const filteredUsers = allUsers
         .filter((u) => {
             const role = String(u.role || 'uploader').toLowerCase();
             const status = String(u.status || 'active').toLowerCase();
+            const presence = u.isOnline === true ? 'online' : 'offline';
             const whatsapp = getUserWhatsApp(u);
             const searchable = [
                 u.fullName || '',
@@ -1292,11 +1603,13 @@ function renderAdminManagement() {
                 u.email || '',
                 whatsapp,
                 getRoleLabel(role),
-                status
+                status,
+                presence
             ].join(' ').toLowerCase();
             return (!search || searchable.includes(search))
                 && (!roleFilter || role === roleFilter)
-                && (!statusFilter || status === statusFilter);
+                && (!statusFilter || status === statusFilter)
+                && (!onlineFilter || presence === onlineFilter);
         })
         .sort((a, b) => String(a.fullName || a.email || '').localeCompare(String(b.fullName || b.email || '')));
 
@@ -1738,6 +2051,7 @@ async function loadSettings() {
     const agentRegistrationApprovalRequired = document.getElementById('settingAgentRegistrationApprovalRequired');
     const bulkImportRequiredColumns = document.getElementById('settingBulkImportRequiredColumns');
     const sessionTimeoutMinutes = document.getElementById('settingSessionTimeoutMinutes');
+    const forceLogoutCountdown = document.getElementById('settingForceLogoutCountdown');
     const auditRetentionDays = document.getElementById('settingAuditRetentionDays');
     const defaultRouteMode = document.getElementById('settingDefaultRouteMode');
     if (maintenance) maintenance.value = data.maintenanceMode ? 'true' : 'false';
@@ -1783,6 +2097,7 @@ async function loadSettings() {
     currentNotificationTemplates = { ...(systemSettings.notificationTemplates || {}) };
     renderNotificationTemplatesManager();
     if (sessionTimeoutMinutes) sessionTimeoutMinutes.value = String(systemSettings.securityControls.sessionTimeoutMinutes ?? 60);
+    if (forceLogoutCountdown) forceLogoutCountdown.value = String(systemSettings.securityControls.forceLogoutCountdown || '11m');
     if (auditRetentionDays) auditRetentionDays.value = String(systemSettings.auditControls.retentionDays ?? 30);
     currentRolePermissions = { ...(systemSettings.rolePermissions || {}) };
     renderRolePermissionsManager();
@@ -1797,6 +2112,7 @@ async function loadSettings() {
     if (!settingsCardsInitialized) initializeSettingsCardLayout();
     renderSettingsDropdownNav();
     renderSettingsSubTabState();
+    renderScheduledReportLogs(false).catch(() => {});
 }
 
 function renderCurrentTab() {
@@ -3260,6 +3576,9 @@ window.saveSuperSettings = async (triggerButton = null) => {
     const reviewerRejectRequired = String(document.getElementById('settingReviewerRejectRequired')?.value || 'true') === 'true';
     const rsaRejectRequired = String(document.getElementById('settingRsaRejectRequired')?.value || 'true') === 'true';
     const sessionTimeoutMinutes = Number(document.getElementById('settingSessionTimeoutMinutes')?.value || getDefaultSystemSettings().securityControls.sessionTimeoutMinutes);
+    const forceLogoutCountdown = parseForceLogoutDurationInput(
+        document.getElementById('settingForceLogoutCountdown')?.value || getDefaultSystemSettings().securityControls.forceLogoutCountdown || '11m'
+    );
     const auditRetentionDays = Number(document.getElementById('settingAuditRetentionDays')?.value || getDefaultSystemSettings().auditControls.retentionDays);
     if (!Number.isFinite(commissionRatePercent) || commissionRatePercent < 0) {
         showNotification('Enter a valid commission rate percentage', 'warning');
@@ -3271,6 +3590,10 @@ window.saveSuperSettings = async (triggerButton = null) => {
     }
     if (!Number.isFinite(sessionTimeoutMinutes) || sessionTimeoutMinutes <= 0) {
         showNotification('Session timeout must be greater than 0', 'warning');
+        return false;
+    }
+    if (!forceLogoutCountdown || forceLogoutDurationToSeconds(forceLogoutCountdown) <= 0) {
+        showNotification('Enter a valid force logout countdown like 30s, 10m, or 1h', 'warning');
         return false;
     }
     if (!Number.isFinite(auditRetentionDays) || auditRetentionDays <= 0) {
@@ -3419,6 +3742,7 @@ window.saveSuperSettings = async (triggerButton = null) => {
             },
             securityControls: {
                 sessionTimeoutMinutes,
+                forceLogoutCountdown,
                 forceLogoutToken: String(existing?.securityControls?.forceLogoutToken || '').trim()
             },
             notificationTemplates: normalizedNotificationTemplates,
@@ -3484,6 +3808,7 @@ window.saveSuperSettings = async (triggerButton = null) => {
             documentRequirementRoles,
             bulkImportColumnCount: bulkImportRequiredColumns.length,
             sessionTimeoutMinutes,
+            forceLogoutCountdown,
             auditRetentionDays,
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
@@ -3637,12 +3962,15 @@ window.clearAppCacheForAllUsers = async () => {
 };
 
 window.forceLogoutAllUsers = async () => {
-    const confirmed = confirm('Force logout all signed-in users? They will need to sign in again.');
-    if (!confirmed) return;
-
     try {
+        const currentSettings = await getSystemSettings(db, { force: true });
+        const countdownSetting = parseForceLogoutDurationInput(currentSettings.securityControls?.forceLogoutCountdown || getDefaultSystemSettings().securityControls.forceLogoutCountdown || '11m');
+        const countdownLabel = describeForceLogoutDuration(countdownSetting);
+        const confirmed = confirm(`Force logout all signed-in users?\n\nThey will first see a warning and can finish current work before automatic logout in ${countdownLabel}.`);
+        if (!confirmed) return;
+
         const securityControls = {
-            ...(await getSystemSettings(db, { force: true })).securityControls,
+            ...(currentSettings.securityControls || {}),
             forceLogoutToken: new Date().toISOString()
         };
         await setDoc(doc(db, 'settings', 'system'), {
@@ -3653,10 +3981,11 @@ window.forceLogoutAllUsers = async () => {
         clearSystemSettingsCache();
         await addDoc(collection(db, 'audit'), {
             action: 'force_logout_all_users',
+            countdown: countdownSetting,
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         });
-        showNotification('Force logout signal sent successfully', 'success');
+        showNotification(`Force logout notice sent successfully. Automatic logout will happen in ${countdownLabel}.`, 'success');
     } catch (_) {
         showNotification('Failed to send force logout signal', 'error');
     }
@@ -3693,7 +4022,8 @@ window.signOutUser = async () => {
         if (userId) {
             await updateDoc(doc(db, 'users', userId), {
                 isOnline: false,
-                lastSeenAt: serverTimestamp()
+                lastSeenAt: serverTimestamp(),
+                lastLogoutAt: serverTimestamp()
             }).catch(() => {});
         }
         await signOut(auth);
@@ -3745,8 +4075,41 @@ document.querySelectorAll('.nav-item[data-tab]').forEach((item) => {
 document.getElementById('superUserSearch')?.addEventListener('input', renderAdminManagement);
 document.getElementById('superUserRoleFilter')?.addEventListener('change', renderAdminManagement);
 document.getElementById('superUserStatusFilter')?.addEventListener('change', renderAdminManagement);
+document.getElementById('superUserOnlineFilter')?.addEventListener('change', renderAdminManagement);
 document.getElementById('routingRulesSearch')?.addEventListener('input', () => {
     if (currentTab === 'routing-rules') renderRoutingRules();
+});
+document.getElementById('refreshScheduledReportLogsInlineBtn')?.addEventListener('click', async () => {
+    const button = document.getElementById('refreshScheduledReportLogsInlineBtn');
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+        }
+        await renderScheduledReportLogs(true);
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+});
+document.getElementById('refreshScheduledReportLogsModalBtn')?.addEventListener('click', async () => {
+    const button = document.getElementById('refreshScheduledReportLogsModalBtn');
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Refreshing...';
+        }
+        await renderScheduledReportLogs(true);
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
 });
 document.getElementById('clearAppCacheBtn')?.addEventListener('click', () => {
     window.clearAppCacheForAllUsers?.();
@@ -3841,6 +4204,9 @@ document.getElementById('settingScheduledReportRecipients')?.addEventListener('i
 document.getElementById('sendCustomScheduledReportBtn')?.addEventListener('click', () => {
     openScheduledReportSendModal();
 });
+document.getElementById('openScheduledReportLogsModalBtn')?.addEventListener('click', () => {
+    openScheduledReportLogsModal();
+});
 document.getElementById('scheduledReportSendMode')?.addEventListener('change', () => {
     updateScheduledReportSendModeVisibility();
 });
@@ -3856,6 +4222,20 @@ document.getElementById('scheduledReportSendModal')?.addEventListener('click', (
     if (event.target?.id === 'scheduledReportSendModal') {
         event.stopPropagation();
         closeScheduledReportSendModal();
+    }
+});
+document.getElementById('closeScheduledReportLogsModalBtn')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeScheduledReportLogsModal();
+});
+document.getElementById('cancelScheduledReportLogsModalBtn')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeScheduledReportLogsModal();
+});
+document.getElementById('scheduledReportLogsModal')?.addEventListener('click', (event) => {
+    if (event.target?.id === 'scheduledReportLogsModal') {
+        event.stopPropagation();
+        closeScheduledReportLogsModal();
     }
 });
 document.getElementById('closeScheduledReportConfirmModalBtn')?.addEventListener('click', (event) => {
@@ -3887,14 +4267,14 @@ document.getElementById('checkScheduledReportStatusBtn')?.addEventListener('clic
         }
         const status = await getScheduledReportBackendStatus();
         if (status.enabled !== true) {
-            setScheduledReportSendStatus('Scheduled report sender is reachable, but daily report email is disabled in settings.', 'warning', describeScheduledReportStatus(status));
+            setScheduledReportSendStatus('Scheduled report sender is reachable, but daily report email is disabled in settings.', 'warning', describeScheduledReportStatus(status), status);
             return;
         }
         if (!Array.isArray(status.recipients) || !status.recipients.length) {
-            setScheduledReportSendStatus('Scheduled report sender is reachable, but no recipients are configured.', 'warning', describeScheduledReportStatus(status));
+            setScheduledReportSendStatus('Scheduled report sender is reachable, but no recipients are configured.', 'warning', describeScheduledReportStatus(status), status);
             return;
         }
-        setScheduledReportSendStatus('Scheduled report sender is connected and ready.', 'success', describeScheduledReportStatus(status));
+        setScheduledReportSendStatus('Scheduled report sender is connected and ready.', 'success', describeScheduledReportStatus(status), status);
     } catch (error) {
         const message = String(error?.name === 'AbortError' ? 'Timed out while checking sender status.' : (error?.message || 'Failed to check sender status.'));
         setScheduledReportSendStatus(message, 'error');
@@ -3968,11 +4348,13 @@ document.getElementById('confirmScheduledReportSendBtn')?.addEventListener('clic
 
         const details = [
             `Report sent: ${String(result?.reportLabel || selection.label).trim() || selection.label}`,
+            `Excel file: ${String(result?.attachmentFileName || '-').trim() || '-'}`,
             `Sent count: ${Number(result?.sentCount || 0)}`,
             `Failed count: ${Number(result?.failedCount || 0)}`
         ];
+        const refreshedStatus = await getScheduledReportBackendStatus().catch(() => null);
         setScheduledReportSendModalStatus('Selected report sent successfully.', 'success', details);
-        setScheduledReportSendStatus('Custom report email sent successfully.', 'success', details);
+        setScheduledReportSendStatus('Custom report email sent successfully.', 'success', details, refreshedStatus);
         showNotification('Custom report email sent successfully.', 'success');
     } catch (error) {
         const message = String(error?.name === 'AbortError' ? 'Timed out while sending the selected report.' : (error?.message || 'Failed to send selected report.'));
@@ -3993,13 +4375,13 @@ document.getElementById('sendScheduledReportNowBtn')?.addEventListener('click', 
         const status = await getScheduledReportBackendStatus();
         if (status.enabled !== true) {
             const message = 'Scheduled report email is disabled in settings.';
-            setScheduledReportSendStatus(message, 'warning', describeScheduledReportStatus(status));
+            setScheduledReportSendStatus(message, 'warning', describeScheduledReportStatus(status), status);
             showNotification(message, 'warning');
             return;
         }
         if (!Array.isArray(status.recipients) || !status.recipients.length) {
             const message = 'No scheduled report recipients are configured.';
-            setScheduledReportSendStatus(message, 'warning', describeScheduledReportStatus(status));
+            setScheduledReportSendStatus(message, 'warning', describeScheduledReportStatus(status), status);
             showNotification(message, 'warning');
             return;
         }
@@ -4014,7 +4396,7 @@ document.getElementById('sendScheduledReportNowBtn')?.addEventListener('click', 
             button.disabled = true;
             button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
         }
-        setScheduledReportSendStatus('Sending previous day report now...', 'info', describeScheduledReportStatus(status));
+        setScheduledReportSendStatus('Sending previous day report now...', 'info', describeScheduledReportStatus(status), status);
         const idToken = await currentUser.getIdToken(true);
         let forceResend = false;
         let requestResult = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-now`, {
@@ -4038,7 +4420,7 @@ document.getElementById('sendScheduledReportNowBtn')?.addEventListener('click', 
                 confirmLabel: 'Resend Report'
             });
             if (!confirmed) {
-                setScheduledReportSendStatus('Manual resend cancelled. The previous day report had already been sent earlier.', 'info', describeScheduledReportStatus(status));
+                setScheduledReportSendStatus('Manual resend cancelled. The previous day report had already been sent earlier.', 'info', describeScheduledReportStatus(status), status);
                 showNotification('Scheduled report resend cancelled.', 'info');
                 return;
             }
@@ -4047,7 +4429,7 @@ document.getElementById('sendScheduledReportNowBtn')?.addEventListener('click', 
                 button.disabled = true;
                 button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Resending...';
             }
-            setScheduledReportSendStatus('Resending previous day report on your confirmation...', 'warning', describeScheduledReportStatus(status));
+            setScheduledReportSendStatus('Resending previous day report on your confirmation...', 'warning', describeScheduledReportStatus(status), status);
             requestResult = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-now`, {
                 method: 'POST',
                 headers: {
@@ -4065,6 +4447,7 @@ document.getElementById('sendScheduledReportNowBtn')?.addEventListener('click', 
         const failedCount = Number(result?.failedCount || 0);
         const detailLines = [
             `Report date sent: ${String(result?.reportDateKey || status.reportDateKey || '-').trim() || '-'}`,
+            `Excel file: ${String(result?.attachmentFileName || '-').trim() || '-'}`,
             `Successful recipients: ${sentCount}`,
             `Failed recipients: ${failedCount}`
         ];
@@ -4073,12 +4456,14 @@ document.getElementById('sendScheduledReportNowBtn')?.addEventListener('click', 
                 detailLines.push(`${String(entry?.recipient || 'Recipient')}: ${String(entry?.error || 'failed')}`);
             });
         }
+        const refreshedStatus = await getScheduledReportBackendStatus().catch(() => null);
         setScheduledReportSendStatus(
             failedCount > 0
                 ? (forceResend ? 'Scheduled report was resent, but some recipients failed.' : 'Scheduled report was sent, but some recipients failed.')
                 : (forceResend ? 'Scheduled report resent successfully.' : 'Scheduled report sent successfully.'),
             failedCount > 0 ? 'warning' : 'success',
-            detailLines
+            detailLines,
+            refreshedStatus
         );
         showNotification(
             failedCount > 0
@@ -4137,6 +4522,10 @@ document.addEventListener('keydown', (event) => {
     }
     if (event.key === 'Escape' && document.getElementById('scheduledReportSendModal')?.classList.contains('active')) {
         closeScheduledReportSendModal();
+        return;
+    }
+    if (event.key === 'Escape' && document.getElementById('scheduledReportLogsModal')?.classList.contains('active')) {
+        closeScheduledReportLogsModal();
         return;
     }
     if (event.key === 'Escape' && document.getElementById('scheduledReportPreviewModal')?.classList.contains('active')) {

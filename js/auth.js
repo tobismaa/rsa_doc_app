@@ -829,7 +829,8 @@ window.signOutUser = async () => {
             if (writableUserRef) {
                 await updateDoc(writableUserRef, {
                     isOnline: false,
-                    lastSeenAt: serverTimestamp()
+                    lastSeenAt: serverTimestamp(),
+                    lastLogoutAt: serverTimestamp()
                 }).catch(() => {});
             }
         }

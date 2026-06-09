@@ -28,6 +28,17 @@ import {
     getSubmissionCommissionAmount,
     resolveSubmissionCommissionRate
 } from './shared/commission-config.js?v=20260507a';
+import {
+    getTimestampMillis as getStageTimestampMillis,
+    getSubmissionCurrentStageEntryAt,
+    getSubmissionDraftEntryAt,
+    getSubmissionReviewEntryAt,
+    getSubmissionApprovalEntryAt,
+    getSubmissionRejectionEntryAt,
+    getSubmissionFinalSubmissionEntryAt,
+    getSubmissionPaymentEntryAt,
+    getSubmissionPaidEntryAt
+} from './shared/submission-stage.js?v=20260609a';
 
 // Security: suppress console output in admin dashboard.
 (() => {
@@ -660,7 +671,8 @@ window.signOutUser = async () => {
         if (userId) {
             await updateDoc(doc(db, 'users', userId), {
                 isOnline: false,
-                lastSeenAt: serverTimestamp()
+                lastSeenAt: serverTimestamp(),
+                lastLogoutAt: serverTimestamp()
             }).catch(() => {});
         }
         await signOut(auth);
@@ -914,6 +926,7 @@ function setupEventListeners() {
     document.getElementById('cancelConfirm')?.addEventListener('click', closeConfirmModal);
 
     document.getElementById('userSearch')?.addEventListener('input', filterUsers);
+    document.getElementById('userOnlineFilter')?.addEventListener('change', filterUsers);
     document.getElementById('userRoleFilter')?.addEventListener('change', filterUsers);
     document.getElementById('userStatusFilter')?.addEventListener('change', filterUsers);
 
@@ -1397,6 +1410,13 @@ function renderPendingUsersGrid(pendingUsers) {
 }
 
 // ==================== RENDER USERS TABLE ====================
+function formatUserLastLoginCell(user = {}) {
+    if (user.isOnline === true) {
+        return '<span class="status-badge approved">Online</span>';
+    }
+    return formatDate(user.lastLogoutAt || user.lastSeenAt || user.lastLoginAt);
+}
+
 function renderUsersTable(users) {
     if (!usersTableBody) return;
 
@@ -1429,7 +1449,7 @@ function renderUsersTable(users) {
                 <td><span class="role-badge ${normalizedRole}">${roleLabel}</span></td>
                 <td>${leaveStatusHtml}</td>
                 <td>${formatDate(user.createdAt)}</td>
-                <td>${formatDate(user.lastLoginAt)}</td>
+                <td>${formatUserLastLoginCell(user)}</td>
                 <td>
                     <div class="action-buttons">
                         <button class="action-btn view-btn" onclick="window.viewUser('${user.id}')" title="View">
@@ -1729,7 +1749,10 @@ function renderFinallySubmitted() {
     const finallySubmittedTableBody = document.getElementById('finallySubmittedTableBody');
     if (!finallySubmittedTableBody) return;
 
-    const finallySubmitted = allSubmissions.filter(s => s.finalSubmitted === true || s.rsaSubmitted === true);
+    const finallySubmitted = allSubmissions
+        .filter(s => s.finalSubmitted === true || s.rsaSubmitted === true)
+        .slice()
+        .sort((a, b) => getStageTimestampMillis(getSubmissionFinalSubmissionEntryAt(b)) - getStageTimestampMillis(getSubmissionFinalSubmissionEntryAt(a)));
 
     if (finallySubmitted.length === 0) {
         finallySubmittedTableBody.innerHTML = '<tr><td colspan="10" class="no-data">No finally submitted applications</td></tr>';
@@ -1795,7 +1818,7 @@ function renderPaymentQueue() {
         const status = String(sub.status || '').toLowerCase();
         const isFinal = sub.finalSubmitted === true || sub.rsaSubmitted === true || status === 'sent_to_pfa' || status === 'rsa_submitted' || status === 'paid';
         return isFinal && status !== 'cleared';
-    });
+    }).slice().sort((a, b) => getStageTimestampMillis(getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(getSubmissionCurrentStageEntryAt(a)));
 
     if (paymentQueue.length === 0) {
         paymentsTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No payment records available</td></tr>';
@@ -2875,7 +2898,7 @@ window.viewUser = async (userId) => {
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">Last Login:</span>
-                        <span class="detail-value">${formatDate(user.lastLoginAt)}</span>
+                        <span class="detail-value">${user.isOnline === true ? 'Online' : formatDate(user.lastLogoutAt || user.lastSeenAt || user.lastLoginAt)}</span>
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">Submissions:</span>
@@ -2965,10 +2988,10 @@ function renderTrackApplications() {
 
     if (start || end) {
         list = list.filter((s) => {
-            const uploaded = tsToDate(s.uploadedAt);
-            if (!uploaded) return false;
-            if (start && uploaded.getTime() < start.getTime()) return false;
-            if (end && uploaded.getTime() > end.getTime()) return false;
+            const entryMs = getStageTimestampMillis(getSubmissionCurrentStageEntryAt(s));
+            if (!entryMs) return false;
+            if (start && entryMs < start.getTime()) return false;
+            if (end && entryMs > end.getTime()) return false;
             return true;
         });
     }
@@ -2981,6 +3004,7 @@ function renderTrackApplications() {
             return uploaderEmail.includes(search) || uploaderName.includes(search) || customerName.includes(search);
         });
     }
+    list = list.slice().sort((a, b) => getStageTimestampMillis(getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(getSubmissionCurrentStageEntryAt(a)));
 
     const totalRecords = list.length;
     const totalPages = Math.max(1, Math.ceil(totalRecords / TRACK_PAGE_SIZE));
@@ -3013,7 +3037,7 @@ function renderTrackApplications() {
                 <td><strong>${s.customerName || 'Unknown'}</strong></td>
                 <td>${uploaderLabel}</td>
                 <td>${formatStatusLabel(status)}</td>
-                <td>${formatDate(s.uploadedAt)}</td>
+                <td>${formatDate(getSubmissionCurrentStageEntryAt(s))}</td>
                 <td>${assignedReviewer}</td>
                 <td>${attendedAt}</td>
                 <td>${assignedRsa}</td>
@@ -3524,19 +3548,22 @@ function filterUsers() {
     const searchTerm = document.getElementById('userSearch')?.value.toLowerCase() || '';
     const roleFilter = document.getElementById('userRoleFilter')?.value || 'all';
     const statusFilter = document.getElementById('userStatusFilter')?.value || 'all';
+    const onlineFilter = document.getElementById('userOnlineFilter')?.value || 'all';
 
     if (!allUsers) return;
 
     const filtered = allUsers.filter(user => {
         const fullName = user.fullName || user.email?.split('@')[0] || '';
         const normalizedRole = normalizeUserRole(user.role);
+        const presence = user.isOnline === true ? 'online' : 'offline';
         const matchesSearch = searchTerm === '' ||
             fullName.toLowerCase().includes(searchTerm) ||
             user.email?.toLowerCase().includes(searchTerm);
         const matchesRole = roleFilter === 'all' || normalizedRole === roleFilter;
         const matchesStatus = statusFilter === 'all' || user.status === statusFilter;
+        const matchesOnline = onlineFilter === 'all' || presence === onlineFilter;
 
-        return matchesSearch && matchesRole && matchesStatus;
+        return matchesSearch && matchesRole && matchesStatus && matchesOnline;
     });
 
     renderUsersTable(filtered);
@@ -3594,10 +3621,10 @@ function filterDraftDocs() {
             String(sub.customerName || '').toLowerCase().includes(searchTerm) ||
             String(sub.uploadedBy || '').toLowerCase().includes(searchTerm) ||
             getSubmissionAgentLabel(sub).toLowerCase().includes(searchTerm);
-        const relevantDate = sub.draftSavedAt || sub.uploadedAt || sub.updatedAt;
+        const relevantDate = getSubmissionDraftEntryAt(sub);
         const matchesDate = matchesExactDate(relevantDate, dateFilter);
         return matchesSearch && matchesDate;
-    });
+    }).sort((a, b) => getStageTimestampMillis(getSubmissionDraftEntryAt(b)) - getStageTimestampMillis(getSubmissionDraftEntryAt(a)));
 
     if (!draftDocsTableBody) return;
 
@@ -3642,10 +3669,10 @@ function filterPendingDocs() {
             sub.customerName?.toLowerCase().includes(searchTerm) ||
             sub.uploadedBy?.toLowerCase().includes(searchTerm) ||
             sub.assignedTo?.toLowerCase().includes(searchTerm);
-        const relevantDate = isResubmittedSubmission(sub) ? (sub.reuploadedAt || sub.uploadedAt) : sub.uploadedAt;
+        const relevantDate = getSubmissionReviewEntryAt(sub);
         const matchesDate = matchesExactDate(relevantDate, dateFilter);
         return matchesSearch && matchesDate;
-    });
+    }).sort((a, b) => getStageTimestampMillis(getSubmissionReviewEntryAt(b)) - getStageTimestampMillis(getSubmissionReviewEntryAt(a)));
 
     if (!pendingDocsTableBody) return;
 
@@ -3708,9 +3735,9 @@ function filterApprovedDocs() {
         const matchesSearch = searchTerm === '' ||
             sub.customerName?.toLowerCase().includes(searchTerm) ||
             sub.uploadedBy?.toLowerCase().includes(searchTerm);
-        const matchesDate = matchesExactDate(sub.reviewedAt || sub.uploadedAt, dateFilter);
+        const matchesDate = matchesExactDate(getSubmissionApprovalEntryAt(sub), dateFilter);
         return matchesSearch && matchesDate;
-    });
+    }).sort((a, b) => getStageTimestampMillis(getSubmissionApprovalEntryAt(b)) - getStageTimestampMillis(getSubmissionApprovalEntryAt(a)));
 
     if (!approvedDocsTableBody) return;
 
@@ -3759,9 +3786,9 @@ function filterRejectedDocs() {
         const matchesSearch = searchTerm === '' ||
             sub.customerName?.toLowerCase().includes(searchTerm) ||
             sub.uploadedBy?.toLowerCase().includes(searchTerm);
-        const matchesDate = matchesExactDate(sub.latestRejectedAt || sub.rejectedAt || sub.reviewedAt || sub.uploadedAt, dateFilter);
+        const matchesDate = matchesExactDate(getSubmissionRejectionEntryAt(sub), dateFilter);
         return matchesSearch && matchesDate;
-    });
+    }).sort((a, b) => getStageTimestampMillis(getSubmissionRejectionEntryAt(b)) - getStageTimestampMillis(getSubmissionRejectionEntryAt(a)));
 
     if (!rejectedDocsTableBody) return;
 

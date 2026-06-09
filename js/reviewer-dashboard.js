@@ -11,6 +11,12 @@ import {
     normalizeEmail as normalizeEmailShared
 } from './shared/user-directory.js?v=20260518a';
 import { getUploaderRoutingRule as getUploaderRoutingRuleShared, routingRuleDocId as routingRuleDocIdShared } from './shared/uploader-routing.js?v=20260427e';
+import {
+    getTimestampMillis as getStageTimestampMillis,
+    getSubmissionReviewEntryAt,
+    getSubmissionApprovalEntryAt,
+    getSubmissionRejectionEntryAt
+} from './shared/submission-stage.js?v=20260609a';
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
     collection,
@@ -839,7 +845,8 @@ window.signOutUser = async () => {
         if (userId) {
             await updateDoc(doc(db, 'users', userId), {
                 isOnline: false,
-                lastSeenAt: serverTimestamp()
+                lastSeenAt: serverTimestamp(),
+                lastLogoutAt: serverTimestamp()
             }).catch(() => {});
         }
         await signOut(auth);
@@ -1119,17 +1126,23 @@ function renderAllTables() {
         .filter(sub => sub.status === 'pending' && isAssignedToCurrentReviewer(sub))
         .slice()
         .sort((a, b) => {
-            const aTime = getTimestampMs(a.reuploadedAt || a.uploadedAt);
-            const bTime = getTimestampMs(b.reuploadedAt || b.uploadedAt);
+            const aTime = getStageTimestampMillis(getSubmissionReviewEntryAt(a));
+            const bTime = getStageTimestampMillis(getSubmissionReviewEntryAt(b));
             return bTime - aTime;
         });
     renderPendingTable(pendingSubs);
 
     // Viewer should only see approved/rejected items they reviewed
-    const approvedSubs = allSubmissions.filter(sub => getReviewerWorkflowState(sub) === 'approved' && isReviewedByCurrentReviewer(sub));
+    const approvedSubs = allSubmissions
+        .filter(sub => getReviewerWorkflowState(sub) === 'approved' && isReviewedByCurrentReviewer(sub))
+        .slice()
+        .sort((a, b) => getStageTimestampMillis(getSubmissionApprovalEntryAt(b)) - getStageTimestampMillis(getSubmissionApprovalEntryAt(a)));
     renderApprovedTable(approvedSubs);
 
-    const rejectedSubs = allSubmissions.filter(sub => getReviewerWorkflowState(sub) === 'rejected' && isReviewedByCurrentReviewer(sub));
+    const rejectedSubs = allSubmissions
+        .filter(sub => getReviewerWorkflowState(sub) === 'rejected' && isReviewedByCurrentReviewer(sub))
+        .slice()
+        .sort((a, b) => getStageTimestampMillis(getSubmissionRejectionEntryAt(b)) - getStageTimestampMillis(getSubmissionRejectionEntryAt(a)));
     renderRejectedTable(rejectedSubs);
 }
 
@@ -1146,8 +1159,8 @@ function renderPendingTable(submissions) {
         let date = 'N/A';
         if (isResubmitted && sub.reuploadedAt) {
             date = `${formatTimestamp(sub.reuploadedAt)} (Re-uploaded)`;
-        } else if (sub.uploadedAt) {
-            date = formatTimestamp(sub.uploadedAt);
+        } else if (getSubmissionReviewEntryAt(sub)) {
+            date = formatTimestamp(getSubmissionReviewEntryAt(sub));
         }
 
         const docTypes = sub.documentTypes?.map(type => DOCUMENT_TYPES[type] || type).join(', ') || 'N/A';
@@ -1204,10 +1217,7 @@ function renderApprovedTable(submissions) {
             uploadDate = formatTimestamp(sub.uploadedAt);
         }
         
-        let approvedDate = 'N/A';
-        if (sub.reviewedAt) {
-            approvedDate = formatTimestamp(sub.reviewedAt);
-        }
+        const approvedDate = formatTimestamp(getSubmissionApprovalEntryAt(sub)) || 'N/A';
         const whatsapp = renderWhatsAppLink(sub.customerDetails?.phone || sub.customerPhone || '');
 
         return `
@@ -1246,10 +1256,7 @@ function renderRejectedTable(submissions) {
     }
 
     rejectedTableBody.innerHTML = submissions.map(sub => {
-        let date = 'N/A';
-        if (sub.uploadedAt) {
-            date = formatTimestamp(sub.uploadedAt);
-        }
+        const date = formatTimestamp(getSubmissionRejectionEntryAt(sub)) || 'N/A';
         
         const docTypes = sub.documentTypes?.map(type => DOCUMENT_TYPES[type] || type).join(', ') || 'N/A';
         const docCount = getEffectiveSubmissionDocuments(sub).length;

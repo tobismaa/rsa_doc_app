@@ -7,6 +7,10 @@ import {
 import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
 import { formatAppDateTime } from './shared/app-time.js';
 import {
+    getTimestampMillis as getStageTimestampMillis,
+    getSubmissionCurrentStageEntryAt
+} from './shared/submission-stage.js?v=20260609a';
+import {
     collection, query, where, orderBy, onSnapshot, getDocs, getDoc, doc, limit, serverTimestamp, updateDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
@@ -120,7 +124,8 @@ function ensureSignOutUser() {
                 if (userId) {
                     await updateDoc(doc(db, 'users', userId), {
                         isOnline: false,
-                        lastSeenAt: serverTimestamp()
+                        lastSeenAt: serverTimestamp(),
+                        lastLogoutAt: serverTimestamp()
                     }).catch(() => {});
                 }
                 await signOut(auth);
@@ -452,6 +457,7 @@ function loadSubmissionsForDisplay() {
         });
 
         await ensureUserFullNames(Array.from(emails));
+        allSubmissions.sort((a, b) => getStageTimestampMillis(getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(getSubmissionCurrentStageEntryAt(a)));
 
         // Update dashboard counts only - don't render tables that conflict
         updateDashboardCards();
@@ -513,7 +519,10 @@ function renderRecentTable() {
     const rows = document.getElementById('recentTableBody');
     if (!rows) return;
 
-    const recent = allSubmissions.slice(0, 10);
+    const recent = allSubmissions
+        .slice()
+        .sort((a, b) => getStageTimestampMillis(getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(getSubmissionCurrentStageEntryAt(a)))
+        .slice(0, 10);
 
     if (recent.length === 0) {
         rows.innerHTML = '<tr><td colspan="5" class="no-data">No recent applications</td></tr>';
@@ -521,7 +530,7 @@ function renderRecentTable() {
     }
 
     rows.innerHTML = recent.map(sub => {
-        const uploadDate = formatAppDateTime(sub.uploadedAt, 'N/A');
+        const uploadDate = formatAppDateTime(getSubmissionCurrentStageEntryAt(sub), 'N/A');
         const uploaderName = (sub.uploadedBy && userFullNames.get(sub.uploadedBy)) ? userFullNames.get(sub.uploadedBy) : (sub.uploadedBy || '-');
         return `
             <tr>
