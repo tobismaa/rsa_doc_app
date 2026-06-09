@@ -227,6 +227,23 @@ function shiftDateKey(dateKey, offsetDays) {
     return utcDate.toISOString().slice(0, 10);
 }
 
+function parseTimeToMinutes(value) {
+    const text = String(value || '').trim();
+    const match = text.match(/^(\d{2}):(\d{2})$/);
+    if (!match) return null;
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+    return (hours * 60) + minutes;
+}
+
+function isScheduledTimeDue(now, sendTime) {
+    const scheduledMinutes = parseTimeToMinutes(sendTime);
+    const currentMinutes = parseTimeToMinutes(getLagosTimeKey(now));
+    if (scheduledMinutes == null || currentMinutes == null) return false;
+    return currentMinutes >= scheduledMinutes;
+}
+
 function resolveAutoScheduledScope(now = new Date()) {
     const weekday = getLagosWeekdayKey(now);
     const previousDateKey = getPreviousDateKeyInLagos(now);
@@ -1594,7 +1611,7 @@ app.post('/api/user/push-event', authMiddleware, async (req, res) => {
     }
 });
 
-let lastScheduledMinuteKey = '';
+let lastScheduledDueKey = '';
 
 async function tickScheduledReportSender() {
     if (!ENABLE_SCHEDULED_REPORT_SENDER) return;
@@ -1605,12 +1622,11 @@ async function tickScheduledReportSender() {
 
     const sendTime = String(scheduled.sendTime || '08:00').trim() || '08:00';
     const now = new Date();
-    const lagosTime = getLagosTimeKey(now);
     const lagosDateKey = getLagosDateKey(now);
-    const minuteKey = `${lagosDateKey}:${lagosTime}`;
-    if (lagosTime !== sendTime || minuteKey === lastScheduledMinuteKey) return;
+    const dueKey = `${lagosDateKey}:${sendTime}`;
+    if (!isScheduledTimeDue(now, sendTime) || dueKey === lastScheduledDueKey) return;
 
-    lastScheduledMinuteKey = minuteKey;
+    lastScheduledDueKey = dueKey;
     const autoScope = resolveAutoScheduledScope(now);
     if (autoScope.mode === 'skip') return;
     try {
