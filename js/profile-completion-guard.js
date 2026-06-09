@@ -21,6 +21,7 @@ const FORCE_LOGOUT_DISMISSED_TOKEN_KEY = 'cmbank_force_logout_dismissed_token';
 let cacheClearWatcherStarted = false;
 let cacheClearInProgress = false;
 let securityWatchStarted = false;
+let securityPollTimer = null;
 let sessionTimeoutTimer = null;
 let inactivityHandlersBound = false;
 let forceLogoutNoticeActive = false;
@@ -608,11 +609,7 @@ function watchForSecuritySignals(userData = {}) {
   if (securityWatchStarted) return;
   securityWatchStarted = true;
 
-  onSnapshot(doc(db, 'settings', 'system'), async (snap) => {
-    const systemSettings = snap.exists()
-      ? await getSystemSettings(db, { force: true })
-      : await getSystemSettings(db, { force: true });
-
+  const evaluateSecurityState = async (systemSettings) => {
     showDashboardAnnouncement(systemSettings.dashboardAnnouncement);
     bindInactivityHandlers(systemSettings.securityControls.sessionTimeoutMinutes);
 
@@ -645,7 +642,23 @@ function watchForSecuritySignals(userData = {}) {
     if (dismissedToken === forceLogoutToken) {
       forceLogoutNoticeActive = false;
     }
+  };
+
+  onSnapshot(doc(db, 'settings', 'system'), async () => {
+    try {
+      const systemSettings = await getSystemSettings(db, { force: true });
+      await evaluateSecurityState(systemSettings);
+    } catch (_) {}
   }, () => {});
+
+  if (!securityPollTimer) {
+    securityPollTimer = window.setInterval(async () => {
+      try {
+        const systemSettings = await getSystemSettings(db, { force: true });
+        await evaluateSecurityState(systemSettings);
+      } catch (_) {}
+    }, 5000);
+  }
 }
 
 async function findUserDocByUidOrEmail(uid, email) {
