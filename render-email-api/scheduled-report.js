@@ -396,8 +396,8 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
                 groupRows: buildUploaderSheetRows(uploaderRecords, usersByEmail, scope.includeDateColumn).sort(compareGroupedRows),
                 tableHeaders: [...dateHeaders, 'Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Uploaded Time', 'Reviewer Time', 'Reject Reason', 'Reject Count'],
                 columns: [...dateColumns, { width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
-                decimalColumns: moneyDecimalColumns,
-                integerColumns: rejectIntegerColumn
+                decimalColumns: scope.includeDateColumn ? [3, 4, 5] : [2, 3, 4],
+                integerColumns: scope.includeDateColumn ? [10] : [9]
             },
             {
                 worksheetName: 'Reviewer Report',
