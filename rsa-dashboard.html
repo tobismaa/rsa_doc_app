@@ -78,9 +78,9 @@
                     <span>Rejected by RSA</span>
                     <span class="badge" id="rejectedCount">0</span>
                 </a>
-                <a href="#" class="nav-item" data-tab="excel-export" id="rsaExcelExportNavItem" style="display:none;">
-                    <i class="fas fa-file-excel"></i>
-                    <span>Excel Export</span>
+                <a href="#" class="nav-item" data-tab="report" id="rsaExcelExportNavItem" style="display:none;">
+                    <i class="fas fa-file-export"></i>
+                    <span>Report</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="leave">
                     <i class="fas fa-person-walking-luggage"></i>
@@ -209,8 +209,60 @@
                 </div>
             </div>
 
-            <div id="excel-exportTab" class="tab-content">
+            <div id="reportTab" class="tab-content">
                 <div class="table-section">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px;padding:18px;border:1px solid #dbe2ea;border-radius:18px;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);box-shadow:0 10px 24px rgba(15,59,103,0.08);">
+                        <div style="max-width:760px;">
+                            <h2 style="margin:0 0 8px;color:#0f3b67;">RSA Report</h2>
+                            <p id="rsaReportMeta" style="margin:0;color:#64748b;font-size:14px;line-height:1.6;">RSA Level 2 can generate the RSA-only report here. The report uses the real RSA entry date for the selected date range.</p>
+                        </div>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;">
+                            <label style="display:flex;flex-direction:column;gap:6px;">
+                                <span style="font-size:12px;font-weight:700;color:#334155;">Start Date</span>
+                                <input type="date" id="rsaReportStartDate" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;">
+                            </label>
+                            <label style="display:flex;flex-direction:column;gap:6px;">
+                                <span style="font-size:12px;font-weight:700;color:#334155;">End Date</span>
+                                <input type="date" id="rsaReportEndDate" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;">
+                            </label>
+                            <button type="button" class="action-btn" id="generateRsaStageReportBtn" style="background:#0f766e;color:#fff;border:none;">
+                                <i class="fas fa-chart-column"></i> Generate
+                            </button>
+                            <button type="button" class="action-btn" id="exportRsaStageReportBtn">
+                                <i class="fas fa-file-excel"></i> Export Excel
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-container" style="margin-bottom:16px;">
+                        <table class="customers-table" style="max-width:560px;">
+                            <thead>
+                                <tr><th>Metric</th><th>Value</th></tr>
+                            </thead>
+                            <tbody id="rsaReportSummaryBody">
+                                <tr><td colspan="2" class="no-data">Generate a report to see the summary.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="table-container" style="margin-bottom:18px;">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>RSA Officer</th>
+                                    <th>Customer Name</th>
+                                    <th>Uploader Name</th>
+                                    <th>Reviewer Name</th>
+                                    <th>RSA Balance</th>
+                                    <th>25% RSA Balance</th>
+                                    <th>1% Commission</th>
+                                    <th>Status</th>
+                                    <th>RSA Assigned Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rsaReportDetailsBody">
+                                <tr><td colspan="9" class="no-data">Generate a report to see the application breakdown.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                     <div class="document-info" style="background:
                         radial-gradient(circle at top right, rgba(16, 185, 129, 0.18), transparent 42%),
                         linear-gradient(135deg, #effdf5, #ecfeff);
@@ -710,11 +762,11 @@
 
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script type="module" src="js/firebase-config.js"></script>
-    <script type="module" src="js/rsa-dashboard.js?v=20260512a"></script>
+    <script type="module" src="js/rsa-dashboard.js?v=20260610a"></script>
     <script src="js/table-enhancer.js?v=20260512b"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260609b"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260518a">
-    <script type="module" src="js/app-chat.js?v=20260518a"></script>
+    <script type="module" src="js/app-chat.js?v=20260610a"></script>
     <link rel="stylesheet" href="css/pwa-install.css">
     <script src="js/pwa-install.js?v=20260423a"></script>
     <link rel="stylesheet" href="css/profile-card.css">

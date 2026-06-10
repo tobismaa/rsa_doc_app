@@ -1,4 +1,6 @@
 const ExcelJS = require('exceljs');
+const REPORT_INCEPTION_START_DATE = '1900-01-01';
+const REPORT_INCEPTION_LABEL = 'From Inception';
 
 const lagosDateTimeFormatter = new Intl.DateTimeFormat('en-NG', {
     timeZone: 'Africa/Lagos',
@@ -59,7 +61,17 @@ function getSubmissionApprovalEntryAt(sub = {}) {
 }
 
 function getSubmissionRsaEntryAt(sub = {}) {
-    return pickTimestamp(sub.reviewedAt, sub.approvedAt, sub.statusUpdatedAt, sub.updatedAt);
+    return pickTimestamp(
+        sub.rsaAssignedAt,
+        sub.reviewedAt,
+        sub.approvedAt,
+        sub.reuploadedAt,
+        sub.uploadedAt,
+        sub.submittedAt,
+        sub.createdAt,
+        sub.statusUpdatedAt,
+        sub.updatedAt
+    );
 }
 
 function getSubmissionFinalSubmissionEntryAt(sub = {}) {
@@ -132,6 +144,16 @@ function getRejectionReason(sub = {}) {
     return String(sub?.latestRejectionReason || sub?.previousRejectionReason || sub?.comment || '').trim();
 }
 
+function getRejectionOfficerName(sub = {}, usersByEmail) {
+    if (getRejectionCount(sub) <= 0 && !getRejectionReason(sub)) return '';
+    const rejectedBy = String(sub?.latestRejectedBy || sub?.previousRejectedBy || '').trim();
+    if (rejectedBy) return getUserDisplayNameByEmail(usersByEmail, rejectedBy);
+    const stage = String(sub?.latestRejectedStage || '').trim().toLowerCase();
+    if (stage === 'rsa') return getUserDisplayNameByEmail(usersByEmail, sub?.assignedToRSA || '');
+    if (stage === 'payment') return getUserDisplayNameByEmail(usersByEmail, sub?.assignedToPayment || '');
+    return getUserDisplayNameByEmail(usersByEmail, sub?.reviewedBy || sub?.assignedTo || '');
+}
+
 function getRejectionCount(sub = {}) {
     const history = Array.isArray(sub?.rejectionHistory)
         ? sub.rejectionHistory.filter((entry) => {
@@ -184,8 +206,8 @@ function buildUploaderSheetRows(records = [], usersByEmail, includeDateColumn = 
         commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
         status: String(sub.status || '').replace(/_/g, ' '),
         uploadedAt: formatDate(getSubmissionReviewEntryAt(sub)),
-        stageTime: formatDate(getSubmissionApprovalEntryAt(sub)),
         rejectionReason: getRejectionReason(sub),
+        rejectionOfficer: getRejectionOfficerName(sub, usersByEmail),
         rejectionCount: getRejectionCount(sub)
     }));
 }
@@ -203,7 +225,6 @@ function buildReviewerSheetRows(records = [], usersByEmail, includeDateColumn = 
             commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
             status: String(sub.status || '').replace(/_/g, ' '),
             assignedAt: formatDate(getSubmissionReviewEntryAt(sub)),
-            stageTime: formatDate(getSubmissionApprovalEntryAt(sub)),
             rejectionReason: getRejectionReason(sub),
             rejectionCount: getRejectionCount(sub)
         }));
@@ -216,6 +237,7 @@ function buildRsaSheetRows(records = [], usersByEmail, includeDateColumn = false
             owner: getUserDisplayNameByEmail(usersByEmail, sub.assignedToRSA),
             ...(includeDateColumn ? { reportDate: getDateKey(getSubmissionRsaEntryAt(sub)) || '-' } : {}),
             customerName: sub.customerName || '',
+            uploaderName: getUserDisplayNameByEmail(usersByEmail, sub.uploadedBy),
             reviewerName: getUserDisplayNameByEmail(usersByEmail, sub.assignedTo || sub.reviewedBy),
             rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
             rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
@@ -223,8 +245,8 @@ function buildRsaSheetRows(records = [], usersByEmail, includeDateColumn = false
             status: String(sub.status || '').replace(/_/g, ' '),
             assignedAt: formatDate(getSubmissionRsaEntryAt(sub)),
             stageTime: formatDate(getSubmissionFinalSubmissionEntryAt(sub)),
-            rejectionReason: String(String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? getRejectionReason(sub) : ''),
-            rejectionCount: Number(String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? getRejectionCount(sub) : 0)
+            rejectionReason: getRejectionReason(sub),
+            rejectionCount: getRejectionCount(sub)
         }));
 }
 
@@ -235,16 +257,36 @@ function buildPaymentSheetRows(records = [], usersByEmail, includeDateColumn = f
             owner: getUserDisplayNameByEmail(usersByEmail, sub.assignedToPayment),
             ...(includeDateColumn ? { reportDate: getDateKey(getSubmissionPaymentEntryAt(sub)) || '-' } : {}),
             customerName: sub.customerName || '',
+            uploaderName: getUserDisplayNameByEmail(usersByEmail, sub.uploadedBy),
             rsaOfficerName: getUserDisplayNameByEmail(usersByEmail, sub.assignedToRSA),
             rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
             rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
             commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
             status: String(sub.status || '').replace(/_/g, ' '),
             assignedAt: formatDate(getSubmissionPaymentEntryAt(sub)),
-            paidAt: formatDate(getSubmissionPaidEntryAt(sub)),
-            clearedAt: formatDate(getSubmissionClearedEntryAt(sub)),
-            remarks: sub.clearedWithoutAgentCommission ? 'Cleared without agent commission' : String(sub.paymentReconciliationFileName || '').trim()
         }));
+}
+
+function normalizeOutstandingRowForStage(row = {}, stageId = '') {
+    return row;
+}
+
+function normalizeRsaReportRow(row = {}) {
+    const normalized = {
+        owner: row.owner || '',
+        customerName: row.customerName || '',
+        uploaderName: row.uploaderName || '',
+        reviewerName: row.reviewerName || '',
+        rsaBalance: row.rsaBalance ?? '',
+        rsa25: row.rsa25 ?? '',
+        commission: row.commission ?? '',
+        status: row.status || '',
+        assignedAt: row.assignedAt || '-'
+    };
+    if (Object.prototype.hasOwnProperty.call(row, 'reportDate')) {
+        return { owner: normalized.owner, reportDate: row.reportDate || '-', ...Object.fromEntries(Object.entries(normalized).filter(([key]) => key !== 'owner')) };
+    }
+    return normalized;
 }
 
 function applySheetHeaderStyle(row) {
@@ -327,6 +369,16 @@ function normalizeReportScope({ reportDateKey, rangeStartDateKey, rangeEndDateKe
     if (rangeStart && rangeEnd) {
         const start = rangeStart <= rangeEnd ? rangeStart : rangeEnd;
         const end = rangeStart <= rangeEnd ? rangeEnd : rangeStart;
+        if (start === REPORT_INCEPTION_START_DATE) {
+            return {
+                mode: 'from_inception',
+                reportDateKey: '',
+                rangeStartDateKey: start,
+                rangeEndDateKey: end,
+                label: `${REPORT_INCEPTION_LABEL} to ${end}`,
+                includeDateColumn: true
+            };
+        }
         return {
             mode: 'date_range',
             reportDateKey: '',
@@ -367,7 +419,7 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
         const status = String(sub.status || '').toLowerCase();
         return ['sent_to_pfa', 'rsa_submitted'].includes(status);
     });
-    const matchesScope = (value) => scope.mode === 'date_range'
+    const matchesScope = (value) => ['date_range', 'from_inception'].includes(scope.mode)
         ? isDateKeyWithinRange(value, scope.rangeStartDateKey, scope.rangeEndDateKey)
         : isSameReportDate(value, scope.reportDateKey);
     const uploaderRecords = submittedRecords.filter((sub) => matchesScope(getSubmissionReviewEntryAt(sub)));
@@ -394,8 +446,8 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
                     ['Pending', uploaderRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length]
                 ],
                 groupRows: buildUploaderSheetRows(uploaderRecords, usersByEmail, scope.includeDateColumn).sort(compareGroupedRows),
-                tableHeaders: [...dateHeaders, 'Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Uploaded Time', 'Reviewer Time', 'Reject Reason', 'Reject Count'],
-                columns: [...dateColumns, { width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
+                tableHeaders: [...dateHeaders, 'Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Uploaded Time', 'Reject Reason', 'Rejected By', 'Reject Count'],
+                columns: [...dateColumns, { width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 28 }, { width: 24 }, { width: 14 }],
                 decimalColumns: scope.includeDateColumn ? [3, 4, 5] : [2, 3, 4],
                 integerColumns: scope.includeDateColumn ? [10] : [9]
             },
@@ -409,10 +461,10 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
                     ['Total Outstanding', reviewerOutstandingRecords.length]
                 ],
                 groupRows: buildReviewerSheetRows(reviewerRecords, usersByEmail, scope.includeDateColumn).sort(compareGroupedRows),
-                tableHeaders: [...dateHeaders, 'Customer Name', 'Uploader Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Decision Time', 'Reject Reason', 'Reject Count'],
-                columns: [...dateColumns, { width: 28 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
+                tableHeaders: [...dateHeaders, 'Customer Name', 'Uploader Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Reject Reason', 'Reject Count'],
+                columns: [...dateColumns, { width: 28 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 28 }, { width: 14 }],
                 decimalColumns: scope.includeDateColumn ? [4, 5, 6] : [3, 4, 5],
-                integerColumns: scope.includeDateColumn ? [11] : [10]
+                integerColumns: scope.includeDateColumn ? [10] : [9]
             },
             {
                 worksheetName: 'RSA Report',
@@ -423,11 +475,11 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
                     ['Pending', rsaRecords.filter((sub) => ['approved', 'processing_to_pfa'].includes(String(sub.status || '').toLowerCase()) && !sub.finalSubmitted && !sub.rsaSubmitted).length],
                     ['Total Outstanding', rsaOutstandingRecords.length]
                 ],
-                groupRows: buildRsaSheetRows(rsaRecords, usersByEmail, scope.includeDateColumn).sort(compareGroupedRows),
-                tableHeaders: [...dateHeaders, 'Customer Name', 'Reviewer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time', 'RSA Done Time', 'RSA Reject Reason', 'RSA Reject Count'],
-                columns: [...dateColumns, { width: 28 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
-                decimalColumns: scope.includeDateColumn ? [4, 5, 6] : [3, 4, 5],
-                integerColumns: scope.includeDateColumn ? [11] : [10]
+                groupRows: buildRsaSheetRows(rsaRecords, usersByEmail, scope.includeDateColumn).map(normalizeRsaReportRow).sort(compareGroupedRows),
+                tableHeaders: [...dateHeaders, 'Customer Name', 'Uploader Name', 'Reviewer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time'],
+                columns: [...dateColumns, { width: 28 }, { width: 24 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }],
+                decimalColumns: scope.includeDateColumn ? [5, 6, 7] : [4, 5, 6],
+                integerColumns: []
             },
             {
                 worksheetName: 'Payment Report',
@@ -439,12 +491,116 @@ function buildDailyReportDefinition({ submissions = [], users = [], reportDateKe
                     ['Total Outstanding', paymentOutstandingRecords.length]
                 ],
                 groupRows: buildPaymentSheetRows(paymentRecords, usersByEmail, scope.includeDateColumn).sort(compareGroupedRows),
-                tableHeaders: [...dateHeaders, 'Customer Name', 'RSA Officer', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Paid Time', 'Cleared Time', 'Remarks'],
-                columns: [...dateColumns, { width: 28 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 22 }, { width: 28 }],
-                decimalColumns: scope.includeDateColumn ? [4, 5, 6] : [3, 4, 5],
+                tableHeaders: [...dateHeaders, 'Customer Name', 'Uploader Name', 'RSA Officer', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time'],
+                columns: [...dateColumns, { width: 28 }, { width: 24 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }],
+                decimalColumns: scope.includeDateColumn ? [5, 6, 7] : [4, 5, 6],
                 integerColumns: []
             }
         ]
+    };
+}
+
+function buildOutstandingReportDefinition({ submissions = [], users = [], reportDateKey, rangeStartDateKey, rangeEndDateKey, outstandingDashboard = 'all' }) {
+    const usersByEmail = new Map();
+    users.forEach((user) => {
+        const normalized = normalizeEmail(user?.email);
+        if (normalized && !usersByEmail.has(normalized)) usersByEmail.set(normalized, user);
+    });
+
+    const scope = normalizeReportScope({ reportDateKey, rangeStartDateKey, rangeEndDateKey });
+    const dateKey = scope.label;
+    const dashboard = String(outstandingDashboard || 'all').trim().toLowerCase() || 'all';
+    const submittedRecords = submissions.filter((sub) => String(sub.status || '').toLowerCase() !== 'draft');
+    const uploaderOutstandingRecords = submittedRecords.filter((sub) => (
+        String(sub.status || '').toLowerCase() === 'pending'
+    ));
+    const reviewerOutstandingRecords = submittedRecords.filter((sub) => (
+        String(sub.status || '').toLowerCase() === 'pending'
+        && normalizeEmail(sub.assignedTo)
+    ));
+    const rsaOutstandingRecords = submittedRecords.filter((sub) => {
+        const status = String(sub.status || '').toLowerCase();
+        return ['approved', 'processing_to_pfa'].includes(status)
+            && !sub.finalSubmitted
+            && !sub.rsaSubmitted
+            && normalizeEmail(sub.assignedToRSA);
+    });
+    const paymentOutstandingRecords = submittedRecords.filter((sub) => {
+        const status = String(sub.status || '').toLowerCase();
+        return ['sent_to_pfa', 'rsa_submitted'].includes(status)
+            && normalizeEmail(sub.assignedToPayment);
+    });
+
+    const outstandingConfigs = [
+        {
+            id: 'uploader',
+            worksheetName: 'Uploader Report',
+            reportTitle: `Uploader Outstanding - ${dateKey}`,
+            summaryRows: [
+                ['Total Outstanding', uploaderOutstandingRecords.length],
+                ['Pending', uploaderOutstandingRecords.length]
+            ],
+            groupRows: buildUploaderSheetRows(uploaderOutstandingRecords, usersByEmail, false).map((row) => normalizeOutstandingRowForStage(row, 'uploader')).sort(compareGroupedRows),
+            tableHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Uploaded Time', 'Reject Reason', 'Rejected By', 'Reject Count'],
+            columns: [{ width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 28 }, { width: 24 }, { width: 14 }],
+            decimalColumns: [2, 3, 4],
+            integerColumns: [9]
+        },
+        {
+            id: 'reviewer',
+            worksheetName: 'Reviewer Report',
+            reportTitle: `Reviewer Outstanding - ${dateKey}`,
+            summaryRows: [
+                ['Total Outstanding', reviewerOutstandingRecords.length],
+                ['Pending', reviewerOutstandingRecords.length]
+            ],
+            groupRows: buildReviewerSheetRows(reviewerOutstandingRecords, usersByEmail, false).map((row) => normalizeOutstandingRowForStage(row, 'reviewer')).sort(compareGroupedRows),
+            tableHeaders: ['Customer Name', 'Uploader Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Reject Reason', 'Reject Count'],
+            columns: [{ width: 28 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 28 }, { width: 14 }],
+            decimalColumns: [3, 4, 5],
+            integerColumns: [9]
+        },
+        {
+            id: 'rsa',
+            worksheetName: 'RSA Report',
+            reportTitle: `RSA Outstanding - ${dateKey}`,
+            summaryRows: [
+                ['Total Outstanding', rsaOutstandingRecords.length],
+                ['Pending', rsaOutstandingRecords.length]
+            ],
+            groupRows: buildRsaSheetRows(rsaOutstandingRecords, usersByEmail, false).map((row) => normalizeOutstandingRowForStage(row, 'rsa')).map(normalizeRsaReportRow).sort(compareGroupedRows),
+            tableHeaders: ['Customer Name', 'Uploader Name', 'Reviewer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time'],
+            columns: [{ width: 28 }, { width: 24 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }],
+            decimalColumns: [4, 5, 6],
+            integerColumns: []
+        },
+        {
+            id: 'payment',
+            worksheetName: 'Payment Report',
+            reportTitle: `Payment Outstanding - ${dateKey}`,
+            summaryRows: [
+                ['Total Outstanding', paymentOutstandingRecords.length],
+                ['Pending', paymentOutstandingRecords.length]
+            ],
+            groupRows: buildPaymentSheetRows(paymentOutstandingRecords, usersByEmail, false).map((row) => normalizeOutstandingRowForStage(row, 'payment')).sort(compareGroupedRows),
+            tableHeaders: ['Customer Name', 'Uploader Name', 'RSA Officer', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Payment Assigned Time'],
+            columns: [{ width: 28 }, { width: 24 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }],
+            decimalColumns: [4, 5, 6],
+            integerColumns: []
+        }
+    ];
+
+    const sheets = (dashboard === 'all'
+        ? outstandingConfigs
+        : outstandingConfigs.filter((config) => config.id === dashboard));
+
+    return {
+        reportDateKey: scope.reportDateKey,
+        rangeStartDateKey: scope.rangeStartDateKey,
+        rangeEndDateKey: scope.rangeEndDateKey,
+        reportLabel: `${dashboard === 'all' ? 'All Dashboards' : dashboard.toUpperCase()} Outstanding - ${scope.label}`,
+        outstandingDashboard: dashboard,
+        sheets
     };
 }
 
@@ -473,8 +629,34 @@ async function createDailyReportWorkbookBuffer({ submissions = [], users = [], r
     return workbook.xlsx.writeBuffer();
 }
 
+async function createOutstandingReportWorkbookBuffer({ submissions = [], users = [], reportDateKey, rangeStartDateKey, rangeEndDateKey, outstandingDashboard = 'all' }) {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'CMBank RSA Portal';
+    workbook.company = 'CMBank';
+    workbook.created = new Date();
+    workbook.modified = new Date();
+
+    const report = buildOutstandingReportDefinition({ submissions, users, reportDateKey, rangeStartDateKey, rangeEndDateKey, outstandingDashboard });
+    report.sheets.forEach((sheet) => {
+        const worksheet = workbook.addWorksheet(sheet.worksheetName);
+        renderGroupedSheet({
+            worksheet,
+            reportTitle: sheet.reportTitle,
+            summaryRows: sheet.summaryRows,
+            groupRows: sheet.groupRows,
+            tableHeaders: sheet.tableHeaders,
+            columns: sheet.columns,
+            decimalColumns: sheet.decimalColumns,
+            integerColumns: sheet.integerColumns
+        });
+    });
+
+    return workbook.xlsx.writeBuffer();
+}
+
 module.exports = {
     createDailyReportWorkbookBuffer,
+    createOutstandingReportWorkbookBuffer,
     getPreviousDateKeyInLagos,
     getLagosDateKey
 };

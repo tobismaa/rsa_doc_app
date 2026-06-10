@@ -40,7 +40,17 @@ function getSubmissionRejectionEntryAt(submission = {}) {
 }
 
 function getSubmissionRsaEntryAt(submission = {}) {
-    return pickTimestamp(submission?.reviewedAt, submission?.approvedAt, submission?.statusUpdatedAt, submission?.updatedAt);
+    return pickTimestamp(
+        submission?.rsaAssignedAt,
+        submission?.reviewedAt,
+        submission?.approvedAt,
+        submission?.reuploadedAt,
+        submission?.uploadedAt,
+        submission?.submittedAt,
+        submission?.createdAt,
+        submission?.statusUpdatedAt,
+        submission?.updatedAt
+    );
 }
 
 function getSubmissionFinalSubmissionEntryAt(submission = {}) {

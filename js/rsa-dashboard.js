@@ -31,6 +31,11 @@ import {
     getSubmissionFinalSubmissionEntryAt
 } from './shared/submission-stage.js?v=20260609a';
 import {
+    buildDashboardStageReport,
+    renderDashboardStageReport,
+    exportDashboardStageReportExcel
+} from './shared/dashboard-stage-report.js?v=20260610a';
+import {
     getUploaderRoutingRule as getUploaderRoutingRuleShared,
     routingRuleDocId as routingRuleDocIdShared
 } from './shared/uploader-routing.js?v=20260427e';
@@ -72,6 +77,7 @@ let rsaReliefLeaveHistory = [];
 const userFullNameCache = new Map();
 let unsubscribeQueue = null;
 let queueLoadSeq = 0;
+let currentRsaStageReport = null;
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 let idleLastActivity = Date.now();
@@ -121,6 +127,13 @@ const rsaExcelResultsTableBody = document.getElementById('rsaExcelResultsTableBo
 const rsaExcelResultsSelectAll = document.getElementById('rsaExcelResultsSelectAll');
 const exportRsaLevel2AllBtn = document.getElementById('exportRsaLevel2AllBtn');
 const exportRsaLevel2SelectedBtn = document.getElementById('exportRsaLevel2SelectedBtn');
+const rsaReportMeta = document.getElementById('rsaReportMeta');
+const rsaReportStartDate = document.getElementById('rsaReportStartDate');
+const rsaReportEndDate = document.getElementById('rsaReportEndDate');
+const rsaReportSummaryBody = document.getElementById('rsaReportSummaryBody');
+const rsaReportDetailsBody = document.getElementById('rsaReportDetailsBody');
+const generateRsaStageReportBtn = document.getElementById('generateRsaStageReportBtn');
+const exportRsaStageReportBtn = document.getElementById('exportRsaStageReportBtn');
 
 let currentDetailsSubmissionId = null;
 let currentRejectSubmissionId = null;
@@ -349,6 +362,51 @@ function isCurrentRsaLevelTwo() {
     return getCurrentRsaRoleLevel() >= 2;
 }
 
+function initializeRsaReportDates() {
+    const today = new Date();
+    const sixDaysAgo = new Date(today.getTime() - (6 * 24 * 60 * 60 * 1000));
+    const toInputValue = (date) => `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
+    if (rsaReportStartDate && !rsaReportStartDate.value) rsaReportStartDate.value = toInputValue(sixDaysAgo);
+    if (rsaReportEndDate && !rsaReportEndDate.value) rsaReportEndDate.value = toInputValue(today);
+}
+
+function resolveRsaKnownName(email) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return 'Unassigned';
+    if (normalizeEmail(currentRsaProfileData?.email) === normalized) {
+        return currentRsaProfileData?.fullName || currentRsaProfileData?.displayName || normalized;
+    }
+    return userFullNameCache.get(normalized) || normalized;
+}
+
+async function fetchRsaStageReportSourceRecords() {
+    if (isCurrentRsaLevelTwo()) {
+        const snapshot = await getDocs(query(collection(db, 'submissions'), orderBy('uploadedAt', 'desc')));
+        const records = snapshot.docs
+            .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+            .filter((sub) => normalizeEmail(sub.assignedToRSA));
+        const emails = [...new Set(records.flatMap((sub) => [sub.assignedToRSA, sub.assignedTo, sub.reviewedBy, sub.uploadedBy]).filter(Boolean))];
+        await Promise.all(emails.map((email) => getUserFullName(email)));
+        return records;
+    }
+    return allSubmissions.filter((sub) => normalizeEmail(sub.assignedToRSA));
+}
+
+async function buildRsaStageReport() {
+    const startDate = String(rsaReportStartDate?.value || '').trim();
+    const endDate = String(rsaReportEndDate?.value || '').trim();
+    if (!startDate || !endDate) throw new Error('Choose both start date and end date.');
+    if (startDate > endDate) throw new Error('Start date cannot be after end date.');
+    const sourceRecords = await fetchRsaStageReportSourceRecords();
+    return buildDashboardStageReport({
+        stageId: 'rsa',
+        records: sourceRecords,
+        rangeStart: startDate,
+        rangeEnd: endDate,
+        resolveName: resolveRsaKnownName
+    });
+}
+
 function updateRsaExcelAccessUI() {
     const isLevelTwo = isCurrentRsaLevelTwo();
     if (rsaExcelExportNavItem) {
@@ -357,7 +415,7 @@ function updateRsaExcelAccessUI() {
     if (approvedExcelExportBar) {
         approvedExcelExportBar.style.display = 'flex';
     }
-    if (!isLevelTwo && currentTab === 'excel-export') {
+    if (!isLevelTwo && currentTab === 'report') {
         switchTab('approved');
     }
 }
@@ -1505,11 +1563,14 @@ function switchTab(tabId) {
         approved: 'Processing to PFA',
         rejected: 'Rejected by RSA',
         'finally-submitted': 'Finally Submitted Applications',
-        'excel-export': 'RSA Excel Export',
+        report: 'RSA Report',
         profile: 'My Profile',
         help: 'Help & SOP'
     };
     if (pageTitle) pageTitle.textContent = titles[tabId] || 'RSA Queue';
+    if (tabId === 'report') {
+        initializeRsaReportDates();
+    }
     renderCurrentTab();
 }
 
@@ -2512,3 +2573,44 @@ function closeViewerModal() {
 
 window.signOutUser = () => { window.location.href = 'index.html'; };
 window.viewMergedPDF = viewMergedPDF;
+
+initializeRsaReportDates();
+
+generateRsaStageReportBtn?.addEventListener('click', async () => {
+    const originalHtml = generateRsaStageReportBtn.innerHTML;
+    generateRsaStageReportBtn.disabled = true;
+    generateRsaStageReportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+    try {
+        currentRsaStageReport = await buildRsaStageReport();
+        renderDashboardStageReport(currentRsaStageReport, {
+            metaEl: rsaReportMeta,
+            summaryBodyEl: rsaReportSummaryBody,
+            detailsBodyEl: rsaReportDetailsBody
+        });
+        showNotification('RSA report generated successfully.', 'success');
+    } catch (error) {
+        showNotification(error?.message || 'Failed to generate RSA report.', 'error');
+    } finally {
+        generateRsaStageReportBtn.disabled = false;
+        generateRsaStageReportBtn.innerHTML = originalHtml;
+    }
+});
+
+exportRsaStageReportBtn?.addEventListener('click', async () => {
+    if (!currentRsaStageReport) {
+        showNotification('Generate a report first.', 'warning');
+        return;
+    }
+    const originalHtml = exportRsaStageReportBtn.innerHTML;
+    exportRsaStageReportBtn.disabled = true;
+    exportRsaStageReportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+    try {
+        await exportDashboardStageReportExcel(currentRsaStageReport, 'CMBank RSA Dashboard');
+        showNotification('RSA report Excel downloaded.', 'success');
+    } catch (error) {
+        showNotification(error?.message || 'Failed to export RSA report.', 'error');
+    } finally {
+        exportRsaStageReportBtn.disabled = false;
+        exportRsaStageReportBtn.innerHTML = originalHtml;
+    }
+});

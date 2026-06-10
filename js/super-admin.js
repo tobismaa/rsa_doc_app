@@ -27,10 +27,11 @@ import {
     getSubmissionReviewEntryAt,
     getSubmissionApprovalEntryAt,
     getSubmissionRsaEntryAt,
+    getSubmissionFinalSubmissionEntryAt,
     getSubmissionPaymentEntryAt,
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt
-} from './shared/submission-stage.js?v=20260609a';
+} from './shared/submission-stage.js?v=20260610b';
 import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260508a';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 
@@ -65,6 +66,18 @@ let settingsModalSourceDropdownTab = '';
 let currentScheduledReportPreview = null;
 let scheduledReportConfirmResolver = null;
 let lastScheduledReportLogSnapshot = null;
+let currentScheduledReportSendTab = 'daily';
+let currentScheduledReportDownloadTab = 'daily';
+
+const OUTSTANDING_REPORT_OPTIONS = [
+    { id: 'all', label: 'All Dashboards' },
+    { id: 'uploader', label: 'Uploader' },
+    { id: 'reviewer', label: 'Reviewer' },
+    { id: 'rsa', label: 'RSA' },
+    { id: 'payment', label: 'Payment' }
+];
+const REPORT_INCEPTION_START_DATE = '1900-01-01';
+const REPORT_INCEPTION_LABEL = 'From Inception';
 
 function parseForceLogoutDurationInput(value) {
     const text = String(value || '').trim().toLowerCase();
@@ -227,6 +240,33 @@ function setScheduledReportSendModalStatus(message = '', type = 'info', details 
     `;
 }
 
+function setOutstandingReportDownloadStatus(message = '', type = 'info', details = []) {
+    const host = document.getElementById('scheduledOutstandingDownloadStatus');
+    if (!host) return;
+    const safeType = ['success', 'error', 'warning', 'info'].includes(type) ? type : 'info';
+    const toneMap = {
+        success: { border: '#86efac', background: '#f0fdf4', color: '#166534', title: 'Outstanding Report Ready' },
+        error: { border: '#fca5a5', background: '#fef2f2', color: '#991b1b', title: 'Outstanding Report Error' },
+        warning: { border: '#fcd34d', background: '#fffbeb', color: '#92400e', title: 'Outstanding Report Attention' },
+        info: { border: '#bfdbfe', background: '#eff6ff', color: '#1d4ed8', title: 'Outstanding Report Info' }
+    };
+    if (!String(message || '').trim() && (!Array.isArray(details) || !details.length)) {
+        host.style.display = 'none';
+        host.innerHTML = '';
+        return;
+    }
+    const tone = toneMap[safeType];
+    host.style.display = 'block';
+    host.style.borderColor = tone.border;
+    host.style.background = tone.background;
+    host.style.color = tone.color;
+    host.innerHTML = `
+        <div style="font-weight:700;margin-bottom:${details.length ? '6px' : '0'};">${escapeHtml(tone.title)}</div>
+        <div>${escapeHtml(message)}</div>
+        ${details.length ? `<div style="margin-top:8px;">${details.map((line) => `<div>${escapeHtml(line)}</div>`).join('')}</div>` : ''}
+    `;
+}
+
 function openScheduledReportSendModal() {
     const modal = document.getElementById('scheduledReportSendModal');
     if (!modal) return;
@@ -235,12 +275,27 @@ function openScheduledReportSendModal() {
     const manualDate = document.getElementById('scheduledReportManualDate');
     const rangeStart = document.getElementById('scheduledReportRangeStartDate');
     const rangeEnd = document.getElementById('scheduledReportRangeEndDate');
+    const inceptionEnd = document.getElementById('scheduledReportInceptionEndDate');
     const mode = document.getElementById('scheduledReportSendMode');
+    const outstandingDate = document.getElementById('scheduledOutstandingReportDate');
+    const outstandingRangeStart = document.getElementById('scheduledOutstandingRangeStartDate');
+    const outstandingRangeEnd = document.getElementById('scheduledOutstandingRangeEndDate');
+    const outstandingInceptionEnd = document.getElementById('scheduledOutstandingInceptionEndDate');
+    const outstandingMode = document.getElementById('scheduledOutstandingSendMode');
     if (manualDate && !manualDate.value) manualDate.value = previousDay;
     if (rangeStart && !rangeStart.value) rangeStart.value = previousDay;
     if (rangeEnd && !rangeEnd.value) rangeEnd.value = previousDay;
+    if (inceptionEnd && !inceptionEnd.value) inceptionEnd.value = previousDay;
+    if (outstandingDate && !outstandingDate.value) outstandingDate.value = previousDay;
+    if (outstandingRangeStart && !outstandingRangeStart.value) outstandingRangeStart.value = previousDay;
+    if (outstandingRangeEnd && !outstandingRangeEnd.value) outstandingRangeEnd.value = previousDay;
+    if (outstandingInceptionEnd && !outstandingInceptionEnd.value) outstandingInceptionEnd.value = previousDay;
     if (mode && !mode.value) mode.value = 'single_day';
+    if (outstandingMode && !outstandingMode.value) outstandingMode.value = 'single_day';
+    currentScheduledReportSendTab = 'daily';
+    renderScheduledReportSendTabState();
     updateScheduledReportSendModeVisibility();
+    updateOutstandingReportSendModeVisibility();
     setScheduledReportSendModalStatus();
 }
 
@@ -293,11 +348,83 @@ function updateScheduledReportSendModeVisibility() {
     const mode = String(document.getElementById('scheduledReportSendMode')?.value || 'single_day').trim();
     const singleWrap = document.getElementById('scheduledReportSingleDateWrap');
     const rangeWrap = document.getElementById('scheduledReportRangeWrap');
-    if (singleWrap) singleWrap.style.display = mode === 'date_range' ? 'none' : '';
+    const inceptionWrap = document.getElementById('scheduledReportInceptionWrap');
+    if (singleWrap) singleWrap.style.display = mode === 'single_day' ? '' : 'none';
     if (rangeWrap) rangeWrap.style.display = mode === 'date_range' ? 'grid' : 'none';
+    if (inceptionWrap) inceptionWrap.style.display = mode === 'from_inception' ? 'grid' : 'none';
+}
+
+function updateOutstandingReportSendModeVisibility() {
+    const mode = String(document.getElementById('scheduledOutstandingSendMode')?.value || 'single_day').trim();
+    const singleWrap = document.getElementById('scheduledOutstandingSingleDateWrap');
+    const rangeWrap = document.getElementById('scheduledOutstandingRangeWrap');
+    const inceptionWrap = document.getElementById('scheduledOutstandingInceptionWrap');
+    if (singleWrap) singleWrap.style.display = mode === 'single_day' ? '' : 'none';
+    if (rangeWrap) rangeWrap.style.display = mode === 'date_range' ? 'grid' : 'none';
+    if (inceptionWrap) inceptionWrap.style.display = mode === 'from_inception' ? 'grid' : 'none';
+}
+
+function updateOutstandingReportDownloadModeVisibility() {
+    const mode = String(document.getElementById('scheduledOutstandingDownloadMode')?.value || 'single_day').trim();
+    const singleWrap = document.getElementById('scheduledOutstandingDownloadSingleDateWrap');
+    const rangeWrap = document.getElementById('scheduledOutstandingDownloadRangeWrap');
+    const inceptionWrap = document.getElementById('scheduledOutstandingDownloadInceptionWrap');
+    if (singleWrap) singleWrap.style.display = mode === 'single_day' ? '' : 'none';
+    if (rangeWrap) rangeWrap.style.display = mode === 'date_range' ? 'grid' : 'none';
+    if (inceptionWrap) inceptionWrap.style.display = mode === 'from_inception' ? 'grid' : 'none';
+}
+
+function renderScheduledReportSendTabState() {
+    const dailyBtn = document.getElementById('scheduledReportSendDailyTabBtn');
+    const outstandingBtn = document.getElementById('scheduledReportSendOutstandingTabBtn');
+    const dailySection = document.getElementById('scheduledReportSendDailySection');
+    const outstandingSection = document.getElementById('scheduledReportSendOutstandingSection');
+    const isOutstanding = currentScheduledReportSendTab === 'outstanding';
+    if (dailyBtn) {
+        dailyBtn.style.background = isOutstanding ? '' : '#003366';
+        dailyBtn.style.color = isOutstanding ? '' : '#fff';
+        dailyBtn.style.border = isOutstanding ? '' : 'none';
+    }
+    if (outstandingBtn) {
+        outstandingBtn.style.background = isOutstanding ? '#003366' : '';
+        outstandingBtn.style.color = isOutstanding ? '#fff' : '';
+        outstandingBtn.style.border = isOutstanding ? 'none' : '';
+    }
+    if (dailySection) dailySection.style.display = isOutstanding ? 'none' : '';
+    if (outstandingSection) outstandingSection.style.display = isOutstanding ? '' : 'none';
+}
+
+function renderScheduledReportDownloadTabState() {
+    const dailyBtn = document.getElementById('scheduledReportDownloadDailyTabBtn');
+    const outstandingBtn = document.getElementById('scheduledReportDownloadOutstandingTabBtn');
+    const dailySection = document.getElementById('scheduledReportDownloadDailySection');
+    const outstandingSection = document.getElementById('scheduledReportDownloadOutstandingSection');
+    const isOutstanding = currentScheduledReportDownloadTab === 'outstanding';
+    if (dailyBtn) {
+        dailyBtn.style.background = isOutstanding ? '' : '#003366';
+        dailyBtn.style.color = isOutstanding ? '' : '#fff';
+        dailyBtn.style.border = isOutstanding ? '' : 'none';
+    }
+    if (outstandingBtn) {
+        outstandingBtn.style.background = isOutstanding ? '#003366' : '';
+        outstandingBtn.style.color = isOutstanding ? '#fff' : '';
+        outstandingBtn.style.border = isOutstanding ? 'none' : '';
+    }
+    if (dailySection) dailySection.style.display = isOutstanding ? 'none' : '';
+    if (outstandingSection) outstandingSection.style.display = isOutstanding ? '' : 'none';
 }
 
 function buildManualScheduledReportPayload() {
+    if (currentScheduledReportSendTab === 'outstanding') {
+        return buildOutstandingReportSelection({
+            dashboardElementId: 'scheduledOutstandingDashboardSelect',
+            modeElementId: 'scheduledOutstandingSendMode',
+            singleDateElementId: 'scheduledOutstandingReportDate',
+            rangeStartElementId: 'scheduledOutstandingRangeStartDate',
+            rangeEndElementId: 'scheduledOutstandingRangeEndDate',
+            inceptionEndElementId: 'scheduledOutstandingInceptionEndDate'
+        });
+    }
     const mode = String(document.getElementById('scheduledReportSendMode')?.value || 'single_day').trim();
     if (mode === 'date_range') {
         const rangeStartDateKey = String(document.getElementById('scheduledReportRangeStartDate')?.value || '').trim();
@@ -311,6 +438,17 @@ function buildManualScheduledReportPayload() {
             label: `${rangeStartDateKey} to ${rangeEndDateKey}`
         };
     }
+    if (mode === 'from_inception') {
+        const rangeEndDateKey = String(document.getElementById('scheduledReportInceptionEndDate')?.value || '').trim();
+        if (!rangeEndDateKey) {
+            throw new Error('Choose the end date for the inception report.');
+        }
+        return {
+            mode: 'from_inception',
+            payload: { rangeStartDateKey: REPORT_INCEPTION_START_DATE, rangeEndDateKey },
+            label: `${REPORT_INCEPTION_LABEL} to ${rangeEndDateKey}`
+        };
+    }
     const reportDateKey = String(document.getElementById('scheduledReportManualDate')?.value || '').trim();
     if (!reportDateKey) {
         throw new Error('Choose the report date you want to send.');
@@ -320,6 +458,138 @@ function buildManualScheduledReportPayload() {
         payload: { reportDateKey },
         label: reportDateKey
     };
+}
+
+function buildOutstandingReportSelection({
+    dashboardElementId,
+    modeElementId,
+    singleDateElementId,
+    rangeStartElementId,
+    rangeEndElementId,
+    inceptionEndElementId
+} = {}) {
+    const dashboard = String(document.getElementById(dashboardElementId)?.value || 'all').trim().toLowerCase() || 'all';
+    const option = OUTSTANDING_REPORT_OPTIONS.find((item) => item.id === dashboard) || OUTSTANDING_REPORT_OPTIONS[0];
+    const mode = String(document.getElementById(modeElementId)?.value || 'single_day').trim();
+    if (mode === 'date_range') {
+        const rangeStartDateKey = String(document.getElementById(rangeStartElementId)?.value || '').trim() || getPreviousScheduledReportDateKey();
+        const rangeEndDateKey = String(document.getElementById(rangeEndElementId)?.value || '').trim() || getPreviousScheduledReportDateKey();
+        return {
+            mode: 'outstanding_range',
+            payload: { rangeStartDateKey, rangeEndDateKey, outstandingDashboard: dashboard },
+            label: `${option.label} Outstanding - ${rangeStartDateKey} to ${rangeEndDateKey}`,
+            reportOptions: {
+                reportDateKey: '',
+                rangeStartDateKey,
+                rangeEndDateKey,
+                dashboard
+            }
+        };
+    }
+    if (mode === 'from_inception') {
+        const rangeEndDateKey = String(document.getElementById(inceptionEndElementId)?.value || '').trim() || getPreviousScheduledReportDateKey();
+        return {
+            mode: 'outstanding_inception',
+            payload: { rangeStartDateKey: REPORT_INCEPTION_START_DATE, rangeEndDateKey, outstandingDashboard: dashboard },
+            label: `${option.label} Outstanding - ${REPORT_INCEPTION_LABEL} to ${rangeEndDateKey}`,
+            reportOptions: {
+                reportDateKey: '',
+                rangeStartDateKey: REPORT_INCEPTION_START_DATE,
+                rangeEndDateKey,
+                dashboard
+            }
+        };
+    }
+    const reportDateKey = String(document.getElementById(singleDateElementId)?.value || '').trim() || getPreviousScheduledReportDateKey();
+    return {
+        mode: 'outstanding',
+        payload: { reportDateKey, outstandingDashboard: dashboard },
+        label: `${option.label} Outstanding - ${reportDateKey}`,
+        reportOptions: {
+            reportDateKey,
+            rangeStartDateKey: '',
+            rangeEndDateKey: '',
+            dashboard
+        }
+    };
+}
+
+function buildOutstandingDownloadSelection() {
+    return buildOutstandingReportSelection({
+        dashboardElementId: 'scheduledOutstandingDownloadDashboardSelect',
+        modeElementId: 'scheduledOutstandingDownloadMode',
+        singleDateElementId: 'scheduledOutstandingDownloadDate',
+        rangeStartElementId: 'scheduledOutstandingDownloadRangeStartDate',
+        rangeEndElementId: 'scheduledOutstandingDownloadRangeEndDate',
+        inceptionEndElementId: 'scheduledOutstandingDownloadInceptionEndDate'
+    });
+}
+
+async function sendSelectedScheduledReport(selection, {
+    setStatus = () => {},
+    successMessage = 'Selected report sent successfully.',
+    busyMessage = null
+} = {}) {
+    const status = await getScheduledReportBackendStatus();
+    if (status.enabled !== true) {
+        setStatus('Daily report email is disabled in settings.', 'warning', describeScheduledReportStatus(status));
+        return { ok: false, skipped: true, reason: 'scheduled-report-disabled' };
+    }
+    if (!Array.isArray(status.recipients) || !status.recipients.length) {
+        setStatus('No recipients are configured for scheduled report emails.', 'warning', describeScheduledReportStatus(status));
+        return { ok: false, skipped: true, reason: 'no-recipients' };
+    }
+
+    const apiBaseUrl = getEmailApiBaseUrl();
+    const idToken = await currentUser.getIdToken(true);
+    setStatus(busyMessage || `Sending report for ${selection.label}...`, 'info', describeScheduledReportStatus(status));
+
+    let requestResult = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-now`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`
+        },
+        body: JSON.stringify(selection.payload)
+    }, 45000);
+
+    if (requestResult.response.status === 409 || String(requestResult.data?.error || '').trim() === 'already-sent') {
+        const confirmed = await openScheduledReportConfirmModal({
+            title: 'Report Already Sent',
+            heroTitle: 'Custom report was already sent',
+            message: `A report for ${selection.label} has already been sent. Do you still want to resend it?`,
+            note: 'Continuing will resend this same report to the configured recipient list.',
+            confirmLabel: 'Resend Report'
+        });
+        if (!confirmed) {
+            setStatus(`Manual resend cancelled for ${selection.label}.`, 'info', describeScheduledReportStatus(status));
+            return { ok: false, skipped: true, reason: 'cancelled' };
+        }
+        requestResult = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-now`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`
+            },
+            body: JSON.stringify({ ...selection.payload, forceResend: true })
+        }, 45000);
+    }
+
+    const result = requestResult.data || {};
+    if (!requestResult.response.ok || result?.ok === false) {
+        throw new Error(String(result?.error || 'Failed to send selected report.'));
+    }
+
+    const details = [
+        `Report sent: ${String(result?.reportLabel || selection.label).trim() || selection.label}`,
+        `Excel file: ${String(result?.attachmentFileName || '-').trim() || '-'}`,
+        `Sent count: ${Number(result?.sentCount || 0)}`,
+        `Failed count: ${Number(result?.failedCount || 0)}`
+    ];
+    const refreshedStatus = await getScheduledReportBackendStatus().catch(() => null);
+    setStatus(successMessage, 'success', details);
+    setScheduledReportSendStatus(successMessage, 'success', details, refreshedStatus);
+    return { ok: true, result, details, status: refreshedStatus };
 }
 
 async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 20000) {
@@ -1043,6 +1313,15 @@ function isSameReportDate(value, dateKey) {
     return getDateKey(value) === String(dateKey || '').trim();
 }
 
+function isDateKeyWithinRange(value, startDateKey, endDateKey) {
+    const dateKey = getDateKey(value);
+    if (!dateKey) return false;
+    const start = String(startDateKey || '').trim();
+    const end = String(endDateKey || '').trim();
+    if (!start || !end) return false;
+    return dateKey >= start && dateKey <= end;
+}
+
 function parseMoneyValue(value) {
     const num = Number(String(value ?? '').replace(/[^0-9.\-]/g, ''));
     return Number.isFinite(num) ? num : 0;
@@ -1076,6 +1355,16 @@ function getUserDisplayNameByEmail(email = '') {
 
 function getRejectionReason(sub = {}) {
     return String(sub?.latestRejectionReason || sub?.previousRejectionReason || sub?.comment || '').trim();
+}
+
+function getRejectionOfficerName(sub = {}) {
+    if (getRejectionCount(sub) <= 0 && !getRejectionReason(sub)) return '';
+    const rejectedBy = String(sub?.latestRejectedBy || sub?.previousRejectedBy || '').trim();
+    if (rejectedBy) return getUserDisplayNameByEmail(rejectedBy);
+    const stage = String(sub?.latestRejectedStage || '').trim().toLowerCase();
+    if (stage === 'rsa') return getUserDisplayNameByEmail(sub?.assignedToRSA || '');
+    if (stage === 'payment') return getUserDisplayNameByEmail(sub?.assignedToPayment || '');
+    return getUserDisplayNameByEmail(sub?.reviewedBy || sub?.assignedTo || '');
 }
 
 function getRejectionCount(sub = {}) {
@@ -1127,8 +1416,8 @@ function buildUploaderSheetRows(records = []) {
         commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
         status: String(sub.status || '').replace(/_/g, ' '),
         uploadedAt: formatDate(getSubmissionReviewEntryAt(sub)),
-        stageTime: formatDate(getSubmissionApprovalEntryAt(sub)),
         rejectionReason: getRejectionReason(sub),
+        rejectionOfficer: getRejectionOfficerName(sub),
         rejectionCount: getRejectionCount(sub)
     }));
 }
@@ -1139,12 +1428,12 @@ function buildReviewerSheetRows(records = []) {
         .map((sub) => ({
             owner: getUserDisplayNameByEmail(sub.assignedTo),
             customerName: sub.customerName || '',
+            uploaderName: getUserDisplayNameByEmail(sub.uploadedBy),
             rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
             rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
             commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
             status: String(sub.status || '').replace(/_/g, ' '),
             assignedAt: formatDate(getSubmissionReviewEntryAt(sub)),
-            stageTime: formatDate(getSubmissionApprovalEntryAt(sub)),
             rejectionReason: getRejectionReason(sub),
             rejectionCount: getRejectionCount(sub)
         }));
@@ -1156,14 +1445,16 @@ function buildRsaSheetRows(records = []) {
         .map((sub) => ({
             owner: getUserDisplayNameByEmail(sub.assignedToRSA),
             customerName: sub.customerName || '',
+            uploaderName: getUserDisplayNameByEmail(sub.uploadedBy),
+            reviewerName: getUserDisplayNameByEmail(sub.assignedTo || sub.reviewedBy),
             rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
             rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
             commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
             status: String(sub.status || '').replace(/_/g, ' '),
             assignedAt: formatDate(getSubmissionRsaEntryAt(sub)),
             stageTime: formatDate(getSubmissionFinalSubmissionEntryAt(sub)),
-            rejectionReason: String(String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? getRejectionReason(sub) : ''),
-            rejectionCount: Number(String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? getRejectionCount(sub) : 0)
+            rejectionReason: getRejectionReason(sub),
+            rejectionCount: getRejectionCount(sub)
         }));
 }
 
@@ -1173,15 +1464,37 @@ function buildPaymentSheetRows(records = []) {
         .map((sub) => ({
             owner: getUserDisplayNameByEmail(sub.assignedToPayment),
             customerName: sub.customerName || '',
+            uploaderName: getUserDisplayNameByEmail(sub.uploadedBy),
+            rsaOfficerName: getUserDisplayNameByEmail(sub.assignedToRSA),
             rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
             rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
             commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
             status: String(sub.status || '').replace(/_/g, ' '),
             assignedAt: formatDate(getSubmissionPaymentEntryAt(sub)),
-            paidAt: formatDate(getSubmissionPaidEntryAt(sub)),
-            clearedAt: formatDate(getSubmissionClearedEntryAt(sub)),
-            remarks: sub.clearedWithoutAgentCommission ? 'Cleared without agent commission' : String(sub.paymentReconciliationFileName || '').trim()
         }));
+}
+
+function normalizeOutstandingRowForStage(row = {}, stageId = '') {
+    const normalizedStage = String(stageId || '').trim().toLowerCase();
+    return row;
+}
+
+function normalizeRsaReportRow(row = {}) {
+    const normalized = {
+        owner: row.owner || '',
+        customerName: row.customerName || '',
+        uploaderName: row.uploaderName || '',
+        reviewerName: row.reviewerName || '',
+        rsaBalance: row.rsaBalance ?? '',
+        rsa25: row.rsa25 ?? '',
+        commission: row.commission ?? '',
+        status: row.status || '',
+        assignedAt: row.assignedAt || '-'
+    };
+    if (Object.prototype.hasOwnProperty.call(row, 'reportDate')) {
+        return { owner: normalized.owner, reportDate: row.reportDate || '-', ...Object.fromEntries(Object.entries(normalized).filter(([key]) => key !== 'owner')) };
+    }
+    return normalized;
 }
 
 function applySheetHeaderStyle(row) {
@@ -1358,7 +1671,7 @@ function buildDailyReportDefinition(reportDate) {
 
     const uploaderRows = buildUploaderSheetRows(uploaderRecords).sort(compareGroupedRows);
     const reviewerRows = buildReviewerSheetRows(reviewerRecords).sort(compareGroupedRows);
-    const rsaRows = buildRsaSheetRows(rsaRecords).sort(compareGroupedRows);
+    const rsaRows = buildRsaSheetRows(rsaRecords).map(normalizeRsaReportRow).sort(compareGroupedRows);
     const paymentRows = buildPaymentSheetRows(paymentRecords).sort(compareGroupedRows);
 
     return {
@@ -1374,13 +1687,13 @@ function buildDailyReportDefinition(reportDate) {
                     ['Pending', uploaderRecords.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length]
                 ],
                 rows: uploaderRows,
-                excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Uploaded Time', 'Reviewer Time', 'Reject Reason', 'Reject Count'],
-                previewHeaders: ['Customer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Uploaded', 'Reviewer', 'Reject Count'],
+                excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Uploaded Time', 'Reject Reason', 'Rejected By', 'Reject Count'],
+                previewHeaders: ['Customer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Uploaded', 'Rejected By', 'Reject Count'],
                 previewRows: uploaderRows.map((row) => ({
                     owner: row.owner,
-                    previewValues: [row.customerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.uploadedAt, row.stageTime, String(row.rejectionCount || 0)]
+                    previewValues: [row.customerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.uploadedAt, row.rejectionOfficer, String(row.rejectionCount || 0)]
                 })),
-                columns: [{ width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
+                columns: [{ width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 28 }, { width: 24 }, { width: 14 }],
                 decimalColumns: [2, 3, 4],
                 integerColumns: [9]
             },
@@ -1395,14 +1708,14 @@ function buildDailyReportDefinition(reportDate) {
                     ['Total Outstanding', reviewerOutstandingRecords.length]
                 ],
                 rows: reviewerRows,
-                excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Decision Time', 'Reject Reason', 'Reject Count'],
-                previewHeaders: ['Customer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned', 'Decision', 'Reject Count'],
+                excelHeaders: ['Customer Name', 'Uploader Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Reject Reason', 'Reject Count'],
+                previewHeaders: ['Customer', 'Uploader', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned', 'Reject Count'],
                 previewRows: reviewerRows.map((row) => ({
                     owner: row.owner,
-                    previewValues: [row.customerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, row.stageTime, String(row.rejectionCount || 0)]
+                    previewValues: [row.customerName, row.uploaderName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, String(row.rejectionCount || 0)]
                 })),
-                columns: [{ width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
-                decimalColumns: [2, 3, 4],
+                columns: [{ width: 28 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 28 }, { width: 14 }],
+                decimalColumns: [3, 4, 5],
                 integerColumns: [9]
             },
             {
@@ -1416,15 +1729,15 @@ function buildDailyReportDefinition(reportDate) {
                     ['Total Outstanding', rsaOutstandingRecords.length]
                 ],
                 rows: rsaRows,
-                excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time', 'RSA Done Time', 'RSA Reject Reason', 'RSA Reject Count'],
-                previewHeaders: ['Customer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned', 'Done', 'Reject Count'],
+                excelHeaders: ['Customer Name', 'Uploader Name', 'Reviewer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time'],
+                previewHeaders: ['Customer', 'Uploader', 'Reviewer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned'],
                 previewRows: rsaRows.map((row) => ({
                     owner: row.owner,
-                    previewValues: [row.customerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, row.stageTime, String(row.rejectionCount || 0)]
+                    previewValues: [row.customerName, row.uploaderName, row.reviewerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt]
                 })),
-                columns: [{ width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 22 }, { width: 28 }, { width: 14 }],
-                decimalColumns: [2, 3, 4],
-                integerColumns: [9]
+                columns: [{ width: 28 }, { width: 24 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }],
+                decimalColumns: [4, 5, 6],
+                integerColumns: []
             },
             {
                 id: 'payment',
@@ -1437,17 +1750,162 @@ function buildDailyReportDefinition(reportDate) {
                     ['Total Outstanding', paymentOutstandingRecords.length]
                 ],
                 rows: paymentRows,
-                excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Payment Assigned Time', 'Paid Time', 'Cleared Time', 'Remarks'],
-                previewHeaders: ['Customer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned', 'Paid', 'Cleared'],
+                excelHeaders: ['Customer Name', 'Uploader Name', 'RSA Officer', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Payment Assigned Time'],
+                previewHeaders: ['Customer', 'Uploader', 'RSA Officer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned'],
                 previewRows: paymentRows.map((row) => ({
                     owner: row.owner,
-                    previewValues: [row.customerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, row.paidAt, row.clearedAt]
+                    previewValues: [row.customerName, row.uploaderName, row.rsaOfficerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt]
                 })),
-                columns: [{ width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 20 }, { width: 20 }, { width: 28 }],
-                decimalColumns: [2, 3, 4],
+                columns: [{ width: 28 }, { width: 24 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }],
+                decimalColumns: [4, 5, 6],
                 integerColumns: []
             }
         ]
+    };
+}
+
+function buildOutstandingReportDefinition({ reportDateKey = '', rangeStartDateKey = '', rangeEndDateKey = '', dashboard = 'all' } = {}) {
+    const singleDateKey = String(reportDateKey || '').trim();
+    const rangeStart = String(rangeStartDateKey || '').trim();
+    const rangeEnd = String(rangeEndDateKey || '').trim();
+    const hasRange = !!(rangeStart && rangeEnd);
+    const startDateKey = hasRange ? (rangeStart <= rangeEnd ? rangeStart : rangeEnd) : '';
+    const endDateKey = hasRange ? (rangeStart <= rangeEnd ? rangeEnd : rangeStart) : '';
+    const dateKey = hasRange
+        ? (startDateKey === REPORT_INCEPTION_START_DATE
+            ? `${REPORT_INCEPTION_LABEL} to ${endDateKey}`
+            : `${startDateKey} to ${endDateKey}`)
+        : singleDateKey;
+    if (!dateKey) return null;
+
+    const submittedRecords = allSubmissions.filter((sub) => String(sub.status || '').toLowerCase() !== 'draft');
+    const normalizedDashboard = String(dashboard || 'all').trim().toLowerCase() || 'all';
+    const uploaderOutstandingRecords = submittedRecords.filter((sub) => (
+        String(sub.status || '').toLowerCase() === 'pending'
+    ));
+    const reviewerOutstandingRecords = submittedRecords.filter((sub) => (
+        String(sub.status || '').toLowerCase() === 'pending'
+        && normalizeEmail(sub.assignedTo)
+    ));
+    const rsaOutstandingRecords = submittedRecords.filter((sub) => {
+        const status = String(sub.status || '').toLowerCase();
+        return ['approved', 'processing_to_pfa'].includes(status)
+            && !sub.finalSubmitted
+            && !sub.rsaSubmitted
+            && normalizeEmail(sub.assignedToRSA);
+    });
+    const paymentOutstandingRecords = submittedRecords.filter((sub) => {
+        const status = String(sub.status || '').toLowerCase();
+        return ['sent_to_pfa', 'rsa_submitted'].includes(status)
+            && normalizeEmail(sub.assignedToPayment);
+    });
+
+    const outstandingConfigs = [
+        {
+            id: 'uploader',
+            tabLabel: 'Uploader',
+            title: `Uploader Outstanding - ${dateKey}`,
+            summaryRows: (records) => [
+                ['Total Outstanding', records.length],
+                ['Pending', records.filter((sub) => String(sub.status || '').toLowerCase() === 'pending').length]
+            ],
+            records: uploaderOutstandingRecords,
+            rowsBuilder: buildUploaderSheetRows,
+            excelHeaders: ['Customer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Uploaded Time', 'Reject Reason', 'Rejected By', 'Reject Count'],
+            previewHeaders: ['Customer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Uploaded', 'Rejected By', 'Reject Count'],
+            previewValues: (row) => [row.customerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.uploadedAt, row.rejectionOfficer, String(row.rejectionCount || 0)],
+            columns: [{ width: 28 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 28 }, { width: 24 }, { width: 14 }],
+            decimalColumns: [2, 3, 4],
+            integerColumns: [9]
+        },
+        {
+            id: 'reviewer',
+            tabLabel: 'Reviewer',
+            title: `Reviewer Outstanding - ${dateKey}`,
+            summaryRows: (records) => [
+                ['Total Outstanding', records.length],
+                ['Pending', records.length]
+            ],
+            records: reviewerOutstandingRecords,
+            rowsBuilder: buildReviewerSheetRows,
+            excelHeaders: ['Customer Name', 'Uploader Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Assigned Time', 'Reject Reason', 'Reject Count'],
+            previewHeaders: ['Customer', 'Uploader', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned', 'Reject Count'],
+            previewValues: (row) => [row.customerName, row.uploaderName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, String(row.rejectionCount || 0)],
+            columns: [{ width: 28 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 28 }, { width: 14 }],
+            decimalColumns: [3, 4, 5],
+            integerColumns: [9]
+        },
+        {
+            id: 'rsa',
+            tabLabel: 'RSA',
+            title: `RSA Outstanding - ${dateKey}`,
+            summaryRows: (records) => [
+                ['Total Outstanding', records.length],
+                ['Pending', records.length]
+            ],
+            records: rsaOutstandingRecords,
+            rowsBuilder: buildRsaSheetRows,
+            excelHeaders: ['Customer Name', 'Uploader Name', 'Reviewer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time'],
+            previewHeaders: ['Customer', 'Uploader', 'Reviewer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned'],
+            previewValues: (row) => [row.customerName, row.uploaderName, row.reviewerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt],
+            columns: [{ width: 28 }, { width: 24 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }],
+            decimalColumns: [4, 5, 6],
+            integerColumns: []
+        },
+        {
+            id: 'payment',
+            tabLabel: 'Payment',
+            title: `Payment Outstanding - ${dateKey}`,
+            summaryRows: (records) => [
+                ['Total Outstanding', records.length],
+                ['Pending', records.length]
+            ],
+            records: paymentOutstandingRecords,
+            rowsBuilder: buildPaymentSheetRows,
+            excelHeaders: ['Customer Name', 'Uploader Name', 'RSA Officer', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'Payment Assigned Time'],
+            previewHeaders: ['Customer', 'Uploader', 'RSA Officer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned'],
+            previewValues: (row) => [row.customerName, row.uploaderName, row.rsaOfficerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt],
+            columns: [{ width: 28 }, { width: 24 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }],
+            decimalColumns: [4, 5, 6],
+            integerColumns: []
+        }
+    ];
+
+    const selectedConfigs = normalizedDashboard === 'all'
+        ? outstandingConfigs
+        : outstandingConfigs.filter((config) => config.id === normalizedDashboard);
+    if (!selectedConfigs.length) return null;
+
+    const sheets = selectedConfigs.map((config) => {
+        const rows = config.rowsBuilder(config.records)
+            .map((row) => normalizeOutstandingRowForStage(row, config.id))
+            .map((row) => (config.id === 'rsa' ? normalizeRsaReportRow(row) : row))
+            .sort(compareGroupedRows);
+        return {
+            id: config.id,
+            tabLabel: config.tabLabel,
+            title: config.title,
+            summaryRows: config.summaryRows(config.records),
+            rows,
+            excelHeaders: config.excelHeaders,
+            previewHeaders: config.previewHeaders,
+            previewRows: rows.map((row) => ({
+                owner: row.owner,
+                previewValues: config.previewValues(row)
+            })),
+            columns: config.columns,
+            decimalColumns: config.decimalColumns,
+            integerColumns: config.integerColumns
+        };
+    });
+
+    return {
+        dateKey: hasRange ? startDateKey : singleDateKey,
+        reportLabel: dateKey,
+        activeTab: sheets[0]?.id || 'uploader',
+        type: 'outstanding',
+        selectedDashboard: normalizedDashboard,
+        sheets
     };
 }
 
@@ -1487,10 +1945,17 @@ async function downloadDailyReportWorkbook(reportInput) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `cmbank_daily_report_${report.dateKey}.xlsx`;
+    const isOutstanding = report.type === 'outstanding';
+    const dashboardSuffix = isOutstanding && report.selectedDashboard && report.selectedDashboard !== 'all'
+        ? `_${report.selectedDashboard}`
+        : '';
+    const reportSuffix = String(report.reportLabel || report.dateKey || '').replace(/\s+to\s+/g, '_to_').replace(/[^\w-]/g, '_');
+    link.download = isOutstanding
+        ? `cmbank_outstanding_report${dashboardSuffix}_${reportSuffix}.xlsx`
+        : `cmbank_daily_report_${report.dateKey}.xlsx`;
     link.click();
     URL.revokeObjectURL(url);
-    showNotification('Daily report Excel downloaded.', 'success');
+    showNotification(isOutstanding ? 'Outstanding report Excel downloaded.' : 'Daily report Excel downloaded.', 'success');
 }
 
 function roleHome(role) {
@@ -2044,6 +2509,10 @@ async function loadSettings() {
     const scheduledReportRecipients = document.getElementById('settingScheduledReportRecipients');
     const scheduledReportBody = document.getElementById('settingScheduledReportBody');
     const scheduledReportDownloadDate = document.getElementById('scheduledReportDownloadDate');
+    const scheduledOutstandingDownloadDate = document.getElementById('scheduledOutstandingDownloadDate');
+    const scheduledOutstandingDownloadRangeStartDate = document.getElementById('scheduledOutstandingDownloadRangeStartDate');
+    const scheduledOutstandingDownloadRangeEndDate = document.getElementById('scheduledOutstandingDownloadRangeEndDate');
+    const scheduledOutstandingDownloadInceptionEndDate = document.getElementById('scheduledOutstandingDownloadInceptionEndDate');
     const announcementEnabled = document.getElementById('settingAnnouncementEnabled');
     const announcementTone = document.getElementById('settingAnnouncementTone');
     const announcementMessage = document.getElementById('settingAnnouncementMessage');
@@ -2078,6 +2547,12 @@ async function loadSettings() {
     if (scheduledReportRecipients) scheduledReportRecipients.value = Array.isArray(systemSettings.scheduledReportEmail?.recipients) ? systemSettings.scheduledReportEmail.recipients.join('\n') : '';
     if (scheduledReportBody) scheduledReportBody.value = String(systemSettings.scheduledReportEmail?.body || defaultSystemSettings.scheduledReportEmail.body || '');
     if (scheduledReportDownloadDate && !scheduledReportDownloadDate.value) scheduledReportDownloadDate.value = getPreviousScheduledReportDateKey();
+    if (scheduledOutstandingDownloadDate && !scheduledOutstandingDownloadDate.value) scheduledOutstandingDownloadDate.value = getPreviousScheduledReportDateKey();
+    if (scheduledOutstandingDownloadRangeStartDate && !scheduledOutstandingDownloadRangeStartDate.value) scheduledOutstandingDownloadRangeStartDate.value = getPreviousScheduledReportDateKey();
+    if (scheduledOutstandingDownloadRangeEndDate && !scheduledOutstandingDownloadRangeEndDate.value) scheduledOutstandingDownloadRangeEndDate.value = getPreviousScheduledReportDateKey();
+    if (scheduledOutstandingDownloadInceptionEndDate && !scheduledOutstandingDownloadInceptionEndDate.value) scheduledOutstandingDownloadInceptionEndDate.value = getPreviousScheduledReportDateKey();
+    renderScheduledReportDownloadTabState();
+    updateOutstandingReportDownloadModeVisibility();
     refreshScheduledReportRecipientPicker();
     if (announcementEnabled) announcementEnabled.value = String(systemSettings.dashboardAnnouncement.enabled ? 'true' : 'false');
     if (announcementTone) announcementTone.value = String(systemSettings.dashboardAnnouncement.tone || 'info');
@@ -3502,6 +3977,7 @@ window.redirectSubmission = async (submissionId) => {
             assignedTo: reviewer || '',
             assignedToRSA: rsa || '',
             assignedToPayment: payment || '',
+            rsaAssignedAt: rsa ? serverTimestamp() : null,
             reassignedAt: serverTimestamp(),
             reassignedBy: currentUser?.email || '',
             reassignmentReason: reason
@@ -4156,6 +4632,61 @@ document.getElementById('previewScheduledReportBtn')?.addEventListener('click', 
         }
     }
 });
+document.getElementById('previewOutstandingReportBtn')?.addEventListener('click', async () => {
+    const button = document.getElementById('previewOutstandingReportBtn');
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing...';
+        }
+        const selection = buildOutstandingDownloadSelection();
+        const report = buildOutstandingReportDefinition(selection.reportOptions);
+        if (!report) {
+            showNotification('Choose a valid outstanding report date first.', 'warning');
+            return;
+        }
+        currentScheduledReportPreview = report;
+        renderScheduledReportPreviewTab(report.activeTab || report.sheets[0]?.id || 'uploader');
+        openScheduledReportPreviewModal();
+    } catch (error) {
+        const message = String(error?.message || 'Failed to prepare outstanding report preview.');
+        console.error('Outstanding report preview failed:', error);
+        showNotification(message, 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+});
+document.getElementById('sendOutstandingReportBtn')?.addEventListener('click', async () => {
+    const button = document.getElementById('sendOutstandingReportBtn');
+    const originalHtml = button?.innerHTML || '';
+    try {
+        const selection = buildOutstandingDownloadSelection();
+        setOutstandingReportDownloadStatus(`Preparing to send ${selection.label}...`, 'info');
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+        }
+        await sendSelectedScheduledReport(selection, {
+            setStatus: setOutstandingReportDownloadStatus,
+            successMessage: 'Outstanding report sent successfully.',
+            busyMessage: `Sending ${selection.label} to configured scheduled report recipients...`
+        });
+        showNotification('Outstanding report sent successfully.', 'success');
+    } catch (error) {
+        const message = String(error?.name === 'AbortError' ? 'Timed out while sending the outstanding report.' : (error?.message || 'Failed to send outstanding report.'));
+        setOutstandingReportDownloadStatus(message, 'error');
+        showNotification(message, 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+});
 document.getElementById('downloadScheduledReportFromModalBtn')?.addEventListener('click', async () => {
     try {
         await downloadDailyReportWorkbook(currentScheduledReportPreview);
@@ -4209,11 +4740,33 @@ document.getElementById('settingScheduledReportRecipients')?.addEventListener('i
 document.getElementById('sendCustomScheduledReportBtn')?.addEventListener('click', () => {
     openScheduledReportSendModal();
 });
+document.getElementById('scheduledReportSendDailyTabBtn')?.addEventListener('click', () => {
+    currentScheduledReportSendTab = 'daily';
+    renderScheduledReportSendTabState();
+});
+document.getElementById('scheduledReportSendOutstandingTabBtn')?.addEventListener('click', () => {
+    currentScheduledReportSendTab = 'outstanding';
+    renderScheduledReportSendTabState();
+});
+document.getElementById('scheduledReportDownloadDailyTabBtn')?.addEventListener('click', () => {
+    currentScheduledReportDownloadTab = 'daily';
+    renderScheduledReportDownloadTabState();
+});
+document.getElementById('scheduledReportDownloadOutstandingTabBtn')?.addEventListener('click', () => {
+    currentScheduledReportDownloadTab = 'outstanding';
+    renderScheduledReportDownloadTabState();
+});
 document.getElementById('openScheduledReportLogsModalBtn')?.addEventListener('click', () => {
     openScheduledReportLogsModal();
 });
 document.getElementById('scheduledReportSendMode')?.addEventListener('change', () => {
     updateScheduledReportSendModeVisibility();
+});
+document.getElementById('scheduledOutstandingSendMode')?.addEventListener('change', () => {
+    updateOutstandingReportSendModeVisibility();
+});
+document.getElementById('scheduledOutstandingDownloadMode')?.addEventListener('change', () => {
+    updateOutstandingReportDownloadModeVisibility();
 });
 document.getElementById('closeScheduledReportSendModalBtn')?.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -4301,65 +4854,10 @@ document.getElementById('confirmScheduledReportSendBtn')?.addEventListener('clic
             button.disabled = true;
             button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
         }
-        const status = await getScheduledReportBackendStatus();
-        if (status.enabled !== true) {
-            setScheduledReportSendModalStatus('Daily report email is disabled in settings.', 'warning', describeScheduledReportStatus(status));
-            return;
-        }
-        if (!Array.isArray(status.recipients) || !status.recipients.length) {
-            setScheduledReportSendModalStatus('No recipients are configured for scheduled report emails.', 'warning', describeScheduledReportStatus(status));
-            return;
-        }
-
-        const apiBaseUrl = getEmailApiBaseUrl();
-        const idToken = await currentUser.getIdToken(true);
-        setScheduledReportSendModalStatus(`Sending report for ${selection.label}...`, 'info', describeScheduledReportStatus(status));
-
-        let requestResult = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-now`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${idToken}`
-            },
-            body: JSON.stringify(selection.payload)
-        }, 45000);
-
-        if (requestResult.response.status === 409 || String(requestResult.data?.error || '').trim() === 'already-sent') {
-            const confirmed = await openScheduledReportConfirmModal({
-                title: 'Report Already Sent',
-                heroTitle: 'Custom report was already sent',
-                message: `A report for ${selection.label} has already been sent. Do you still want to resend it?`,
-                note: 'Continuing will resend this same report to the configured recipient list.',
-                confirmLabel: 'Resend Report'
-            });
-            if (!confirmed) {
-                setScheduledReportSendModalStatus(`Manual resend cancelled for ${selection.label}.`, 'info', describeScheduledReportStatus(status));
-                return;
-            }
-            requestResult = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-now`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${idToken}`
-                },
-                body: JSON.stringify({ ...selection.payload, forceResend: true })
-            }, 45000);
-        }
-
-        const result = requestResult.data || {};
-        if (!requestResult.response.ok || result?.ok === false) {
-            throw new Error(String(result?.error || 'Failed to send selected report.'));
-        }
-
-        const details = [
-            `Report sent: ${String(result?.reportLabel || selection.label).trim() || selection.label}`,
-            `Excel file: ${String(result?.attachmentFileName || '-').trim() || '-'}`,
-            `Sent count: ${Number(result?.sentCount || 0)}`,
-            `Failed count: ${Number(result?.failedCount || 0)}`
-        ];
-        const refreshedStatus = await getScheduledReportBackendStatus().catch(() => null);
-        setScheduledReportSendModalStatus('Selected report sent successfully.', 'success', details);
-        setScheduledReportSendStatus('Custom report email sent successfully.', 'success', details, refreshedStatus);
+        await sendSelectedScheduledReport(selection, {
+            setStatus: setScheduledReportSendModalStatus,
+            successMessage: 'Selected report sent successfully.'
+        });
         showNotification('Custom report email sent successfully.', 'success');
     } catch (error) {
         const message = String(error?.name === 'AbortError' ? 'Timed out while sending the selected report.' : (error?.message || 'Failed to send selected report.'));

@@ -17,6 +17,11 @@ import {
     getSubmissionApprovalEntryAt,
     getSubmissionRejectionEntryAt
 } from './shared/submission-stage.js?v=20260609a';
+import {
+    buildDashboardStageReport,
+    renderDashboardStageReport,
+    exportDashboardStageReportExcel
+} from './shared/dashboard-stage-report.js?v=20260610a';
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
     collection,
@@ -58,6 +63,8 @@ let currentSubmissionId = null;
 let currentViewerSubmission = null;
 let currentViewerIndex = 0;
 let downloadInProgress = false;
+let submissionsLoadVersion = 0;
+let currentReviewerStageReport = null;
 
 function getTimestampMsSafe(value) {
     if (!value) return 0;
@@ -172,12 +179,43 @@ function getReviewerWorkflowState(submission = {}) {
     return '';
 }
 
+function getReviewerDecisionState(submission = {}) {
+    const decision = String(submission?.reviewerDecision || '').toLowerCase().trim();
+    if (decision === 'approved' || decision === 'rejected') return decision;
+
+    const normalizedStatus = String(submission?.status || '').toLowerCase().trim();
+    if (normalizedStatus === 'rejected') return 'rejected';
+    if (
+        normalizedStatus === 'processing_to_pfa' ||
+        normalizedStatus === 'approved' ||
+        normalizedStatus === 'sent_to_pfa' ||
+        normalizedStatus === 'rsa_submitted' ||
+        normalizedStatus === 'paid' ||
+        normalizedStatus === 'cleared'
+    ) {
+        return 'approved';
+    }
+    return '';
+}
+
 function isAssignedToCurrentReviewer(submission = {}) {
     return normalizeEmail(submission?.assignedTo) === normalizeEmail(currentUser?.email);
 }
 
 function isReviewedByCurrentReviewer(submission = {}) {
     return normalizeEmail(submission?.reviewedBy) === normalizeEmail(currentUser?.email);
+}
+
+function isPendingForCurrentReviewer(submission = {}) {
+    return String(submission?.status || '').toLowerCase().trim() === 'pending' && isAssignedToCurrentReviewer(submission);
+}
+
+function isApprovedByCurrentReviewer(submission = {}) {
+    return isReviewedByCurrentReviewer(submission) && getReviewerDecisionState(submission) === 'approved';
+}
+
+function isRejectedByCurrentReviewer(submission = {}) {
+    return isReviewedByCurrentReviewer(submission) && getReviewerDecisionState(submission) === 'rejected';
 }
 
 function formatReviewerStatusLabel(status) {
@@ -353,6 +391,50 @@ const profileWhatsappEl = document.getElementById('profileWhatsapp');
 const profileLocationEl = document.getElementById('profileLocation');
 const profileRoleEl = document.getElementById('profileRole');
 const profileStatusEl = document.getElementById('profileStatus');
+const reviewerReportMeta = document.getElementById('reviewerReportMeta');
+const reviewerReportStartDate = document.getElementById('reviewerReportStartDate');
+const reviewerReportEndDate = document.getElementById('reviewerReportEndDate');
+const reviewerReportSummaryBody = document.getElementById('reviewerReportSummaryBody');
+const reviewerReportDetailsBody = document.getElementById('reviewerReportDetailsBody');
+const generateReviewerReportBtn = document.getElementById('generateReviewerReportBtn');
+const exportReviewerReportBtn = document.getElementById('exportReviewerReportBtn');
+
+function initializeReviewerReportDates() {
+    const today = new Date();
+    const sixDaysAgo = new Date(today.getTime() - (6 * 24 * 60 * 60 * 1000));
+    const toInputValue = (date) => `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
+    if (reviewerReportStartDate && !reviewerReportStartDate.value) reviewerReportStartDate.value = toInputValue(sixDaysAgo);
+    if (reviewerReportEndDate && !reviewerReportEndDate.value) reviewerReportEndDate.value = toInputValue(today);
+}
+
+function resolveReviewerKnownName(email) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return 'Unassigned';
+    if (normalizeEmail(currentUserData?.email) === normalized) {
+        return currentUserData?.fullName || currentUserData?.displayName || normalized;
+    }
+    const matchedSubmission = allSubmissions.find((sub) => (
+        normalizeEmail(sub.uploadedBy) === normalized
+        || normalizeEmail(sub.reviewedBy) === normalized
+        || normalizeEmail(sub.assignedTo) === normalized
+    ));
+    return matchedSubmission?.uploadedByName || matchedSubmission?.reviewedByName || normalized;
+}
+
+function buildReviewerStageReport() {
+    const startDate = String(reviewerReportStartDate?.value || '').trim();
+    const endDate = String(reviewerReportEndDate?.value || '').trim();
+    if (!startDate || !endDate) throw new Error('Choose both start date and end date.');
+    if (startDate > endDate) throw new Error('Start date cannot be after end date.');
+    const sourceRecords = allSubmissions.filter((sub) => normalizeEmail(sub.assignedTo));
+    return buildDashboardStageReport({
+        stageId: 'reviewer',
+        records: sourceRecords,
+        rangeStart: startDate,
+        rangeEnd: endDate,
+        resolveName: resolveReviewerKnownName
+    });
+}
 
 function renderProfileTab() {
     if (!profileNameEl && !profileEmailEl && !profileRoleEl && !profileStatusEl) return;
@@ -965,6 +1047,7 @@ function setupEventListeners() {
 async function loadSubmissions() {
     const reviewerEmail = normalizeEmail(currentUser?.email);
     if (!reviewerEmail) return;
+    const loadVersion = ++submissionsLoadVersion;
 
     // Load broadly, then filter locally so previously reviewed items remain visible
     // after they are moved onward to RSA/PFA and no longer stay in assignedTo.
@@ -974,7 +1057,6 @@ async function loadSubmissions() {
     );
 
     const processSnapshot = async (snapshot) => {
-        allSubmissions = [];
         const relevantDocs = snapshot.docs.filter((docSnap) => {
             const data = docSnap.data() || {};
             return normalizeEmail(data.assignedTo) === reviewerEmail
@@ -985,17 +1067,19 @@ async function loadSubmissions() {
         const allEmails = [...new Set([...uploaderEmails, ...reviewerEmails].filter(Boolean))];
         await Promise.all(allEmails.map(email => getUserFullName(email)));
 
-        for (const docSnap of relevantDocs) {
+        const nextSubmissions = await Promise.all(relevantDocs.map(async (docSnap) => {
             const data = docSnap.data();
             const uploaderName = await getUserFullName(data.uploadedBy);
             const reviewerName = data.reviewedBy ? await getUserFullName(data.reviewedBy) : null;
-            allSubmissions.push({
+            return {
                 id: docSnap.id,
                 ...data,
                 uploadedByName: uploaderName,
                 reviewedByName: reviewerName
-            });
-        }
+            };
+        }));
+        if (loadVersion !== submissionsLoadVersion) return;
+        allSubmissions = nextSubmissions;
 
         renderAllTables();
         updatePendingCount();
@@ -1016,6 +1100,7 @@ async function loadSubmissionsFallback() {
     try {
         const reviewerEmail = normalizeEmail(currentUser?.email);
         if (!reviewerEmail) return;
+        const loadVersion = ++submissionsLoadVersion;
 
         const fallbackQuery = query(
             collection(db, 'submissions'),
@@ -1033,7 +1118,7 @@ async function loadSubmissionsFallback() {
         const allEmails = [...new Set([...uploaderEmails, ...reviewerEmails].filter(Boolean))];
         await Promise.all(allEmails.map(email => getUserFullName(email)));
 
-        allSubmissions = await Promise.all(docsSorted.map(async (docSnap) => {
+        const nextSubmissions = await Promise.all(docsSorted.map(async (docSnap) => {
             const data = docSnap.data();
             const uploaderName = await getUserFullName(data.uploadedBy);
             const reviewerName = data.reviewedBy ? await getUserFullName(data.reviewedBy) : null;
@@ -1044,6 +1129,8 @@ async function loadSubmissionsFallback() {
                 reviewedByName: reviewerName
             };
         }));
+        if (loadVersion !== submissionsLoadVersion) return;
+        allSubmissions = nextSubmissions;
 
         renderAllTables();
         updatePendingCount();
@@ -1061,9 +1148,9 @@ function updatePendingCount() {
 }
 
 function updateNavCounts() {
-    const pendingSubmissions = allSubmissions.filter(sub => sub.status === 'pending' && isAssignedToCurrentReviewer(sub)).length;
-    const approvedSubmissions = allSubmissions.filter(sub => getReviewerWorkflowState(sub) === 'approved' && isReviewedByCurrentReviewer(sub)).length;
-    const rejectedSubmissions = allSubmissions.filter(sub => getReviewerWorkflowState(sub) === 'rejected' && isReviewedByCurrentReviewer(sub)).length;
+    const pendingSubmissions = allSubmissions.filter(isPendingForCurrentReviewer).length;
+    const approvedSubmissions = allSubmissions.filter(isApprovedByCurrentReviewer).length;
+    const rejectedSubmissions = allSubmissions.filter(isRejectedByCurrentReviewer).length;
     [
         [pendingCountBadge, pendingSubmissions],
         [approvedCountBadge, approvedSubmissions],
@@ -1078,9 +1165,9 @@ function updateNavCounts() {
 
 // --- DASHBOARD HELPERS ---
 function updateDashboardCards() {
-    const approved = allSubmissions.filter(s => getReviewerWorkflowState(s) === 'approved' && isReviewedByCurrentReviewer(s)).length;
-    const pending = allSubmissions.filter(s => s.status === 'pending' && isAssignedToCurrentReviewer(s)).length;
-    const rejected = allSubmissions.filter(s => getReviewerWorkflowState(s) === 'rejected' && isReviewedByCurrentReviewer(s)).length;
+    const approved = allSubmissions.filter(isApprovedByCurrentReviewer).length;
+    const pending = allSubmissions.filter(isPendingForCurrentReviewer).length;
+    const rejected = allSubmissions.filter(isRejectedByCurrentReviewer).length;
     document.getElementById('vCardApprovedCount') && (document.getElementById('vCardApprovedCount').textContent = approved);
     document.getElementById('vCardPendingCount') && (document.getElementById('vCardPendingCount').textContent = pending);
     document.getElementById('vCardRejectedCount') && (document.getElementById('vCardRejectedCount').textContent = rejected);
@@ -1093,7 +1180,7 @@ function renderRecentReviews() {
     const q = (document.getElementById('vRecentSearch')?.value || '').toLowerCase();
     const items = allSubmissions.filter(s => {
         if (!isReviewedByCurrentReviewer(s)) return false;
-        const decision = getReviewerWorkflowState(s);
+        const decision = getReviewerDecisionState(s);
         return decision === 'approved' || decision === 'rejected';
     })
         .slice().sort((a,b) => {
@@ -1123,7 +1210,7 @@ function renderRecentReviews() {
 // ==================== RENDER TABLES ====================
 function renderAllTables() {
     const pendingSubs = allSubmissions
-        .filter(sub => sub.status === 'pending' && isAssignedToCurrentReviewer(sub))
+        .filter(isPendingForCurrentReviewer)
         .slice()
         .sort((a, b) => {
             const aTime = getStageTimestampMillis(getSubmissionReviewEntryAt(a));
@@ -1134,13 +1221,13 @@ function renderAllTables() {
 
     // Viewer should only see approved/rejected items they reviewed
     const approvedSubs = allSubmissions
-        .filter(sub => getReviewerWorkflowState(sub) === 'approved' && isReviewedByCurrentReviewer(sub))
+        .filter(isApprovedByCurrentReviewer)
         .slice()
         .sort((a, b) => getStageTimestampMillis(getSubmissionApprovalEntryAt(b)) - getStageTimestampMillis(getSubmissionApprovalEntryAt(a)));
     renderApprovedTable(approvedSubs);
 
     const rejectedSubs = allSubmissions
-        .filter(sub => getReviewerWorkflowState(sub) === 'rejected' && isReviewedByCurrentReviewer(sub))
+        .filter(isRejectedByCurrentReviewer)
         .slice()
         .sort((a, b) => getStageTimestampMillis(getSubmissionRejectionEntryAt(b)) - getStageTimestampMillis(getSubmissionRejectionEntryAt(a)));
     renderRejectedTable(rejectedSubs);
@@ -1448,7 +1535,7 @@ async function assignRoundRobinRSA(submissionRef) {
     const routingRule = await getUploaderRoutingRule(uploaderEmail);
     const mappedRsa = routingRule?.rsaEmail || '';
     if (mappedRsa && await isActiveRSAUser(mappedRsa)) {
-        await updateDoc(submissionRef, { assignedToRSA: mappedRsa, rsaAssignmentMode: 'uploader_routing' });
+        await updateDoc(submissionRef, { assignedToRSA: mappedRsa, rsaAssignedAt: serverTimestamp(), rsaAssignmentMode: 'uploader_routing' });
         try {
             const subSnap = await getDoc(submissionRef);
             if (subSnap.exists()) {
@@ -1491,12 +1578,12 @@ async function assignRoundRobinRSA(submissionRef) {
             assigned = rsaUsers[newIndex];
             
             tx.set(RSA_COUNTER_DOC, { lastIndex: newIndex, lastDate: trustedDateKey }, { merge: true });
-            tx.update(submissionRef, { assignedToRSA: assigned, rsaAssignmentMode: 'round_robin' });
+            tx.update(submissionRef, { assignedToRSA: assigned, rsaAssignedAt: serverTimestamp(), rsaAssignmentMode: 'round_robin' });
         });
     } catch (error) {
         assigned = rsaUsers[0] || null;
         if (assigned) {
-            await updateDoc(submissionRef, { assignedToRSA: assigned, rsaAssignmentMode: 'round_robin_fallback' });
+            await updateDoc(submissionRef, { assignedToRSA: assigned, rsaAssignedAt: serverTimestamp(), rsaAssignmentMode: 'round_robin_fallback' });
             assignmentMethod = 'round_robin_fallback';
         }
         console.error('RSA round-robin transaction failed; using fallback assignment.', {
@@ -1979,11 +2066,15 @@ window.switchTab = (tabId, triggerEl = null) => {
         'pending': 'Pending Documents Review',
         'approved': 'Approved Documents',
         'rejected': 'Rejected Documents',
+        'report': 'Reviewer Report',
         'leave': 'Leave History',
         'profile': 'My Profile',
         'help': 'Help & SOP'
     };
     if (pageTitle) pageTitle.textContent = titles[tabId] || 'Dashboard';
+    if (tabId === 'report') {
+        initializeReviewerReportDates();
+    }
     if (tabId === 'leave') {
         renderReviewerLeaveHistory().catch(() => {});
     }
@@ -2162,3 +2253,44 @@ window.signOutUser = () => {
     window.location.href = 'index.html';
 };
 // Merge feature removed; no merged-PDF globals.
+
+initializeReviewerReportDates();
+
+generateReviewerReportBtn?.addEventListener('click', async () => {
+    const originalHtml = generateReviewerReportBtn.innerHTML;
+    generateReviewerReportBtn.disabled = true;
+    generateReviewerReportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+    try {
+        currentReviewerStageReport = buildReviewerStageReport();
+        renderDashboardStageReport(currentReviewerStageReport, {
+            metaEl: reviewerReportMeta,
+            summaryBodyEl: reviewerReportSummaryBody,
+            detailsBodyEl: reviewerReportDetailsBody
+        });
+        showNotification('Reviewer report generated successfully.', 'success');
+    } catch (error) {
+        showNotification(error?.message || 'Failed to generate reviewer report.', 'error');
+    } finally {
+        generateReviewerReportBtn.disabled = false;
+        generateReviewerReportBtn.innerHTML = originalHtml;
+    }
+});
+
+exportReviewerReportBtn?.addEventListener('click', async () => {
+    if (!currentReviewerStageReport) {
+        showNotification('Generate a report first.', 'warning');
+        return;
+    }
+    const originalHtml = exportReviewerReportBtn.innerHTML;
+    exportReviewerReportBtn.disabled = true;
+    exportReviewerReportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+    try {
+        await exportDashboardStageReportExcel(currentReviewerStageReport, 'CMBank RSA Reviewer Dashboard');
+        showNotification('Reviewer report Excel downloaded.', 'success');
+    } catch (error) {
+        showNotification(error?.message || 'Failed to export reviewer report.', 'error');
+    } finally {
+        exportReviewerReportBtn.disabled = false;
+        exportReviewerReportBtn.innerHTML = originalHtml;
+    }
+});

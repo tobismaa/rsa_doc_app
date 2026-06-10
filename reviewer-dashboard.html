@@ -81,6 +81,10 @@
                     <span>Rejected</span>
                     <span class="badge" id="rejectedCount">0</span>
                 </a>
+                <a href="#" class="nav-item" data-tab="report">
+                    <i class="fas fa-file-export"></i>
+                    <span>Report</span>
+                </a>
                 <a href="#" class="nav-item" data-tab="leave">
                     <i class="fas fa-person-walking-luggage"></i>
                     <span>Leave</span>
@@ -234,6 +238,64 @@
                             </thead>
                             <tbody id="rejectedTableBody">
                                 <tr><td colspan="8" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="reportTab" class="tab-content">
+                <div class="table-section">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px;padding:18px;border:1px solid #dbe2ea;border-radius:18px;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);box-shadow:0 10px 24px rgba(15,59,103,0.08);">
+                        <div style="max-width:760px;">
+                            <h2 style="margin:0 0 8px;color:#0f3b67;">Reviewer Report</h2>
+                            <p id="reviewerReportMeta" style="margin:0;color:#64748b;font-size:14px;line-height:1.6;">Choose a date range to generate the reviewer-only report from your dashboard records.</p>
+                        </div>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;">
+                            <label style="display:flex;flex-direction:column;gap:6px;">
+                                <span style="font-size:12px;font-weight:700;color:#334155;">Start Date</span>
+                                <input type="date" id="reviewerReportStartDate" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;">
+                            </label>
+                            <label style="display:flex;flex-direction:column;gap:6px;">
+                                <span style="font-size:12px;font-weight:700;color:#334155;">End Date</span>
+                                <input type="date" id="reviewerReportEndDate" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;">
+                            </label>
+                            <button type="button" class="action-btn" id="generateReviewerReportBtn" style="background:#0f766e;color:#fff;border:none;">
+                                <i class="fas fa-chart-column"></i> Generate
+                            </button>
+                            <button type="button" class="action-btn" id="exportReviewerReportBtn">
+                                <i class="fas fa-file-excel"></i> Export Excel
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-container" style="margin-bottom:16px;">
+                        <table class="customers-table" style="max-width:560px;">
+                            <thead>
+                                <tr><th>Metric</th><th>Value</th></tr>
+                            </thead>
+                            <tbody id="reviewerReportSummaryBody">
+                                <tr><td colspan="2" class="no-data">Generate a report to see the summary.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Reviewer</th>
+                                    <th>Customer Name</th>
+                                    <th>Uploader Name</th>
+                                    <th>RSA Balance</th>
+                                    <th>25% RSA Balance</th>
+                                    <th>1% Commission</th>
+                                    <th>Status</th>
+                                    <th>Assigned Time</th>
+                                    <th>Reject Reason</th>
+                                    <th>Reject Count</th>
+                                </tr>
+                            </thead>
+                            <tbody id="reviewerReportDetailsBody">
+                                <tr><td colspan="10" class="no-data">Generate a report to see the application breakdown.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -651,7 +713,8 @@
     </div>
 
     <script type="module" src="js/firebase-config.js?v=20260415b"></script>
-    <script type="module" src="js/reviewer-dashboard.js?v=20260507e"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+    <script type="module" src="js/reviewer-dashboard.js?v=20260610a"></script>
     
     <script>
         // Mobile sidebar functionality
@@ -719,7 +782,10 @@
                     const titles = {
                         'pending': 'Pending Documents Review',
                         'approved': 'Approved Documents',
-                        'rejected': 'Rejected Documents'
+                        'rejected': 'Rejected Documents',
+                        'report': 'Reviewer Report',
+                        'leave': 'Leave History',
+                        'profile': 'My Profile'
                     };
                     document.getElementById('pageTitle').textContent = titles[tabId];
                     
@@ -753,7 +819,7 @@
     <script src="js/table-enhancer.js?v=20260512b"></script>
 <script type="module" src="js/profile-completion-guard.js?v=20260609b"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260518a">
-    <script type="module" src="js/app-chat.js?v=20260518a"></script>
+    <script type="module" src="js/app-chat.js?v=20260610a"></script>
     <link rel="stylesheet" href="css/pwa-install.css">
     <script src="js/pwa-install.js?v=20260423a"></script>
     <link rel="stylesheet" href="css/profile-card.css">

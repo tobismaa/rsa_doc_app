@@ -24,6 +24,11 @@ import {
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt
 } from './shared/submission-stage.js?v=20260609a';
+import {
+    buildDashboardStageReport,
+    renderDashboardStageReport,
+    exportDashboardStageReportExcel
+} from './shared/dashboard-stage-report.js?v=20260610a';
 
 let currentUser = null;
 let currentUserData = null;
@@ -38,6 +43,7 @@ let paymentReconciliationSelectedIds = new Set();
 const uploaderNameCache = new Map();
 let activePaymentTab = 'dashboard';
 let currentPaymentReport = null;
+let currentPaymentStageReport = null;
 let pendingPaymentReportRequest = { kind: 'range' };
 const PAYMENT_RATE_CUTOFF_MS = new Date('2026-05-07T00:00:00+01:00').getTime();
 
@@ -96,6 +102,13 @@ const paymentClearedSortFilter = document.getElementById('paymentClearedSortFilt
 const generateSentToPfaReportBtn = document.getElementById('generateSentToPfaReportBtn');
 const generatePaidReportBtn = document.getElementById('generatePaidReportBtn');
 const generateClearedReportBtn = document.getElementById('generateClearedReportBtn');
+const paymentStageReportMeta = document.getElementById('paymentStageReportMeta');
+const paymentStageReportStartDate = document.getElementById('paymentStageReportStartDate');
+const paymentStageReportEndDate = document.getElementById('paymentStageReportEndDate');
+const paymentStageReportSummaryBody = document.getElementById('paymentStageReportSummaryBody');
+const paymentStageReportDetailsBody = document.getElementById('paymentStageReportDetailsBody');
+const generatePaymentStageReportBtn = document.getElementById('generatePaymentStageReportBtn');
+const exportPaymentStageReportBtn = document.getElementById('exportPaymentStageReportBtn');
 
 function showNotification(message, type = 'info') {
     if (!notification) return;
@@ -160,6 +173,47 @@ function formatDateOnly(value) {
     } catch (_) {
         return new Date(ms).toISOString().slice(0, 10);
     }
+}
+
+function getGenericDisplayName(email) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return 'Unassigned';
+    return uploaderNameCache.get(normalized) || normalized.split('@')[0] || normalized;
+}
+
+function initializePaymentStageReportDates() {
+    const today = new Date();
+    const sixDaysAgo = new Date(today.getTime() - (6 * 24 * 60 * 60 * 1000));
+    const formatInput = (date) => {
+        const year = date.getFullYear();
+        const month = `${date.getMonth() + 1}`.padStart(2, '0');
+        const day = `${date.getDate()}`.padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+    if (paymentStageReportStartDate && !paymentStageReportStartDate.value) paymentStageReportStartDate.value = formatInput(sixDaysAgo);
+    if (paymentStageReportEndDate && !paymentStageReportEndDate.value) paymentStageReportEndDate.value = formatInput(today);
+}
+
+function buildPaymentStageDashboardReport() {
+    const startDate = String(paymentStageReportStartDate?.value || '').trim();
+    const endDate = String(paymentStageReportEndDate?.value || '').trim();
+    if (!startDate || !endDate) {
+        throw new Error('Choose both start date and end date.');
+    }
+    if (startDate > endDate) {
+        throw new Error('Start date cannot be after end date.');
+    }
+    const sourceRecords = allSubmissions.filter((sub) => (
+        String(sub.status || '').toLowerCase() !== 'draft'
+        && normalizeEmail(sub.assignedToPayment)
+    ));
+    return buildDashboardStageReport({
+        stageId: 'payment',
+        records: sourceRecords,
+        rangeStart: startDate,
+        rangeEnd: endDate,
+        resolveName: getGenericDisplayName
+    });
 }
 
 function formatInputDateValue(value) {
@@ -270,7 +324,13 @@ function getUploaderDisplayName(email) {
 }
 
 async function primeUploaderNames(records = []) {
-    const emails = [...new Set(records.map((sub) => normalizeEmail(sub?.uploadedBy)).filter(Boolean))];
+    const emails = [...new Set(records.flatMap((sub) => [
+        normalizeEmail(sub?.uploadedBy),
+        normalizeEmail(sub?.assignedToPayment),
+        normalizeEmail(sub?.paidBy),
+        normalizeEmail(sub?.clearedBy),
+        normalizeEmail(sub?.assignedToRSA)
+    ]).filter(Boolean))];
     const missingEmails = emails.filter((email) => !uploaderNameCache.has(email));
     if (!missingEmails.length) return;
 
@@ -321,7 +381,9 @@ function buildAgentPaymentGroups(records = []) {
             total25: 0,
             totalCommission: 0,
             latestPaidAt: null,
+            latestPaidBy: '',
             latestClearedAt: null,
+            latestClearedBy: '',
             latestQueueAt: null,
             hasCommissionEligibleAgent: false
         };
@@ -336,8 +398,14 @@ function buildAgentPaymentGroups(records = []) {
         const paidAtMs = sub?.paidAt?.toMillis ? sub.paidAt.toMillis() : new Date(sub?.paidAt || 0).getTime();
         const clearedAtMs = sub?.clearedAt?.toMillis ? sub.clearedAt.toMillis() : new Date(sub?.clearedAt || 0).getTime();
         const queueAtMs = sub?.rsaSubmittedAt?.toMillis ? sub.rsaSubmittedAt.toMillis() : new Date(sub?.rsaSubmittedAt || sub?.updatedAt || 0).getTime();
-        if (Number.isFinite(paidAtMs) && paidAtMs > 0 && (!existing.latestPaidAt || paidAtMs > existing.latestPaidAt)) existing.latestPaidAt = paidAtMs;
-        if (Number.isFinite(clearedAtMs) && clearedAtMs > 0 && (!existing.latestClearedAt || clearedAtMs > existing.latestClearedAt)) existing.latestClearedAt = clearedAtMs;
+        if (Number.isFinite(paidAtMs) && paidAtMs > 0 && (!existing.latestPaidAt || paidAtMs > existing.latestPaidAt)) {
+            existing.latestPaidAt = paidAtMs;
+            existing.latestPaidBy = String(sub?.paidBy || '').trim();
+        }
+        if (Number.isFinite(clearedAtMs) && clearedAtMs > 0 && (!existing.latestClearedAt || clearedAtMs > existing.latestClearedAt)) {
+            existing.latestClearedAt = clearedAtMs;
+            existing.latestClearedBy = String(sub?.clearedBy || '').trim();
+        }
         if (Number.isFinite(queueAtMs) && queueAtMs > 0 && (!existing.latestQueueAt || queueAtMs > existing.latestQueueAt)) existing.latestQueueAt = queueAtMs;
 
         groups.set(key, existing);
@@ -450,11 +518,6 @@ function renderDashboardOverview() {
 }
 
 function switchTab(tabId) {
-    if (tabId === 'report') {
-        openPaymentReportRangeModal();
-        return;
-    }
-
     activePaymentTab = tabId;
     document.querySelectorAll('.nav-item').forEach((nav) => nav.classList.remove('active'));
     document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
@@ -473,6 +536,9 @@ function switchTab(tabId) {
     if (pageTitle) pageTitle.textContent = titles[tabId] || 'Payment Dashboard';
     if (tabId === 'leave') {
         renderPaymentLeaveHistory().catch(() => {});
+    }
+    if (tabId === 'report') {
+        initializePaymentStageReportDates();
     }
 }
 
@@ -612,7 +678,9 @@ function getPaymentRecords() {
 function getSentToPfaRecords() {
     return getPaymentRecords().filter((sub) => {
         const status = String(sub.status || '').toLowerCase();
-        return status === 'sent_to_pfa' || status === 'rsa_submitted' || sub.finalSubmitted === true || sub.rsaSubmitted === true;
+        if (status === 'sent_to_pfa' || status === 'rsa_submitted') return true;
+        if (status === 'paid' || status === 'cleared') return false;
+        return sub.finalSubmitted === true || sub.rsaSubmitted === true;
     });
 }
 
@@ -1477,7 +1545,7 @@ function renderPaymentQueue() {
     }
 
     if (paymentQueue.length === 0) {
-        paymentsTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No applications sent to PFA yet</td></tr>';
+        paymentsTableBody.innerHTML = '<tr><td colspan="10" class="no-data">No applications sent to PFA yet</td></tr>';
         return;
     }
 
@@ -1485,6 +1553,7 @@ function renderPaymentQueue() {
         const { pfa, twentyFive, commission2 } = getSubmissionFinancials(sub);
         const queueDate = formatDateValue(getSubmissionPaymentEntryAt(sub));
         const uploaderLabel = getUploaderDisplayName(sub?.uploadedBy);
+        const assignedLabel = getUploaderDisplayName(sub?.assignedToPayment);
         const agentName = String(sub?.agentName || '').trim() || 'No Agent';
         const rateLabel = getSubmissionRateLabel(sub);
         const reconciliationMatch = getPaymentReconciliationMatch(sub.id);
@@ -1562,7 +1631,7 @@ function renderPaidCustomersSimpleTableLegacy() {
     }
 
     if (!paidCustomers.length) {
-        paidCustomersTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No paid applications yet</td></tr>';
+        paidCustomersTableBody.innerHTML = '<tr><td colspan="10" class="no-data">No paid applications yet</td></tr>';
         return;
     }
 
@@ -1570,6 +1639,7 @@ function renderPaidCustomersSimpleTableLegacy() {
         const { pfa, twentyFive, commission2 } = getSubmissionFinancials(sub);
         const paidDate = formatDateValue(getSubmissionPaidEntryAt(sub));
         const uploaderLabel = getUploaderDisplayName(sub?.uploadedBy);
+        const approvedByLabel = getUploaderDisplayName(sub?.paidBy);
         const agentName = String(sub?.agentName || '').trim() || 'No Agent';
         const rateLabel = getSubmissionRateLabel(sub);
         const clearAction = hasCommissionEligibleAgent(sub)
@@ -1584,6 +1654,7 @@ function renderPaidCustomersSimpleTableLegacy() {
                     <div style="font-size:12px;color:#64748b;margin-top:4px;">${escapeHtml(String(sub?.agentAccountBank || '').trim() || '-')} â€¢ ${escapeHtml(String(sub?.agentAccountNumber || '').trim() || '-')}</div>
                 </td>
                 <td>${escapeHtml(uploaderLabel || '-')}</td>
+                <td>${escapeHtml(approvedByLabel || '-')}</td>
                 <td>${escapeHtml(pfa)}</td>
                 <td>${formatCurrency(twentyFive)}<div style="font-size:12px;color:#64748b;margin-top:4px;">Rate: ${escapeHtml(rateLabel)}</div></td>
                 <td>${formatCurrency(commission2)}</td>
@@ -1607,7 +1678,7 @@ function renderPaidCustomersSimpleTable() {
     }
 
     if (!paidCustomers.length) {
-        paidCustomersTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No paid applications yet</td></tr>';
+        paidCustomersTableBody.innerHTML = '<tr><td colspan="10" class="no-data">No paid applications yet</td></tr>';
         return;
     }
 
@@ -1615,6 +1686,7 @@ function renderPaidCustomersSimpleTable() {
         const { pfa, twentyFive, commission2 } = getSubmissionFinancials(sub);
         const paidDate = formatDateValue(getSubmissionPaidEntryAt(sub));
         const uploaderLabel = getUploaderDisplayName(sub?.uploadedBy);
+        const approvedByLabel = getUploaderDisplayName(sub?.paidBy);
         const agentName = String(sub?.agentName || '').trim() || 'No Agent';
         const rateLabel = getSubmissionRateLabel(sub);
         const clearAction = hasCommissionEligibleAgent(sub)
@@ -1629,6 +1701,7 @@ function renderPaidCustomersSimpleTable() {
                     <div style="font-size:12px;color:#64748b;margin-top:4px;">${escapeHtml(String(sub?.agentAccountBank || '').trim() || '-')} - ${escapeHtml(String(sub?.agentAccountNumber || '').trim() || '-')}</div>
                 </td>
                 <td>${escapeHtml(uploaderLabel || '-')}</td>
+                <td>${escapeHtml(approvedByLabel || '-')}</td>
                 <td>${escapeHtml(pfa)}</td>
                 <td>${formatCurrency(twentyFive)}<div style="font-size:12px;color:#64748b;margin-top:4px;">Rate: ${escapeHtml(rateLabel)}</div></td>
                 <td>${formatCurrency(commission2)}</td>
@@ -1650,13 +1723,14 @@ function renderClearedCustomers() {
     }
 
     if (groupedCleared.length === 0) {
-        clearedCustomersTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No cleared agent batches yet</td></tr>';
+        clearedCustomersTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No cleared agent batches yet</td></tr>';
         return;
     }
 
     clearedCustomersTableBody.innerHTML = groupedCleared.map((group) => {
         const breakdownId = `cleared-breakdown-${toSafeDomId(group.key)}`;
         const clearedDate = formatDateValue(group.latestClearedAt ? new Date(group.latestClearedAt) : null);
+        const clearedByLabel = getUploaderDisplayName(group.latestClearedBy);
         const rateLabel = getGroupRateSummaryLabel(group);
         return `
             <tr>
@@ -1665,6 +1739,7 @@ function renderClearedCustomers() {
                     <div style="font-size:12px;color:#64748b;margin-top:4px;">${escapeHtml(group.agentAccountBank)} • ${escapeHtml(group.agentAccountNumber)}</div>
                 </td>
                 <td>${escapeHtml(group.uploaderName || group.uploaderEmail || '-')}</td>
+                <td>${escapeHtml(clearedByLabel || '-')}</td>
                 <td>${group.customerCount}</td>
                 <td>${formatCurrency(group.total25)}<div style="font-size:12px;color:#64748b;margin-top:4px;">${escapeHtml(rateLabel)}</div></td>
                 <td>${formatCurrency(group.totalCommission)}</td>
@@ -1672,20 +1747,16 @@ function renderClearedCustomers() {
                 <td><button class="action-btn agent-breakdown-toggle" onclick="window.togglePaymentAgentBreakdown('${breakdownId}', this)"><i class="fas fa-chevron-down"></i> Breakdown</button></td>
             </tr>
             <tr id="${breakdownId}" class="agent-breakdown-row" style="display:none;">
-                <td colspan="7">${renderAgentBreakdownTable(group, 'paid')}</td>
+                <td colspan="8">${renderAgentBreakdownTable(group, 'paid')}</td>
             </tr>
         `;
     }).join('');
 }
 
 function loadSubmissions() {
-    const paymentEmail = normalizeEmail(currentUser?.email);
-    if (!paymentEmail) return;
+    if (!currentUser) return;
 
-    const q = query(
-        collection(db, 'submissions'),
-        where('assignedToPayment', '==', paymentEmail)
-    );
+    const q = query(collection(db, 'submissions'));
     onSnapshot(q, async (snapshot) => {
         allSubmissions = snapshot.docs
             .map((d) => ({ id: d.id, ...d.data() }))
@@ -2203,6 +2274,43 @@ generatePaidReportBtn?.addEventListener('click', () => {
 generateClearedReportBtn?.addEventListener('click', () => {
     pendingPaymentReportRequest = { kind: 'cleared' };
     openPaymentReportRangeModal();
+});
+generatePaymentStageReportBtn?.addEventListener('click', async () => {
+    const originalHtml = generatePaymentStageReportBtn.innerHTML;
+    generatePaymentStageReportBtn.disabled = true;
+    generatePaymentStageReportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+    try {
+        currentPaymentStageReport = buildPaymentStageDashboardReport();
+        renderDashboardStageReport(currentPaymentStageReport, {
+            metaEl: paymentStageReportMeta,
+            summaryBodyEl: paymentStageReportSummaryBody,
+            detailsBodyEl: paymentStageReportDetailsBody
+        });
+        showNotification('Payment report generated successfully.', 'success');
+    } catch (error) {
+        showNotification(error?.message || 'Failed to generate payment report.', 'error');
+    } finally {
+        generatePaymentStageReportBtn.disabled = false;
+        generatePaymentStageReportBtn.innerHTML = originalHtml;
+    }
+});
+exportPaymentStageReportBtn?.addEventListener('click', async () => {
+    if (!currentPaymentStageReport) {
+        showNotification('Generate a report first.', 'warning');
+        return;
+    }
+    const originalHtml = exportPaymentStageReportBtn.innerHTML;
+    exportPaymentStageReportBtn.disabled = true;
+    exportPaymentStageReportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+    try {
+        await exportDashboardStageReportExcel(currentPaymentStageReport, 'CMBank RSA Payment Dashboard');
+        showNotification('Payment report Excel downloaded.', 'success');
+    } catch (error) {
+        showNotification(error?.message || 'Failed to export payment report.', 'error');
+    } finally {
+        exportPaymentStageReportBtn.disabled = false;
+        exportPaymentStageReportBtn.innerHTML = originalHtml;
+    }
 });
 paymentQueueSortFilter?.addEventListener('change', () => {
     renderPaymentQueue();

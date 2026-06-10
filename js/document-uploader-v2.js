@@ -35,6 +35,11 @@ import {
 } from './shared/submission-stage.js?v=20260609a';
 import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260508a';
 import {
+  buildDashboardStageReport,
+  renderDashboardStageReport,
+  exportDashboardStageReportExcel
+} from './shared/dashboard-stage-report.js?v=20260610a';
+import {
   collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, doc,
   serverTimestamp, arrayUnion, getDocs, getDoc, setDoc, runTransaction, deleteDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
@@ -167,6 +172,38 @@ let MAX_PDF_SIZE_BYTES = 1.5 * 1024 * 1024; // 1.5MB
 const userFullNames = new Map();
 let customerDetailsSaved = false;
 const RR_COUNTER_DOC = doc(db, 'counters', 'roundRobin');
+let currentUploaderStageReport = null;
+
+function initializeUploaderReportDates() {
+  const today = new Date();
+  const sixDaysAgo = new Date(today.getTime() - (6 * 24 * 60 * 60 * 1000));
+  const toInputValue = (date) => {
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  if (uploaderReportStartDate && !uploaderReportStartDate.value) uploaderReportStartDate.value = toInputValue(sixDaysAgo);
+  if (uploaderReportEndDate && !uploaderReportEndDate.value) uploaderReportEndDate.value = toInputValue(today);
+}
+
+function buildUploaderStageReport() {
+  const startDate = String(uploaderReportStartDate?.value || '').trim();
+  const endDate = String(uploaderReportEndDate?.value || '').trim();
+  if (!startDate || !endDate) throw new Error('Choose both start date and end date.');
+  if (startDate > endDate) throw new Error('Start date cannot be after end date.');
+  const sourceRecords = allSubmissions.filter((sub) => String(sub.status || '').toLowerCase() !== 'draft');
+  return buildDashboardStageReport({
+    stageId: 'uploader',
+    records: sourceRecords,
+    rangeStart: startDate,
+    rangeEnd: endDate,
+    resolveName: (email) => {
+      const normalized = normalizeEmail(email);
+      return userFullNames.get(normalized) || normalized || 'Unassigned';
+    }
+  });
+}
 
 function formatUploadLimitLabel(bytes) {
   const mb = Number(bytes || 0) / (1024 * 1024);
@@ -622,6 +659,7 @@ async function assignDirectToRSA(subRef, uploaderEmail = '') {
     await updateDoc(subRef, {
       assignedTo: '',
       assignedToRSA: mappedRsa,
+      rsaAssignedAt: serverTimestamp(),
       status: 'processing_to_pfa',
       rsaReady: true,
       assignmentMode: 'skip_reviewer_routing',
@@ -651,6 +689,7 @@ async function assignDirectToRSA(subRef, uploaderEmail = '') {
       tx.update(subRef, {
         assignedTo: '',
         assignedToRSA: assigned,
+        rsaAssignedAt: serverTimestamp(),
         status: 'processing_to_pfa',
         rsaReady: true,
         assignmentMode: 'skip_reviewer_routing',
@@ -664,6 +703,7 @@ async function assignDirectToRSA(subRef, uploaderEmail = '') {
       await updateDoc(subRef, {
         assignedTo: '',
         assignedToRSA: assigned,
+        rsaAssignedAt: serverTimestamp(),
         status: 'processing_to_pfa',
         rsaReady: true,
         assignmentMode: 'skip_reviewer_routing',
@@ -760,6 +800,13 @@ const uploadModalTitle = document.getElementById('uploadModalTitle');
 const uploadDocType = document.getElementById('uploadDocType');
 const confirmSingleUpload = document.getElementById('confirmSingleUpload');
 const pageTitle = document.getElementById('pageTitle');
+const uploaderReportMeta = document.getElementById('uploaderReportMeta');
+const uploaderReportStartDate = document.getElementById('uploaderReportStartDate');
+const uploaderReportEndDate = document.getElementById('uploaderReportEndDate');
+const uploaderReportSummaryBody = document.getElementById('uploaderReportSummaryBody');
+const uploaderReportDetailsBody = document.getElementById('uploaderReportDetailsBody');
+const generateUploaderReportBtn = document.getElementById('generateUploaderReportBtn');
+const exportUploaderReportBtn = document.getElementById('exportUploaderReportBtn');
 const switchBackRoleLink = document.getElementById('switchBackRoleLink');
 const switchBackRoleText = document.getElementById('switchBackRoleText');
 const draftTableBody = document.getElementById('draftTableBody');
@@ -2318,10 +2365,13 @@ window.switchTab = (tabId) => {
   document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
   document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
   document.getElementById(`${tabId}Tab`)?.classList.add('active');
-  const titles = { overview: 'Dashboard', draft: 'Draft Submissions', pending: 'Pending Documents', approved: 'Approved Documents', rejected: 'Rejected Documents', paid: 'Agent Commission', 'register-agent': 'Register Agent', profile: 'My Profile' };
+  const titles = { overview: 'Dashboard', draft: 'Draft Submissions', pending: 'Pending Documents', approved: 'Approved Documents', rejected: 'Rejected Documents', paid: 'Agent Commission', report: 'Uploader Report', 'register-agent': 'Register Agent', profile: 'My Profile' };
   if (pageTitle) pageTitle.textContent = titles[tabId] || 'My Documents';
   if (tabId === 'paid') {
     renderPaidTable();
+  }
+  if (tabId === 'report') {
+    initializeUploaderReportDates();
   }
   if (tabId === 'register-agent') {
     loadApprovedAgents();
@@ -3402,6 +3452,7 @@ async function submitCustomer() {
         fixSubmitted: true, fixLocked: false, fixSubmittedAt: serverTimestamp(), fixCount: nextFixCount,
         assignedTo: rsaRejectFlow ? '' : (reviewerToReassign || existingSub.assignedTo || ''),
         assignedToRSA: rsaRejectFlow ? (rsaToReassign || existingSub.assignedToRSA || '') : (existingSub.assignedToRSA || ''),
+        rsaAssignedAt: rsaRejectFlow ? serverTimestamp() : (existingSub.rsaAssignedAt || null),
         reviewedAt: rsaRejectFlow ? (existingSub.reviewedAt || null) : null,
         reviewerDecision: rsaRejectFlow ? String(existingSub.reviewerDecision || '').trim() : '',
         reviewerDecisionBy: rsaRejectFlow ? String(existingSub.reviewerDecisionBy || '').trim() : '',
@@ -3637,6 +3688,7 @@ async function submitEdit() {
         fixCount: nextFixCount,
         assignedTo: rsaRejectFlow ? '' : (reviewerToReassign || existingSub.assignedTo || ''),
         assignedToRSA: rsaRejectFlow ? (rsaToReassign || existingSub.assignedToRSA || '') : (existingSub.assignedToRSA || ''),
+        rsaAssignedAt: rsaRejectFlow ? serverTimestamp() : (existingSub.rsaAssignedAt || null),
         reviewedAt: rsaRejectFlow ? (existingSub.reviewedAt || null) : null,
         reviewerDecision: rsaRejectFlow ? String(existingSub.reviewerDecision || '').trim() : '',
         reviewerDecisionBy: rsaRejectFlow ? String(existingSub.reviewerDecisionBy || '').trim() : '',
@@ -4988,6 +5040,7 @@ window.removeUploadedDoc = (docType) => {
 
 // ==================== INITIALIZE RECENT SEARCH ====================
 document.addEventListener('DOMContentLoaded', function() {
+  initializeUploaderReportDates();
   const recentSearch = document.getElementById('recentSearch');
   if (recentSearch) {
     recentSearch.addEventListener('input', function(e) {
@@ -5006,4 +5059,45 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     }
   });
+  if (generateUploaderReportBtn) {
+    generateUploaderReportBtn.addEventListener('click', async () => {
+      const originalHtml = generateUploaderReportBtn.innerHTML;
+      generateUploaderReportBtn.disabled = true;
+      generateUploaderReportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+      try {
+        currentUploaderStageReport = buildUploaderStageReport();
+        renderDashboardStageReport(currentUploaderStageReport, {
+          metaEl: uploaderReportMeta,
+          summaryBodyEl: uploaderReportSummaryBody,
+          detailsBodyEl: uploaderReportDetailsBody
+        });
+        showNotification('Uploader report generated successfully.', 'success');
+      } catch (error) {
+        showNotification(error?.message || 'Failed to generate uploader report.', 'error');
+      } finally {
+        generateUploaderReportBtn.disabled = false;
+        generateUploaderReportBtn.innerHTML = originalHtml;
+      }
+    });
+  }
+  if (exportUploaderReportBtn) {
+    exportUploaderReportBtn.addEventListener('click', async () => {
+      if (!currentUploaderStageReport) {
+        showNotification('Generate a report first.', 'warning');
+        return;
+      }
+      const originalHtml = exportUploaderReportBtn.innerHTML;
+      exportUploaderReportBtn.disabled = true;
+      exportUploaderReportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+      try {
+        await exportDashboardStageReportExcel(currentUploaderStageReport, 'CMBank RSA Uploader Dashboard');
+        showNotification('Uploader report Excel downloaded.', 'success');
+      } catch (error) {
+        showNotification(error?.message || 'Failed to export uploader report.', 'error');
+      } finally {
+        exportUploaderReportBtn.disabled = false;
+        exportUploaderReportBtn.innerHTML = originalHtml;
+      }
+    });
+  }
 });

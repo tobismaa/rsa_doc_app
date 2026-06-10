@@ -87,8 +87,8 @@
       ''
     ).trim();
     const serviceWorkerUrl = cacheBustToken
-      ? `/service-worker.js?v=20260508a&clear=${encodeURIComponent(cacheBustToken)}`
-      : '/service-worker.js?v=20260508a';
+      ? `/service-worker.js?v=20260610a&clear=${encodeURIComponent(cacheBustToken)}`
+      : '/service-worker.js?v=20260610a';
     navigator.serviceWorker.register(serviceWorkerUrl).catch(() => {});
   }
 

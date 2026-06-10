@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
 const sgMail = require('@sendgrid/mail');
-const { createDailyReportWorkbookBuffer, getPreviousDateKeyInLagos, getLagosDateKey } = require('./scheduled-report');
+const { createDailyReportWorkbookBuffer, createOutstandingReportWorkbookBuffer, getPreviousDateKeyInLagos, getLagosDateKey } = require('./scheduled-report');
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -209,7 +209,6 @@ const lagosWeekdayFormatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Africa/Lagos',
     weekday: 'short'
 });
-
 function getLagosTimeKey(date = new Date()) {
     return lagosTimeFormatter.format(date);
 }
@@ -504,6 +503,8 @@ function normalizeDateKey(value) {
     return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
 }
 
+const REPORT_INCEPTION_START_DATE = '1900-01-01';
+
 function resolveManualReportScope({ reportDateKey, rangeStartDateKey, rangeEndDateKey } = {}) {
     const singleDate = normalizeDateKey(reportDateKey);
     const rangeStart = normalizeDateKey(rangeStartDateKey);
@@ -511,6 +512,16 @@ function resolveManualReportScope({ reportDateKey, rangeStartDateKey, rangeEndDa
     if (rangeStart && rangeEnd) {
         const start = rangeStart <= rangeEnd ? rangeStart : rangeEnd;
         const end = rangeStart <= rangeEnd ? rangeEnd : rangeStart;
+        if (start === REPORT_INCEPTION_START_DATE) {
+            return {
+                mode: 'from_inception',
+                reportDateKey: '',
+                rangeStartDateKey: start,
+                rangeEndDateKey: end,
+                label: `Inception to ${end}`,
+                runKey: `inception_to_${end}`
+            };
+        }
         return {
             mode: 'date_range',
             reportDateKey: '',
@@ -661,8 +672,11 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', f
     }
 }
 
-async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDateKey, trigger = 'manual_custom', forceResend = false }) {
+async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDateKey, outstandingDashboard = '', trigger = 'manual_custom', forceResend = false }) {
     const scope = resolveManualReportScope({ reportDateKey, rangeStartDateKey, rangeEndDateKey });
+    const normalizedOutstandingDashboard = ['all', 'uploader', 'reviewer', 'rsa', 'payment'].includes(String(outstandingDashboard || '').trim().toLowerCase())
+        ? String(outstandingDashboard || '').trim().toLowerCase()
+        : '';
     const settingsSnap = await adminDb.collection('settings').doc('system').get();
     const settings = settingsSnap.exists ? (settingsSnap.data() || {}) : {};
     const scheduled = settings.scheduledReportEmail || {};
@@ -679,9 +693,21 @@ async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDate
         return { ok: false, skipped: true, reason: 'no-recipients' };
     }
 
-    const { shouldSend, runRef } = await reserveScheduledReportRun(scope.runKey, trigger, forceResend);
+    const outstandingScopeKey = ['date_range', 'from_inception'].includes(scope.mode)
+        ? (scope.mode === 'from_inception'
+            ? `from_inception_to_${scope.rangeEndDateKey}`
+            : `${scope.rangeStartDateKey}_to_${scope.rangeEndDateKey}`)
+        : (scope.reportDateKey || getPreviousDateKeyInLagos());
+    const manualRunKey = normalizedOutstandingDashboard
+        ? `outstanding:${normalizedOutstandingDashboard}:${outstandingScopeKey}`
+        : scope.runKey;
+    const manualLabel = normalizedOutstandingDashboard
+        ? `${normalizedOutstandingDashboard === 'all' ? 'All Dashboards' : normalizedOutstandingDashboard.toUpperCase()} Outstanding - ${scope.label}`
+        : scope.label;
+
+    const { shouldSend, runRef } = await reserveScheduledReportRun(manualRunKey, trigger, forceResend);
     if (!shouldSend) {
-        return { ok: true, skipped: true, reason: 'already-sent', reportDateKey: scope.reportDateKey, reportLabel: scope.label };
+        return { ok: true, skipped: true, reason: 'already-sent', reportDateKey: scope.reportDateKey, reportLabel: manualLabel };
     }
 
     try {
@@ -691,17 +717,33 @@ async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDate
         ]);
         const users = usersSnap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
         const submissions = submissionsSnap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
-        const workbookBuffer = Buffer.from(await createDailyReportWorkbookBuffer({
-            submissions,
-            users,
-            reportDateKey: scope.reportDateKey,
-            rangeStartDateKey: scope.rangeStartDateKey,
-            rangeEndDateKey: scope.rangeEndDateKey
-        }));
-        const attachmentSuffix = scope.mode === 'date_range'
-            ? `${scope.rangeStartDateKey}_to_${scope.rangeEndDateKey}`
+        const workbookBuffer = Buffer.from(normalizedOutstandingDashboard
+            ? await createOutstandingReportWorkbookBuffer({
+                submissions,
+                users,
+                reportDateKey: scope.reportDateKey,
+                rangeStartDateKey: scope.rangeStartDateKey,
+                rangeEndDateKey: scope.rangeEndDateKey,
+                outstandingDashboard: normalizedOutstandingDashboard
+            })
+            : await createDailyReportWorkbookBuffer({
+                submissions,
+                users,
+                reportDateKey: scope.reportDateKey,
+                rangeStartDateKey: scope.rangeStartDateKey,
+                rangeEndDateKey: scope.rangeEndDateKey
+            }));
+        const attachmentSuffix = ['date_range', 'from_inception'].includes(scope.mode)
+            ? (scope.mode === 'from_inception'
+                ? `from_inception_to_${scope.rangeEndDateKey}`
+                : `${scope.rangeStartDateKey}_to_${scope.rangeEndDateKey}`)
             : scope.reportDateKey;
-        const attachmentFileName = `cmbank_daily_report_${attachmentSuffix}.xlsx`;
+        const dashboardSuffix = normalizedOutstandingDashboard && normalizedOutstandingDashboard !== 'all'
+            ? `_${normalizedOutstandingDashboard}`
+            : '';
+        const attachmentFileName = normalizedOutstandingDashboard
+            ? `cmbank_outstanding_report${dashboardSuffix}_${attachmentSuffix}.xlsx`
+            : `cmbank_daily_report_${attachmentSuffix}.xlsx`;
         const attachmentDataUri = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${workbookBuffer.toString('base64')}`;
         const text = bodyText;
 
@@ -711,12 +753,14 @@ async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDate
             try {
                 await sendEmailViaEmailJs({
                     to: recipient,
-                    subject: `${subject} - ${scope.label}`,
+                    subject: `${subject} - ${manualLabel}`,
                     text,
-                    reportDateKey: scope.label,
-                    reportIntro: scope.mode === 'date_range'
-                        ? 'Your selected report range is ready and attached for review.'
-                        : 'Your selected report day is ready and attached for review.',
+                    reportDateKey: manualLabel,
+                    reportIntro: normalizedOutstandingDashboard
+                        ? 'Your selected outstanding report is ready and attached for review.'
+                        : (['date_range', 'from_inception'].includes(scope.mode)
+                            ? 'Your selected report range is ready and attached for review.'
+                            : 'Your selected report day is ready and attached for review.'),
                     attachmentDataUri,
                     attachmentFileName
                 });
@@ -731,11 +775,12 @@ async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDate
             : 'failed';
         await runRef.set({
             status: finalStatus,
-            runKey: scope.runKey,
+            runKey: manualRunKey,
             reportDateKey: scope.reportDateKey,
             rangeStartDateKey: scope.rangeStartDateKey,
             rangeEndDateKey: scope.rangeEndDateKey,
-            reportLabel: scope.label,
+            reportLabel: manualLabel,
+            outstandingDashboard: normalizedOutstandingDashboard || admin.firestore.FieldValue.delete(),
             trigger,
             resendRequested: forceResend === true,
             sendTime,
@@ -752,11 +797,12 @@ async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDate
 
         return {
             ok: sentCount > 0 && failures.length === 0,
-            mode: scope.mode,
+            mode: normalizedOutstandingDashboard ? 'outstanding' : scope.mode,
             reportDateKey: scope.reportDateKey,
             rangeStartDateKey: scope.rangeStartDateKey,
             rangeEndDateKey: scope.rangeEndDateKey,
-            reportLabel: scope.label,
+            reportLabel: manualLabel,
+            outstandingDashboard: normalizedOutstandingDashboard,
             attachmentFileName,
             sentCount,
             failedCount: failures.length,
@@ -765,11 +811,12 @@ async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDate
     } catch (err) {
         await runRef.set({
             status: 'failed',
-            runKey: scope.runKey,
+            runKey: manualRunKey,
             reportDateKey: scope.reportDateKey,
             rangeStartDateKey: scope.rangeStartDateKey,
             rangeEndDateKey: scope.rangeEndDateKey,
-            reportLabel: scope.label,
+            reportLabel: manualLabel,
+            outstandingDashboard: normalizedOutstandingDashboard || admin.firestore.FieldValue.delete(),
             trigger,
             error: String(err?.message || 'scheduled-report-failed'),
             failedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -919,11 +966,13 @@ app.post('/api/scheduled-report/send-now', authMiddleware, requireAdminOrSuperAd
         const reportDateKey = normalizeDateKey(req.body?.reportDateKey);
         const rangeStartDateKey = normalizeDateKey(req.body?.rangeStartDateKey);
         const rangeEndDateKey = normalizeDateKey(req.body?.rangeEndDateKey);
-        const result = (reportDateKey || (rangeStartDateKey && rangeEndDateKey))
+        const outstandingDashboard = String(req.body?.outstandingDashboard || '').trim().toLowerCase();
+        const result = (reportDateKey || (rangeStartDateKey && rangeEndDateKey) || outstandingDashboard)
             ? await sendManualReport({
                 reportDateKey,
                 rangeStartDateKey,
                 rangeEndDateKey,
+                outstandingDashboard,
                 trigger: `manual:${normalizeEmail(req.user?.email) || 'admin'}`,
                 forceResend
             })

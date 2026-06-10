@@ -655,6 +655,11 @@
                     <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
                         <h3 style="margin:0 0 8px;color:#0f3b67;">Download Daily Report</h3>
                         <p style="margin:0 0 12px;color:#64748b;">Generate the same multi-sheet daily report workbook directly from Super Admin. This date defaults to the previous day.</p>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+                            <button id="scheduledReportDownloadDailyTabBtn" class="action-btn" type="button" style="background:#003366;color:#fff;border:none;">Daily Report</button>
+                            <button id="scheduledReportDownloadOutstandingTabBtn" class="action-btn" type="button">Outstanding Reports</button>
+                        </div>
+                        <div id="scheduledReportDownloadDailySection">
                         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;">
                             <label style="min-width:220px;">Report Date
                                 <input id="scheduledReportDownloadDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
@@ -662,6 +667,50 @@
                             <button id="previewScheduledReportBtn" class="action-btn" type="button" style="background:#0f766e;color:#fff;border:none;">
                                 <i class="fas fa-table"></i> Preview Report
                             </button>
+                        </div>
+                        </div>
+                        <div id="scheduledReportDownloadOutstandingSection" style="display:none;">
+                            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;align-items:end;">
+                                <label style="min-width:220px;">Outstanding Dashboard
+                                    <select id="scheduledOutstandingDownloadDashboardSelect" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                        <option value="all">All Dashboards</option>
+                                        <option value="uploader">Uploader</option>
+                                        <option value="reviewer">Reviewer</option>
+                                        <option value="rsa">RSA</option>
+                                        <option value="payment">Payment</option>
+                                    </select>
+                                </label>
+                                <label>Send Mode
+                                    <select id="scheduledOutstandingDownloadMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                        <option value="single_day">Specific Day</option>
+                                        <option value="date_range">Date Range</option>
+                                        <option value="from_inception">From Inception</option>
+                                    </select>
+                                </label>
+                                <label id="scheduledOutstandingDownloadSingleDateWrap" style="min-width:220px;">Report Date
+                                    <input id="scheduledOutstandingDownloadDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                </label>
+                                <div id="scheduledOutstandingDownloadRangeWrap" style="display:none;grid-column:1/-1;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+                                    <label>Start Date
+                                        <input id="scheduledOutstandingDownloadRangeStartDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    </label>
+                                    <label>End Date
+                                        <input id="scheduledOutstandingDownloadRangeEndDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    </label>
+                                </div>
+                                <div id="scheduledOutstandingDownloadInceptionWrap" style="display:none;grid-column:1/-1;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+                                    <label>End Date
+                                        <input id="scheduledOutstandingDownloadInceptionEndDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    </label>
+                                </div>
+                                <button id="previewOutstandingReportBtn" class="action-btn" type="button" style="background:#0f766e;color:#fff;border:none;">
+                                    <i class="fas fa-table"></i> Preview Outstanding
+                                </button>
+                                <button id="sendOutstandingReportBtn" class="action-btn" type="button" style="background:#1d4ed8;color:#fff;border:none;">
+                                    <i class="fas fa-paper-plane"></i> Send Outstanding
+                                </button>
+                            </div>
+                            <div id="scheduledOutstandingDownloadStatus" style="display:none;margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid #dbe6f2;background:#fff;color:#334155;font-size:13px;line-height:1.6;"></div>
                         </div>
                     </div>
                     <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
@@ -884,11 +933,17 @@
                     <p>This manual send still uses your saved recipients, subject, and mail body.</p>
                 </div>
             </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+                <button id="scheduledReportSendDailyTabBtn" class="action-btn" type="button" style="background:#003366;color:#fff;border:none;">Daily Report</button>
+                <button id="scheduledReportSendOutstandingTabBtn" class="action-btn" type="button">Outstanding Report</button>
+            </div>
+            <div id="scheduledReportSendDailySection">
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
                 <label>Send Mode
                     <select id="scheduledReportSendMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
                         <option value="single_day">Specific Day</option>
                         <option value="date_range">Date Range</option>
+                        <option value="from_inception">From Inception</option>
                     </select>
                 </label>
                 <div id="scheduledReportSingleDateWrap">
@@ -904,6 +959,51 @@
                 <label>End Date
                     <input id="scheduledReportRangeEndDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
                 </label>
+            </div>
+            <div id="scheduledReportInceptionWrap" style="display:none;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px;">
+                <label>End Date
+                    <input id="scheduledReportInceptionEndDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                </label>
+            </div>
+            </div>
+            <div id="scheduledReportSendOutstandingSection" style="display:none;">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+                    <label>Outstanding Dashboard
+                        <select id="scheduledOutstandingDashboardSelect" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                            <option value="all">All Dashboards</option>
+                            <option value="uploader">Uploader</option>
+                            <option value="reviewer">Reviewer</option>
+                            <option value="rsa">RSA</option>
+                            <option value="payment">Payment</option>
+                        </select>
+                    </label>
+                    <label>Send Mode
+                        <select id="scheduledOutstandingSendMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                            <option value="single_day">Specific Day</option>
+                            <option value="date_range">Date Range</option>
+                            <option value="from_inception">From Inception</option>
+                        </select>
+                    </label>
+                    <label id="scheduledOutstandingSingleDateWrap">Report Date
+                        <input id="scheduledOutstandingReportDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                    </label>
+                </div>
+                <div id="scheduledOutstandingRangeWrap" style="display:none;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px;">
+                    <label>Start Date
+                        <input id="scheduledOutstandingRangeStartDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                    </label>
+                    <label>End Date
+                        <input id="scheduledOutstandingRangeEndDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                    </label>
+                </div>
+                <div id="scheduledOutstandingInceptionWrap" style="display:none;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px;">
+                    <label>End Date
+                        <input id="scheduledOutstandingInceptionEndDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                    </label>
+                </div>
+                <div style="margin-top:12px;padding:12px 14px;border-radius:12px;background:#eef6ff;color:#475569;font-size:13px;line-height:1.6;">
+                    Send only the selected outstanding dashboard report, or all outstanding dashboards together, to the configured scheduled report recipients.
+                </div>
             </div>
             <div id="scheduledReportSendModalStatus" style="display:none;margin-top:14px;padding:12px 14px;border-radius:12px;border:1px solid #dbe6f2;background:#fff;color:#334155;font-size:13px;line-height:1.6;"></div>
         </div>
@@ -1181,7 +1281,7 @@
 <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="js/table-enhancer.js?v=20260512b"></script>
-<script type="module" src="js/super-admin.js?v=20260518a"></script>
+<script type="module" src="js/super-admin.js?v=20260610p"></script>
 <script type="module" src="js/profile-completion-guard.js?v=20260609b"></script>
 <link rel="stylesheet" href="css/pwa-install.css">
     <script src="js/pwa-install.js?v=20260423a"></script>
