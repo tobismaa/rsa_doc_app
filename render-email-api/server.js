@@ -617,8 +617,11 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', f
             }
         }
 
+        const finalStatus = sentCount > 0
+            ? (failures.length ? 'partial' : 'sent')
+            : 'failed';
         await runRef.set({
-            status: failures.length ? 'partial' : 'sent',
+            status: finalStatus,
             runKey: scope.runKey,
             reportDateKey: normalizedDateKey,
             reportLabel: scope.label,
@@ -631,11 +634,13 @@ async function sendScheduledReportForDate({ reportDateKey, trigger = 'manual', f
             failures,
             attachmentFileName,
             completedAt: admin.firestore.FieldValue.serverTimestamp(),
-            subject
+            subject,
+            error: admin.firestore.FieldValue.delete(),
+            failedAt: admin.firestore.FieldValue.delete()
         }, { merge: true });
 
         return {
-            ok: failures.length === 0,
+            ok: sentCount > 0 && failures.length === 0,
             reportDateKey: normalizedDateKey,
             reportLabel: scope.label,
             attachmentFileName,
@@ -721,8 +726,11 @@ async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDate
             }
         }
 
+        const finalStatus = sentCount > 0
+            ? (failures.length ? 'partial' : 'sent')
+            : 'failed';
         await runRef.set({
-            status: failures.length ? 'partial' : 'sent',
+            status: finalStatus,
             runKey: scope.runKey,
             reportDateKey: scope.reportDateKey,
             rangeStartDateKey: scope.rangeStartDateKey,
@@ -737,11 +745,13 @@ async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDate
             failures,
             attachmentFileName,
             completedAt: admin.firestore.FieldValue.serverTimestamp(),
-            subject
+            subject,
+            error: admin.firestore.FieldValue.delete(),
+            failedAt: admin.firestore.FieldValue.delete()
         }, { merge: true });
 
         return {
-            ok: failures.length === 0,
+            ok: sentCount > 0 && failures.length === 0,
             mode: scope.mode,
             reportDateKey: scope.reportDateKey,
             rangeStartDateKey: scope.rangeStartDateKey,
