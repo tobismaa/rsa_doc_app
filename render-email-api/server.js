@@ -825,6 +825,141 @@ async function sendManualReport({ reportDateKey, rangeStartDateKey, rangeEndDate
     }
 }
 
+async function sendPrebuiltWorkbookReport({
+    reportLabel = '',
+    attachmentFileName = '',
+    attachmentDataUri = '',
+    reportType = 'outstanding',
+    outstandingDashboard = '',
+    reportDateKey = '',
+    rangeStartDateKey = '',
+    rangeEndDateKey = '',
+    trigger = 'manual_custom',
+    forceResend = false
+}) {
+    const normalizedLabel = String(reportLabel || '').trim() || 'Outstanding Report';
+    const normalizedFileName = String(attachmentFileName || '').trim() || 'report.xlsx';
+    const normalizedDataUri = String(attachmentDataUri || '').trim();
+    const normalizedType = String(reportType || '').trim().toLowerCase() === 'daily' ? 'daily' : 'outstanding';
+    const normalizedOutstandingDashboard = ['all', 'uploader', 'reviewer', 'rsa', 'payment'].includes(String(outstandingDashboard || '').trim().toLowerCase())
+        ? String(outstandingDashboard || '').trim().toLowerCase()
+        : '';
+    const normalizedReportDateKey = normalizeDateKey(reportDateKey);
+    const normalizedRangeStartDateKey = normalizeDateKey(rangeStartDateKey);
+    const normalizedRangeEndDateKey = normalizeDateKey(rangeEndDateKey);
+
+    if (!normalizedDataUri.startsWith('data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,')) {
+        throw new Error('Invalid workbook attachment payload.');
+    }
+
+    const settingsSnap = await adminDb.collection('settings').doc('system').get();
+    const settings = settingsSnap.exists ? (settingsSnap.data() || {}) : {};
+    const scheduled = settings.scheduledReportEmail || {};
+    const enabled = scheduled.enabled === true;
+    const sendTime = String(scheduled.sendTime || '08:00').trim() || '08:00';
+    const subject = String(scheduled.subject || 'Daily RSA Report').trim() || 'Daily RSA Report';
+    const bodyText = String(scheduled.body || 'Hello,\n\nPlease find the attached daily RSA report.\n\nRegards,\nCMBank RSA Portal').trim();
+    const recipients = normalizeEmailList(scheduled.recipients || []);
+
+    if (!enabled) {
+        return { ok: false, skipped: true, reason: 'scheduled-report-disabled' };
+    }
+    if (!recipients.length) {
+        return { ok: false, skipped: true, reason: 'no-recipients' };
+    }
+
+    const runScopeKey = normalizedRangeStartDateKey && normalizedRangeEndDateKey
+        ? `${normalizedRangeStartDateKey}_to_${normalizedRangeEndDateKey}`
+        : (normalizedReportDateKey || normalizedLabel.replace(/[^\w-]+/g, '_').toLowerCase());
+    const runKey = normalizedType === 'outstanding'
+        ? `frontend-outstanding:${normalizedOutstandingDashboard || 'all'}:${runScopeKey}`
+        : `frontend-daily:${runScopeKey}`;
+    const { shouldSend, runRef } = await reserveScheduledReportRun(runKey, trigger, forceResend);
+    if (!shouldSend) {
+        return { ok: true, skipped: true, reason: 'already-sent', reportDateKey: normalizedReportDateKey, reportLabel: normalizedLabel };
+    }
+
+    try {
+        let sentCount = 0;
+        const failures = [];
+        for (const recipient of recipients) {
+            try {
+                await sendEmailViaEmailJs({
+                    to: recipient,
+                    subject: `${subject} - ${normalizedLabel}`,
+                    text: bodyText,
+                    reportDateKey: normalizedLabel,
+                    reportIntro: normalizedType === 'outstanding'
+                        ? 'Your selected outstanding report is ready and attached for review.'
+                        : 'Your selected report is ready and attached for review.',
+                    attachmentDataUri: normalizedDataUri,
+                    attachmentFileName: normalizedFileName
+                });
+                sentCount += 1;
+            } catch (err) {
+                failures.push({ recipient, error: String(err?.message || 'send-failed') });
+            }
+        }
+
+        const finalStatus = sentCount > 0
+            ? (failures.length ? 'partial' : 'sent')
+            : 'failed';
+        await runRef.set({
+            status: finalStatus,
+            runKey,
+            reportDateKey: normalizedReportDateKey || admin.firestore.FieldValue.delete(),
+            rangeStartDateKey: normalizedRangeStartDateKey || admin.firestore.FieldValue.delete(),
+            rangeEndDateKey: normalizedRangeEndDateKey || admin.firestore.FieldValue.delete(),
+            reportLabel: normalizedLabel,
+            outstandingDashboard: normalizedType === 'outstanding'
+                ? (normalizedOutstandingDashboard || 'all')
+                : admin.firestore.FieldValue.delete(),
+            trigger,
+            resendRequested: forceResend === true,
+            sendTime,
+            recipients,
+            sentCount,
+            failedCount: failures.length,
+            failures,
+            attachmentFileName: normalizedFileName,
+            completedAt: admin.firestore.FieldValue.serverTimestamp(),
+            subject,
+            error: admin.firestore.FieldValue.delete(),
+            failedAt: admin.firestore.FieldValue.delete()
+        }, { merge: true });
+
+        return {
+            ok: sentCount > 0 && failures.length === 0,
+            mode: normalizedType,
+            reportDateKey: normalizedReportDateKey,
+            rangeStartDateKey: normalizedRangeStartDateKey,
+            rangeEndDateKey: normalizedRangeEndDateKey,
+            reportLabel: normalizedLabel,
+            outstandingDashboard: normalizedOutstandingDashboard,
+            attachmentFileName: normalizedFileName,
+            sentCount,
+            failedCount: failures.length,
+            failures
+        };
+    } catch (err) {
+        await runRef.set({
+            status: 'failed',
+            runKey,
+            reportDateKey: normalizedReportDateKey || admin.firestore.FieldValue.delete(),
+            rangeStartDateKey: normalizedRangeStartDateKey || admin.firestore.FieldValue.delete(),
+            rangeEndDateKey: normalizedRangeEndDateKey || admin.firestore.FieldValue.delete(),
+            reportLabel: normalizedLabel,
+            outstandingDashboard: normalizedType === 'outstanding'
+                ? (normalizedOutstandingDashboard || 'all')
+                : admin.firestore.FieldValue.delete(),
+            trigger,
+            error: String(err?.message || 'scheduled-report-failed'),
+            failedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        throw err;
+    }
+}
+
 async function requireAdminRole(req, res, next) {
     if (!req.user?.uid && !req.user?.email) {
         return res.status(401).json({ ok: false, error: 'Missing authenticated user context' });
@@ -991,6 +1126,34 @@ app.post('/api/scheduled-report/send-now', authMiddleware, requireAdminOrSuperAd
         return res.status(500).json({
             ok: false,
             error: String(err?.message || 'Failed to send scheduled report')
+        });
+    }
+});
+
+app.post('/api/scheduled-report/send-workbook', authMiddleware, requireAdminOrSuperAdminRole, async (req, res) => {
+    try {
+        const result = await sendPrebuiltWorkbookReport({
+            reportLabel: req.body?.reportLabel,
+            attachmentFileName: req.body?.attachmentFileName,
+            attachmentDataUri: req.body?.attachmentDataUri,
+            reportType: req.body?.reportType,
+            outstandingDashboard: req.body?.outstandingDashboard,
+            reportDateKey: req.body?.reportDateKey,
+            rangeStartDateKey: req.body?.rangeStartDateKey,
+            rangeEndDateKey: req.body?.rangeEndDateKey,
+            trigger: `manual:${normalizeEmail(req.user?.email) || 'admin'}`,
+            forceResend: req.body?.forceResend === true
+        });
+        if (result?.skipped) {
+            const reason = String(result?.reason || 'scheduled-report-skipped');
+            const statusCode = reason === 'already-sent' ? 409 : 400;
+            return res.status(statusCode).json({ ok: false, ...result, error: reason });
+        }
+        return res.json({ ok: true, ...result });
+    } catch (err) {
+        return res.status(500).json({
+            ok: false,
+            error: String(err?.message || 'Failed to send workbook report')
         });
     }
 });

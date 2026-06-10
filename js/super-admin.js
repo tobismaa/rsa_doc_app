@@ -592,6 +592,104 @@ async function sendSelectedScheduledReport(selection, {
     return { ok: true, result, details, status: refreshedStatus };
 }
 
+async function sendPrebuiltScheduledWorkbook({
+    report,
+    reportLabel,
+    setStatus = () => {},
+    successMessage = 'Selected report sent successfully.',
+    busyMessage = null,
+    forceResend = false
+} = {}) {
+    const artifact = await buildDailyReportWorkbookArtifact(report);
+    if (!artifact) return { ok: false, skipped: true, reason: 'no-artifact' };
+
+    const status = await getScheduledReportBackendStatus();
+    if (status.enabled !== true) {
+        setStatus('Daily report email is disabled in settings.', 'warning', describeScheduledReportStatus(status));
+        return { ok: false, skipped: true, reason: 'scheduled-report-disabled' };
+    }
+    if (!Array.isArray(status.recipients) || !status.recipients.length) {
+        setStatus('No recipients are configured for scheduled report emails.', 'warning', describeScheduledReportStatus(status));
+        return { ok: false, skipped: true, reason: 'no-recipients' };
+    }
+
+    const apiBaseUrl = getEmailApiBaseUrl();
+    const idToken = await currentUser.getIdToken(true);
+    const normalizedLabel = String(reportLabel || artifact.report?.reportLabel || '').trim() || 'Outstanding Report';
+    setStatus(busyMessage || `Sending report for ${normalizedLabel}...`, 'info', describeScheduledReportStatus(status));
+
+    const bodyPayload = {
+        reportLabel: normalizedLabel,
+        attachmentFileName: artifact.fileName,
+        attachmentDataUri: `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${arrayBufferToBase64(artifact.buffer)}`,
+        reportType: artifact.isOutstanding ? 'outstanding' : 'daily',
+        outstandingDashboard: artifact.report?.selectedDashboard || '',
+        reportDateKey: String(artifact.report?.dateKey || '').trim(),
+        rangeStartDateKey: String(artifact.report?.rangeStartDateKey || '').trim(),
+        rangeEndDateKey: String(artifact.report?.rangeEndDateKey || '').trim(),
+        forceResend: forceResend === true
+    };
+
+    let requestResult = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-workbook`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`
+        },
+        body: JSON.stringify(bodyPayload)
+    }, 60000);
+
+    if (requestResult.response.status === 409 || String(requestResult.data?.error || '').trim() === 'already-sent') {
+        const confirmed = await openScheduledReportConfirmModal({
+            title: 'Report Already Sent',
+            heroTitle: 'Custom report was already sent',
+            message: `A report for ${normalizedLabel} has already been sent. Do you still want to resend it?`,
+            note: 'Continuing will resend this exact workbook to the configured recipient list.',
+            confirmLabel: 'Resend Report'
+        });
+        if (!confirmed) {
+            setStatus(`Manual resend cancelled for ${normalizedLabel}.`, 'info', describeScheduledReportStatus(status));
+            return { ok: false, skipped: true, reason: 'cancelled' };
+        }
+        bodyPayload.forceResend = true;
+        requestResult = await fetchJsonWithTimeout(`${apiBaseUrl}/api/scheduled-report/send-workbook`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`
+            },
+            body: JSON.stringify(bodyPayload)
+        }, 60000);
+    }
+
+    const result = requestResult.data || {};
+    if (!requestResult.response.ok || result?.ok === false) {
+        throw new Error(String(result?.error || 'Failed to send selected report.'));
+    }
+
+    const details = [
+        `Report sent: ${String(result?.reportLabel || normalizedLabel).trim() || normalizedLabel}`,
+        `Excel file: ${String(result?.attachmentFileName || artifact.fileName).trim() || artifact.fileName}`,
+        `Sent count: ${Number(result?.sentCount || 0)}`,
+        `Failed count: ${Number(result?.failedCount || 0)}`
+    ];
+    const refreshedStatus = await getScheduledReportBackendStatus().catch(() => null);
+    setStatus(successMessage, 'success', details);
+    setScheduledReportSendStatus(successMessage, 'success', details, refreshedStatus);
+    return { ok: true, result, details, status: refreshedStatus };
+}
+
+function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    let binary = '';
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+        const chunk = bytes.subarray(index, index + chunkSize);
+        binary += String.fromCharCode.apply(null, Array.from(chunk));
+    }
+    return btoa(binary);
+}
+
 async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 20000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -1905,20 +2003,38 @@ function buildOutstandingReportDefinition({ reportDateKey = '', rangeStartDateKe
         activeTab: sheets[0]?.id || 'uploader',
         type: 'outstanding',
         selectedDashboard: normalizedDashboard,
+        rangeStartDateKey: startDateKey,
+        rangeEndDateKey: endDateKey,
         sheets
     };
 }
 
 async function downloadDailyReportWorkbook(reportInput) {
+    const artifact = await buildDailyReportWorkbookArtifact(reportInput);
+    if (!artifact) return;
+    const { buffer, fileName, isOutstanding } = artifact;
+    const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+    showNotification(isOutstanding ? 'Outstanding report Excel downloaded.' : 'Daily report Excel downloaded.', 'success');
+}
+
+async function buildDailyReportWorkbookArtifact(reportInput) {
     if (!window.ExcelJS) {
         showNotification('Excel export library is not available right now.', 'error');
-        return;
+        return null;
     }
 
     const report = typeof reportInput === 'string' ? buildDailyReportDefinition(reportInput) : reportInput;
     if (!report) {
         showNotification('Choose a report date first.', 'warning');
-        return;
+        return null;
     }
 
     const workbook = new window.ExcelJS.Workbook();
@@ -1939,23 +2055,18 @@ async function downloadDailyReportWorkbook(reportInput) {
     });
 
     const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
     const isOutstanding = report.type === 'outstanding';
     const dashboardSuffix = isOutstanding && report.selectedDashboard && report.selectedDashboard !== 'all'
         ? `_${report.selectedDashboard}`
         : '';
-    const reportSuffix = String(report.reportLabel || report.dateKey || '').replace(/\s+to\s+/g, '_to_').replace(/[^\w-]/g, '_');
-    link.download = isOutstanding
+    const reportSuffix = String(report.reportLabel || report.dateKey || '')
+        .replace(/\s+to\s+/gi, '_to_')
+        .replace(/[^\w-]/g, '_');
+    const fileName = isOutstanding
         ? `cmbank_outstanding_report${dashboardSuffix}_${reportSuffix}.xlsx`
         : `cmbank_daily_report_${report.dateKey}.xlsx`;
-    link.click();
-    URL.revokeObjectURL(url);
-    showNotification(isOutstanding ? 'Outstanding report Excel downloaded.' : 'Daily report Excel downloaded.', 'success');
+
+    return { report, buffer, fileName, isOutstanding };
 }
 
 function roleHome(role) {
@@ -4665,12 +4776,19 @@ document.getElementById('sendOutstandingReportBtn')?.addEventListener('click', a
     const originalHtml = button?.innerHTML || '';
     try {
         const selection = buildOutstandingDownloadSelection();
+        const report = buildOutstandingReportDefinition(selection.reportOptions);
+        if (!report) {
+            showNotification('Choose a valid outstanding report date first.', 'warning');
+            return;
+        }
         setOutstandingReportDownloadStatus(`Preparing to send ${selection.label}...`, 'info');
         if (button) {
             button.disabled = true;
             button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
         }
-        await sendSelectedScheduledReport(selection, {
+        await sendPrebuiltScheduledWorkbook({
+            report,
+            reportLabel: selection.label,
             setStatus: setOutstandingReportDownloadStatus,
             successMessage: 'Outstanding report sent successfully.',
             busyMessage: `Sending ${selection.label} to configured scheduled report recipients...`
