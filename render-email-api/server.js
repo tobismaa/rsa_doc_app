@@ -316,6 +316,7 @@ function serializeRunSummary(run = {}) {
         sendTime: String(run.sendTime || '').trim(),
         subject: String(run.subject || '').trim(),
         attachmentFileName: String(run.attachmentFileName || '').trim(),
+        error: String(run.error || '').trim(),
         sentCount: Number(run.sentCount || 0),
         failedCount: Number(run.failedCount || 0),
         recipientsCount: Array.isArray(run.recipients) ? run.recipients.length : 0,

@@ -140,6 +140,7 @@ function buildScheduledReportMiniReport(status = {}) {
                 <div style="margin-top:6px;font-size:12px;color:#334155;">${escapeHtml(humanizeScheduledReportTrigger(run.trigger))}</div>
                 <div style="margin-top:4px;font-size:12px;color:#475569;">Status: ${escapeHtml(run.status || '-')} | Sent: ${Number(run.sentCount || 0)} | Failed: ${Number(run.failedCount || 0)}</div>
                 ${run.attachmentFileName ? `<div style="margin-top:4px;font-size:12px;color:#475569;">Excel: ${escapeHtml(run.attachmentFileName)}</div>` : ''}
+                ${run.error ? `<div style="margin-top:4px;font-size:12px;color:#991b1b;">Error: ${escapeHtml(run.error)}</div>` : ''}
             </div>
         `).join('')
         : '<div style="padding:10px 12px;border:1px dashed #cbd5e1;border-radius:10px;background:#fff;color:#64748b;">No send activity logged yet for today.</div>';
@@ -162,6 +163,7 @@ function buildScheduledReportMiniReport(status = {}) {
                     <div style="font-size:12px;color:#334155;">Configured send time: ${escapeHtml(lastRun.sendTime || status.sendTime || '-')}</div>
                     <div style="font-size:12px;color:#334155;">Excel file: ${escapeHtml(lastRun.attachmentFileName || 'Not recorded')}</div>
                     <div style="font-size:12px;color:#334155;">Completed: ${escapeHtml(lastRun.eventTime || '-')}</div>
+                    ${lastRun.error ? `<div style="font-size:12px;color:#991b1b;">Error: ${escapeHtml(lastRun.error)}</div>` : ''}
                 </div>
             ` : ''}
             <div style="font-weight:700;color:#0f3b67;margin-bottom:8px;">Today's activity</div>
@@ -506,6 +508,7 @@ function buildScheduledReportLogRows(runs = []) {
                 <td>
                     <div>Sent: ${Number(run.sentCount || 0)}</div>
                     <div style="font-size:12px;color:#64748b;margin-top:4px;">Failed: ${Number(run.failedCount || 0)} | Total: ${escapeHtml(recipientsText)}</div>
+                    ${run.error ? `<div style="font-size:12px;color:#991b1b;margin-top:4px;">${escapeHtml(run.error)}</div>` : ''}
                 </td>
                 <td>${escapeHtml(run.attachmentFileName || '-')}</td>
                 <td>${escapeHtml(run.sendTime || '-')}</td>
