@@ -1013,11 +1013,58 @@ function collectDraftableCustomerDetails() {
 function collectSubmissionDocuments() {
   const documents = [];
   Object.entries(currentCustomerUploads || {}).forEach(([type, files]) => {
-    (files || []).forEach((file) => {
-      documents.push({ documentType: type, ...file });
-    });
+    const latestFile = getLatestUploadedDoc(files || []);
+    if (latestFile) documents.push({ documentType: type, ...latestFile });
   });
   return documents;
+}
+
+function getUploadedDocTimestamp(docItem = {}) {
+  return Math.max(
+    getStageTimestampMillis(docItem?.uploadedAt),
+    Number(docItem?.localAddedAt || 0)
+  );
+}
+
+function getLatestUploadedDoc(files = []) {
+  const validFiles = (Array.isArray(files) ? files : [])
+    .filter((file) => file && (file.fileUrl || file.fileId || file.name));
+  if (!validFiles.length) return null;
+  return validFiles.reduce((latest, file) => {
+    if (!latest) return file;
+    const fileTime = getUploadedDocTimestamp(file);
+    const latestTime = getUploadedDocTimestamp(latest);
+    return fileTime >= latestTime ? file : latest;
+  }, null);
+}
+
+function getUploadedDocumentTypes() {
+  return Object.entries(currentCustomerUploads || {})
+    .filter(([, files]) => Boolean(getLatestUploadedDoc(files || [])))
+    .map(([type]) => type);
+}
+
+function getEffectiveSubmissionDocuments(submission = null) {
+  const rawDocs = Array.isArray(submission?.documents) ? submission.documents : [];
+  if (rawDocs.length <= 1) return rawDocs;
+
+  const latestByType = new Map();
+  rawDocs.forEach((docItem, index) => {
+    const type = String(docItem?.documentType || '').trim();
+    const key = type || `__index_${index}`;
+    const previous = latestByType.get(key);
+    if (!previous || getUploadedDocTimestamp(docItem) >= getUploadedDocTimestamp(previous)) {
+      latestByType.set(key, docItem);
+    }
+  });
+
+  const orderedTypes = Array.isArray(submission?.documentTypes) ? submission.documentTypes : [];
+  const orderedDocs = orderedTypes
+    .map((type) => latestByType.get(String(type || '').trim()))
+    .filter(Boolean);
+  const included = new Set(orderedDocs);
+  const remainder = Array.from(latestByType.values()).filter((docItem) => !included.has(docItem));
+  return [...orderedDocs, ...remainder];
 }
 
 function getStoredAgentSelectionValue(submission = {}) {
@@ -1172,8 +1219,11 @@ function hydrateCurrentUploads(documents = []) {
   const existingUploads = {};
   (documents || []).forEach((item) => {
     if (!item?.documentType) return;
-    if (!existingUploads[item.documentType]) existingUploads[item.documentType] = [];
-    existingUploads[item.documentType].push(item);
+    const type = item.documentType;
+    const previous = existingUploads[type]?.[0] || null;
+    if (!previous || getUploadedDocTimestamp(item) >= getUploadedDocTimestamp(previous)) {
+      existingUploads[type] = [item];
+    }
   });
   currentCustomerUploads = existingUploads;
 }
@@ -1261,7 +1311,7 @@ async function persistCurrentDraft({ silent = false, source = 'manual' } = {}) {
   }
   const storedCustomerDetails = await ensureStoredHouseNumber(customerDetails);
   const documents = collectSubmissionDocuments();
-  const documentTypes = Object.keys(currentCustomerUploads || {}).filter((id) => Array.isArray(currentCustomerUploads[id]) && currentCustomerUploads[id].length > 0);
+  const documentTypes = getUploadedDocumentTypes();
   const agentPayload = getSelectedAgentPayload();
   const payload = {
     customerName: storedCustomerDetails.name || 'Untitled Draft',
@@ -3168,20 +3218,21 @@ window.viewDocument = (docType) => {
 // ==================== VIEW SUBMISSION DOCUMENTS ====================
 window.viewSubmissionDocs = (submissionId) => {
   const sub = allSubmissions.find(s => s.id === submissionId);
-  if (!sub || !sub.documents || sub.documents.length === 0) { showNotification('No documents available', 'error'); return; }
-  const firstDoc = sub.documents[0];
+  const effectiveDocs = getEffectiveSubmissionDocuments(sub);
+  if (!sub || effectiveDocs.length === 0) { showNotification('No documents available', 'error'); return; }
+  const firstDoc = effectiveDocs[0];
   const docTypeLabel = DOCUMENT_TYPES.find(t => t.id === firstDoc.documentType)?.name || firstDoc.documentType || 'Document';
   if (viewerModal && viewerFileName && documentViewer) {
     viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel}`;
     documentViewer.src = firstDoc.fileUrl?.trim();
     viewerModal.classList.add('active');
   }
-  if (sub.documents.length > 1) {
+  if (effectiveDocs.length > 1) {
     let currentIndex = 0;
     const showDoc = (index) => {
-      const doc = sub.documents[index];
+      const doc = effectiveDocs[index];
       const docTypeLabel = DOCUMENT_TYPES.find(t => t.id === doc.documentType)?.name || doc.documentType || 'Document';
-      viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel} (${index + 1}/${sub.documents.length})`;
+      viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel} (${index + 1}/${effectiveDocs.length})`;
       documentViewer.src = doc.fileUrl?.trim();
     };
     const addViewerNav = () => {
@@ -3194,13 +3245,13 @@ window.viewSubmissionDocs = (submissionId) => {
       nav.style.cssText = 'display: flex; gap: 10px; align-items: center;';
       nav.innerHTML = `
         <button id="prevDoc" class="action-btn" ${currentIndex === 0 ? 'disabled' : ''}><i class="fas fa-chevron-left"></i> Prev</button>
-        <span id="docCounter" style="font-size: 14px; color: #666;">${currentIndex + 1}/${sub.documents.length}</span>
-        <button id="nextDoc" class="action-btn" ${currentIndex === sub.documents.length - 1 ? 'disabled' : ''}><i class="fas fa-chevron-right"></i> Next</button>
+        <span id="docCounter" style="font-size: 14px; color: #666;">${currentIndex + 1}/${effectiveDocs.length}</span>
+        <button id="nextDoc" class="action-btn" ${currentIndex === effectiveDocs.length - 1 ? 'disabled' : ''}><i class="fas fa-chevron-right"></i> Next</button>
       `;
       const closeBtn = viewerHeader.querySelector('#closeViewer') || document.getElementById('closeViewer');
       viewerHeader.insertBefore(nav, closeBtn);
       document.getElementById('prevDoc').onclick = () => { if (currentIndex > 0) { currentIndex--; showDoc(currentIndex); addViewerNav(); } };
-      document.getElementById('nextDoc').onclick = () => { if (currentIndex < sub.documents.length - 1) { currentIndex++; showDoc(currentIndex); addViewerNav(); } };
+      document.getElementById('nextDoc').onclick = () => { if (currentIndex < effectiveDocs.length - 1) { currentIndex++; showDoc(currentIndex); addViewerNav(); } };
     };
     addViewerNav();
   }
@@ -3355,10 +3406,7 @@ async function submitCustomer() {
         syncUploadRequirementUi();
         return showNotification('Please upload at least one document before submitting fix.', 'error');
       }
-      const documents = [];
-      Object.entries(currentCustomerUploads).forEach(([type, files]) => {
-        files.forEach(file => { documents.push({ documentType: type, ...file }); });
-      });
+      const documents = collectSubmissionDocuments();
       const agentPayload = getSelectedAgentPayload();
       const customerDetails = {
         ...collectDraftableCustomerDetails(),
@@ -3394,7 +3442,7 @@ async function submitCustomer() {
       const preservedCommissionRate = resolveSubmissionCommissionRate(existingSub);
       await updateDoc(submissionRef, {
         customerName, customerDetails, status: rsaRejectFlow ? 'processing_to_pfa' : 'pending', documents,
-        documentTypes: Object.keys(currentCustomerUploads), reuploadedAt: serverTimestamp(),
+        documentTypes: getUploadedDocumentTypes(), reuploadedAt: serverTimestamp(),
         houseNumber: customerDetails.houseNumber || '',
         agentId: agentPayload.agentId,
         agentName: agentPayload.agentName,
@@ -3486,7 +3534,7 @@ async function submitCustomer() {
       status: 'pending',
       comment: '',
       documents,
-      documentTypes: Object.keys(currentCustomerUploads),
+      documentTypes: getUploadedDocumentTypes(),
       houseNumber: allocatedHouseNumber,
       agentId: agentPayload.agentId,
       agentName: agentPayload.agentName,
@@ -3632,7 +3680,7 @@ async function submitEdit() {
       await updateDoc(submissionRef, {
         status: rsaRejectFlow ? 'processing_to_pfa' : 'pending',
         documents,
-        documentTypes: Object.keys(currentCustomerUploads),
+        documentTypes: getUploadedDocumentTypes(),
         reuploadedAt: serverTimestamp(),
         fixSubmitted: true,
         fixLocked: false,

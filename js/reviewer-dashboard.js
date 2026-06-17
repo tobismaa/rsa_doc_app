@@ -2249,9 +2249,11 @@ function showNotification(message, type = 'info') {
 }
 
 // ==================== SIGN OUT ====================
-window.signOutUser = () => {
-    window.location.href = 'index.html';
-};
+if (typeof window.signOutUser !== 'function') {
+    window.signOutUser = () => {
+        window.location.href = 'index.html';
+    };
+}
 // Merge feature removed; no merged-PDF globals.
 
 initializeReviewerReportDates();

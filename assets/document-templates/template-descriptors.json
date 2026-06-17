@@ -1,0 +1,4753 @@
+{
+  "allocation-letter-master.pdf": {
+    "source": "allocation-letter-template.pdf",
+    "pages": [
+      [
+        {
+          "text": "9th March, 2026",
+          "bbox": [
+            59.53,
+            140.84,
+            151.67,
+            152.48
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "AJIBADE MARY BOSE",
+          "bbox": [
+            59.53,
+            160.68,
+            174.94,
+            172.32
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "PLOT 4, ANS 5 ORISUMIBARE,ZONE 8,OMI ADIO,IBADAN",
+          "bbox": [
+            59.53,
+            180.52,
+            372.49,
+            192.16
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Dear Sir/Ma,",
+          "bbox": [
+            59.53,
+            200.37,
+            121.35,
+            212.01
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "LETTER OF ALLOCATION FOR A3 BEDROOM SEMI DETACHED BUNGALOWAT",
+          "bbox": [
+            59.53,
+            220.21,
+            485.78,
+            231.85
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "PACESETTER GARDEN ESTATE ADEGBAYI AREA, OFF IBADAN-IFE EXPRESSWAY IBADAN",
+          "bbox": [
+            59.53,
+            234.38,
+            546.89,
+            246.02
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "With reference to your application for a house at PACESETTER GARDEN ESTATE, Adegbayi Area,",
+          "bbox": [
+            59.53,
+            254.22,
+            541.66,
+            265.86
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "off Ibadan-Ife Expressway Ibadan. We are pleased to inform you that you have been formally",
+          "bbox": [
+            59.53,
+            268.4,
+            526.52,
+            280.04
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "allocated HOUSEM52, a unit of 3 BEDROOM SEMI DETACHED BUNGALOW in the Estate",
+          "bbox": [
+            59.53,
+            282.57,
+            524.88,
+            294.21
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "which is allocated to you for residential purpose on a leasehold basis with effect from 9th",
+          "bbox": [
+            59.53,
+            296.74,
+            510.33,
+            308.38
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "March, 2026.",
+          "bbox": [
+            59.53,
+            310.92,
+            132.51,
+            322.56
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "1. This allocation is subject to the following terms and condition:",
+          "bbox": [
+            59.53,
+            330.76,
+            383.14,
+            342.4
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "a. Not to use any or whole of the premises allocated to you for any other purpose(s) except",
+          "bbox": [
+            59.53,
+            350.6,
+            518.79,
+            362.24
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "residential and the occupying of the same either as an office, shop, light industry or any other",
+          "bbox": [
+            59.53,
+            364.78,
+            532.45,
+            376.42
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "use not in accordance with the user clause of this allocation, would automatically attract",
+          "bbox": [
+            59.53,
+            378.95,
+            504.71,
+            390.59
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "forfeiture of the allocation;",
+          "bbox": [
+            59.53,
+            393.12,
+            196.99,
+            404.76
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "b. Not to construct servant quarters, perimeter fence or any other structure around or within the",
+          "bbox": [
+            59.53,
+            412.96,
+            544.91,
+            424.6
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "premises without prior approval of the Company being sought and obtained in writing, the",
+          "bbox": [
+            59.53,
+            427.14,
+            513.54,
+            438.78
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "violation of which shall attract demolition, penalty/or both;",
+          "bbox": [
+            59.53,
+            441.31,
+            353.88,
+            452.95
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "c. Not to alter or cause to be altered the external design or structure of the house/flat. Internal",
+          "bbox": [
+            59.53,
+            461.15,
+            535.36,
+            472.79
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "alteration may however, be effected only after prior approval of the Company has been sought",
+          "bbox": [
+            59.53,
+            475.33,
+            537.06,
+            486.97
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "and obtained in writing;",
+          "bbox": [
+            59.53,
+            489.5,
+            178.98,
+            501.14
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "d. To comply with the rules and regulations that the Company may make from time to time, as",
+          "bbox": [
+            59.53,
+            509.34,
+            536.16,
+            520.98
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "they affect ownership, possession, occupation and use of housing unit(s);",
+          "bbox": [
+            59.53,
+            523.52,
+            428.36,
+            535.16
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "e. Not to mortgage, sublet, assign, transfer or part with possession of the housing unit or any",
+          "bbox": [
+            59.53,
+            543.36,
+            528.16,
+            555.0
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "part thereof without the consent of the Company being sought and obtained in writing, such",
+          "bbox": [
+            59.53,
+            557.53,
+            523.45,
+            569.17
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "consent shall not be unreasonably withheld;",
+          "bbox": [
+            59.53,
+            571.7,
+            281.26,
+            583.34
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "f. To enter into a Legal mortgage agreement with Cooperative Mortgage Bank Limited and pay",
+          "bbox": [
+            59.53,
+            591.55,
+            535.17,
+            603.19
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "such fees for Title Document as may be prescribed;",
+          "bbox": [
+            59.53,
+            605.72,
+            318.75,
+            617.36
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "g. Payment of ground rent as it will be communicated to you at a later date;  h. To pay levies,",
+          "bbox": [
+            59.53,
+            625.56,
+            530.26,
+            637.2
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "rates or other service charges as may from time to time be levied in respect of the property for",
+          "bbox": [
+            59.53,
+            639.74,
+            538.58,
+            651.38
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "the maintenance of the estate by the Company in charge of such maintenance;",
+          "bbox": [
+            59.53,
+            653.91,
+            459.03,
+            665.55
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "i. Maintain the property hereby allocated as well as its environment in good sanitary and",
+          "bbox": [
+            59.53,
+            673.75,
+            505.19,
+            685.39
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "tenantable condition to the satisfaction of the Company;",
+          "bbox": [
+            59.53,
+            687.92,
+            343.26,
+            699.56
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        }
+      ],
+      [
+        {
+          "text": "Idris Busari",
+          "bbox": [
+            93.48,
+            341.98,
+            157.38,
+            354.14
+          ],
+          "font": "CIDFont+F3",
+          "size": 10.82,
+          "flags": 20
+        },
+        {
+          "text": "Head  Legal",
+          "bbox": [
+            93.48,
+            354.22,
+            153.4,
+            366.38
+          ],
+          "font": "CIDFont+F3",
+          "size": 10.82,
+          "flags": 20
+        },
+        {
+          "text": "j. Refrain from erecting, exhibiting or permitting the erection or exhibition of any bills, or notice",
+          "bbox": [
+            59.53,
+            84.15,
+            538.86,
+            95.79
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "boards on the premises;",
+          "bbox": [
+            59.53,
+            98.32,
+            181.28,
+            109.96
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "k. Identify with the Resident Association established within the estate charged with the",
+          "bbox": [
+            59.53,
+            118.16,
+            497.18,
+            129.8
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "maintenance and management of the estate as it affects commercial, cultural facilities and/or",
+          "bbox": [
+            59.53,
+            132.33,
+            532.14,
+            143.97
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "recreation;",
+          "bbox": [
+            59.53,
+            146.51,
+            114.21,
+            158.15
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "l. Not to rear animals or pets in the apartment and its premises without the written consent of",
+          "bbox": [
+            59.53,
+            166.35,
+            531.96,
+            177.99
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "the Company. Such consent however not to be unreasonably withheld.",
+          "bbox": [
+            59.53,
+            180.52,
+            415.26,
+            192.16
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "2. This letter represents an offer by Coop Property Development Company Limited in respect of",
+          "bbox": [
+            59.53,
+            200.37,
+            539.54,
+            212.01
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "the sale of the said dwelling house to you at a price of #15,000,000 (Fifteen million naira",
+          "bbox": [
+            59.53,
+            214.54,
+            528.92,
+            226.18
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "only).",
+          "bbox": [
+            59.53,
+            228.71,
+            91.22,
+            240.35
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Please accept our congratulations.",
+          "bbox": [
+            59.53,
+            268.4,
+            232.91,
+            280.04
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Yours faithfully,",
+          "bbox": [
+            59.53,
+            288.24,
+            137.81,
+            299.88
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "For: Coop Property Development Company Limited",
+          "bbox": [
+            59.53,
+            308.08,
+            315.25,
+            319.72
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        }
+      ]
+    ]
+  },
+  "availability-letter-master.pdf": {
+    "source": "availability-letter-template.pdf",
+    "pages": [
+      [
+        {
+          "text": "For: Cooperative Mortgage Bank Limited",
+          "bbox": [
+            63.74,
+            499.63,
+            260.04,
+            511.63
+          ],
+          "font": "Calibri,Bold",
+          "size": 12.0,
+          "flags": 16
+        },
+        {
+          "text": "Credit and Risk Management",
+          "bbox": [
+            72.02,
+            559.51,
+            208.32,
+            571.51
+          ],
+          "font": "Calibri,Bold",
+          "size": 12.0,
+          "flags": 16
+        },
+        {
+          "text": "17th March, 2026",
+          "bbox": [
+            59.53,
+            148.84,
+            158.63,
+            160.48
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "PAL PENSION ALLIANCE LIMITED,",
+          "bbox": [
+            59.53,
+            188.52,
+            245.1,
+            200.16
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Plot 289, Adeogun Street,",
+          "bbox": [
+            59.53,
+            208.37,
+            205.44,
+            220.01
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Victoria Island,",
+          "bbox": [
+            59.53,
+            228.21,
+            144.18,
+            239.85
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Lagos.",
+          "bbox": [
+            59.53,
+            248.05,
+            95.81,
+            259.69
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Dear Sir/Ma,",
+          "bbox": [
+            59.53,
+            287.74,
+            121.35,
+            299.38
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "CONFIRMATION OF AVAILABILITY OF PROPERTY",
+          "bbox": [
+            59.53,
+            327.42,
+            327.66,
+            339.06
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "This is to confirm the authenticity of the property allocated to AJIBADE MARY BOSE, which is a",
+          "bbox": [
+            59.53,
+            367.11,
+            547.09,
+            378.75
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "3 BEDROOM SEMI DETACHED BUNGALOW, House number M52 situated at Pacesetter",
+          "bbox": [
+            59.53,
+            381.28,
+            512.62,
+            392.92
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Gardens Estate, Adegbayi Area, off Ibadan- Ife Express way, Ibadan, valued at #15,000,000",
+          "bbox": [
+            59.53,
+            395.45,
+            526.97,
+            407.09
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "(Fifteen million naira only).",
+          "bbox": [
+            59.53,
+            409.63,
+            216.59,
+            421.27
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Thank you.",
+          "bbox": [
+            59.53,
+            449.31,
+            114.98,
+            460.95
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Yours Faithfully,",
+          "bbox": [
+            59.53,
+            469.15,
+            140.04,
+            480.79
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        }
+      ]
+    ]
+  },
+  "indemnity-letter-master.pdf": {
+    "source": "indemnity-letter-template.pdf",
+    "pages": [
+      [
+        {
+          "text": "PAL PENSION ALLIANCE LIMITED,",
+          "bbox": [
+            59.53,
+            134.19,
+            245.1,
+            145.83
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Plot 289, Adeogun Street,",
+          "bbox": [
+            59.53,
+            154.03,
+            205.44,
+            165.67
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Victoria Island,",
+          "bbox": [
+            59.53,
+            173.87,
+            144.18,
+            185.51
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Lagos.",
+          "bbox": [
+            59.53,
+            193.71,
+            95.81,
+            205.35
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "LETTER OF INDEMNITY IN RESPECT OF RETIREMENT SAVINGS ACCOUNT EQUITY",
+          "bbox": [
+            59.53,
+            233.4,
+            505.55,
+            245.04
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "CONTRIBUTION",
+          "bbox": [
+            59.53,
+            247.57,
+            145.13,
+            259.21
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "THIS INDEMNITY is issued by Cooperative Mortgage Bank Ltd. of 11B University Crescent,",
+          "bbox": [
+            59.53,
+            267.41,
+            537.58,
+            279.05
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "UI-Secretariat road, Old Bodija, Ibadan (hereinafter called \u201cCooperative Mortgage Bank\u201d which",
+          "bbox": [
+            59.53,
+            281.59,
+            534.2,
+            293.23
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "expression shall where the context so admits include its successors-in-title and assigns), to PAL",
+          "bbox": [
+            59.53,
+            295.76,
+            542.33,
+            307.4
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "PENSION ALLIANCE LIMITED Limited having its Head Office at Plot 289, Adeogun Street,",
+          "bbox": [
+            59.53,
+            309.93,
+            536.95,
+            321.57
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Victoria Island, Lagos. (hereinafter called \u201cPAL PENSION ALLIANCE LIMITED(PFA)\u201d which",
+          "bbox": [
+            59.53,
+            324.11,
+            541.76,
+            335.75
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "expression shall where the context so admits include its successors-in-title and assigns)",
+          "bbox": [
+            59.53,
+            338.28,
+            501.31,
+            349.92
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "WHEREAS:",
+          "bbox": [
+            59.53,
+            358.12,
+            119.23,
+            369.76
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "1.  PAL PENSION ALLIANCE LIMITED is a Pension Fund Administrator licensed by the National",
+          "bbox": [
+            59.53,
+            377.96,
+            544.28,
+            389.6
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Pension Commission (\u201cthe Commission\u201d) to manage individual Retirement Savings Accounts",
+          "bbox": [
+            59.53,
+            392.14,
+            524.22,
+            403.78
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "(RSA) in accordance with the provisions of the Pension Reform Act, 2014 (\u201cthe Act\u201d);",
+          "bbox": [
+            59.53,
+            406.31,
+            485.02,
+            417.95
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "2.  Pursuant to the Act, the Commission has issued Guidelines on Accessing RSA Balance towards",
+          "bbox": [
+            59.53,
+            426.15,
+            549.25,
+            437.79
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Payment of Equity Contributions for Residential Mortgage (\u201cGuidelines\u201d) which Guidelines permit",
+          "bbox": [
+            59.53,
+            440.33,
+            546.8,
+            451.97
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "RSA Account Holders to access a portion of their RSA balance as equity contribution towards",
+          "bbox": [
+            59.53,
+            454.5,
+            524.5,
+            466.14
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "acquiring a residential property from a licensed financial institution;",
+          "bbox": [
+            59.53,
+            468.67,
+            400.51,
+            480.31
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "3.   Cooperative Mortgage Bank is duly licensed by the Central Bank of Nigeria (CBN) and",
+          "bbox": [
+            59.53,
+            488.52,
+            525.79,
+            500.16
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "meets all the eligibility criteria for the provision of mortgage lending services to RSA holders",
+          "bbox": [
+            59.53,
+            502.69,
+            523.93,
+            514.33
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "under the Guidelines issued by the Commission.",
+          "bbox": [
+            59.53,
+            516.86,
+            301.86,
+            528.5
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "4.  Cooperative Mortgage Bank has received applications from several RSA holders who",
+          "bbox": [
+            59.53,
+            536.7,
+            517.82,
+            548.34
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "maintain RSAs with PAL PENSION ALLIANCE LIMITED and in line with the Guidelines, the",
+          "bbox": [
+            59.53,
+            550.88,
+            520.29,
+            562.52
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "indemnifier has agreed to finance the purchase of a residential property on behalf of the RSA",
+          "bbox": [
+            59.53,
+            565.05,
+            527.95,
+            576.69
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "holders, subject to the execution of relevant mortgage contracts.",
+          "bbox": [
+            59.53,
+            579.22,
+            387.07,
+            590.86
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "5.  AJIBADE MARY BOSE, the RSA holder has requested and authorized that a portion of his/her",
+          "bbox": [
+            59.53,
+            599.07,
+            547.42,
+            610.71
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "RSA balance should be utilized as equity contribution to facilitate his/her mortgage and has",
+          "bbox": [
+            59.53,
+            613.24,
+            519.12,
+            624.88
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "applied to the PAL PENSION ALLIANCE LIMITED to release to the indemnifier, a portion not",
+          "bbox": [
+            59.53,
+            627.41,
+            531.88,
+            639.05
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "more than 25% of his/her RSA balance as equity contribution towards the acquisition of a",
+          "bbox": [
+            59.53,
+            641.59,
+            508.45,
+            653.23
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "residential mortgage.",
+          "bbox": [
+            59.53,
+            655.76,
+            167.46,
+            667.4
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "6.  Cooperative Mortgage Bank has conducted all requisite due diligence to confirm the",
+          "bbox": [
+            59.53,
+            675.6,
+            516.35,
+            687.24
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "authenticity of the RSA holder\u2019s intended acquisition of a residential property and undertakes to",
+          "bbox": [
+            59.53,
+            689.78,
+            546.0,
+            701.42
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "PAL PENSION ALLIANCE LIMITED that the portion of the RSA holder\u2019s fund which shall be",
+          "bbox": [
+            59.53,
+            703.95,
+            523.22,
+            715.59
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "released to the Cooperative Mortgage Bank on the RSA holder\u2019s request shall be applied",
+          "bbox": [
+            59.53,
+            718.12,
+            522.09,
+            729.76
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "solely as equity contribution towards the acquisition of a residential mortgage, under the",
+          "bbox": [
+            59.53,
+            732.3,
+            506.97,
+            743.94
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "mortgage",
+          "bbox": [
+            59.53,
+            746.47,
+            108.4,
+            758.11
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        }
+      ],
+      [
+        {
+          "text": "Page 2 of 2",
+          "bbox": [
+            61.68,
+            781.61,
+            119.7,
+            793.68
+          ],
+          "font": "Verdana",
+          "size": 9.96,
+          "flags": 0
+        },
+        {
+          "text": "Confidential",
+          "bbox": [
+            442.51,
+            779.62,
+            515.54,
+            794.1
+          ],
+          "font": "Tahoma,Bold",
+          "size": 12.0,
+          "flags": 16
+        },
+        {
+          "text": "Authorized Signatory",
+          "bbox": [
+            72.38,
+            750.1,
+            175.77,
+            762.1
+          ],
+          "font": "Calibri,Bold",
+          "size": 12.0,
+          "flags": 16
+        },
+        {
+          "text": "Authorized Signatory",
+          "bbox": [
+            397.99,
+            750.1,
+            501.41,
+            762.1
+          ],
+          "font": "Calibri,Bold",
+          "size": 12.0,
+          "flags": 16
+        },
+        {
+          "text": "agreement between the Indemnifier and the RSA holder; and shall not, under any condition, be",
+          "bbox": [
+            59.53,
+            49.15,
+            537.77,
+            60.79
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "released to the RSA holder or any third party for any other purpose.",
+          "bbox": [
+            59.53,
+            63.32,
+            400.3,
+            74.96
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "7.  PAL PENSION ALLIANCE LIMITED agrees to release the relevant portion of the RSA holder\u2019s",
+          "bbox": [
+            59.53,
+            83.16,
+            550.52,
+            94.8
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "fund to the Cooperative Mortgage Bank and has requested that the Indemnifier provides this",
+          "bbox": [
+            59.53,
+            97.33,
+            543.9,
+            108.97
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "indemnity in favour of PAL PENSION ALLIANCE LIMITED in the manner hereinafter stated.",
+          "bbox": [
+            59.53,
+            111.51,
+            526.66,
+            123.15
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "NOW THEREFORE, in consideration of PAL PENSION ALLIANCE LIMITED effecting the transfer",
+          "bbox": [
+            59.53,
+            131.35,
+            551.89,
+            142.99
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "of the portion of the RSA holder\u2019s balance to the Indemnifier as equity contribution by the RSA",
+          "bbox": [
+            59.53,
+            145.52,
+            533.91,
+            157.16
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "holder whose RSA PIN herein appears, towards acquisition of residential property in accordance",
+          "bbox": [
+            59.53,
+            159.7,
+            543.17,
+            171.34
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "with the Guidelines, We, Cooperative Mortgage Bank Ltd hereby irrevocably and",
+          "bbox": [
+            59.53,
+            173.87,
+            486.33,
+            185.51
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "unconditionally covenant that we shall at all times hereafter, indemnify PAL PENSION ALLIANCE",
+          "bbox": [
+            59.53,
+            188.04,
+            554.59,
+            199.68
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "LIMITED and keep PAL PENSION ALLIANCE LIMITED fully indemnified against all claims,",
+          "bbox": [
+            59.53,
+            202.22,
+            520.82,
+            213.86
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "demands, liabilities, actions, damages, penalties and legal proceedings (including any cost of",
+          "bbox": [
+            59.53,
+            216.39,
+            528.47,
+            228.03
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "litigation) which may be incurred by PAL PENSION ALLIANCE LIMITED in the event that the fund",
+          "bbox": [
+            59.53,
+            230.56,
+            558.54,
+            242.2
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "so released by PAL PENSION ALLIANCE LIMITED is not utilized as equity contribution towards",
+          "bbox": [
+            59.53,
+            244.74,
+            544.51,
+            256.38
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "the purchase of a residential property on behalf of the RSA holder.",
+          "bbox": [
+            59.53,
+            258.91,
+            393.5,
+            270.55
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Furthermore, Cooperative Mortgage Bank, undertakes to pay PAL PENSION ALLIANCE",
+          "bbox": [
+            59.53,
+            278.75,
+            530.02,
+            290.39
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "LIMITED on demand without cavil or contention, all payments, liabilities, damages and expenses",
+          "bbox": [
+            59.53,
+            292.93,
+            549.18,
+            304.57
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "(including but not limited to legal fees) incurred by the PAL PENSION ALLIANCE LIMITED from",
+          "bbox": [
+            59.53,
+            307.1,
+            546.86,
+            318.74
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "acceding to the RSA holder\u2019s request to release funds from his/her RSA, in the event that the fund",
+          "bbox": [
+            59.53,
+            321.27,
+            552.62,
+            332.91
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "so released by PAL PENSION ALLIANCE LIMITED is not utilized as equity contribution towards",
+          "bbox": [
+            59.53,
+            335.45,
+            544.51,
+            347.09
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "the purchase of a residential property on behalf of the RSA holder.",
+          "bbox": [
+            59.53,
+            349.62,
+            393.5,
+            361.26
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "This Indemnity shall be a continuing security and shall be enforceable from the date of",
+          "bbox": [
+            59.53,
+            369.46,
+            495.54,
+            381.1
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "disbursement of the portion of the RSA holder\u2019s balance to Cooperative Mortgage Bank and shall",
+          "bbox": [
+            59.53,
+            383.63,
+            564.03,
+            395.27
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "inure to the benefit of PAL PENSION ALLIANCE LIMITED up until the utilization of the funds so",
+          "bbox": [
+            59.53,
+            397.81,
+            545.82,
+            409.45
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "released, as equity contribution towards the acquisition of the residential property in favour of the",
+          "bbox": [
+            59.53,
+            411.98,
+            553.45,
+            423.62
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "RSA holder by the PAL PENSION ALLIANCE LIMITED.",
+          "bbox": [
+            59.53,
+            426.15,
+            338.49,
+            437.79
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "This Indemnity shall not be enforceable against Cooperative Mortgage Bank for any claims,",
+          "bbox": [
+            59.53,
+            446.0,
+            535.99,
+            457.64
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "demands, liabilities, losses, actions, damages, penalties, and legal proceedings (including any cost",
+          "bbox": [
+            59.53,
+            460.17,
+            555.87,
+            471.81
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "of litigation), arising from any dispute or breach howsoever, in the contractual relationship between",
+          "bbox": [
+            59.53,
+            474.34,
+            561.03,
+            485.98
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "PAL PENSION ALLIANCE LIMITED and the RSA holder.",
+          "bbox": [
+            59.53,
+            488.52,
+            345.04,
+            500.16
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "The indemnification provided under this Indemnity by Cooperative Mortgage Bank shall be",
+          "bbox": [
+            59.53,
+            508.36,
+            532.48,
+            520.0
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "completely discharged upon the utilization of the portion of the RSA holder\u2019s balance towards the",
+          "bbox": [
+            59.53,
+            522.53,
+            549.46,
+            534.17
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "purchase of a residential property in favour of the RSA holder by Cooperative Mortgage Bank.",
+          "bbox": [
+            59.53,
+            536.7,
+            548.06,
+            548.34
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "RSA HOLDER:       AJIBADE MARY BOSE",
+          "bbox": [
+            59.53,
+            556.55,
+            272.76,
+            568.19
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "PIN:                      PEN200066970833",
+          "bbox": [
+            59.53,
+            576.39,
+            258.33,
+            588.03
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "This indemnity shall be governed by and construed in accordance with the extant laws of the",
+          "bbox": [
+            59.53,
+            596.23,
+            527.66,
+            607.87
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Federal Republic of Nigeria.",
+          "bbox": [
+            59.53,
+            610.41,
+            198.29,
+            622.05
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "THE COMMON SEAL of the within named INDEMNIFIER Cooperative Mortgage Bank was hereunto",
+          "bbox": [
+            59.53,
+            630.25,
+            563.38,
+            641.89
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "affixed in the presence of:",
+          "bbox": [
+            59.53,
+            644.42,
+            191.12,
+            656.06
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        }
+      ]
+    ]
+  },
+  "offer-letter-master.pdf": {
+    "source": "offer-letter-template.pdf",
+    "pages": [
+      [
+        {
+          "text": "13th March, 2026",
+          "bbox": [
+            59.53,
+            134.19,
+            158.63,
+            145.83
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "AJIBADE MARY BOSE",
+          "bbox": [
+            59.53,
+            154.03,
+            174.94,
+            165.67
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "PLOT 4, ANS 5 ORISUMIBARE,ZONE 8,OMI ADIO,IBADAN",
+          "bbox": [
+            59.53,
+            173.87,
+            372.49,
+            185.51
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Dear Sir/Ma,",
+          "bbox": [
+            59.53,
+            193.71,
+            121.35,
+            205.35
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "PROVISIONAL OFFER OF MORTGAGE FACILITY",
+          "bbox": [
+            59.53,
+            213.56,
+            316.1,
+            225.2
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "We are pleased to inform you that Cooperative Mortgage Bank Limited (\u201cthe Bank\u201d) has",
+          "bbox": [
+            59.53,
+            233.4,
+            525.13,
+            245.04
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "approved a Mortgage Facility in your favor under the following terms and conditions:",
+          "bbox": [
+            59.53,
+            247.57,
+            488.66,
+            259.21
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "COOPERATIVE MORTGAGE BANK LIMITED",
+          "bbox": [
+            201.26,
+            268.83,
+            408.07,
+            280.47
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Lender:",
+          "bbox": [
+            59.53,
+            268.83,
+            102.67,
+            280.47
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "COOPERATIVE MORTGAGE BANK LIMITED",
+          "bbox": [
+            201.26,
+            268.83,
+            408.07,
+            280.47
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "AJIBADE MARY BOSE",
+          "bbox": [
+            201.26,
+            285.84,
+            304.01,
+            297.48
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Borrow:",
+          "bbox": [
+            59.53,
+            285.84,
+            103.99,
+            297.48
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "AJIBADE MARY BOSE",
+          "bbox": [
+            201.26,
+            285.84,
+            304.01,
+            297.48
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "PLOT 4, ANS 5 ORISUMIBARE,ZONE 8,OMI ADIO,IBADAN",
+          "bbox": [
+            201.26,
+            302.85,
+            480.38,
+            314.49
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Address:",
+          "bbox": [
+            59.53,
+            302.85,
+            109.2,
+            314.49
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "PLOT 4, ANS 5 ORISUMIBARE,ZONE 8,OMI ADIO,IBADAN",
+          "bbox": [
+            201.26,
+            302.85,
+            480.38,
+            314.49
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Mortgage Facility",
+          "bbox": [
+            201.26,
+            319.85,
+            287.76,
+            331.49
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Facility Type:",
+          "bbox": [
+            59.53,
+            319.85,
+            135.39,
+            331.49
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Mortgage Facility",
+          "bbox": [
+            201.26,
+            319.85,
+            287.76,
+            331.49
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "#15,000,000 (Fifteen million naira only)",
+          "bbox": [
+            201.26,
+            336.86,
+            401.98,
+            348.5
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Property Value:",
+          "bbox": [
+            59.53,
+            336.86,
+            148.13,
+            348.5
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "#15,000,000 (Fifteen million naira only)",
+          "bbox": [
+            201.26,
+            336.86,
+            401.98,
+            348.5
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "This  facility  shall  commence  upon  drawdown  or  on  the  date  of",
+          "bbox": [
+            201.26,
+            353.87,
+            535.75,
+            365.51
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "disbursement notwithstanding the date on the offer letter or date",
+          "bbox": [
+            201.26,
+            370.88,
+            535.75,
+            382.52
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "of execution",
+          "bbox": [
+            201.26,
+            387.89,
+            263.3,
+            399.53
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Commencement Date:",
+          "bbox": [
+            59.53,
+            370.88,
+            184.38,
+            382.52
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "This  facility  shall  commence  upon  drawdown  or  on  the  date  of",
+          "bbox": [
+            201.26,
+            353.87,
+            535.75,
+            365.51
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "disbursement notwithstanding the date on the offer letter or date",
+          "bbox": [
+            201.26,
+            370.88,
+            535.75,
+            382.52
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "of execution",
+          "bbox": [
+            201.26,
+            387.89,
+            263.3,
+            399.53
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "#10,775,000 (Ten million, seven hundred and seventy-five",
+          "bbox": [
+            201.26,
+            404.89,
+            535.75,
+            416.53
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "thousand naira only)",
+          "bbox": [
+            201.26,
+            421.9,
+            304.92,
+            433.54
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Loan Amount:",
+          "bbox": [
+            59.53,
+            413.4,
+            138.17,
+            425.04
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "#10,775,000 (Ten million, seven hundred and seventy-five",
+          "bbox": [
+            201.26,
+            404.89,
+            535.75,
+            416.53
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "thousand naira only)",
+          "bbox": [
+            201.26,
+            421.9,
+            304.92,
+            433.54
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Upon satisfactory compliance with all conditions precedent to",
+          "bbox": [
+            201.26,
+            438.91,
+            535.75,
+            450.55
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "drawdown but not later than 14 days from date of offer letter.",
+          "bbox": [
+            201.26,
+            455.92,
+            512.45,
+            467.56
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Availability:",
+          "bbox": [
+            59.53,
+            447.41,
+            126.9,
+            459.05
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Upon satisfactory compliance with all conditions precedent to",
+          "bbox": [
+            201.26,
+            438.91,
+            535.75,
+            450.55
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "drawdown but not later than 14 days from date of offer letter.",
+          "bbox": [
+            201.26,
+            455.92,
+            512.45,
+            467.56
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "To part finance the purchase House M52 of a 3 BEDROOM SEMI",
+          "bbox": [
+            201.26,
+            472.93,
+            535.75,
+            484.57
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "DETACHED  BUNGALOW  at  Pacesetter  Gardens  Estate,  Adegbayi",
+          "bbox": [
+            201.26,
+            489.93,
+            535.75,
+            501.57
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Area, Off Ibadan Ife Expressway Ajoda, Ibadan Oyo State",
+          "bbox": [
+            201.26,
+            506.94,
+            486.42,
+            518.58
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Purpose:",
+          "bbox": [
+            59.53,
+            489.93,
+            109.67,
+            501.57
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "To part finance the purchase House M52 of a 3 BEDROOM SEMI",
+          "bbox": [
+            201.26,
+            472.93,
+            535.75,
+            484.57
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "DETACHED  BUNGALOW  at  Pacesetter  Gardens  Estate,  Adegbayi",
+          "bbox": [
+            201.26,
+            489.93,
+            535.75,
+            501.57
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Area, Off Ibadan Ife Expressway Ajoda, Ibadan Oyo State",
+          "bbox": [
+            201.26,
+            506.94,
+            486.42,
+            518.58
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "#4,225,000 (Four million, two hundred and twenty-five thousand",
+          "bbox": [
+            201.26,
+            523.95,
+            535.75,
+            535.59
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "naira only)",
+          "bbox": [
+            201.26,
+            540.96,
+            254.99,
+            552.6
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Equity Contribution:",
+          "bbox": [
+            59.53,
+            532.45,
+            173.8,
+            544.09
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "#4,225,000 (Four million, two hundred and twenty-five thousand",
+          "bbox": [
+            201.26,
+            523.95,
+            535.75,
+            535.59
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "naira only)",
+          "bbox": [
+            201.26,
+            540.96,
+            254.99,
+            552.6
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "#208,310 (Two hundred and eight thousand, three hundred and",
+          "bbox": [
+            201.26,
+            557.96,
+            535.75,
+            569.6
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "ten naira only) Monthly principal and interest repayment",
+          "bbox": [
+            201.26,
+            574.97,
+            485.86,
+            586.61
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Repayment Schedule:",
+          "bbox": [
+            59.53,
+            566.47,
+            182.54,
+            578.11
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "#208,310 (Two hundred and eight thousand, three hundred and",
+          "bbox": [
+            201.26,
+            557.96,
+            535.75,
+            569.6
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "ten naira only) Monthly principal and interest repayment",
+          "bbox": [
+            201.26,
+            574.97,
+            485.86,
+            586.61
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "#4,000 (Four thousand naira only) Monthly payment",
+          "bbox": [
+            201.26,
+            591.98,
+            465.46,
+            603.62
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Facility Fee:",
+          "bbox": [
+            59.53,
+            591.98,
+            128.5,
+            603.62
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "#4,000 (Four thousand naira only) Monthly payment",
+          "bbox": [
+            201.26,
+            591.98,
+            465.46,
+            603.62
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Monthly Salary",
+          "bbox": [
+            201.26,
+            608.99,
+            275.91,
+            620.63
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Source of Repayment:",
+          "bbox": [
+            59.53,
+            608.99,
+            184.55,
+            620.63
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Monthly Salary",
+          "bbox": [
+            201.26,
+            608.99,
+            275.91,
+            620.63
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "5 Years",
+          "bbox": [
+            201.26,
+            626.0,
+            238.51,
+            637.64
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Tenor",
+          "bbox": [
+            59.53,
+            626.0,
+            92.05,
+            637.64
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "5 Years",
+          "bbox": [
+            201.26,
+            626.0,
+            238.51,
+            637.64
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "6%  per  annum  subject  to  review  in  line  with  changes  in  Money",
+          "bbox": [
+            201.26,
+            643.0,
+            535.75,
+            654.64
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "market rate.",
+          "bbox": [
+            201.26,
+            660.01,
+            263.77,
+            671.65
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Interest Rate:",
+          "bbox": [
+            59.53,
+            651.51,
+            137.86,
+            663.15
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "6%  per  annum  subject  to  review  in  line  with  changes  in  Money",
+          "bbox": [
+            201.26,
+            643.0,
+            535.75,
+            654.64
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "market rate.",
+          "bbox": [
+            201.26,
+            660.01,
+            263.77,
+            671.65
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "1% of the facility amount (Upfront payment upon booking)",
+          "bbox": [
+            201.26,
+            677.02,
+            495.56,
+            688.66
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Management Fee:",
+          "bbox": [
+            59.53,
+            677.02,
+            161.01,
+            688.66
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "1% of the facility amount (Upfront payment upon booking)",
+          "bbox": [
+            201.26,
+            677.02,
+            495.56,
+            688.66
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Voluntary  prepayment  is  allowed  during  the  term  of  the  facility",
+          "bbox": [
+            201.26,
+            694.03,
+            535.75,
+            705.67
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "without penal charge.",
+          "bbox": [
+            201.26,
+            711.04,
+            310.73,
+            722.68
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Prepayment:",
+          "bbox": [
+            59.53,
+            702.53,
+            132.1,
+            714.17
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Voluntary  prepayment  is  allowed  during  the  term  of  the  facility",
+          "bbox": [
+            201.26,
+            694.03,
+            535.75,
+            705.67
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "without penal charge.",
+          "bbox": [
+            201.26,
+            711.04,
+            310.73,
+            722.68
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        }
+      ],
+      [
+        {
+          "text": "Security/Comfort:    Deed of Sublease on House M52 of a 3 BEDROOM SEMI DETACHED",
+          "bbox": [
+            59.53,
+            91.67,
+            525.51,
+            103.31
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "BUNGALOW at Pacesetter Gardens Estate, Adegbayi Area, Off Ibadan-Ife Expressway Ajoda,",
+          "bbox": [
+            59.53,
+            105.84,
+            527.05,
+            117.48
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Ibadan Oyo State. Comprehensive Fire and Other Perils Insurance Policy with Cooperative",
+          "bbox": [
+            59.53,
+            120.01,
+            509.87,
+            131.65
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Mortgage Bank Ltd noted as the first loss payee. Mortgage Protection Policy on behalf of",
+          "bbox": [
+            59.53,
+            134.19,
+            506.57,
+            145.83
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "AJIBADE MARY BOSE",
+          "bbox": [
+            59.53,
+            148.36,
+            174.94,
+            160.0
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Title over Property:   Deed of Sublease over property situated at Pacesetter Gardens",
+          "bbox": [
+            59.53,
+            168.2,
+            498.05,
+            179.84
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Estate, Adegbayi Area, off Ibadan-Ife Expressway Ajoda Ibadan Oyo State.",
+          "bbox": [
+            59.53,
+            182.37,
+            431.43,
+            194.01
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Cost of Registration of Title: The cost and expenses on preparation and perfection of legal",
+          "bbox": [
+            59.53,
+            202.22,
+            531.74,
+            213.86
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "mortgage shall be borne by the Borrower. This is inclusive of other incidental expenses",
+          "bbox": [
+            59.53,
+            216.39,
+            497.23,
+            228.03
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "necessary for perfection.",
+          "bbox": [
+            59.53,
+            230.56,
+            184.48,
+            242.2
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "CONDITIONS PRECEDENT TO DRAWDOWN:",
+          "bbox": [
+            59.53,
+            250.41,
+            297.45,
+            262.05
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "1.    Duly executed offer letter accepting the terms and conditions of the facility",
+          "bbox": [
+            59.53,
+            270.25,
+            460.66,
+            281.89
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "unconditionally.",
+          "bbox": [
+            59.53,
+            284.42,
+            139.25,
+            296.06
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "2.    Upfront payment of fees:",
+          "bbox": [
+            59.53,
+            304.26,
+            207.6,
+            315.9
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "a.    Management fees (1% of loan amount) \u20a6107,750.0.",
+          "bbox": [
+            59.53,
+            324.11,
+            341.23,
+            335.75
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "b.    Preparation of Deed of Sublease \u20a625,000.00",
+          "bbox": [
+            59.53,
+            343.95,
+            304.18,
+            355.59
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "c.    Preparation of Deed of Legal Mortgage \u20a625,000.00;",
+          "bbox": [
+            59.53,
+            363.79,
+            339.16,
+            375.43
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "3.    All documents necessary to perfect Legal Mortgage which includes:",
+          "bbox": [
+            59.53,
+            383.63,
+            420.46,
+            395.27
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "-    Executed copy of Deed of Legal Mortgage between the Bank and the Borrower;",
+          "bbox": [
+            59.53,
+            403.48,
+            493.14,
+            415.12
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "-    Original Title documents in Bank\u2019s custody;",
+          "bbox": [
+            59.53,
+            423.32,
+            312.75,
+            434.96
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "4.    Letter of authority granting CMBank or any of its appointed Professional Valuer",
+          "bbox": [
+            59.53,
+            443.16,
+            478.37,
+            454.8
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "unrestricted access  to periodically re-evaluate the property financed which is House M52, a 3",
+          "bbox": [
+            59.53,
+            457.33,
+            534.97,
+            468.97
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "BEDROOM SEMI DETACHED BUNGALOW at Pacesetter Gardens Estate, Adegbayi Area, Off",
+          "bbox": [
+            59.53,
+            471.51,
+            532.2,
+            483.15
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Ibadan-Ife Expressway Ajoda, Ibadan, Oyo State.",
+          "bbox": [
+            59.53,
+            485.68,
+            303.8,
+            497.32
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "5.     Acceptance of the following conditions as it relates to the facility:",
+          "bbox": [
+            59.53,
+            505.52,
+            413.27,
+            517.16
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "a.    In the event of default beyond the due date as stated above, the payments so in arrears",
+          "bbox": [
+            59.53,
+            525.37,
+            525.92,
+            537.01
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "shall henceforth bear interest at a daily default rate of 1% computed from the date same",
+          "bbox": [
+            59.53,
+            539.54,
+            507.57,
+            551.18
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "became payable to the 15th day of the succeeding month;",
+          "bbox": [
+            59.53,
+            553.71,
+            375.75,
+            565.35
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "b.    A monthly late payment charge of 2.5% shall also accrue on any unpaid amount after the",
+          "bbox": [
+            59.53,
+            573.56,
+            534.15,
+            585.2
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "15th day of the succeeding month;",
+          "bbox": [
+            59.53,
+            587.73,
+            256.75,
+            599.37
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "c.    That default shall warrant invoking the Bank\u2019s right of sale on the mortgaged",
+          "bbox": [
+            59.53,
+            607.57,
+            502.74,
+            619.21
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "property which includes but is not limited to the occurrence of any of the following events:",
+          "bbox": [
+            59.53,
+            621.74,
+            520.81,
+            633.38
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "d.    Non-repayment of both principal and interest on due date for 3 (three) consecutive",
+          "bbox": [
+            59.53,
+            641.59,
+            513.09,
+            653.23
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "months;",
+          "bbox": [
+            59.53,
+            655.76,
+            105.79,
+            667.4
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "e.    Default in payment of yearly insurance premium and other fees as stipulated in the offer;",
+          "bbox": [
+            59.53,
+            675.6,
+            531.15,
+            687.24
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "f.    Part payment of monthly repayment due for any current month;",
+          "bbox": [
+            59.53,
+            695.45,
+            401.2,
+            707.09
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "6.    That the security for the facility is the Deed of Sublease on House M52 of the 3",
+          "bbox": [
+            59.53,
+            715.29,
+            481.53,
+            726.93
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "BEDROOM SEMI DETACHED BUNGALOW at Pacesetter Gardens Estate, Adegbayi Area, Off",
+          "bbox": [
+            59.53,
+            729.46,
+            532.2,
+            741.1
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Ibadan-Ife Expressway, Ajoda, Ibadan, Oyo State.",
+          "bbox": [
+            59.53,
+            743.63,
+            306.98,
+            755.27
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "7.    That CMBank shall arrange at the expense of AJIBADE MARY BOSE a fire insurance",
+          "bbox": [
+            59.53,
+            763.48,
+            507.93,
+            775.12
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "cover for the property and a mortgage protection policy for the borrower.",
+          "bbox": [
+            59.53,
+            777.65,
+            428.67,
+            789.29
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        }
+      ],
+      [
+        {
+          "text": "The premium payable on the fire insurance and mortgage protection policy is on per annual",
+          "bbox": [
+            59.53,
+            91.67,
+            521.57,
+            103.31
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "basis;",
+          "bbox": [
+            59.53,
+            105.84,
+            88.58,
+            117.48
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "8.    The Bank shall sell the collateral/property House M52, a 3 BEDROOM SEMI DETACHED",
+          "bbox": [
+            59.53,
+            125.68,
+            531.05,
+            137.32
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "BUNGALOW at Pacesetter, Gardens Estate, Adegbayi Area, Off Ibadan-Ife Expressway, Ajoda,",
+          "bbox": [
+            59.53,
+            139.85,
+            533.41,
+            151.49
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Ibadan) if the Borrower is in default of any of the terms and conditions therein stated;",
+          "bbox": [
+            59.53,
+            154.03,
+            490.48,
+            165.67
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "9.    AJIBADE MARY BOSE, or any person(s) designated by the borrower shall be responsible",
+          "bbox": [
+            59.53,
+            173.87,
+            531.04,
+            185.51
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "for all cost incurred in the recovery process in case of default.",
+          "bbox": [
+            59.53,
+            188.04,
+            370.66,
+            199.68
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "10.    This offer may be withdrawn:",
+          "bbox": [
+            59.53,
+            207.89,
+            234.72,
+            219.53
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "a.     If it is not accepted within two weeks of the receipt of the offer letter;",
+          "bbox": [
+            59.53,
+            227.73,
+            433.77,
+            239.37
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "b.     If any irregularity is discovered anytime.",
+          "bbox": [
+            59.53,
+            247.57,
+            287.99,
+            259.21
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Note: All the conditions must be complied with or else this offer shall be",
+          "bbox": [
+            59.53,
+            267.41,
+            469.39,
+            279.05
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "withdrawn.",
+          "bbox": [
+            59.53,
+            281.59,
+            123.1,
+            293.23
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "OTHER CONDITIONS",
+          "bbox": [
+            59.53,
+            301.43,
+            172.07,
+            313.07
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "1.    The Bank shall, without any recourse to AJIBADE MARY BOSE, debit the following",
+          "bbox": [
+            59.53,
+            321.27,
+            498.97,
+            332.91
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "charges to his account annually throughout the tenor of the facility except where the",
+          "bbox": [
+            59.53,
+            335.45,
+            487.3,
+            347.09
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "evidence of payment is provided:",
+          "bbox": [
+            59.53,
+            349.62,
+            227.27,
+            361.26
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "a.    Facility Maintenance Fee: \u20a64,000.0 monthly",
+          "bbox": [
+            59.53,
+            369.46,
+            301.35,
+            381.1
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "b.     Mortgage Protection premium per annum will be communicated to the customer in future",
+          "bbox": [
+            59.53,
+            389.3,
+            535.25,
+            400.94
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "c.     Ground rent per annum will be communicated to the customer in future",
+          "bbox": [
+            59.53,
+            409.15,
+            444.79,
+            420.79
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "2.     No waiver of interest or accumulated interest on this facility will be entertained.",
+          "bbox": [
+            59.53,
+            428.99,
+            486.49,
+            440.63
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "3.     The Bank reserves the right to debit the Borrower\u2019s Account with perfection costs without",
+          "bbox": [
+            59.53,
+            448.83,
+            535.38,
+            460.47
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "recourse to the Borrower.",
+          "bbox": [
+            59.53,
+            463.0,
+            188.15,
+            474.64
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "4.     Notwithstanding any repayment condition stated herein, this facility shall become",
+          "bbox": [
+            59.53,
+            482.85,
+            496.76,
+            494.49
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "repayable upon the occurrence of any of the following events:",
+          "bbox": [
+            59.53,
+            497.02,
+            371.71,
+            508.66
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "a.     If there should, in the opinion of the Bank, be a material adverse change in the financial",
+          "bbox": [
+            59.53,
+            516.86,
+            526.82,
+            528.5
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "condition of the Borrower.",
+          "bbox": [
+            59.53,
+            531.04,
+            190.31,
+            542.68
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "b.     The Bank reserves the right to cancel and/or reduce the facility in line with its ability to",
+          "bbox": [
+            59.53,
+            550.88,
+            522.68,
+            562.52
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "accommodate it within its legal lending limits and/or policy or portfolio constraints.",
+          "bbox": [
+            59.53,
+            565.05,
+            476.03,
+            576.69
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "DEFECT LIABILITY PERIOD",
+          "bbox": [
+            59.53,
+            604.74,
+            205.14,
+            616.38
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "1.0.   The following provisions set out the developer\u2019s responsibilities in the event of damage",
+          "bbox": [
+            59.53,
+            624.58,
+            526.88,
+            636.22
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "or destruction to permanent fixtures within the allocated housing unit.",
+          "bbox": [
+            59.53,
+            638.75,
+            412.99,
+            650.39
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "1.1.   Where there is a defect as to the installation and/or functionality of electrical",
+          "bbox": [
+            59.53,
+            658.59,
+            474.6,
+            670.23
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "fittings/lights, internal doors, sanitary wares (inclusive of the water closet, wash-hand basin,",
+          "bbox": [
+            59.53,
+            672.77,
+            522.94,
+            684.41
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "floor, drain, kitchen sink etc.), painting and wardrobes, the developer shall be liable for repairs",
+          "bbox": [
+            59.53,
+            686.94,
+            535.03,
+            698.58
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "no later than three months after the handover date.",
+          "bbox": [
+            59.53,
+            701.11,
+            321.02,
+            712.75
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "1.2.   Where there is a defect as to the installation and/or functionality of the septic tank,",
+          "bbox": [
+            59.53,
+            720.96,
+            506.84,
+            732.6
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "other external works (inclusive of inspection chambers, compound landscaping",
+          "bbox": [
+            59.53,
+            735.13,
+            457.18,
+            746.77
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "interlocks/concreting), the ceiling, roof and external doors, the developer shall be liable for",
+          "bbox": [
+            59.53,
+            749.3,
+            516.45,
+            760.94
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "repairs no later than six months after the handover date.",
+          "bbox": [
+            59.53,
+            763.48,
+            346.28,
+            775.12
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        }
+      ],
+      [
+        {
+          "text": "1.3.   Where such damage or destruction results in a need for the replacement of permanent",
+          "bbox": [
+            59.53,
+            91.67,
+            525.65,
+            103.31
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "fixtures, the developer shall not replace such fixture more than twice during the defect",
+          "bbox": [
+            59.53,
+            105.84,
+            497.06,
+            117.48
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "liability period.",
+          "bbox": [
+            59.53,
+            120.01,
+            133.97,
+            131.65
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "1.4.   Where such damage or destruction occurs towards the end of the defect liability period,",
+          "bbox": [
+            59.53,
+            139.85,
+            530.29,
+            151.49
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "the Developer shall be notified through Cooperative Mortgage Bank no later than 5 working",
+          "bbox": [
+            59.53,
+            154.03,
+            519.85,
+            165.67
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "days before the lapse of the defect liability period.",
+          "bbox": [
+            59.53,
+            168.2,
+            316.09,
+            179.84
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "1.5.   In the event that there is noncompliance with clause 1.4 above, the developer shall no",
+          "bbox": [
+            59.53,
+            188.04,
+            523.28,
+            199.68
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "longer be required to effect any repair on the allocated housing unit, and any claim of",
+          "bbox": [
+            59.53,
+            202.22,
+            491.29,
+            213.86
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "whatever nature shall be deemed to have been waived and shall become absolutely barred",
+          "bbox": [
+            59.53,
+            216.39,
+            519.44,
+            228.03
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "EVENTS OF DEFAULT",
+          "bbox": [
+            59.53,
+            256.07,
+            176.62,
+            267.71
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "1.     In the event of default to meet the Borrower\u2019s obligations to the Bank in respect of the",
+          "bbox": [
+            59.53,
+            275.92,
+            520.43,
+            287.56
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Facility granted, the Bank shall be at liberty to take immediate physical possession (where",
+          "bbox": [
+            59.53,
+            290.09,
+            514.6,
+            301.73
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "possible) of the property with a view to selling same towards liquidation of the Borrower\u2019s",
+          "bbox": [
+            59.53,
+            304.26,
+            510.91,
+            315.9
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "indebtedness to the Bank. Such recourse to the property shall however be without prejudice",
+          "bbox": [
+            59.53,
+            318.44,
+            523.44,
+            330.08
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "to other rights which the Bank may have against the Borrower;",
+          "bbox": [
+            59.53,
+            332.61,
+            379.3,
+            344.25
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "2.     Without prejudice to CMBank\u2019s right to demand repayment of outstanding amounts of",
+          "bbox": [
+            59.53,
+            352.45,
+            517.22,
+            364.09
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "this facility at any time, the occurrence of any of the following events shall cause all",
+          "bbox": [
+            59.53,
+            366.63,
+            482.25,
+            378.27
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "outstanding amounts under the facility to become immediately payable if:",
+          "bbox": [
+            59.53,
+            380.8,
+            432.75,
+            392.44
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "2.1.   The Borrower commits any breach or default under the terms of this facilities or of any",
+          "bbox": [
+            59.53,
+            400.64,
+            524.14,
+            412.28
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "other credit facilities granted to the Borrower by CMBank or any other creditors; and",
+          "bbox": [
+            59.53,
+            414.82,
+            487.31,
+            426.46
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "2.2.   In the opinion of CMBank, there are significant material adverse changes in the",
+          "bbox": [
+            59.53,
+            434.66,
+            486.41,
+            446.3
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Borrower\u2019s income or financial conditions;",
+          "bbox": [
+            59.53,
+            448.83,
+            270.39,
+            460.47
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "2.3.   The Bank is compelled by any Central Bank of Nigeria\u2019s rules and regulations or",
+          "bbox": [
+            59.53,
+            468.67,
+            488.99,
+            480.31
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "directive to call in the loan.",
+          "bbox": [
+            59.53,
+            482.85,
+            196.4,
+            494.49
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "POLICY CLAUSES",
+          "bbox": [
+            59.53,
+            522.53,
+            154.31,
+            534.17
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "1.     It is the Bank\u2019s policy to review facilities from time to time in the light of changing",
+          "bbox": [
+            59.53,
+            542.37,
+            497.14,
+            554.01
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "market conditions.",
+          "bbox": [
+            59.53,
+            556.55,
+            153.19,
+            568.19
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "2.     The Bank may decide to refinance the loan and all right of the Bank under this loan may",
+          "bbox": [
+            59.53,
+            576.39,
+            528.54,
+            588.03
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "be transferred to the underwriter with notice to the Borrower. The Borrower shall honor its",
+          "bbox": [
+            59.53,
+            590.56,
+            513.6,
+            602.2
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "obligations under this loan as it would with the Bank.",
+          "bbox": [
+            59.53,
+            604.74,
+            325.68,
+            616.38
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "3.     Any dispute, question or difference arising in connection with this agreement shall be",
+          "bbox": [
+            59.53,
+            624.58,
+            514.7,
+            636.22
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "referred to arbitration under the Arbitration and Conciliation Act Cap 19, Laws of the",
+          "bbox": [
+            59.53,
+            638.75,
+            483.5,
+            650.39
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "federation of Nigeria 1990. The arbitration shall be conducted by a single arbitrator to be",
+          "bbox": [
+            59.53,
+            652.93,
+            507.49,
+            664.57
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "appointed by the Chairman of the Nigerian Branch of the Chartered Institute of Arbitrator.",
+          "bbox": [
+            59.53,
+            667.1,
+            511.07,
+            678.74
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        }
+      ]
+    ]
+  },
+  "readiness-letter-master.pdf": {
+    "source": "readiness-letter-template.pdf",
+    "pages": [
+      [
+        {
+          "text": "17th March, 2026",
+          "bbox": [
+            59.52,
+            134.07,
+            157.98,
+            145.46
+          ],
+          "font": "TrebuchetMS-Bold",
+          "size": 10.82,
+          "flags": 16
+        },
+        {
+          "text": "PAL PENSION ALLIANCE LIMITED,",
+          "bbox": [
+            59.52,
+            173.67,
+            242.94,
+            185.06
+          ],
+          "font": "TrebuchetMS-Bold",
+          "size": 10.82,
+          "flags": 16
+        },
+        {
+          "text": "Plot 289, Adeogun Street",
+          "bbox": [
+            59.52,
+            193.59,
+            204.25,
+            204.98
+          ],
+          "font": "TrebuchetMS-Bold",
+          "size": 10.82,
+          "flags": 16
+        },
+        {
+          "text": "Victoria Island,",
+          "bbox": [
+            59.52,
+            213.39,
+            143.67,
+            224.78
+          ],
+          "font": "TrebuchetMS-Bold",
+          "size": 10.82,
+          "flags": 16
+        },
+        {
+          "text": "Lagos.",
+          "bbox": [
+            59.52,
+            233.19,
+            94.23,
+            244.58
+          ],
+          "font": "TrebuchetMS-Bold",
+          "size": 10.82,
+          "flags": 16
+        },
+        {
+          "text": "Dear Sir/Ma,",
+          "bbox": [
+            59.52,
+            272.94,
+            121.78,
+            284.33
+          ],
+          "font": "TrebuchetMS",
+          "size": 10.35,
+          "flags": 0
+        },
+        {
+          "text": "READINESS TO RECEIVE DISBURSEMENT AS EQUITY FOR MORTGAGE",
+          "bbox": [
+            59.52,
+            292.74,
+            438.85,
+            304.13
+          ],
+          "font": "TrebuchetMS-Bold",
+          "size": 11.05,
+          "flags": 16
+        },
+        {
+          "text": "We hereby assert the availability of the aforementioned property and our readiness to receive",
+          "bbox": [
+            59.52,
+            332.46,
+            528.32,
+            343.85
+          ],
+          "font": "TrebuchetMS",
+          "size": 10.35,
+          "flags": 0
+        },
+        {
+          "text": "disbursement on behalf of the above-named customer into the account details below:",
+          "bbox": [
+            59.52,
+            346.62,
+            483.72,
+            358.01
+          ],
+          "font": "TrebuchetMS",
+          "size": 10.35,
+          "flags": 0
+        },
+        {
+          "text": "Name: AJIBADE MARY BOSE",
+          "bbox": [
+            59.52,
+            386.22,
+            211.31,
+            397.61
+          ],
+          "font": "TrebuchetMS-Bold",
+          "size": 10.82,
+          "flags": 16
+        },
+        {
+          "text": "Account Number: 5980207331",
+          "bbox": [
+            59.52,
+            406.04,
+            228.9,
+            417.43
+          ],
+          "font": "TrebuchetMS-Bold",
+          "size": 10.82,
+          "flags": 16
+        },
+        {
+          "text": "Equity Amount: #4,225,000 (Four million, two hundred and twenty-five thousand",
+          "bbox": [
+            59.52,
+            425.96,
+            519.9,
+            437.35
+          ],
+          "font": "TrebuchetMS-Bold",
+          "size": 10.82,
+          "flags": 16
+        },
+        {
+          "text": "naira only)",
+          "bbox": [
+            59.52,
+            440.12,
+            119.54,
+            451.51
+          ],
+          "font": "TrebuchetMS-Bold",
+          "size": 10.82,
+          "flags": 16
+        },
+        {
+          "text": "Bank: Cooperative Mortgage Bank Ltd.",
+          "bbox": [
+            59.52,
+            459.8,
+            276.75,
+            471.19
+          ],
+          "font": "TrebuchetMS-Bold",
+          "size": 10.82,
+          "flags": 16
+        },
+        {
+          "text": "We also affirm our readiness to grant a Mortgage Loan of 10,775,000.00 only to AJIBADE",
+          "bbox": [
+            59.52,
+            499.52,
+            520.8,
+            510.91
+          ],
+          "font": "TrebuchetMS",
+          "size": 10.6,
+          "flags": 0
+        },
+        {
+          "text": "MARY BOSE",
+          "bbox": [
+            59.52,
+            511.16,
+            119.21,
+            522.55
+          ],
+          "font": "TrebuchetMS-Bold",
+          "size": 10.58,
+          "flags": 16
+        },
+        {
+          "text": "for the aforementioned property.",
+          "bbox": [
+            59.52,
+            525.32,
+            223.78,
+            536.71
+          ],
+          "font": "TrebuchetMS",
+          "size": 10.35,
+          "flags": 0
+        },
+        {
+          "text": "Thank you.",
+          "bbox": [
+            59.52,
+            565.04,
+            113.65,
+            576.43
+          ],
+          "font": "TrebuchetMS",
+          "size": 10.35,
+          "flags": 0
+        },
+        {
+          "text": "For: Cooperative Mortgage Bank Limited",
+          "bbox": [
+            70.82,
+            590.26,
+            267.12,
+            602.26
+          ],
+          "font": "Calibri-Bold",
+          "size": 12.0,
+          "flags": 16
+        },
+        {
+          "text": "Authorized Signatory",
+          "bbox": [
+            72.02,
+            650.14,
+            174.93,
+            662.14
+          ],
+          "font": "Calibri-Bold",
+          "size": 12.0,
+          "flags": 16
+        }
+      ]
+    ]
+  },
+  "title-letter-master.pdf": {
+    "source": "title-letter-template.pdf",
+    "pages": [
+      [
+        {
+          "text": "For: COOPERATIVE MORTGAGE BANK LIMITED.",
+          "bbox": [
+            72.02,
+            525.55,
+            319.6,
+            538.88
+          ],
+          "font": "Tahoma,Bold",
+          "size": 11.04,
+          "flags": 16
+        },
+        {
+          "text": "Legal Officer",
+          "bbox": [
+            72.02,
+            600.91,
+            143.77,
+            614.24
+          ],
+          "font": "Tahoma,Bold",
+          "size": 11.04,
+          "flags": 16
+        },
+        {
+          "text": "Business Development Manager",
+          "bbox": [
+            324.05,
+            600.91,
+            493.77,
+            614.24
+          ],
+          "font": "Tahoma,Bold",
+          "size": 11.04,
+          "flags": 16
+        },
+        {
+          "text": "17th March, 2026",
+          "bbox": [
+            59.53,
+            134.19,
+            158.63,
+            145.83
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "PAL PENSION ALLIANCE LIMITED,",
+          "bbox": [
+            59.53,
+            173.87,
+            245.1,
+            185.51
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Plot 289, Adeogun Street,",
+          "bbox": [
+            59.53,
+            193.71,
+            205.44,
+            205.35
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Victoria Island,",
+          "bbox": [
+            59.53,
+            213.56,
+            144.18,
+            225.2
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Lagos.",
+          "bbox": [
+            59.53,
+            233.4,
+            95.81,
+            245.04
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Dear Sir/Ma.",
+          "bbox": [
+            59.53,
+            273.08,
+            121.35,
+            284.72
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "CONFIRMATION OF TITLE DOCUMENT OF PROPERTY KNOWN AS3 BEDROOM SEMI",
+          "bbox": [
+            59.53,
+            312.77,
+            517.51,
+            324.41
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "DETACHED BUNGALOWLOCATED AT PACESETTER GARDENS ESTATE, AJODA IBADAN IN",
+          "bbox": [
+            59.53,
+            326.94,
+            546.91,
+            338.58
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "FAVOUR OFAJIBADE MARY BOSEPIN:PEN200066970833",
+          "bbox": [
+            59.53,
+            341.11,
+            379.39,
+            352.75
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Following the application and subsequent approval of the National Pension Commission",
+          "bbox": [
+            59.53,
+            380.8,
+            498.91,
+            392.44
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "(PenCom) for the release of 25% RSA balance as equity for the mortgage of AJIBADE MARY",
+          "bbox": [
+            59.53,
+            394.97,
+            524.68,
+            406.61
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "BOSE. We hereby confirm that a search was conducted to confirm the authenticity of the",
+          "bbox": [
+            59.53,
+            409.15,
+            509.17,
+            420.79
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "property document and it was confirmed that the property is free from all encumbrances.",
+          "bbox": [
+            59.53,
+            423.32,
+            509.9,
+            434.96
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Please find enclosed the search report on the property.",
+          "bbox": [
+            59.53,
+            443.16,
+            336.7,
+            454.8
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Thank you.",
+          "bbox": [
+            59.53,
+            482.85,
+            114.98,
+            494.49
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Yours Faithfully,",
+          "bbox": [
+            59.53,
+            502.69,
+            140.04,
+            514.33
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        }
+      ]
+    ]
+  },
+  "verification-letter-master.pdf": {
+    "source": "verification-letter-template.pdf",
+    "pages": [
+      [
+        {
+          "text": "For: Cooperative Mortgage Bank Limited",
+          "bbox": [
+            63.74,
+            499.63,
+            260.04,
+            511.63
+          ],
+          "font": "Calibri,Bold",
+          "size": 12.0,
+          "flags": 16
+        },
+        {
+          "text": "Credit and Risk Management",
+          "bbox": [
+            72.02,
+            559.51,
+            208.32,
+            571.51
+          ],
+          "font": "Calibri,Bold",
+          "size": 12.0,
+          "flags": 16
+        },
+        {
+          "text": "13th March, 2026",
+          "bbox": [
+            59.53,
+            191.36,
+            158.63,
+            203.0
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "PAL PENSION ALLIANCE LIMITED,",
+          "bbox": [
+            59.53,
+            231.04,
+            245.1,
+            242.68
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "Plot 289, Adeogun Street,",
+          "bbox": [
+            59.53,
+            250.89,
+            188.45,
+            262.53
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Victoria Island,",
+          "bbox": [
+            59.53,
+            270.73,
+            133.83,
+            282.37
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Lagos.",
+          "bbox": [
+            59.53,
+            290.57,
+            92.09,
+            302.21
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "VERIFICATION OF PROPERTY",
+          "bbox": [
+            59.53,
+            330.26,
+            220.3,
+            341.9
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "This is to confirm the authenticity of the property offer allocated to AJIBADE MARY BOSE,",
+          "bbox": [
+            59.53,
+            350.1,
+            517.71,
+            361.74
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "which is House M52, a 3 BEDROOM SEMI DETACHED BUNGALOW situated at Pacesetter",
+          "bbox": [
+            59.53,
+            364.27,
+            498.82,
+            375.91
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Gardens Estate, Adegbayi Area, off Ibadan-Ife Express way, Ibadan valued at #15,000,000",
+          "bbox": [
+            59.53,
+            378.44,
+            520.61,
+            390.08
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "(Fifteen million naira only) and available for sale. The allocation letter and offer of property",
+          "bbox": [
+            59.53,
+            392.62,
+            535.52,
+            404.26
+          ],
+          "font": "DejaVuSans-Bold",
+          "size": 10.0,
+          "flags": 20
+        },
+        {
+          "text": "is hereby confirmed as genuine and valid.",
+          "bbox": [
+            59.53,
+            406.79,
+            269.98,
+            418.43
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Thank you.",
+          "bbox": [
+            59.53,
+            446.48,
+            114.98,
+            458.12
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        },
+        {
+          "text": "Yours Faithfully,",
+          "bbox": [
+            59.53,
+            466.32,
+            140.04,
+            477.96
+          ],
+          "font": "DejaVuSans",
+          "size": 10.0,
+          "flags": 4
+        }
+      ]
+    ]
+  }
+}

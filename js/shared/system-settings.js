@@ -294,6 +294,7 @@ export function getDefaultSystemSettings() {
     },
     agentBankOptions,
     pfaOptions,
+    pfaAddresses: {},
     documentRequirements,
     documentRequirementRoles: normalizeDocumentRequirementRoles(),
     rolePermissions: {
@@ -385,6 +386,7 @@ function normalizeSystemSettings(data = {}) {
       ...(defaults.pfaOptions || []),
       ...(Array.isArray(data.pfaOptions) ? data.pfaOptions : [])
     ], defaults.pfaOptions),
+    pfaAddresses: parseObject(data.pfaAddresses, defaults.pfaAddresses),
     documentRequirements: normalizeDocumentRequirements(data.documentRequirements, defaults.documentRequirements),
     documentRequirementRoles: normalizeDocumentRequirementRoles(data.documentRequirementRoles, defaults.documentRequirementRoles),
     rolePermissions: {

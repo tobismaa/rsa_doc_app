@@ -710,6 +710,25 @@ function watchForCacheClearSignal() {
 
     cacheClearInProgress = true;
     try {
+      const securityControls = data?.securityControls && typeof data.securityControls === 'object'
+        ? data.securityControls
+        : {};
+      const forceLogoutToken = String(securityControls.forceLogoutToken || '').trim();
+      const completedToken = String(localStorage.getItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY) || '').trim();
+      const countdownSetting = String(securityControls.forceLogoutCountdown || '11m').trim() || '11m';
+      if (forceLogoutToken && forceLogoutToken !== completedToken) {
+        const currentActiveToken = String(localStorage.getItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY) || '').trim();
+        const existingDeadline = Number(localStorage.getItem(FORCE_LOGOUT_DEADLINE_KEY) || 0);
+        const nextDeadline = getForceLogoutDeadlineMs(forceLogoutToken, parseForceLogoutDurationMs(countdownSetting));
+        if (currentActiveToken !== forceLogoutToken || !Number.isFinite(existingDeadline) || existingDeadline <= 0) {
+          localStorage.setItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY, forceLogoutToken);
+          localStorage.setItem(FORCE_LOGOUT_DEADLINE_KEY, String(nextDeadline));
+          localStorage.removeItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY);
+        }
+      }
+    } catch (_) {}
+
+    try {
       localStorage.setItem(CACHE_CLEAR_HANDLED_KEY, token);
       localStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
       sessionStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
@@ -736,13 +755,16 @@ function watchForSecuritySignals(userData = {}) {
     showDashboardAnnouncement(systemSettings.dashboardAnnouncement);
     bindInactivityHandlers(systemSettings.securityControls.sessionTimeoutMinutes);
 
-    const forceLogoutToken = String(systemSettings.securityControls.forceLogoutToken || '').trim();
+    const configuredForceLogoutToken = String(systemSettings.securityControls.forceLogoutToken || '').trim();
     const completed = String(localStorage.getItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY) || '').trim();
     const role = String(userData.role || '-').trim() || '-';
     const countdownSetting = String(systemSettings.securityControls.forceLogoutCountdown || '11m');
     const activeTokenBefore = String(localStorage.getItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY) || '').trim();
     const dismissedTokenBefore = String(localStorage.getItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY) || '').trim();
     const deadlineBefore = Number(localStorage.getItem(FORCE_LOGOUT_DEADLINE_KEY) || 0);
+    const persistedForceLogoutToken = activeTokenBefore && activeTokenBefore !== completed ? activeTokenBefore : '';
+    const forceLogoutToken = configuredForceLogoutToken || persistedForceLogoutToken;
+    const hasPersistedDeadline = Number.isFinite(deadlineBefore) && deadlineBefore > 0;
     if (!forceLogoutToken || isMaintenanceExemptRole(userData.role) || forceLogoutToken === completed) {
       renderForceLogoutDebugStrip({
         role,
@@ -769,6 +791,8 @@ function watchForSecuritySignals(userData = {}) {
       localStorage.setItem(FORCE_LOGOUT_DEADLINE_KEY, String(deadlineMs));
       localStorage.removeItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY);
       forceLogoutNoticeActive = false;
+    } else if (!configuredForceLogoutToken && persistedForceLogoutToken && hasPersistedDeadline) {
+      deadlineMs = deadlineBefore;
     }
 
     renderForceLogoutDebugStrip({

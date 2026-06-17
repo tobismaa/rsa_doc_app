@@ -28,6 +28,7 @@ import {
     getSubmissionCommissionAmount,
     resolveSubmissionCommissionRate
 } from './shared/commission-config.js?v=20260507a';
+import { getSystemSettings } from './shared/system-settings.js?v=20260615a';
 import {
     getTimestampMillis as getStageTimestampMillis,
     getSubmissionCurrentStageEntryAt,
@@ -37,7 +38,8 @@ import {
     getSubmissionRejectionEntryAt,
     getSubmissionFinalSubmissionEntryAt,
     getSubmissionPaymentEntryAt,
-    getSubmissionPaidEntryAt
+    getSubmissionPaidEntryAt,
+    getSubmissionClearedEntryAt
 } from './shared/submission-stage.js?v=20260609a';
 
 // Security: suppress console output in admin dashboard.
@@ -89,10 +91,196 @@ let trackAppsPage = 1;
 let currentParentTab = 'user-management';
 let currentLeafTab = 'users';
 let selectedLeaveUserId = '';
+let trackReportParsedNames = [];
+let trackReportPreviewRows = [];
+let trackReportUnmatchedEntries = [];
+let currentDocumentGenerationSubmissionId = '';
+let generatedDocumentPreviewItems = [];
+let pdfFontAssetCache = null;
+let adminSystemSettings = {};
+
+const GENERATED_DOCUMENT_TYPES = [
+    { id: 'offer_letter', label: 'Offer Letter', description: 'Mortgage facility offer and terms.' },
+    { id: 'allocation_letter', label: 'Allocation Letter', description: 'Property allocation and estate terms.' },
+    { id: 'availability_letter', label: 'Availability Letter', description: 'Confirms availability of allocated property.' },
+    { id: 'indemnity_letter', label: 'Indemnity Letter', description: 'RSA equity indemnity in favour of the PFA.' },
+    { id: 'readiness_letter', label: 'Readiness Letter', description: 'Confirms readiness to receive disbursement.' },
+    { id: 'title_letter', label: 'Title Letter', description: 'Confirms title authenticity and search status.' },
+    { id: 'verification_letter', label: 'Verification Letter', description: 'Verifies property offer and sale validity.' }
+];
+
+const GENERATED_DOCUMENT_MASTER_FILES = {
+    offer_letter: 'offer-letter-master.pdf',
+    allocation_letter: 'allocation-letter-master.pdf',
+    availability_letter: 'availability-letter-master.pdf',
+    indemnity_letter: 'indemnity-letter-master.pdf',
+    readiness_letter: 'readiness-letter-master.pdf',
+    title_letter: 'title-letter-master.pdf',
+    verification_letter: 'verification-letter-master.pdf'
+};
+
+const GENERATED_DOCUMENT_PAGE_FORMATS_MM = {
+    offer_letter: {
+        0: [210, 260],
+        1: [210, 275],
+        2: [210, 275],
+        3: [210, 275]
+    },
+    allocation_letter: {
+        0: [215, 240],
+        1: [215, 260]
+    },
+    indemnity_letter: {
+        0: [215, 260],
+        1: [220, 290]
+    },
+    verification_letter: {
+        0: [210, 240]
+    },
+    availability_letter: {
+        0: [215, 255]
+    },
+    readiness_letter: {
+        0: [210, 260]
+    },
+    title_letter: {
+        0: [215, 260]
+    }
+};
+
+const PDF_TEMPLATE_CONFIGS = {
+    offer_letter: {
+        fileName: 'offer-letter-template.pdf',
+        wipeZones: [
+            { page: 0, rect: [201.26, 336.3, 401.98, 349.2] },
+            { page: 0, rect: [327.0, 472.2, 535.75, 502.1] },
+            { page: 0, rect: [201.26, 523.2, 535.75, 536.3] },
+            { page: 1, rect: [313.0, 91.1, 512.8, 104.0] },
+            { page: 1, rect: [414.5, 456.8, 536.0, 486.4] },
+            { page: 1, rect: [414.8, 714.8, 536.0, 727.4] },
+            { page: 2, rect: [328.0, 125.1, 531.2, 138.0] }
+        ],
+        fields: [
+            { page: 0, key: 'currentDate', rect: [59.53, 134.19, 158.63, 145.83], fontWeight: 'bold' },
+            { page: 0, key: 'customerName', rect: [59.53, 154.03, 174.94, 165.67], fontWeight: 'bold' },
+            { page: 0, key: 'customerAddress', rect: [59.53, 173.87, 372.49, 185.51], fontWeight: 'regular' },
+            { page: 0, key: 'customerName', rect: [201.26, 285.84, 304.01, 297.48], fontWeight: 'regular' },
+            { page: 0, key: 'customerAddress', rect: [201.26, 302.85, 480.38, 314.49], fontWeight: 'regular' },
+            { page: 0, key: 'offerPropertyValueLine', rect: [201.26, 336.86, 401.98, 348.5], fontWeight: 'regular' },
+            { page: 0, key: 'loanAmountText', rect: [201.26, 404.89, 266.88, 416.53], fontWeight: 'regular' },
+            { page: 0, key: 'offerPurposeFragment', rect: [327.0, 472.93, 535.75, 501.57], fontWeight: 'regular', allowWrap: true },
+            { page: 0, key: 'offerEquityLine', rect: [201.26, 523.95, 535.75, 535.59], fontWeight: 'regular' },
+            { page: 1, key: 'customerName', rect: [59.53, 148.36, 174.94, 160.0], fontWeight: 'bold' },
+            { page: 1, key: 'offerSecurityFragment', rect: [313.3, 91.67, 512.45, 103.31], fontWeight: 'bold' },
+            { page: 1, key: 'offerReevaluateFragment', rect: [415.0, 457.33, 535.75, 485.98], fontWeight: 'bold', allowWrap: true },
+            { page: 1, key: 'offerClause6Fragment', rect: [415.11, 715.29, 535.75, 726.93], fontWeight: 'bold' },
+            { page: 1, key: 'customerName', rect: [311.39, 763.48, 426.8, 775.12], fontWeight: 'bold' },
+            { page: 2, key: 'offerClause8Fragment', rect: [328.48, 125.68, 531.05, 137.32], fontWeight: 'bold' },
+            { page: 2, key: 'customerName', rect: [81.79, 173.87, 197.2, 185.51], fontWeight: 'bold' },
+            { page: 2, key: 'customerName', rect: [283.91, 321.27, 399.32, 332.91], fontWeight: 'bold' }
+        ]
+    },
+    allocation_letter: {
+        fileName: 'allocation-letter-template.pdf',
+        wipeZones: [
+            { page: 0, rect: [150.0, 282.0, 459.0, 295.0] },
+            { page: 1, rect: [334.6, 214.0, 529.2, 226.8] }
+        ],
+        fields: [
+            { page: 0, key: 'currentDate', rect: [59.53, 140.84, 151.67, 152.48], fontWeight: 'bold' },
+            { page: 0, key: 'customerName', rect: [59.53, 160.68, 174.94, 172.32], fontWeight: 'bold' },
+            { page: 0, key: 'customerAddress', rect: [59.53, 180.52, 372.49, 192.16], fontWeight: 'regular' },
+            { page: 0, key: 'allocationHouseLine', rect: [150.77, 282.57, 458.16, 294.21], fontWeight: 'regular' },
+            { page: 0, key: 'currentDate', rect: [491.47, 296.74, 510.33, 308.38], fontWeight: 'bold' },
+            { page: 0, key: 'currentDateShort', rect: [59.53, 310.92, 129.33, 322.56], fontWeight: 'bold' },
+            { page: 1, key: 'allocationValueLine', rect: [335.07, 214.54, 528.92, 226.18], fontWeight: 'regular' }
+        ]
+    },
+    availability_letter: {
+        fileName: 'availability-letter-template.pdf',
+        wipeZones: [
+            { page: 0, rect: [59.0, 366.4, 488.4, 379.4] },
+            { page: 0, rect: [59.0, 380.6, 399.6, 393.5] },
+            { page: 0, rect: [59.0, 394.8, 527.5, 407.8] }
+        ],
+        fields: [
+            { page: 0, key: 'currentDate', rect: [59.53, 148.84, 158.63, 160.48], fontWeight: 'bold' },
+            { page: 0, key: 'pfaName', rect: [59.53, 188.52, 241.92, 200.16], fontWeight: 'bold' },
+            { page: 0, key: 'availabilityLine1', rect: [59.53, 367.11, 487.93, 378.75], fontWeight: 'regular' },
+            { page: 0, key: 'availabilityLine2', rect: [59.53, 381.28, 398.96, 392.92], fontWeight: 'regular' },
+            { page: 0, key: 'availabilityLine3', rect: [59.53, 395.45, 526.97, 407.09], fontWeight: 'regular' }
+        ]
+    },
+    indemnity_letter: {
+        fileName: 'indemnity-letter-template.pdf',
+        wipeZones: [
+            { page: 0, rect: [59.0, 598.3, 191.5, 611.5] },
+            { page: 1, rect: [151.8, 555.8, 274.0, 568.9] },
+            { page: 1, rect: [147.0, 575.5, 259.2, 588.8] }
+        ],
+        fields: [
+            { page: 0, key: 'pfaName', rect: [59.53, 171.43, 241.92, 183.07] },
+            { page: 0, key: 'pfaName', rect: [98.88, 292.16, 281.27, 303.8] },
+            { page: 0, key: 'pfaName', rect: [71.35, 610.41, 253.74, 622.05] },
+            { page: 0, key: 'customerName', rect: [75.43, 599.07, 190.84, 610.71] },
+            { page: 1, key: 'customerName', rect: [157.35, 556.55, 272.76, 568.19] },
+            { page: 1, key: 'rsaPin', rect: [152.28, 576.39, 258.33, 588.03] },
+            { page: 1, key: 'pfaName', rect: [290.69, 249.1, 473.08, 260.74] },
+            { page: 1, key: 'pfaName', rect: [361.1, 639.52, 535.92, 651.16] }
+        ]
+    },
+    readiness_letter: {
+        fileName: 'readiness-letter-template.pdf',
+        wipeZones: [
+            { page: 0, rect: [59.0, 385.5, 212.0, 398.4] },
+            { page: 0, rect: [59.0, 405.3, 229.6, 418.1] },
+            { page: 0, rect: [59.0, 425.2, 520.5, 438.1] },
+            { page: 0, rect: [404.0, 498.7, 521.4, 523.4] }
+        ],
+        fields: [
+            { page: 0, key: 'currentDate', rect: [59.52, 134.07, 157.98, 145.46], fontWeight: 'bold' },
+            { page: 0, key: 'pfaName', rect: [59.52, 173.67, 238.7, 185.06], fontWeight: 'bold' },
+            { page: 0, key: 'readinessNameLine', rect: [59.52, 386.22, 211.31, 397.61], fontWeight: 'bold' },
+            { page: 0, key: 'readinessAccountLine', rect: [59.52, 406.04, 228.9, 417.43], fontWeight: 'bold' },
+            { page: 0, key: 'readinessEquityLine', rect: [59.52, 425.96, 519.9, 437.35], fontWeight: 'bold' },
+            { page: 0, key: 'readinessLoanLine', rect: [405.0, 499.52, 520.8, 522.55], fontWeight: 'bold', allowWrap: true }
+        ]
+    },
+    title_letter: {
+        fileName: 'title-letter-template.pdf',
+        wipeZones: [
+            { page: 0, rect: [127.5, 340.4, 380.2, 353.5] },
+            { page: 0, rect: [442.2, 394.2, 525.3, 421.5] }
+        ],
+        fields: [
+            { page: 0, key: 'currentDate', rect: [59.53, 134.19, 158.63, 145.83], fontWeight: 'bold' },
+            { page: 0, key: 'pfaName', rect: [59.53, 173.87, 241.92, 185.51], fontWeight: 'bold' },
+            { page: 0, key: 'houseType', rect: [418.49, 312.77, 517.51, 324.41] },
+            { page: 0, key: 'houseType', rect: [59.53, 326.94, 189.5, 338.58] },
+            { page: 0, key: 'titleHeaderLine', rect: [128.15, 341.11, 379.39, 352.75], fontWeight: 'bold' },
+            { page: 0, key: 'titleBodyLine', rect: [442.9, 394.97, 524.68, 420.79], fontWeight: 'bold', allowWrap: true }
+        ]
+    },
+    verification_letter: {
+        fileName: 'verification-letter-template.pdf',
+        wipeZones: [
+            { page: 0, rect: [59.0, 349.3, 515.2, 362.5] },
+            { page: 0, rect: [59.0, 363.5, 499.5, 376.6] },
+            { page: 0, rect: [59.0, 377.7, 521.4, 390.8] }
+        ],
+        fields: [
+            { page: 0, key: 'currentDate', rect: [59.53, 191.36, 158.63, 203.0], fontWeight: 'bold' },
+            { page: 0, key: 'pfaName', rect: [59.53, 231.04, 241.92, 242.68], fontWeight: 'bold' },
+            { page: 0, key: 'verificationLine1', rect: [59.53, 350.1, 514.53, 361.74], fontWeight: 'regular' },
+            { page: 0, key: 'verificationLine2', rect: [59.53, 364.27, 498.82, 375.91], fontWeight: 'regular' },
+            { page: 0, key: 'verificationLine3', rect: [59.53, 378.44, 520.61, 390.08], fontWeight: 'regular' }
+        ]
+    }
+};
 
 const TAB_GROUPS = {
     'user-management': ['users', 'pending-users', 'pending-agents', 'registered-agents'],
-    'application-management': ['draft-docs', 'pending-docs', 'approved-docs', 'rejected-docs', 'escalations', 'track-apps', 'finally-submitted', 'payments', 'agent-commissions']
+    'application-management': ['draft-docs', 'pending-docs', 'approved-docs', 'rejected-docs', 'escalations', 'track-apps', 'generate-documents', 'finally-submitted', 'payments', 'agent-commissions']
 };
 
 const TAB_LABELS = {
@@ -106,6 +294,7 @@ const TAB_LABELS = {
     'rejected-docs': 'Rejected',
     escalations: 'Escalations',
     'track-apps': 'Track Applications',
+    'generate-documents': 'Generate Document',
     'finally-submitted': 'Final Submission',
     payments: 'Payment',
     'agent-commissions': 'Agent Commissions'
@@ -132,6 +321,10 @@ function getAdminSubTabCount(tabId) {
     if (tabId === 'rejected-docs') return allSubmissions.filter((s) => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase())).length;
     if (tabId === 'escalations') return allEscalations.filter((item) => item?.escalationHandled !== true).length;
     if (tabId === 'track-apps') return allSubmissions.filter((s) => String(s.status || '').toLowerCase() !== 'draft').length;
+    if (tabId === 'generate-documents') return allSubmissions.filter((s) => {
+        const status = String(s.status || '').toLowerCase();
+        return status === 'processing_to_pfa' || status === 'approved';
+    }).length;
     if (tabId === 'finally-submitted') return allSubmissions.filter((s) => s.finalSubmitted === true || s.rsaSubmitted === true).length;
     if (tabId === 'payments') return allSubmissions.filter((s) => {
         const status = String(s.status || '').toLowerCase();
@@ -293,6 +486,28 @@ const trackNextPageBtn = document.getElementById('trackNextPageBtn');
 const trackPageInfo = document.getElementById('trackPageInfo');
 const trackJumpPageInput = document.getElementById('trackJumpPageInput');
 const trackJumpPageBtn = document.getElementById('trackJumpPageBtn');
+const generateDocumentsTableBody = document.getElementById('generateDocumentsTableBody');
+const openTrackReportInputModalBtn = document.getElementById('openTrackReportInputModalBtn');
+const downloadTrackTemplateBtn = document.getElementById('downloadTrackTemplateBtn');
+const trackReportFileInput = document.getElementById('trackReportFileInput');
+const trackReportNamesInput = document.getElementById('trackReportNamesInput');
+const generateTrackReportBtn = document.getElementById('generateTrackReportBtn');
+const clearTrackReportBtn = document.getElementById('clearTrackReportBtn');
+const trackReportInlineStatus = document.getElementById('trackReportInlineStatus');
+const trackReportInputModal = document.getElementById('trackReportInputModal');
+const trackReportPreviewModal = document.getElementById('trackReportPreviewModal');
+const trackReportPreviewSummary = document.getElementById('trackReportPreviewSummary');
+const trackReportPreviewAlerts = document.getElementById('trackReportPreviewAlerts');
+const trackReportPreviewTableBody = document.getElementById('trackReportPreviewTableBody');
+const downloadTrackReportBtn = document.getElementById('downloadTrackReportBtn');
+const documentGenerationModal = document.getElementById('documentGenerationModal');
+const documentGenerationCustomerName = document.getElementById('documentGenerationCustomerName');
+const documentGenerationMeta = document.getElementById('documentGenerationMeta');
+const documentGenerationChecklist = document.getElementById('documentGenerationChecklist');
+const generatedDocumentsPreviewModal = document.getElementById('generatedDocumentsPreviewModal');
+const generatedDocumentsPreviewMeta = document.getElementById('generatedDocumentsPreviewMeta');
+const generatedDocumentsPreviewList = document.getElementById('generatedDocumentsPreviewList');
+const saveAllGeneratedDocumentsBtn = document.getElementById('saveAllGeneratedDocumentsBtn');
 const auditTableBody = document.getElementById('auditTableBody');
 const notification = document.getElementById('notification');
 let notificationTimer = null;
@@ -311,6 +526,12 @@ const agentCommissionBreakdownBody = document.getElementById('agentCommissionBre
 const agentCommissionSentTabBtn = document.getElementById('agentCommissionSentTabBtn');
 const agentCommissionActiveTabBtn = document.getElementById('agentCommissionActiveTabBtn');
 const agentCommissionClearedTabBtn = document.getElementById('agentCommissionClearedTabBtn');
+const trackApplicationModal = document.getElementById('trackApplicationModal');
+const trackApplicationCustomerName = document.getElementById('trackApplicationCustomerName');
+const trackApplicationMeta = document.getElementById('trackApplicationMeta');
+const trackApplicationStatusBadges = document.getElementById('trackApplicationStatusBadges');
+const trackApplicationSummary = document.getElementById('trackApplicationSummary');
+const trackApplicationTimeline = document.getElementById('trackApplicationTimeline');
 const profileNameEl = document.getElementById('profileName');
 const profileRegisteredAtEl = document.getElementById('profileRegisteredAt');
 const profileEmailEl = document.getElementById('profileEmail');
@@ -718,6 +939,14 @@ function setupForceRefreshButtons() {
     });
 }
 
+async function loadAdminSystemSettings() {
+    try {
+        adminSystemSettings = await getSystemSettings(db, { force: true });
+    } catch (_) {
+        adminSystemSettings = {};
+    }
+}
+
 // ==================== CHECK ADMIN AUTH ====================
 async function checkAdminAuth() {
     auth.onAuthStateChanged(async (user) => {
@@ -782,6 +1011,7 @@ async function checkAdminAuth() {
             if (userData.role === 'admin') {
                 currentAdmin = user;
                 currentAdminProfileData = userData;
+                loadAdminSystemSettings();
                 ensureRoundRobinUnifiedTab();
                 adminName.textContent = userData.fullName || user.email;
                 adminAvatar.src = user.photoURL || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'40\' height=\'40\' viewBox=\'0 0 40 40\'%3E%3Ccircle cx=\'20\' cy=\'20\' r=\'20\' fill=\'%23003366\'/%3E%3Ctext x=\'20\' y=\'25\' text-anchor=\'middle\' fill=\'%23ffffff\' font-size=\'16\'%3EUser%3C/text%3E%3C/svg%3E';
@@ -942,6 +1172,20 @@ function setupEventListeners() {
     closeAdminRejectionReasonBtn?.addEventListener('click', closeAdminRejectionReasonModalFn);
     document.getElementById('closeAgentCommissionModal')?.addEventListener('click', closeAgentCommissionModalFn);
     document.getElementById('closeAgentCommissionModalFooterBtn')?.addEventListener('click', closeAgentCommissionModalFn);
+    document.getElementById('closeTrackApplicationModal')?.addEventListener('click', closeTrackApplicationModalFn);
+    document.getElementById('closeTrackApplicationModalFooterBtn')?.addEventListener('click', closeTrackApplicationModalFn);
+    document.getElementById('closeDocumentGenerationModal')?.addEventListener('click', closeDocumentGenerationModalFn);
+    document.getElementById('closeDocumentGenerationFooterBtn')?.addEventListener('click', closeDocumentGenerationModalFn);
+    document.getElementById('selectAllDocumentsBtn')?.addEventListener('click', toggleAllDocumentSelections);
+    document.getElementById('generateSelectedDocumentsBtn')?.addEventListener('click', generateSelectedDocumentsForPreview);
+    document.getElementById('closeGeneratedDocumentsPreviewModal')?.addEventListener('click', closeGeneratedDocumentsPreviewModalFn);
+    document.getElementById('closeGeneratedDocumentsPreviewFooterBtn')?.addEventListener('click', closeGeneratedDocumentsPreviewModalFn);
+    saveAllGeneratedDocumentsBtn?.addEventListener('click', saveAllGeneratedDocumentsToFolder);
+    openTrackReportInputModalBtn?.addEventListener('click', openTrackReportInputModalFn);
+    document.getElementById('closeTrackReportInputModal')?.addEventListener('click', closeTrackReportInputModalFn);
+    document.getElementById('closeTrackReportInputFooterBtn')?.addEventListener('click', closeTrackReportInputModalFn);
+    document.getElementById('closeTrackReportPreviewModal')?.addEventListener('click', closeTrackReportPreviewModalFn);
+    document.getElementById('closeTrackReportPreviewFooterBtn')?.addEventListener('click', closeTrackReportPreviewModalFn);
     agentCommissionSentTabBtn?.addEventListener('click', () => switchAgentCommissionBreakdownTab('sent_to_pfa'));
     agentCommissionActiveTabBtn?.addEventListener('click', () => switchAgentCommissionBreakdownTab('active'));
     agentCommissionClearedTabBtn?.addEventListener('click', () => switchAgentCommissionBreakdownTab('cleared'));
@@ -981,6 +1225,11 @@ function setupEventListeners() {
             trackJumpPageBtn?.click();
         }
     });
+    downloadTrackTemplateBtn?.addEventListener('click', downloadTrackReportTemplate);
+    trackReportFileInput?.addEventListener('change', handleTrackReportFileSelected);
+    generateTrackReportBtn?.addEventListener('click', generateTrackReportPreview);
+    clearTrackReportBtn?.addEventListener('click', clearTrackReportInputs);
+    downloadTrackReportBtn?.addEventListener('click', downloadTrackReportWorkbook);
 
     document.getElementById('closeViewer')?.addEventListener('click', closeViewerModal);
 
@@ -988,6 +1237,11 @@ function setupEventListeners() {
         if (e.target === viewerModal) closeViewerModal();
         if (e.target === adminRejectionReasonModal) closeAdminRejectionReasonModalFn();
         if (e.target === agentCommissionModal) closeAgentCommissionModalFn();
+        if (e.target === trackApplicationModal) closeTrackApplicationModalFn();
+        if (e.target === documentGenerationModal) closeDocumentGenerationModalFn();
+        if (e.target === generatedDocumentsPreviewModal) closeGeneratedDocumentsPreviewModalFn();
+        if (e.target === trackReportInputModal) closeTrackReportInputModalFn();
+        if (e.target === trackReportPreviewModal) closeTrackReportPreviewModalFn();
         const userModal = document.getElementById('userModal');
         if (e.target === userModal) closeUserModal();
         const leaveModal = document.getElementById('leaveModal');
@@ -1025,6 +1279,42 @@ function closeAgentCommissionModalFn() {
     agentCommissionSentTabBtn?.classList.add('active');
     agentCommissionActiveTabBtn?.classList.remove('active');
     agentCommissionClearedTabBtn?.classList.remove('active');
+}
+
+function closeTrackApplicationModalFn() {
+    if (trackApplicationModal) trackApplicationModal.classList.remove('active');
+    if (trackApplicationCustomerName) trackApplicationCustomerName.textContent = '-';
+    if (trackApplicationMeta) trackApplicationMeta.textContent = '-';
+    if (trackApplicationStatusBadges) trackApplicationStatusBadges.innerHTML = '';
+    if (trackApplicationSummary) trackApplicationSummary.innerHTML = '';
+    if (trackApplicationTimeline) trackApplicationTimeline.innerHTML = '';
+}
+
+function closeDocumentGenerationModalFn() {
+    currentDocumentGenerationSubmissionId = '';
+    if (documentGenerationModal) documentGenerationModal.classList.remove('active');
+    if (documentGenerationCustomerName) documentGenerationCustomerName.textContent = '-';
+    if (documentGenerationMeta) documentGenerationMeta.textContent = '-';
+    if (documentGenerationChecklist) documentGenerationChecklist.innerHTML = '';
+}
+
+function closeGeneratedDocumentsPreviewModalFn() {
+    if (generatedDocumentsPreviewModal) generatedDocumentsPreviewModal.classList.remove('active');
+    if (generatedDocumentsPreviewList) generatedDocumentsPreviewList.innerHTML = '';
+    if (generatedDocumentsPreviewMeta) generatedDocumentsPreviewMeta.textContent = '';
+    resetGeneratedDocumentPreviewItems();
+}
+
+function openTrackReportInputModalFn() {
+    if (trackReportInputModal) trackReportInputModal.classList.add('active');
+}
+
+function closeTrackReportInputModalFn() {
+    if (trackReportInputModal) trackReportInputModal.classList.remove('active');
+}
+
+function closeTrackReportPreviewModalFn() {
+    if (trackReportPreviewModal) trackReportPreviewModal.classList.remove('active');
 }
 
 // ==================== TAB SWITCHING ====================
@@ -1078,6 +1368,9 @@ function runTabEffects(tabId) {
     if (tabId === 'track-apps') {
         renderTrackApplications();
     }
+    if (tabId === 'generate-documents') {
+        renderGenerateDocumentsTable();
+    }
     if (tabId === 'finally-submitted') {
         renderFinallySubmitted();
     }
@@ -1111,6 +1404,7 @@ function switchLeafTab(tabId) {
         'rejected-docs': 'Application Management - Rejected',
         escalations: 'Application Management - Escalations',
         'track-apps': 'Application Management - Track Applications',
+        'generate-documents': 'Application Management - Generate Document',
         'finally-submitted': 'Application Management - Final Submission',
         payments: 'Application Management - Payment',
         'agent-commissions': 'Application Management - Agent Commissions',
@@ -2966,6 +3260,2556 @@ function matchesExactDate(ts, dateValue) {
     return `${year}-${month}-${day}` === dateValue;
 }
 
+function getTrackStatusBadgeClass(status) {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (['rejected', 'rejected_by_reviewer', 'rejected_by_rsa'].includes(normalized)) return 'status-rejected';
+    if (['pending', 'submitted', 'resubmitted', 'draft'].includes(normalized)) return 'status-pending';
+    return 'status-approved';
+}
+
+function getApplicationCurrentStage(submission = {}) {
+    const status = String(submission.status || '').trim().toLowerCase();
+    if (status === 'draft') return { key: 'draft', label: 'Draft' };
+    if (['pending', 'submitted', 'resubmitted', 'rejected', 'rejected_by_reviewer'].includes(status)) {
+        return { key: 'reviewer', label: status === 'rejected' || status === 'rejected_by_reviewer' ? 'Reviewer Rejected' : 'Reviewer Stage' };
+    }
+    if (['approved', 'processing_to_pfa', 'rejected_by_rsa'].includes(status)) {
+        return { key: 'rsa', label: status === 'rejected_by_rsa' ? 'RSA Rejected' : 'RSA Stage' };
+    }
+    if (['sent_to_pfa', 'rsa_submitted', 'paid'].includes(status) || submission.finalSubmitted === true || submission.rsaSubmitted === true) {
+        return { key: 'payment', label: status === 'paid' ? 'Payment Confirmed' : 'Payment Stage' };
+    }
+    if (status === 'cleared') return { key: 'cleared', label: 'Cleared' };
+    return { key: 'unknown', label: formatStatusLabel(status) };
+}
+
+function getTrackStageTimestamp(submission = {}, stageKey) {
+    if (stageKey === 'upload') {
+        return submission.reuploadedAt || submission.uploadedAt || submission.submittedAt || submission.createdAt || null;
+    }
+    if (stageKey === 'reviewer') {
+        return submission.reviewedAt || getSubmissionReviewEntryAt(submission) || null;
+    }
+    if (stageKey === 'rsa') {
+        return submission.rsaSubmittedAt
+            || submission.finalSubmittedAt
+            || submission.rsaAssignedAt
+            || getSubmissionApprovalEntryAt(submission)
+            || null;
+    }
+    if (stageKey === 'payment') {
+        return submission.paidAt
+            || submission.paymentAssignedAt
+            || getSubmissionPaymentEntryAt(submission)
+            || null;
+    }
+    return null;
+}
+
+function getTrackTimelineState(submission = {}, stageKey) {
+    const currentStage = getApplicationCurrentStage(submission);
+    const normalizedStatus = String(submission.status || '').trim().toLowerCase();
+    const order = { upload: 0, reviewer: 1, rsa: 2, payment: 3, cleared: 4 };
+    const currentOrder = order[currentStage.key] ?? -1;
+    const stageOrder = order[stageKey] ?? -1;
+
+    if ((normalizedStatus === 'rejected' || normalizedStatus === 'rejected_by_reviewer') && stageKey === 'reviewer') {
+        return { label: 'Attention', className: 'attention' };
+    }
+    if (normalizedStatus === 'rejected_by_rsa' && stageKey === 'rsa') {
+        return { label: 'Attention', className: 'attention' };
+    }
+    if (currentStage.key === 'cleared') {
+        return { label: 'Completed', className: 'completed' };
+    }
+    if (stageOrder < currentOrder) {
+        return { label: 'Completed', className: 'completed' };
+    }
+    if (stageOrder === currentOrder) {
+        return { label: 'Current', className: 'current' };
+    }
+    return { label: 'Pending', className: 'pending' };
+}
+
+function renderTrackSummaryCard(label, value) {
+    return `
+        <div class="track-modal-summary-card">
+            <span class="label">${escapeHtml(label)}</span>
+            <div class="value">${escapeHtml(value || '-')}</div>
+        </div>
+    `;
+}
+
+function matchesTrackStatusFilter(submission = {}, filterValue = 'all') {
+    const filter = String(filterValue || 'all').trim().toLowerCase();
+    const status = String(submission.status || '').trim().toLowerCase();
+    if (filter === 'all') return true;
+    if (filter === 'pending') return ['pending', 'submitted', 'resubmitted'].includes(status);
+    if (filter === 'approved') return ['approved', 'processing_to_pfa', 'sent_to_pfa', 'rsa_submitted', 'paid', 'cleared'].includes(status) || submission.finalSubmitted === true || submission.rsaSubmitted === true;
+    if (filter === 'rejected') return ['rejected', 'rejected_by_reviewer', 'rejected_by_rsa'].includes(status);
+    return status === filter;
+}
+
+function toTitleCaseWords(value) {
+    const text = String(value ?? '').trim().toLowerCase();
+    if (!text) return '';
+    return text.replace(/\b([a-z])([a-z']*)/g, (_, first, rest) => `${first.toUpperCase()}${rest}`);
+}
+
+function formatLetterDate(date = new Date()) {
+    const d = date instanceof Date ? date : new Date(date);
+    const day = d.getDate();
+    const month = d.toLocaleString('en-US', { month: 'long' });
+    const year = d.getFullYear();
+    const suffix = day % 10 === 1 && day !== 11 ? 'st'
+        : day % 10 === 2 && day !== 12 ? 'nd'
+            : day % 10 === 3 && day !== 13 ? 'rd'
+                : 'th';
+    return `${day}${suffix} ${month}, ${year}`;
+}
+
+function amountToWords(value) {
+    const num = Math.round(Number(value || 0));
+    if (!Number.isFinite(num) || num <= 0) return 'Zero naira only';
+    const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+    const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+    const chunkToWords = (n) => {
+        const hundred = Math.floor(n / 100);
+        const rest = n % 100;
+        const parts = [];
+        if (hundred) parts.push(`${ones[hundred]} hundred`);
+        if (rest) {
+            if (hundred) parts.push('and');
+            if (rest < 20) parts.push(ones[rest]);
+            else {
+                const ten = Math.floor(rest / 10);
+                const one = rest % 10;
+                parts.push(one ? `${tens[ten]}-${ones[one]}` : tens[ten]);
+            }
+        }
+        return parts.join(' ');
+    };
+    const scales = [
+        { value: 1_000_000_000, label: 'billion' },
+        { value: 1_000_000, label: 'million' },
+        { value: 1_000, label: 'thousand' }
+    ];
+    let remaining = num;
+    const parts = [];
+    scales.forEach((scale) => {
+        if (remaining >= scale.value) {
+            const chunk = Math.floor(remaining / scale.value);
+            parts.push(`${chunkToWords(chunk)} ${scale.label}`);
+            remaining %= scale.value;
+        }
+    });
+    if (remaining) {
+        if (parts.length && remaining < 100) parts.push('and');
+        parts.push(chunkToWords(remaining));
+    }
+    const sentence = parts.join(' ').replace(/\s+/g, ' ').trim();
+    return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)} naira only`;
+}
+
+function getSubmissionDetailValue(submission = {}, keys = [], fallback = '') {
+    const details = submission?.customerDetails || {};
+    for (const key of keys) {
+        const value = details?.[key] ?? submission?.[key];
+        if (value !== undefined && value !== null && String(value).trim() !== '') return String(value).trim();
+    }
+    return fallback;
+}
+
+function getPfaAddress(pfaName = '') {
+    const normalized = String(pfaName || '').trim().toLowerCase();
+    const configured = getConfiguredPfaAddress(pfaName);
+    if (configured) return configured;
+    if (normalized.includes('pal pension')) return 'Plot 289, Adeogun Street, Victoria Island, Lagos.';
+    return 'Pension Fund Administrator Address.';
+}
+
+function getConfiguredPfaAddress(pfaName = '') {
+    const sourceName = String(pfaName || '').trim();
+    const addresses = adminSystemSettings?.pfaAddresses || {};
+    if (!sourceName || !addresses || typeof addresses !== 'object') return '';
+    if (addresses[sourceName]) {
+        const entry = normalizeConfiguredPfaAddressEntry(addresses[sourceName]);
+        return formatAddressLineParts([entry.address, entry.landmark, entry.state], { trailingPeriod: false });
+    }
+    const normalized = sourceName.toLowerCase();
+    const match = Object.entries(addresses).find(([name]) => String(name || '').trim().toLowerCase() === normalized);
+    if (!match) return '';
+    const entry = normalizeConfiguredPfaAddressEntry(match[1]);
+    return formatAddressLineParts([entry.address, entry.landmark, entry.state], { trailingPeriod: false });
+}
+
+function getConfiguredPfaAddressEntry(pfaName = '') {
+    const sourceName = String(pfaName || '').trim();
+    const addresses = adminSystemSettings?.pfaAddresses || {};
+    if (!sourceName || !addresses || typeof addresses !== 'object') return null;
+    const direct = addresses[sourceName];
+    if (direct) return normalizeConfiguredPfaAddressEntry(direct);
+    const normalized = sourceName.toLowerCase();
+    const match = Object.entries(addresses).find(([name]) => String(name || '').trim().toLowerCase() === normalized);
+    return match ? normalizeConfiguredPfaAddressEntry(match[1]) : null;
+}
+
+function normalizeConfiguredPfaAddressEntry(value = {}) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        return {
+            address: String(value.address || value.addressLine || '').trim(),
+            landmark: String(value.landmark || '').trim(),
+            state: String(value.state || '').trim()
+        };
+    }
+    const bits = String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
+    return {
+        address: bits[0] || String(value || '').trim(),
+        landmark: bits[1] || '',
+        state: bits.slice(2).join(', ')
+    };
+}
+
+function getPfaAddressParts(pfaName = '', fallbackAddress = '') {
+    const normalized = String(pfaName || '').trim().toLowerCase();
+    const configured = getConfiguredPfaAddressEntry(pfaName);
+    if (configured && (configured.address || configured.landmark || configured.state)) {
+        return {
+            addressLine: configured.address,
+            landmark: configured.landmark,
+            state: configured.state
+        };
+    }
+    if (normalized.includes('pal pension')) {
+        return {
+            addressLine: 'Plot 289, Adeogun Street',
+            landmark: 'Victoria Island',
+            state: 'Lagos'
+        };
+    }
+
+    const source = String(fallbackAddress || getPfaAddress(pfaName) || '').trim();
+    const bits = source.split(',').map((item) => item.trim()).filter(Boolean);
+    return {
+        addressLine: bits[0] || source || 'Pension Fund Administrator Address',
+        landmark: bits[1] || '',
+        state: bits[2] || ''
+    };
+}
+
+function buildPropertyDescription(documentData = {}) {
+    const houseNumber = documentData.houseNumber || 'the allocated house';
+    const houseType = documentData.houseType || 'Residential Property';
+    const estateName = documentData.estateName || 'the Estate';
+    const estateAddress = documentData.estateAddress || '';
+    return `House ${houseNumber}, a ${houseType} at ${estateName}${estateAddress ? `, ${estateAddress}` : ''}`.replace(/\s+/g, ' ').trim();
+}
+
+function formatAddressLineParts(parts = [], { trailingPeriod = false, separator = ', ' } = {}) {
+    const cleaned = parts
+        .map((part) => String(part || '').trim().replace(/^[,.\s]+|[,.\s]+$/g, ''))
+        .filter(Boolean);
+    const text = cleaned.join(separator).replace(/\s+,/g, ',').replace(/,\s*,/g, ',').trim();
+    if (!text) return '';
+    return trailingPeriod ? `${text}.` : text;
+}
+
+function formatMultilinePfaAddress(r = {}, { includePfaName = false } = {}) {
+    const lines = [];
+    if (includePfaName && r.pfa) lines.push(String(r.pfa || '').trim().replace(/^[,.\s]+|[,.\s]+$/g, ''));
+    const address = formatAddressLineParts([r.pfaAddress], { trailingPeriod: false });
+    const location = formatAddressLineParts([r.landmark, r.state], { trailingPeriod: true });
+    if (address) lines.push(address);
+    if (location) lines.push(location);
+    return lines.filter(Boolean).join('\n');
+}
+
+function addDays(dateValue, days = 0) {
+    const base = dateValue instanceof Date ? new Date(dateValue.getTime()) : new Date(dateValue);
+    if (Number.isNaN(base.getTime())) return new Date();
+    base.setDate(base.getDate() + Number(days || 0));
+    return base;
+}
+
+function getSubmissionDate(submission = {}) {
+    const candidates = [
+        submission.submittedAt,
+        submission.uploadedAt,
+        submission.createdAt,
+        submission.customerDetails?.submittedAt,
+        submission.customerDetails?.uploadedAt,
+        submission.customerDetails?.createdAt
+    ];
+    for (const candidate of candidates) {
+        const millis = getStageTimestampMillis(candidate);
+        if (Number.isFinite(millis) && millis > 0) return new Date(millis);
+        const parsed = new Date(candidate);
+        if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    return new Date();
+}
+
+function extractBirthYear(value = '') {
+    const raw = String(value || '').trim();
+    if (!raw) return 0;
+    const directYear = raw.match(/\b(19|20)\d{2}\b/);
+    if (directYear) return Number(directYear[0]);
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) return parsed.getFullYear();
+    return 0;
+}
+
+function getCustomerBirthYear(submission = {}) {
+    const details = submission.customerDetails || {};
+    const keys = ['birthYear', 'yearOfBirth', 'dateOfBirth', 'dob', 'birthDate'];
+    for (const key of keys) {
+        const year = extractBirthYear(details?.[key] ?? submission?.[key]);
+        if (year) return year;
+    }
+    return 0;
+}
+
+function calculateRepaymentAmount(submission = {}, loanAmount = 0) {
+    const birthYear = getCustomerBirthYear(submission);
+    const currentYear = new Date().getFullYear();
+    const age = birthYear ? currentYear - birthYear : 0;
+    const remainingYears = birthYear ? Math.max(1, 60 - age) : 0;
+    if (remainingYears > 0) return Math.round(Number(loanAmount || 0) / remainingYears);
+    return parseMoney(getSubmissionDetailValue(submission, ['monthlyRepayment'], '208310'));
+}
+
+function buildLetterDocumentData(submission = {}) {
+    const details = submission.customerDetails || {};
+    const propertyValue = parseMoney(getSubmissionDetailValue(submission, ['propertyValue'], '0'));
+    const loanAmount = parseMoney(getSubmissionDetailValue(submission, ['loanAmount'], '0'));
+    const rsaBalance = parseMoney(getSubmissionDetailValue(submission, ['rsaBalance'], '0'));
+    const stored25 = parseMoney(getSubmissionDetailValue(submission, ['rsa25Percent', 'rsa25'], '0'));
+    const equityContribution = stored25 || roundDownToNearestThousand(rsaBalance * 0.25);
+    const pfaName = getSubmissionDetailValue(submission, ['pfa', 'pfaName'], 'Pension Fund Administrator');
+    const houseType = getSubmissionDetailValue(submission, ['propertyType', 'houseType'], 'Residential Property');
+    const houseNumber = getSubmissionDetailValue(submission, ['houseNumber'], 'N/A');
+    const address = getSubmissionDetailValue(submission, ['address'], '');
+    const estateName = getSubmissionDetailValue(submission, ['estateName'], 'Pacesetter Gardens Estate');
+    const estateAddress = getSubmissionDetailValue(submission, ['estateAddress'], 'Adegbayi Area, Off Ibadan-Ife Expressway, Ajoda, Ibadan, Oyo State');
+    const repaymentScheduleAmount = calculateRepaymentAmount(submission, loanAmount);
+    const tenorYears = getSubmissionDetailValue(submission, ['tenor'], '5');
+    const interestRate = getSubmissionDetailValue(submission, ['interestRate'], '6% per annum subject to review in line with changes in money market rate.');
+    const facilityFee = parseMoney(getSubmissionDetailValue(submission, ['facilityFee'], '4000'));
+    const bankAccountNumber = getSubmissionDetailValue(submission, ['accountNo', 'bankAccountNumber'], '5980207331');
+    const currentDate = formatLetterDate(new Date());
+    const postApprovalDate = formatLetterDate(addDays(getSubmissionDate(submission), -3));
+    const customerName = toTitleCaseWords(submission.customerName || getSubmissionDetailValue(submission, ['name'], 'Customer')).toUpperCase();
+    const pfaAddressParts = getPfaAddressParts(
+        pfaName,
+        getSubmissionDetailValue(submission, ['pfaAddress', 'pfa_address'], '')
+    );
+    const propertyDescription = buildPropertyDescription({
+        houseNumber,
+        houseType,
+        estateName,
+        estateAddress
+    });
+    return {
+        currentDate,
+        postApprovalDate,
+        customerName,
+        customerAddress: address || 'Customer Address',
+        propertyValue,
+        propertyValueText: formatCurrency(propertyValue),
+        propertyValueWords: amountToWords(propertyValue),
+        loanAmount,
+        loanAmountText: formatCurrency(loanAmount),
+        loanAmountWords: amountToWords(loanAmount),
+        equityContribution,
+        equityContributionText: formatCurrency(equityContribution),
+        equityContributionWords: amountToWords(equityContribution),
+        houseNumber,
+        houseType: toTitleCaseWords(houseType),
+        estateName: toTitleCaseWords(estateName),
+        estateAddress,
+        propertyDescription,
+        pfaName: String(pfaName || 'Pension Fund Administrator').trim(),
+        pfaBaseName: String(pfaName || 'Pension Fund Administrator').trim().replace(/\s+limited$/i, '').trim(),
+        pfaAddress: getPfaAddress(pfaName),
+        pfaAddressLine: pfaAddressParts.addressLine,
+        pfaLandmark: getSubmissionDetailValue(submission, ['landmark'], pfaAddressParts.landmark),
+        pfaState: getSubmissionDetailValue(submission, ['state'], pfaAddressParts.state),
+        rsaPin: getSubmissionDetailValue(submission, ['penNo', 'rsaPin', 'pin'], 'PEN000000000000'),
+        bankName: 'Cooperative Mortgage Bank Limited',
+        bankAccountNumber,
+        propertyValueAmount: propertyValue,
+        loanAmountAmount: loanAmount,
+        equityContributionAmount: equityContribution,
+        monthlyRepaymentAmount: repaymentScheduleAmount,
+        facilityFeeAmount: facilityFee,
+        managementFeeAmount: loanAmount * 0.01,
+        tenorYears,
+        repaymentScheduleText: `${formatCurrency(repaymentScheduleAmount)} monthly principal and interest repayment`,
+        facilityFeeText: `${formatCurrency(facilityFee)} monthly payment`,
+        sourceOfRepayment: getSubmissionDetailValue(submission, ['sourceOfRepayment'], 'Monthly Salary'),
+        tenorText: `${tenorYears} Years`,
+        interestRate,
+        managementFeeText: `1% of the facility amount (${formatCurrency(loanAmount * 0.01)}) upfront payment upon booking`,
+        commencementDateText: 'This facility shall commence upon drawdown or on the date of disbursement notwithstanding the date on the offer letter or date of execution.',
+        availabilityText: 'Upon satisfactory compliance with all conditions precedent to drawdown but not later than 14 days from date of offer letter.',
+        readinessBankLabel: 'Cooperative Mortgage Bank Ltd.',
+        titleDescription: `Deed of Sublease over property situated at ${toTitleCaseWords(estateName)}, ${estateAddress}.`,
+        uploadedByName: getDisplayNameByEmail(submission.uploadedBy || ''),
+        rsaOfficerName: submission.assignedToRSA ? getDisplayNameByEmail(submission.assignedToRSA) : 'RSA Officer',
+        paymentOfficerName: submission.assignedToPayment ? getDisplayNameByEmail(submission.assignedToPayment) : 'Payment Officer',
+        stampLabel: 'COOPERATIVE MORTGAGE BANK LTD',
+        submissionId: submission.id || ''
+    };
+}
+
+function buildShortLetterDate(dateValue = new Date()) {
+    const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+    });
+}
+
+function toPdfSafeText(value = '') {
+    return String(value || '')
+        .replace(/₦/g, '#')
+        .replace(/[“”]/g, '"')
+        .replace(/[‘’]/g, "'")
+        .replace(/–/g, '-');
+}
+
+function formatAmountForLetter(amount) {
+    const numeric = parseMoney(amount);
+    return `#${numeric.toLocaleString('en-NG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} (${amountToWords(numeric)})`;
+}
+
+function formatAmountWithTwoDecimals(amount) {
+    const numeric = Number(amount || 0);
+    return `#${numeric.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+async function ensurePdfFontAssets() {
+    if (pdfFontAssetCache) return pdfFontAssetCache;
+    if (!window.PDFLib?.PDFDocument) {
+        throw new Error('PDF engine is unavailable. Please refresh and try again.');
+    }
+    if (!window.fontkit) {
+        throw new Error('PDF font engine is unavailable. Please refresh and try again.');
+    }
+
+    const fontFiles = {
+        arial: 'assets/fonts/arial.ttf',
+        arialBold: 'assets/fonts/arialbd.ttf',
+        dejavu: 'assets/fonts/DejaVuSans.ttf',
+        dejavuBold: 'assets/fonts/DejaVuSans-Bold.ttf',
+        trebuchet: 'assets/fonts/trebuc.ttf',
+        trebuchetBold: 'assets/fonts/trebucbd.ttf'
+    };
+
+    const entries = await Promise.all(Object.entries(fontFiles).map(async ([key, path]) => {
+        const response = await fetch(path, { cache: 'force-cache' });
+        if (!response.ok) throw new Error(`Unable to load font asset: ${path}`);
+        return [key, await response.arrayBuffer()];
+    }));
+
+    pdfFontAssetCache = Object.fromEntries(entries);
+    return pdfFontAssetCache;
+}
+
+function getPdfDocumentFontProfile(documentType, field = {}) {
+    const weight = String(field.fontWeight || '').toLowerCase() === 'regular' ? 'regular' : 'bold';
+    return weight === 'regular'
+        ? { family: 'dejavu', assetKey: 'dejavu' }
+        : { family: 'dejavuBold', assetKey: 'dejavuBold' };
+}
+
+function getPdfFontProfileForTemplateLine(line = {}) {
+    const fontName = String(line.font || '').toLowerCase();
+    if (fontName.includes('trebuchet')) {
+        return fontName.includes('bold')
+            ? { family: 'trebuchetBold', assetKey: 'trebuchetBold' }
+            : { family: 'trebuchet', assetKey: 'trebuchet' };
+    }
+    if (fontName.includes('bold') || Number(line.flags || 0) >= 16) {
+        return { family: 'dejavuBold', assetKey: 'dejavuBold' };
+    }
+    return { family: 'dejavu', assetKey: 'dejavu' };
+}
+
+function buildDocumentContent(documentType, data = {}) {
+    const r = {
+        name: data.customerName,
+        address: data.customerAddress,
+        pfa: data.pfaName,
+        pfaBase: data.pfaBaseName || data.pfaName,
+        pfaAddress: data.pfaAddressLine,
+        landmark: data.pfaLandmark,
+        state: data.pfaState,
+        houseNumber: data.houseNumber,
+        houseType: data.houseType,
+        propertyValue: data.propertyValueAmount,
+        loanAmount: data.loanAmountAmount,
+        equityContribution: data.equityContributionAmount,
+        repayment: data.monthlyRepaymentAmount,
+        facilityFee: data.facilityFeeAmount,
+        managementFee: data.managementFeeAmount,
+        tenor: data.tenorYears,
+        accountNumber: data.bankAccountNumber,
+        pen: data.rsaPin,
+        ovDate: data.currentDate,
+        aDate: data.currentDate,
+        date: data.currentDate
+    };
+
+    const offerBoldWords = [
+        r.address,
+        r.ovDate,
+        r.pfa,
+        r.pfaAddress,
+        r.state,
+        r.landmark,
+        r.name,
+        formatAmountWithTwoDecimals(r.managementFee),
+        r.houseNumber,
+        r.houseType,
+        formatAmountForLetter(r.equityContribution),
+        formatAmountForLetter(r.loanAmount),
+        formatAmountForLetter(r.propertyValue),
+        formatAmountForLetter(r.repayment),
+        formatAmountForLetter(r.facilityFee),
+        'PROVISIONAL OFFER OF MORTGAGE FACILITY',
+        'COOPERATIVE MORTGAGE BANK LIMITED',
+        'CONDITIONS PRECEDENT TO DRAWDOWN:',
+        '2.5%',
+        '15th day of the succeeding month.',
+        "invoking the Bank's right of sale on the mortgaged property",
+        'Title over Property:',
+        'Cost of Registration of Title:',
+        '3 (three) consecutive months.',
+        'Note: All the conditions must be complied with or else this offer shall be withdrawn.',
+        'OTHER CONDITIONS',
+        'DEFECT LIABILITY PERIOD',
+        'EVENTS OF DEFAULT',
+        'POLICY CLAUSES',
+        'Cooperative Mortgage Bank Limited',
+        'Security/Comfort:'
+    ].filter(Boolean);
+
+    const generators = {
+        offer_letter: () => ({
+            pages: [
+                {
+                    paragraphs: [
+                        `${r.ovDate}`,
+                        `${r.name}`,
+                        `${r.address}`,
+                        'Dear Sir/Ma,',
+                        'PROVISIONAL OFFER OF MORTGAGE FACILITY',
+                        'We are pleased to inform you that Cooperative Mortgage Bank Limited ("the Bank") has approved a Mortgage Facility in your favor under the following terms and conditions:'
+                    ],
+                    table: [
+                        ['Lender:', 'COOPERATIVE MORTGAGE BANK LIMITED'],
+                        ['Borrower:', r.name],
+                        ['Address:', r.address],
+                        ['Facility Type:', 'Mortgage Facility'],
+                        ['Property Value:', formatAmountForLetter(r.propertyValue)],
+                        ['Commencement Date:', 'This facility shall commence upon drawdown or on the date of disbursement notwithstanding the date on the offer letter or date of execution'],
+                        ['Loan Amount:', formatAmountForLetter(r.loanAmount)],
+                        ['Availability:', 'Upon satisfactory compliance with all conditions precedent to drawdown but not later than 14 days from date of offer letter.'],
+                        ['Purpose:', `To part finance the purchase House ${r.houseNumber} of a ${r.houseType} at Pacesetter Gardens Estate, Adegbayi Area, Off Ibadan Ife Expressway Ajoda, Ibadan Oyo State`],
+                        ['Equity Contribution:', formatAmountForLetter(r.equityContribution)]
+                    ],
+                    offerTermsTable: 'primary',
+                    boldWords: offerBoldWords
+                },
+                {
+                    tablePosition: 'before',
+                    table: [
+                        ['Repayment Schedule:', `${formatAmountForLetter(r.repayment)} Monthly principal and interest repayment`],
+                        ['Facility Fee:', `${formatAmountForLetter(r.facilityFee)} Monthly payment`],
+                        ['Source of Repayment:', 'Monthly Salary'],
+                        ['Tenor:', `${r.tenor} Years`],
+                        ['Interest Rate:', '6% per annum subject to review in line with changes in Money market rate.'],
+                        ['Management Fee:', '1% of the facility amount (Upfront payment upon booking)'],
+                        ['Prepayment:', 'Voluntary prepayment is allowed during the term of the facility without penal charge.'],
+                        ['Security/Comfort:', `Deed of Sublease on House ${r.houseNumber} of a ${r.houseType} at Pacesetter Gardens Estate, Adegbayi Area, Off Ibadan-Ife Expressway Ajoda, Ibadan Oyo State. Comprehensive Fire and Other Perils Insurance Policy with Cooperative Mortgage Bank Ltd noted as the first loss payee. Mortgage Protection Policy on behalf of ${r.name}.`],
+                        ['Title over Property:', 'Deed of Sublease over property situated at Pacesetter Gardens Estate, Adegbayi Area, off Ibadan-Ife Expressway Ajoda Ibadan Oyo State.'],
+                        ['Cost of Registration of Title:', 'The cost and expenses on preparation and perfection of legal mortgage shall be borne by the Borrower. This is inclusive of other incidental expenses necessary for perfection.']
+                    ],
+                    offerTermsTable: 'continuation',
+                    paragraphs: [
+                        'CONDITIONS PRECEDENT TO DRAWDOWN:',
+                        '1. Duly executed offer letter accepting the terms and conditions of the facility unconditionally.',
+                        '2. Upfront payment of fees:',
+                        `a. Management fees (1% of loan amount) ${formatAmountWithTwoDecimals(r.managementFee)}.`,
+                        'b. Preparation of Deed of Sublease #25,000.00.',
+                        'c. Preparation of Deed of Legal Mortgage #25,000.00.',
+                        '3. All documents necessary to perfect Legal Mortgage which includes:',
+                        "   - Executed copy of Deed of Legal Mortgage between the Bank and the Borrower.",
+                        "   - Original Title documents in Bank's custody.",
+                        `4. Letter of authority granting CMBank or any of its appointed Professional Valuer unrestricted access to periodically re-evaluate the property financed which is House ${r.houseNumber}, a ${r.houseType} at Pacesetter Gardens Estate, Adegbayi Area, Off Ibadan-Ife Expressway Ajoda, Ibadan, Oyo State.`,
+                        '5. Acceptance of the following conditions as it relates to the facility:',
+                        'a. In the event of default beyond the due date as stated above, the payments so in arrears shall henceforth bear interest at a daily default rate of 1% computed from the date same became payable to the 15th day of the succeeding month.',
+                        'b. A monthly late payment charge of 2.5% shall also accrue on any unpaid amount after the 15th day of the succeeding month.',
+                        "c. Such default shall warrant invoking the Bank's right of sale on the mortgaged property, including but not limited to the occurrence of any of the following events:",
+                        'd. Non-repayment of both principal and interest on due date for 3 (three) consecutive months.',
+                        'e. Default in payment of yearly insurance premium and other fees as stipulated in the offer.',
+                        'f. Part payment of monthly repayment due for any current month.',
+                        `6. That the security for the facility is the Deed of Sublease on House ${r.houseNumber} of the ${r.houseType} at Pacesetter Gardens Estate, Adegbayi Area, Off Ibadan-Ife Expressway, Ajoda, Ibadan, Oyo State.`,
+                        `7. That CMBank shall arrange at the expense of ${r.name} a fire insurance cover for the property and a mortgage protection policy for the borrower.`
+                    ],
+                    boldWords: offerBoldWords
+                },
+                {
+                    paragraphs: [
+                        'The premium payable on the fire insurance and mortgage protection policy is on per annual basis.',
+                        `8. The Bank shall sell the collateral/property (House ${r.houseNumber}, a ${r.houseType} at Pacesetter Gardens Estate, Adegbayi Area, Off Ibadan-Ife Expressway, Ajoda, Ibadan) if the Borrower is in default of any of the terms and conditions therein stated.`,
+                        `9. ${r.name}, or any person(s) designated by the borrower shall be responsible for all cost incurred in the recovery process in case of default.`,
+                        '10. This offer may be withdrawn:',
+                        'a. If it is not accepted within two weeks of the receipt of the offer letter.',
+                        'b. If any irregularity is discovered anytime.',
+                        'Note: All the conditions must be complied with or else this offer shall be withdrawn.',
+                        'OTHER CONDITIONS',
+                        `1. The Bank shall, without any recourse to ${r.name}, debit the following charges to his account annually throughout the tenor of the facility except where the evidence of payment is provided:`,
+                        `a. Facility Maintenance Fee: ${formatAmountWithTwoDecimals(r.facilityFee)} monthly.`,
+                        'b. Mortgage Protection premium per annum will be communicated to the customer in future.',
+                        'c. Ground rent per annum will be communicated to the customer in future.',
+                        '2. No waiver of interest or accumulated interest on this facility will be entertained.',
+                        "3. The Bank reserves the right to debit the Borrower's Account with perfection costs without recourse to the Borrower.",
+                        '4. Notwithstanding any repayment condition stated herein, this facility shall become repayable upon the occurrence of any of the following events:',
+                        'a. If there should, in the opinion of the Bank, be a material adverse change in the financial condition of the Borrower.',
+                        'b. The Bank reserves the right to cancel and/or reduce the facility in line with its ability to accommodate it within its legal lending limits and/or policy or portfolio constraints.',
+                        '',
+                        'DEFECT LIABILITY PERIOD',
+                        "1.0. The following provisions set out the developer's responsibilities in the event of damage or destruction to permanent fixtures within the allocated housing unit.",
+                        '1.1. Where there is a defect as to the installation and/or functionality of electrical fittings/lights, internal doors, sanitary wares (inclusive of the water closet, wash-hand basin, floor, drain, kitchen sink etc.), painting and wardrobes, the developer shall be liable for repairs no later than three months after the handover date.',
+                        '1.2. Where there is a defect as to the installation and/or functionality of the septic tank, other external works (inclusive of inspection chambers, compound landscaping interlocks/concreting), the ceiling, roof and external doors, the developer shall be liable for repairs no later than six months after the handover date.'
+                    ],
+                    boldWords: offerBoldWords
+                },
+                {
+                    paragraphs: [
+                        "1.3. Where such damage or destruction results in a need for the replacement of permanent fixtures, the developer shall not replace such fixture more than twice during the defect liability period.",
+                        '1.4. Where such damage or destruction occurs towards the end of the defect liability period, the Developer shall be notified through Cooperative Mortgage Bank no later than 5 working days before the lapse of the defect liability period.',
+                        '1.5. In the event that there is noncompliance with clause 1.4 above, the developer shall no longer be required to effect any repair on the allocated housing unit, and any claim of whatever nature shall be deemed to have been waived and shall become absolutely barred.',
+                        '',
+                        'EVENTS OF DEFAULT',
+                        "1. In the event of default to meet the Borrower's obligations to the Bank in respect of the Facility granted, the Bank shall be at liberty to take immediate physical possession (where possible) of the property with a view to selling same towards liquidation of the Borrower's indebtedness to the Bank. Such recourse to the property shall however be without prejudice to other rights which the Bank may have against the Borrower.",
+                        "2. Without prejudice to CMBank's right to demand repayment of outstanding amounts of this facility at any time, the occurrence of any of the following events shall cause all outstanding amounts under the facility to become immediately payable if:",
+                        '2.1. The Borrower commits any breach or default under the terms of this facility or of any other credit facilities granted to the Borrower by CMBank or any other creditors.',
+                        "2.2. In the opinion of CMBank, there are significant material adverse changes in the Borrower's income or financial conditions.",
+                        '2.3. The Bank is compelled by any Central Bank of Nigeria rules and regulations or directive to call in the loan.',
+                        '',
+                        'POLICY CLAUSES',
+                        "1. It is the Bank's policy to review facilities from time to time in the light of changing market conditions.",
+                        '2. The Bank may decide to refinance the loan and all right of the Bank under this loan may be transferred to the underwriter with notice to the Borrower. The Borrower shall honor its obligations under this loan as it would with the Bank.',
+                        '3. Any dispute, question or difference arising in connection with this agreement shall be referred to arbitration under the Arbitration and Conciliation Act Cap 19, Laws of the Federation of Nigeria 1990. The arbitration shall be conducted by a single arbitrator to be appointed by the Chairman of the Nigerian Branch of the Chartered Institute of Arbitrator.'
+                    ],
+                    boldWords: offerBoldWords
+                }
+            ]
+        }),
+        allocation_letter: () => ({
+            pages: [
+                {
+                    paragraphs: [
+                        `${r.aDate}`,
+                        `${r.name}`,
+                        `${r.address}`,
+                        'Dear Sir/Ma,',
+                        `LETTER OF ALLOCATION FOR A ${r.houseType} AT PACESETTER GARDEN ESTATE ADEGBAYI AREA, OFF IBADAN-IFE EXPRESSWAY IBADAN`,
+                        `With reference to your application for a house at PACESETTER GARDEN ESTATE, Adegbayi Area, off Ibadan-Ife Expressway Ibadan. We are pleased to inform you that you have been formally allocated HOUSE ${r.houseNumber}, a unit of ${r.houseType} in the Estate which is allocated to you for residential purpose on a leasehold basis with effect from ${r.aDate}.`,
+                        '1. This allocation is subject to the following terms and condition:',
+                        'a. Not to use any or whole of the premises allocated to you for any other purpose(s) except residential and the occupying of the same either as an office, shop, light industry or any other use not in accordance with the user clause of this allocation, would automatically attract forfeiture of the allocation;',
+                        'b. Not to construct servant quarters, perimeter fence or any other structure around or within the premises without prior approval of the Company being sought and obtained in writing, the violation of which shall attract demolition, penalty/or both;',
+                        'c. Not to alter or cause to be altered the external design or structure of the house/flat. Internal alteration may however, be effected only after prior approval of the Company has been sought and obtained in writing;',
+                        'd. To comply with the rules and regulations that the Company may make from time to time, as they affect ownership, possession, occupation and use of housing unit(s);',
+                        'e. Not to mortgage, sublet, assign, transfer or part with possession of the housing unit or any part thereof without the consent of the Company being sought and obtained in writing, such consent shall not be unreasonably withheld;',
+                        'f. To enter into a Legal mortgage agreement with Cooperative Mortgage Bank Limited and pay such fees for Title Document as may be prescribed;',
+                        'g. Payment of ground rent as it will be communicated to you at a later date;',
+                        'h. To pay levies, rates or other service charges as may from time to time be levied in respect of the property for the maintenance of the estate by the Company in charge of such maintenance;',
+                        'i. Maintain the property hereby allocated as well as its environment in good sanitary and tenantable condition to the satisfaction of the Company;'
+                    ],
+                    boldWords: [
+                        r.aDate, r.address, r.name, r.houseNumber, r.houseType, formatAmountForLetter(r.propertyValue),
+                        'LETTER OF ALLOCATION FOR A', 'AT PACESETTER GARDEN ESTATE ADEGBAYI AREA, OFF IBADAN-IFE EXPRESSWAY IBADAN', 'HOUSE'
+                    ]
+                },
+                {
+                    paragraphs: [
+                        'j. Refrain from erecting, exhibiting or permitting the erection or exhibition of any bills, or notice boards on the premises;',
+                        'k. Identify with the Resident Association established within the estate charged with the maintenance and management of the estate as it affects commercial, cultural facilities and/or recreation;',
+                        'l. Not to rear animals or pets in the apartment and its premises without the written consent of the Company. Such consent however not to be unreasonably withheld.',
+                        `2. This letter represents an offer by Coop Property Development Company Limited in respect of the sale of the said dwelling house to you at a price of ${formatAmountForLetter(r.propertyValue)}.`,
+                        '',
+                        'Please accept our congratulations.',
+                        'Yours faithfully,',
+                        'For: Coop Property Development Company Limited'
+                    ],
+                    boldWords: [
+                        r.aDate, r.address, r.name, r.houseNumber, r.houseType, formatAmountForLetter(r.propertyValue),
+                        'LETTER OF ALLOCATION FOR A', 'AT PACESETTER GARDEN ESTATE ADEGBAYI AREA, OFF IBADAN-IFE EXPRESSWAY IBADAN', 'HOUSE'
+                    ]
+                }
+            ]
+        }),
+        indemnity_letter: () => ({
+            pages: [
+                {
+                    paragraphs: [
+                        formatMultilinePfaAddress(r, { includePfaName: true }),
+                        '',
+                        'LETTER OF INDEMNITY IN RESPECT OF RETIREMENT SAVINGS ACCOUNT EQUITY CONTRIBUTION',
+                        `THIS INDEMNITY is issued by Cooperative Mortgage Bank Ltd. of 11B University Crescent, UI-Secretariat road, Old Bodija, Ibadan (hereinafter called "Cooperative Mortgage Bank" which expression shall where the context so admits include its successors-in-title and assigns), to ${r.pfaBase} Limited having its Head Office at ${formatAddressLineParts([r.pfaAddress, r.landmark, r.state], { trailingPeriod: true })} (hereinafter called "${r.pfaBase} (PFA)" which expression shall where the context so admits include its successors-in-title and assigns).`,
+                        'WHEREAS:',
+                        `1. ${r.pfaBase} is a Pension Fund Administrator licensed by the National Pension Commission ("the Commission") to manage individual Retirement Savings Accounts (RSA) in accordance with the provisions of the Pension Reform Act, 2014 ("the Act").`,
+                        '2. Pursuant to the Act, the Commission has issued Guidelines on Accessing RSA Balance towards Payment of Equity Contributions for Residential Mortgage ("Guidelines"), which permit RSA Account Holders to access a portion of their RSA balance as equity contribution towards acquiring a residential property from a licensed financial institution.',
+                        '3. Cooperative Mortgage Bank is duly licensed by the Central Bank of Nigeria (CBN) and meets all the eligibility criteria for the provision of mortgage lending services to RSA holders under the Guidelines issued by the Commission.',
+                        `4. Cooperative Mortgage Bank has received applications from several RSA holders who maintain RSAs with ${r.pfaBase} and, in line with the Guidelines, the indemnifier has agreed to finance the purchase of a residential property on behalf of the RSA holders, subject to the execution of relevant mortgage contracts.`,
+                        `5. ${r.name}, the RSA holder, has requested and authorized that a portion of his/her RSA balance should be utilized as equity contribution to facilitate his/her mortgage and has applied to ${r.pfaBase} to release to the indemnifier a portion not more than 25% of his/her RSA balance as equity contribution towards the acquisition of a residential mortgage.`,
+                        `6. Cooperative Mortgage Bank has conducted all requisite due diligence to confirm the authenticity of the RSA holder's intended acquisition of a residential property and undertakes to ${r.pfaBase} that the portion of the RSA holder's fund which shall be released to the Cooperative Mortgage Bank on the RSA holder's request shall be applied solely as equity contribution towards the acquisition of a residential mortgage, under the mortgage.`
+                    ],
+                    boldWords: [
+                        r.pen, r.pfaBase, r.pfaAddress, r.state, r.landmark, r.name,
+                        'THIS INDEMNITY', 'Cooperative Mortgage Bank Ltd', 'Cooperative Mortgage Bank',
+                        'WHEREAS:', 'NOW THEREFORE', 'We, Cooperative Mortgage Bank Ltd',
+                        'Furthermore, Cooperative Mortgage Bank', 'PIN', 'RSA HOLDER',
+                        'LETTER OF INDEMNITY IN RESPECT OF RETIREMENT SAVINGS ACCOUNT EQUITY CONTRIBUTION', '(PFA)'
+                    ]
+                },
+                {
+                    paragraphs: [
+                        'Agreement between the Indemnifier and the RSA holder shall not, under any condition, be released to the RSA holder or any third party for any other purpose.',
+                        `7. ${r.pfaBase} agrees to release the relevant portion of the RSA holder's fund to the Cooperative Mortgage Bank and has requested that the Indemnifier provides this indemnity in favour of ${r.pfaBase} in the manner hereinafter stated.`,
+                        `NOW THEREFORE, in consideration of ${r.pfaBase} effecting the transfer of the portion of the RSA holder's balance to the Indemnifier as equity contribution by the RSA holder whose RSA PIN herein appears, towards acquisition of residential property in accordance with the Guidelines, We, Cooperative Mortgage Bank Ltd hereby irrevocably and unconditionally covenant that we shall at all times hereafter, indemnify ${r.pfaBase} and keep ${r.pfaBase} fully indemnified against all claims, demands, liabilities, actions, damages, penalties and legal proceedings (including any cost of litigation) which may be incurred by ${r.pfaBase} in the event that the fund so released by ${r.pfaBase} is not utilized as equity contribution towards the purchase of a residential property on behalf of the RSA holder.`,
+                        `Furthermore, Cooperative Mortgage Bank undertakes to pay ${r.pfaBase} on demand without cavil or contention, all payments, liabilities, damages and expenses (including but not limited to legal fees) incurred by ${r.pfaBase} from acceding to the RSA holder's request to release funds from his/her RSA, in the event that the fund so released by ${r.pfaBase} is not utilized as equity contribution towards the purchase of a residential property on behalf of the RSA holder.`,
+                        `This Indemnity shall be a continuing security and shall be enforceable from the date of disbursement of the portion of the RSA holder's balance to Cooperative Mortgage Bank and shall inure to the benefit of ${r.pfaBase} up until the utilization of the funds so released, as equity contribution towards the acquisition of the residential property in favour of the RSA holder by ${r.pfaBase}.`,
+                        `This Indemnity shall not be enforceable against Cooperative Mortgage Bank for any claims, demands, liabilities, losses, actions, damages, penalties, and legal proceedings (including any cost of litigation), arising from any dispute or breach howsoever, in the contractual relationship between ${r.pfaBase} and the RSA holder.`,
+                        `The indemnification provided under this Indemnity by Cooperative Mortgage Bank shall be completely discharged upon the utilization of the portion of the RSA holder's balance towards the purchase of a residential property in favour of the RSA holder by Cooperative Mortgage Bank.`,
+                        `RSA HOLDER: ${r.name}`,
+                        `PIN: ${r.pen}`,
+                        'This indemnity shall be governed by and construed in accordance with the extant laws of the Federal Republic of Nigeria.',
+                        'THE COMMON SEAL of the within named INDEMNIFIER Cooperative Mortgage Bank was hereunto affixed in the presence of:'
+                    ],
+                    boldWords: [
+                        r.pen, r.pfaBase, r.pfaAddress, r.state, r.landmark, r.name,
+                        'THIS INDEMNITY', 'Cooperative Mortgage Bank Ltd', 'Cooperative Mortgage Bank',
+                        'WHEREAS:', 'NOW THEREFORE', 'We, Cooperative Mortgage Bank Ltd',
+                        'Furthermore, Cooperative Mortgage Bank', 'PIN', 'RSA HOLDER',
+                        'LETTER OF INDEMNITY IN RESPECT OF RETIREMENT SAVINGS ACCOUNT EQUITY CONTRIBUTION', '(PFA)'
+                    ]
+                }
+            ]
+        }),
+        verification_letter: () => ({
+            pages: [{
+                paragraphs: [
+                    `${r.ovDate}`,
+                    '',
+                    formatMultilinePfaAddress(r, { includePfaName: true }),
+                    '',
+                    'VERIFICATION OF PROPERTY',
+                    `This is to confirm the authenticity of the property offer allocated to ${r.name}, which is House ${r.houseNumber}, a ${r.houseType} situated at Pacesetter Gardens Estate, Adegbayi Area, off Ibadan-Ife Express way, Ibadan valued at ${formatAmountForLetter(r.propertyValue)} and available for sale. The allocation letter and offer of property is hereby confirmed as genuine and valid.`,
+                    '',
+                    'Thank you.',
+                    'Yours Faithfully,'
+                ],
+                boldWords: ['VERIFICATION OF PROPERTY', r.ovDate, r.pfa, r.name, formatAmountForLetter(r.propertyValue)]
+            }]
+        }),
+        availability_letter: () => ({
+            pages: [{
+                paragraphs: [
+                    `${r.date}`,
+                    '',
+                    formatMultilinePfaAddress(r, { includePfaName: true }),
+                    '',
+                    'Dear Sir/Ma,',
+                    '',
+                    'CONFIRMATION OF AVAILABILITY OF PROPERTY',
+                    '',
+                    `This is to confirm the authenticity of the property allocated to ${r.name}, which is a ${r.houseType}, House number ${r.houseNumber} situated at Pacesetter Gardens Estate, Adegbayi Area, off Ibadan- Ife Express way, Ibadan, valued at ${formatAmountForLetter(r.propertyValue)}.`,
+                    '',
+                    'Thank you.',
+                    'Yours Faithfully,'
+                ],
+                boldWords: [
+                    r.pfa, r.date, r.houseType, r.houseNumber, 'CONFIRMATION OF AVAILABILITY OF PROPERTY',
+                    r.name, formatAmountForLetter(r.propertyValue), r.pfaAddress, r.landmark, r.state
+                ]
+            }]
+        }),
+        readiness_letter: () => ({
+            pages: [{
+                paragraphs: [
+                    `${r.date}`,
+                    '',
+                    formatMultilinePfaAddress(r, { includePfaName: true }),
+                    '',
+                    'Dear Sir/Ma,',
+                    'READINESS TO RECEIVE DISBURSEMENT AS EQUITY FOR MORTGAGE',
+                    '',
+                    'We hereby assert the availability of the aforementioned property and our readiness to receive disbursement on behalf of the above-named customer into the account details below:',
+                    '',
+                    `Name: ${r.name}\nAccount Number: ${r.accountNumber}\nEquity Amount: ${formatAmountForLetter(r.equityContribution)}\nBank: Cooperative Mortgage Bank Ltd.`,
+                    '',
+                    `We also affirm our readiness to grant a Mortgage Loan of ${formatAmountForLetter(r.loanAmount)} only to ${r.name} for the aforementioned property.`,
+                    '',
+                    'Thank you.'
+                ],
+                boldWords: [
+                    r.date, r.name, r.pfa, r.accountNumber, formatAmountForLetter(r.equityContribution), 'Cooperative Mortgage Bank Ltd.',
+                    r.pfaAddress, r.state, r.landmark, formatAmountForLetter(r.loanAmount),
+                    'READINESS TO RECEIVE DISBURSEMENT AS EQUITY FOR MORTGAGE',
+                    'Name:', 'Account Number:', 'Equity Amount:', 'Bank:'
+                ]
+            }]
+        }),
+        title_letter: () => ({
+            pages: [{
+                paragraphs: [
+                    `${r.date}`,
+                    '',
+                    formatMultilinePfaAddress(r, { includePfaName: true }),
+                    '',
+                    'Dear Sir/Ma.',
+                    '',
+                    `CONFIRMATION OF TITLE DOCUMENT OF PROPERTY KNOWN AS ${String(r.houseType || '').toUpperCase()} LOCATED AT PACESETTER GARDENS ESTATE, AJODA IBADAN IN FAVOUR OF ${r.name} PIN:${r.pen}`,
+                    '',
+                    `Following the application and subsequent approval of the National Pension Commission (PenCom) for the release of 25% RSA balance as equity for the mortgage of ${r.name}. We hereby confirm that a search was conducted to confirm the authenticity of the property document and it was confirmed that the property is free from all encumbrances.`,
+                    'Please find enclosed the search report on the property.',
+                    '',
+                    'Thank you.',
+                    'Yours Faithfully,'
+                ],
+                boldWords: [
+                    String(r.houseType || '').toUpperCase(), r.pfa, r.name, r.date, r.pen, r.pfaAddress, r.state, r.landmark,
+                    'CONFIRMATION OF TITLE DOCUMENT OF PROPERTY KNOWN AS',
+                    'LOCATED AT PACESETTER GARDENS ESTATE, AJODA IBADAN IN FAVOUR OF',
+                    'PIN:'
+                ]
+            }]
+        })
+    };
+
+    return generators[documentType]?.() || { pages: [] };
+}
+
+function ensureDocxZipLibrary() {
+    if (window.PizZip) return true;
+    showNotification('Word document engine is unavailable. Please refresh and try again.', 'error');
+    return false;
+}
+
+function escapeXml(value = '') {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+}
+
+function escapeAttribute(value = '') {
+    return escapeXml(value).replace(/\n/g, ' ');
+}
+
+function normalizeWordText(value = '') {
+    return String(value ?? '')
+        .replace(/[“”]/g, '"')
+        .replace(/[‘’]/g, "'")
+        .replace(/–/g, '-')
+        .replace(/\u00a0/g, ' ');
+}
+
+function splitTextIntoWordRuns(text = '', boldWords = []) {
+    const source = normalizeWordText(text);
+    if (!source) return [];
+    const phrases = normalizeBoldPhraseList(boldWords)
+        .filter((phrase) => phrase.length >= 2)
+        .map((phrase) => normalizeWordText(phrase));
+    if (!phrases.length) return [{ text: source, bold: false }];
+
+    const runs = [];
+    let cursor = 0;
+    const lowerSource = source.toLowerCase();
+    while (cursor < source.length) {
+        let bestMatch = null;
+        phrases.forEach((phrase) => {
+            const index = lowerSource.indexOf(phrase.toLowerCase(), cursor);
+            if (index === -1) return;
+            if (!bestMatch || index < bestMatch.index || (index === bestMatch.index && phrase.length > bestMatch.phrase.length)) {
+                bestMatch = { index, phrase };
+            }
+        });
+
+        if (!bestMatch) {
+            runs.push({ text: source.slice(cursor), bold: false });
+            break;
+        }
+        if (bestMatch.index > cursor) {
+            runs.push({ text: source.slice(cursor, bestMatch.index), bold: false });
+        }
+        runs.push({
+            text: source.slice(bestMatch.index, bestMatch.index + bestMatch.phrase.length),
+            bold: true
+        });
+        cursor = bestMatch.index + bestMatch.phrase.length;
+    }
+    return runs.filter((run) => run.text);
+}
+
+function isDocumentHeading(text = '') {
+    const value = String(text || '').trim();
+    if (!value) return false;
+    const normalized = value.replace(/\s+/g, ' ').replace(/[.,;]+$/g, '').toUpperCase();
+    const exactHeadings = new Set([
+        'PROVISIONAL OFFER OF MORTGAGE FACILITY',
+        'LETTER OF INDEMNITY IN RESPECT OF RETIREMENT SAVINGS ACCOUNT EQUITY CONTRIBUTION',
+        'VERIFICATION OF PROPERTY'
+    ]);
+    if (exactHeadings.has(normalized)) return true;
+    if (normalized.startsWith('LETTER OF ALLOCATION FOR ')) return true;
+    if (normalized.startsWith('CONFIRMATION OF TITLE DOCUMENT OF PROPERTY KNOWN AS ')) return true;
+    return false;
+}
+
+function getDocxPageTopSpacerTwips(documentType, pageIndex) {
+    if (pageIndex === 0) {
+        const firstPageSpacers = {
+            offer_letter: 420,
+            allocation_letter: 760,
+            availability_letter: 1100,
+            indemnity_letter: 1100,
+            readiness_letter: 900,
+            title_letter: 760,
+            verification_letter: 1000
+        };
+        if (Object.prototype.hasOwnProperty.call(firstPageSpacers, documentType)) {
+            return firstPageSpacers[documentType];
+        }
+    }
+    if (documentType === 'indemnity_letter' && pageIndex === 1) return 0;
+    return 180;
+}
+
+function getDocxPreviewPaddingPx(documentType, pageIndex) {
+    const spacer = getDocxPageTopSpacerTwips(documentType, pageIndex);
+    if (spacer === 0) return 104;
+    return 132 + Math.round(spacer / 12);
+}
+
+function createWordSpacerParagraphXml(twips = 0) {
+    const value = Math.max(0, Number(twips || 0));
+    if (!value) return '';
+    return `<w:p><w:pPr><w:spacing w:before="0" w:after="${value}"/></w:pPr></w:p>`;
+}
+
+function createWordRunXml(run = {}, options = {}) {
+    const text = normalizeWordText(run.text || '');
+    if (!text) return '';
+    const bold = run.bold || options.bold;
+    const underline = options.underline;
+    const size = Number(options.size || 20);
+    return `
+      <w:r>
+        <w:rPr>
+          <w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>
+          <w:sz w:val="${size}"/><w:szCs w:val="${size}"/>
+          ${bold ? '<w:b/><w:bCs/>' : ''}
+          ${underline ? '<w:u w:val="single"/>' : ''}
+        </w:rPr>
+        <w:t xml:space="preserve">${escapeXml(text)}</w:t>
+      </w:r>`;
+}
+
+function createWordParagraphXml(text = '', boldWords = [], options = {}) {
+    const rawText = normalizeWordText(text);
+    const lines = rawText.split(/\n/);
+    const heading = options.heading ?? isDocumentHeading(rawText);
+    const center = options.center ?? heading;
+    const bold = options.bold ?? heading;
+    const underline = options.underline ?? heading;
+    const spacingAfter = Number(options.spacingAfter ?? (heading ? 180 : 140));
+    const size = Number(options.size || 20);
+    const lineHeight = Number(options.lineHeight || 276);
+    const alignment = center ? '<w:jc w:val="center"/>' : '';
+
+    if (!rawText.trim()) {
+        return '<w:p><w:pPr><w:spacing w:after="120"/></w:pPr></w:p>';
+    }
+
+    const runXml = lines.map((line, index) => {
+        const runs = splitTextIntoWordRuns(line, boldWords);
+        const xml = runs.length
+            ? runs.map((run) => createWordRunXml(run, { bold, underline, size })).join('')
+            : createWordRunXml({ text: line, bold }, { bold, underline, size });
+        return `${index > 0 ? '<w:r><w:br/></w:r>' : ''}${xml}`;
+    }).join('');
+
+    return `
+    <w:p>
+      <w:pPr>
+        <w:spacing w:before="0" w:after="${spacingAfter}" w:line="${lineHeight}" w:lineRule="auto"/>
+        ${alignment}
+      </w:pPr>
+      ${runXml}
+    </w:p>`;
+}
+
+function createWordTableXml(rows = [], boldWords = [], options = {}) {
+    if (!Array.isArray(rows) || !rows.length) return '';
+    const compact = Boolean(options.compact);
+    const offerTermsMode = options.offerTerms || '';
+    const offerTerms = Boolean(offerTermsMode);
+    const offerPrimaryTerms = offerTermsMode === 'primary';
+    const hasFourColumns = rows.some((row) => Array.isArray(row) && row.length > 2);
+    const columnWidths = hasFourColumns
+        ? (compact ? [1500, 3100, 1500, 3100] : [1700, 2900, 1700, 2900])
+        : (offerTerms ? [2600, 6600] : [compact ? 2500 : 3000, compact ? 6700 : 6200]);
+    const fontSize = offerTerms ? 18 : (compact ? 14 : 18);
+    const lineHeight = offerPrimaryTerms ? 285 : (offerTerms ? 235 : (compact ? 160 : 218));
+    const spacingAfter = (compact || offerTerms) ? 0 : 8;
+    const cellTopBottom = offerPrimaryTerms ? 54 : (offerTerms ? 34 : (compact ? 8 : 35));
+    const cell = (content, width, bold = false) => `
+      <w:tc>
+        <w:tcPr><w:tcW w:w="${width}" w:type="dxa"/><w:vAlign w:val="top"/></w:tcPr>
+        ${createWordParagraphXml(content, boldWords, { bold, spacingAfter, size: fontSize, lineHeight, center: false, underline: false })}
+      </w:tc>`;
+    const rowXml = rows.map((row) => {
+        const safeRow = Array.isArray(row) ? row : [];
+        const cells = hasFourColumns
+            ? [
+                cell(safeRow[0] || '', columnWidths[0], true),
+                cell(safeRow[1] || '', columnWidths[1], false),
+                cell(safeRow[2] || '', columnWidths[2], true),
+                cell(safeRow[3] || '', columnWidths[3], false)
+            ].join('')
+            : [
+                cell(safeRow[0] || '', columnWidths[0], true),
+                cell(safeRow[1] || '', columnWidths[1], false)
+            ].join('');
+        return `<w:tr><w:trPr><w:trHeight w:val="0" w:hRule="auto"/></w:trPr>${cells}</w:tr>`;
+    }).join('');
+    const gridXml = columnWidths.map((width) => `<w:gridCol w:w="${width}"/>`).join('');
+    return `
+    <w:tbl>
+      <w:tblPr>
+        <w:tblW w:w="9200" w:type="dxa"/>
+        <w:tblBorders>
+          <w:top w:val="single" w:sz="4" w:space="0" w:color="D9E2EC"/>
+          <w:left w:val="single" w:sz="4" w:space="0" w:color="D9E2EC"/>
+          <w:bottom w:val="single" w:sz="4" w:space="0" w:color="D9E2EC"/>
+          <w:right w:val="single" w:sz="4" w:space="0" w:color="D9E2EC"/>
+          <w:insideH w:val="single" w:sz="4" w:space="0" w:color="E5E7EB"/>
+          <w:insideV w:val="single" w:sz="4" w:space="0" w:color="E5E7EB"/>
+        </w:tblBorders>
+        <w:tblCellMar>
+          <w:top w:w="${cellTopBottom}" w:type="dxa"/><w:left w:w="70" w:type="dxa"/>
+          <w:bottom w:w="${cellTopBottom}" w:type="dxa"/><w:right w:w="70" w:type="dxa"/>
+        </w:tblCellMar>
+      </w:tblPr>
+      <w:tblGrid>${gridXml}</w:tblGrid>
+      ${rowXml}
+    </w:tbl>`;
+}
+
+function createWordPageBreakXml() {
+    return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+}
+
+const DOCX_TEMPLATE_PAGE_IMAGES = {
+    offer_letter: { stem: 'offer-letter-master', pages: 4 },
+    allocation_letter: { stem: 'allocation-letter-master', pages: 2 },
+    availability_letter: { stem: 'availability-letter-master', pages: 1 },
+    indemnity_letter: { stem: 'indemnity-letter-master', pages: 2 },
+    readiness_letter: { stem: 'readiness-letter-master', pages: 1 },
+    title_letter: { stem: 'title-letter-master', pages: 1 },
+    verification_letter: { stem: 'verification-letter-master', pages: 1 }
+};
+
+async function loadDocxTemplatePageAssets(documentType, pageCount) {
+    const config = DOCX_TEMPLATE_PAGE_IMAGES[documentType];
+    if (!config) return [];
+    const assets = [];
+    for (let index = 0; index < pageCount; index += 1) {
+        const imageIndex = Math.min(index + 1, config.pages);
+        const fileName = `${config.stem}-page-${imageIndex}.png`;
+        const url = `assets/document-templates/docx-page-images/${fileName}`;
+        const response = await fetch(url, { cache: 'force-cache' });
+        if (!response.ok) {
+            assets.push(null);
+            continue;
+        }
+        assets.push({
+            rId: `rIdTemplatePage${index + 1}`,
+            fileName,
+            zipName: `template-page-${index + 1}.png`,
+            url,
+            bytes: await response.arrayBuffer()
+        });
+    }
+    return assets;
+}
+
+function createWordBackgroundImageXml(asset = null, pageIndex = 0) {
+    if (!asset?.rId) return '';
+    const widthEmu = 7560310;
+    const heightEmu = 10692130;
+    return `
+    <w:p>
+      <w:pPr><w:spacing w:before="0" w:after="0"/></w:pPr>
+      <w:r>
+        <w:drawing>
+          <wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="0" behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1">
+            <wp:simplePos x="0" y="0"/>
+            <wp:positionH relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionH>
+            <wp:positionV relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionV>
+            <wp:extent cx="${widthEmu}" cy="${heightEmu}"/>
+            <wp:effectExtent l="0" t="0" r="0" b="0"/>
+            <wp:wrapNone/>
+            <wp:docPr id="${9000 + pageIndex}" name="Template Page ${pageIndex + 1}"/>
+            <wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>
+            <a:graphic>
+              <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                <pic:pic>
+                  <pic:nvPicPr><pic:cNvPr id="${9000 + pageIndex}" name="${escapeAttribute(asset.fileName)}"/><pic:cNvPicPr/></pic:nvPicPr>
+                  <pic:blipFill><a:blip r:embed="${asset.rId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+                  <pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${widthEmu}" cy="${heightEmu}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>
+                </pic:pic>
+              </a:graphicData>
+            </a:graphic>
+          </wp:anchor>
+        </w:drawing>
+      </w:r>
+    </w:p>`;
+}
+
+function createDocxDocumentXml(documentType, contentModel = {}, pageAssets = []) {
+    const body = [];
+    const pages = Array.isArray(contentModel.pages) ? contentModel.pages : [];
+    pages.forEach((page, pageIndex) => {
+        const boldWords = normalizeBoldPhraseList(page.boldWords || []);
+        body.push(createWordBackgroundImageXml(pageAssets[pageIndex], pageIndex));
+        body.push(createWordSpacerParagraphXml(getDocxPageTopSpacerTwips(documentType, pageIndex)));
+        if (page.tablePosition === 'before' && Array.isArray(page.table) && page.table.length) {
+            body.push(createWordTableXml(page.table, boldWords, { compact: page.compactTable, offerTerms: page.offerTermsTable }));
+        }
+        (page.paragraphs || []).forEach((paragraph) => {
+            body.push(createWordParagraphXml(paragraph, boldWords));
+        });
+        if (page.tablePosition !== 'before' && Array.isArray(page.table) && page.table.length) {
+            body.push(createWordTableXml(page.table, boldWords, { compact: page.compactTable, offerTerms: page.offerTermsTable }));
+        }
+        if (pageIndex < pages.length - 1) body.push(createWordPageBreakXml());
+    });
+
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+  <w:body>
+    ${body.join('')}
+    <w:sectPr>
+      <w:pgSz w:w="11906" w:h="16838"/>
+      <w:pgMar w:top="1600" w:right="1134" w:bottom="1134" w:left="1134" w:header="0" w:footer="0" w:gutter="0"/>
+      <w:cols w:space="720"/>
+      <w:docGrid w:linePitch="360"/>
+    </w:sectPr>
+  </w:body>
+</w:document>`;
+}
+
+function createDocxStylesXml() {
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+    <w:name w:val="Normal"/>
+    <w:qFormat/>
+    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>
+  </w:style>
+</w:styles>`;
+}
+
+async function generateDocxDocumentFromContent(documentType, data = {}) {
+    if (!ensureDocxZipLibrary()) throw new Error('Word document engine is unavailable.');
+    const contentModel = buildDocumentContent(documentType, data);
+    const contentPages = Array.isArray(contentModel.pages) ? contentModel.pages : [];
+    const pageAssets = await loadDocxTemplatePageAssets(documentType, contentPages.length);
+    const zip = new window.PizZip();
+    zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>`);
+    zip.folder('_rels').file('.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>`);
+    zip.folder('word').file('document.xml', createDocxDocumentXml(documentType, contentModel, pageAssets));
+    zip.folder('word').file('styles.xml', createDocxStylesXml());
+    const imageRelationships = pageAssets
+        .filter(Boolean)
+        .map((asset) => `  <Relationship Id="${asset.rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${asset.zipName}"/>`)
+        .join('\n');
+    zip.folder('word').folder('_rels').file('document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+${imageRelationships}
+</Relationships>`);
+    pageAssets.filter(Boolean).forEach((asset) => {
+        zip.folder('word').folder('media').file(asset.zipName, asset.bytes, { binary: true });
+    });
+    zip.folder('docProps').file('app.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>CMBank RSA Admin Dashboard</Application></Properties>`);
+    zip.folder('docProps').file('core.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${escapeXml(GENERATED_DOCUMENT_TYPES.find((item) => item.id === documentType)?.label || documentType)}</dc:title><dc:creator>CMBank RSA Admin Dashboard</dc:creator><cp:lastModifiedBy>CMBank RSA Admin Dashboard</cp:lastModifiedBy></cp:coreProperties>`);
+
+    const blob = zip.generate({
+        type: 'blob',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        compression: 'DEFLATE'
+    });
+    return {
+        blob,
+        previewHtml: renderDocxPreviewHtml(contentModel, pageAssets, documentType),
+        contentModel
+    };
+}
+
+function ensurePreviewPdfLibraries() {
+    if (!window.html2canvas || !window.jspdf?.jsPDF) {
+        throw new Error('PDF preview export engine is unavailable. Please refresh and try again.');
+    }
+}
+
+async function createPdfBlobFromPreviewHtml(previewHtml = '') {
+    ensurePreviewPdfLibraries();
+    const host = document.createElement('div');
+    host.className = 'generated-pdf-capture-host word-generated-doc-render';
+    host.style.position = 'fixed';
+    host.style.left = '-10000px';
+    host.style.top = '0';
+    host.style.width = '850px';
+    host.style.background = '#eef4fb';
+    host.style.padding = '26px';
+    host.style.zIndex = '0';
+    host.style.pointerEvents = 'none';
+    host.innerHTML = previewHtml;
+    document.body.appendChild(host);
+
+    try {
+        await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+        await withTimeout(waitForPreviewBackgroundImages(host), 10000, 'PDF template images took too long to load.');
+        const pages = Array.from(host.querySelectorAll('.word-preview-page'));
+        if (!pages.length) throw new Error('Generated document preview is empty.');
+
+        const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+
+        for (let index = 0; index < pages.length; index += 1) {
+            const page = pages[index];
+            const canvas = await withTimeout(window.html2canvas(page, {
+                scale: 2.5,
+                backgroundColor: '#ffffff',
+                useCORS: true,
+                allowTaint: true,
+                logging: false
+            }), 45000, `PDF page ${index + 1} took too long to render.`);
+            const imgData = canvas.toDataURL('image/png');
+            if (index > 0) pdf.addPage();
+            pdf.addImage(imgData, 'PNG', 0, 0, pageWidth, pageHeight, undefined, 'SLOW');
+        }
+
+        return pdf.output('blob');
+    } finally {
+        host.remove();
+    }
+}
+
+function withTimeout(promise, timeoutMs = 30000, message = 'Operation timed out.') {
+    let timer = null;
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+        })
+    ]).finally(() => {
+        if (timer) clearTimeout(timer);
+    });
+}
+
+async function waitForPreviewBackgroundImages(host) {
+    const urls = Array.from(host.querySelectorAll('.word-preview-page'))
+        .map((page) => {
+            const value = page.style.backgroundImage || '';
+            const match = value.match(/url\(["']?(.+?)["']?\)/);
+            return match ? match[1] : '';
+        })
+        .filter(Boolean);
+    if (!urls.length) return;
+    await Promise.all(urls.map((url) => new Promise((resolve) => {
+        const img = new Image();
+        img.onload = resolve;
+        img.onerror = resolve;
+        img.src = url;
+    })));
+}
+
+async function generatePdfDocumentFromPreview(documentType, data = {}) {
+    const generated = await generateDocxDocumentFromContent(documentType, data);
+    const blob = await createPdfBlobFromPreviewHtml(generated.previewHtml);
+    return {
+        blob,
+        previewUrl: URL.createObjectURL(blob),
+        previewHtml: '',
+        contentModel: generated.contentModel
+    };
+}
+
+function renderDocxPreviewHtml(contentModel = {}, pageAssets = [], documentType = '') {
+    const pages = Array.isArray(contentModel.pages) ? contentModel.pages : [];
+    return pages.map((page, pageIndex) => {
+        const boldWords = normalizeBoldPhraseList(page.boldWords || []);
+        const buildParagraphHtml = () => (page.paragraphs || []).map((paragraph) => {
+            const text = String(paragraph || '');
+            if (!text.trim()) return '<p class="word-preview-spacer"></p>';
+            const className = isDocumentHeading(text) ? ' class="word-preview-heading"' : '';
+            const html = text.split(/\n/).map((line) => {
+                const runs = splitTextIntoWordRuns(line, boldWords);
+                return runs.map((run) => run.bold
+                    ? `<strong>${escapeHtml(run.text)}</strong>`
+                    : escapeHtml(run.text)).join('');
+            }).join('<br>');
+            return `<p${className}>${html}</p>`;
+        }).join('');
+        let tableHtml = '';
+        if (Array.isArray(page.table) && page.table.length) {
+            const hasFourColumns = page.table.some((row) => Array.isArray(row) && row.length > 2);
+            const tableClasses = [
+                page.compactTable ? 'compact-word-table' : '',
+                page.offerTermsTable ? 'offer-terms-word-table' : '',
+                page.offerTermsTable === 'primary' ? 'offer-terms-primary-table' : '',
+                page.offerTermsTable === 'continuation' ? 'offer-terms-continuation-table' : '',
+                hasFourColumns ? 'four-column-word-table' : ''
+            ].filter(Boolean).join(' ');
+            const tableRows = page.table.map((row) => {
+                const safeRow = Array.isArray(row) ? row : [];
+                return hasFourColumns
+                    ? `<tr><th>${escapeHtml(safeRow[0] || '')}</th><td>${escapeHtml(safeRow[1] || '')}</td><th>${escapeHtml(safeRow[2] || '')}</th><td>${escapeHtml(safeRow[3] || '')}</td></tr>`
+                    : `<tr><th>${escapeHtml(safeRow[0] || '')}</th><td>${escapeHtml(safeRow[1] || '')}</td></tr>`;
+            }).join('');
+            tableHtml = `<table class="${tableClasses}">${tableRows}</table>`;
+        }
+        const paragraphHtml = buildParagraphHtml();
+        const contentHtml = page.tablePosition === 'before'
+            ? `${tableHtml}${paragraphHtml}`
+            : `${paragraphHtml}${tableHtml}`;
+        const styleParts = [`padding-top: ${getDocxPreviewPaddingPx(documentType, pageIndex)}px`];
+        if (pageAssets[pageIndex]?.url) {
+            styleParts.push(`background-image: url('${escapeAttribute(pageAssets[pageIndex].url)}')`);
+        }
+        const styleAttr = ` style="${styleParts.join('; ')}"`;
+        const spacer = getDocxPageTopSpacerTwips(documentType, pageIndex);
+        const spacingClass = spacer >= 500 ? ' page-spaced-down' : (spacer === 0 ? ' page-spaced-up' : '');
+        return `<section class="word-preview-page${spacingClass}"${styleAttr}><div class="word-preview-page-number">Page ${pageIndex + 1}</div>${contentHtml}</section>`;
+    }).join('');
+}
+
+function resolveGeneratedDocumentFieldValue(fieldKey, data = {}) {
+    const upperHouseType = String(data.houseType || '').toUpperCase();
+    const upperCustomerName = String(data.customerName || '').toUpperCase();
+    const safeEstateName = String(data.estateName || '').trim();
+    const safeEstateAddress = String(data.estateAddress || '').trim();
+    const valueMap = {
+        currentDate: data.currentDate,
+        currentDateShort: buildShortLetterDate(new Date()),
+        customerName: data.customerName,
+        customerAddress: data.customerAddress,
+        propertyValueText: data.propertyValueText,
+        loanAmountText: data.loanAmountText,
+        equityContributionText: data.equityContributionText,
+        houseNumber: data.houseNumber,
+        houseType: data.houseType,
+        pfaName: data.pfaName,
+        rsaPin: data.rsaPin,
+        bankAccountNumber: data.bankAccountNumber,
+        offerPropertyValueLine: `${data.propertyValueText} (${data.propertyValueWords})`,
+        offerPurposeFragment: `House ${data.houseNumber} of a ${upperHouseType}`,
+        offerEquityLine: `${data.equityContributionText} (${data.equityContributionWords})`,
+        offerSecurityFragment: `House ${data.houseNumber} of a ${upperHouseType}`,
+        offerReevaluateFragment: `House ${data.houseNumber}, a ${upperHouseType}`,
+        offerClause6Fragment: `House ${data.houseNumber} of the ${upperHouseType}`,
+        offerClause8Fragment: `House ${data.houseNumber}, a ${upperHouseType}`,
+        allocationHouseLine: `HOUSE ${data.houseNumber}, a unit of ${upperHouseType} in the Estate`,
+        allocationValueLine: `${data.propertyValueText} (${data.propertyValueWords})`,
+        availabilityLine1: `This is to confirm the authenticity of the property allocated to ${upperCustomerName}, which is a`,
+        availabilityLine2: `${upperHouseType}, House number ${data.houseNumber} situated at ${safeEstateName}`,
+        availabilityLine3: `${safeEstateName}, ${safeEstateAddress}, valued at ${data.propertyValueText}`,
+        readinessNameLine: `Name: ${upperCustomerName}`,
+        readinessAccountLine: `Account Number: ${data.bankAccountNumber}`,
+        readinessEquityLine: `Equity Amount: ${data.equityContributionText} (${data.equityContributionWords})`,
+        readinessLoanLine: upperCustomerName,
+        titleHeaderLine: `${upperCustomerName} PIN:${data.rsaPin}`,
+        titleBodyLine: upperCustomerName,
+        verificationLine1: `This is to confirm the authenticity of the property offer allocated to ${upperCustomerName},`,
+        verificationLine2: `which is House ${data.houseNumber}, a ${upperHouseType} situated at ${safeEstateName}`,
+        verificationLine3: `${safeEstateName}, ${safeEstateAddress} valued at ${data.propertyValueText}`
+    };
+    return toPdfSafeText(valueMap[fieldKey] ?? '').trim();
+}
+
+function wrapPdfText(text, font, fontSize, maxWidth) {
+    const content = String(text || '').trim();
+    if (!content) return [''];
+    const words = content.split(/\s+/);
+    const lines = [];
+    let currentLine = '';
+
+    words.forEach((word) => {
+        const candidate = currentLine ? `${currentLine} ${word}` : word;
+        if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth || !currentLine) {
+            currentLine = candidate;
+        } else {
+            lines.push(currentLine);
+            currentLine = word;
+        }
+    });
+
+    if (currentLine) lines.push(currentLine);
+    return lines;
+}
+
+function pointsFromMillimeters(mmValue) {
+    return Number(mmValue || 0) * 2.8346456693;
+}
+
+function normalizeBoldPhraseList(items = []) {
+    return Array.from(new Set(
+        items
+            .map((item) => String(item || '').trim())
+            .filter(Boolean)
+    )).sort((a, b) => b.length - a.length);
+}
+
+function tokenizeRichText(text = '', boldPhrases = []) {
+    const tokens = [];
+    const source = String(text || '');
+    let cursor = 0;
+    while (cursor < source.length) {
+        let match = null;
+        for (const phrase of boldPhrases) {
+            if (phrase && source.slice(cursor, cursor + phrase.length) === phrase) {
+                match = phrase;
+                break;
+            }
+        }
+        if (match) {
+            tokens.push({ text: match, bold: true });
+            cursor += match.length;
+            continue;
+        }
+        let next = cursor + 1;
+        while (next < source.length) {
+            const upcoming = boldPhrases.find((phrase) => phrase && source.slice(next, next + phrase.length) === phrase);
+            if (upcoming) break;
+            next += 1;
+        }
+        tokens.push({ text: source.slice(cursor, next), bold: false });
+        cursor = next;
+    }
+    return tokens;
+}
+
+function splitRichTokensIntoWords(tokens = []) {
+    const pieces = [];
+    tokens.forEach((token) => {
+        const parts = String(token.text || '').match(/\S+|\s+/g) || [];
+        parts.forEach((part) => {
+            pieces.push({ text: part, bold: token.bold });
+        });
+    });
+    return pieces;
+}
+
+function measureRichWordWidth(word, fonts, fontSize) {
+    const font = word.bold ? fonts.bold : fonts.regular;
+    return font.widthOfTextAtSize(word.text, fontSize);
+}
+
+function wrapRichTextLine(text = '', fonts, fontSize, maxWidth, boldPhrases = []) {
+    const tokens = splitRichTokensIntoWords(tokenizeRichText(text, boldPhrases));
+    const lines = [];
+    let currentLine = [];
+    let lineWidth = 0;
+
+    tokens.forEach((word) => {
+        const wordWidth = measureRichWordWidth(word, fonts, fontSize);
+        const nextWidth = lineWidth + wordWidth;
+        const isLeadingWhitespace = currentLine.length === 0 && /^\s+$/.test(word.text);
+        if (!isLeadingWhitespace && currentLine.length > 0 && nextWidth > maxWidth) {
+            lines.push(currentLine);
+            currentLine = /^\s+$/.test(word.text) ? [] : [word];
+            lineWidth = /^\s+$/.test(word.text) ? 0 : wordWidth;
+        } else {
+            if (!isLeadingWhitespace) {
+                currentLine.push(word);
+                lineWidth = nextWidth;
+            }
+        }
+    });
+
+    if (currentLine.length) lines.push(currentLine);
+    if (!lines.length) lines.push([]);
+    return lines;
+}
+
+function drawRichTextLine(page, lineTokens, x, y, fonts, fontSize) {
+    let cursorX = x;
+    lineTokens.forEach((token) => {
+        const font = token.bold ? fonts.bold : fonts.regular;
+        page.drawText(token.text, {
+            x: cursorX,
+            y,
+            size: fontSize,
+            font,
+            color: window.PDFLib.rgb(0, 0, 0)
+        });
+        cursorX += font.widthOfTextAtSize(token.text, fontSize);
+    });
+}
+
+function renderParagraphBlock(page, paragraph = '', boldWords = [], layout, fonts) {
+    const sourceLines = String(paragraph || '').split('\n');
+    const contentWidth = layout.contentWidth;
+    sourceLines.forEach((sourceLine) => {
+        if (!sourceLine) {
+            layout.cursorY -= layout.paragraphSpacing;
+            return;
+        }
+        const wrappedLines = wrapRichTextLine(sourceLine, fonts, layout.fontSize, contentWidth, boldWords);
+        wrappedLines.forEach((lineTokens) => {
+            drawRichTextLine(page, lineTokens, layout.marginLeft, layout.cursorY, fonts, layout.fontSize);
+            layout.cursorY -= layout.lineHeight;
+        });
+        layout.cursorY -= Math.max(0, layout.paragraphSpacing - layout.lineHeight);
+    });
+}
+
+function wrapPlainText(text = '', font, fontSize, maxWidth) {
+    return wrapPdfText(String(text || ''), font, fontSize, maxWidth);
+}
+
+function renderTableBlock(page, rows = [], layout, fonts) {
+    const labelWidth = pointsFromMillimeters(50);
+    const valueWidth = layout.contentWidth - labelWidth;
+    rows.forEach(([label, value]) => {
+        const valueLines = wrapPlainText(String(value || ''), fonts.regular, layout.tableFontSize, valueWidth - 8);
+        const rowHeight = Math.max(layout.tableLineHeight, valueLines.length * layout.tableLineHeight);
+        const rowBottom = layout.cursorY - rowHeight;
+        page.drawRectangle({
+            x: layout.marginLeft,
+            y: rowBottom,
+            width: labelWidth,
+            height: rowHeight,
+            borderWidth: 1,
+            borderColor: window.PDFLib.rgb(0, 0, 0)
+        });
+        page.drawRectangle({
+            x: layout.marginLeft + labelWidth,
+            y: rowBottom,
+            width: valueWidth,
+            height: rowHeight,
+            borderWidth: 1,
+            borderColor: window.PDFLib.rgb(0, 0, 0)
+        });
+
+        page.drawText(String(label || ''), {
+            x: layout.marginLeft + 4,
+            y: layout.cursorY - layout.tableFontSize - 3,
+            size: layout.tableFontSize,
+            font: fonts.bold,
+            color: window.PDFLib.rgb(0, 0, 0)
+        });
+
+        valueLines.forEach((line, index) => {
+            page.drawText(line, {
+                x: layout.marginLeft + labelWidth + 4,
+                y: layout.cursorY - layout.tableFontSize - 3 - (index * layout.tableLineHeight),
+                size: layout.tableFontSize,
+                font: fonts.regular,
+                color: window.PDFLib.rgb(0, 0, 0)
+            });
+        });
+
+        layout.cursorY = rowBottom - pointsFromMillimeters(1.4);
+    });
+}
+
+function getOverlayPageFormatPoints(documentType, pageIndex, page) {
+    const format = GENERATED_DOCUMENT_PAGE_FORMATS_MM?.[documentType]?.[pageIndex];
+    if (!format) {
+        return { width: page.getWidth(), height: page.getHeight(), offsetX: 0, offsetY: 0 };
+    }
+    const width = pointsFromMillimeters(format[0]);
+    const height = pointsFromMillimeters(format[1]);
+    return {
+        width,
+        height,
+        offsetX: 0,
+        offsetY: Math.max(0, page.getHeight() - height)
+    };
+}
+
+function pdfRectFromTopLeft(page, rect = []) {
+    const [x1, y1, x2, y2] = rect.map((value) => Number(value || 0));
+    const padding = 1.8;
+    return {
+        x: Math.max(0, x1 - padding),
+        y: Math.max(0, page.getHeight() - y2 - padding),
+        width: Math.max(1, x2 - x1 + (padding * 2)),
+        height: Math.max(1, y2 - y1 + (padding * 2)),
+        textX: x1,
+        textY: page.getHeight() - y2 + 2,
+        maxWidth: Math.max(1, x2 - x1)
+    };
+}
+
+function wipePdfRect(page, rect = []) {
+    const box = pdfRectFromTopLeft(page, rect);
+    page.drawRectangle({
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height,
+        color: window.PDFLib.rgb(1, 1, 1),
+        borderWidth: 0
+    });
+}
+
+function drawPdfField(page, field = {}, value = '', embeddedFonts = {}) {
+    const content = toPdfSafeText(value).trim();
+    if (!content) return;
+    const box = pdfRectFromTopLeft(page, field.rect);
+    const fontSize = Number(field.fontSize || 10);
+    const fieldForFont = field.key === 'customerName'
+        ? { ...field, fontWeight: 'bold' }
+        : field;
+    const profile = getPdfDocumentFontProfile('', fieldForFont);
+    const font = embeddedFonts[profile.family] || embeddedFonts.dejavu || embeddedFonts.dejavuBold;
+    const color = window.PDFLib.rgb(0, 0, 0);
+    const lines = field.allowWrap
+        ? wrapPdfText(content, font, fontSize, box.maxWidth)
+        : [content];
+
+    lines.slice(0, 3).forEach((line, index) => {
+        page.drawText(line, {
+            x: box.textX,
+            y: box.textY - (index * (fontSize + 2)),
+            size: fontSize,
+            font,
+            color,
+            maxWidth: box.maxWidth
+        });
+    });
+}
+
+async function generatePdfDocumentFromTemplate(documentType, data = {}) {
+    const config = PDF_TEMPLATE_CONFIGS[documentType];
+    if (!config) throw new Error(`Unsupported document template: ${documentType}`);
+    if (!window.PDFLib?.PDFDocument) throw new Error('PDF engine is unavailable. Please refresh and try again.');
+
+    const fontAssets = await ensurePdfFontAssets();
+    const templateResponse = await fetch(`assets/document-templates/${config.fileName}`, { cache: 'no-store' });
+    if (!templateResponse.ok) {
+        throw new Error(`Template not found for ${documentType}.`);
+    }
+
+    const templateBytes = await templateResponse.arrayBuffer();
+    const templateDoc = await window.PDFLib.PDFDocument.load(templateBytes);
+    templateDoc.registerFontkit(window.fontkit);
+    const templatePages = templateDoc.getPages();
+    const embeddedFonts = {
+        dejavu: await templateDoc.embedFont(fontAssets.dejavu),
+        dejavuBold: await templateDoc.embedFont(fontAssets.dejavuBold),
+        trebuchet: fontAssets.trebuchet ? await templateDoc.embedFont(fontAssets.trebuchet) : null,
+        trebuchetBold: fontAssets.trebuchetBold ? await templateDoc.embedFont(fontAssets.trebuchetBold) : null
+    };
+
+    (config.wipeZones || []).forEach((zone) => {
+        const page = templatePages[zone.page];
+        if (page) wipePdfRect(page, zone.rect);
+    });
+
+    (config.fields || []).forEach((field) => {
+        const page = templatePages[field.page];
+        if (!page) return;
+        wipePdfRect(page, field.rect);
+        const value = resolveGeneratedDocumentFieldValue(field.key, data);
+        drawPdfField(page, field, value, embeddedFonts);
+    });
+
+    const pdfBytes = await templateDoc.save();
+    return new Blob([pdfBytes], { type: 'application/pdf' });
+}
+
+function resetGeneratedDocumentPreviewItems() {
+    generatedDocumentPreviewItems.forEach((item) => {
+        if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    });
+    generatedDocumentPreviewItems = [];
+}
+
+function renderDocumentGenerationChecklist(submission = {}) {
+    if (!documentGenerationChecklist) return;
+    documentGenerationChecklist.innerHTML = GENERATED_DOCUMENT_TYPES.map((item) => `
+        <label class="document-check-card">
+            <input type="checkbox" class="document-check-input" value="${item.id}" checked>
+            <span class="document-check-copy">
+                <strong>${escapeHtml(item.label)}</strong>
+                <span>${escapeHtml(item.description)}</span>
+            </span>
+        </label>
+    `).join('');
+    if (documentGenerationCustomerName) documentGenerationCustomerName.textContent = submission.customerName || 'Customer';
+    if (documentGenerationMeta) {
+        const details = submission.customerDetails || {};
+        documentGenerationMeta.textContent = `Application ID: ${submission.id || '-'} | PFA: ${details.pfa || submission.pfa || '-'} | House No: ${details.houseNumber || submission.houseNumber || '-'}`;
+    }
+}
+
+function renderGenerateDocumentsTable() {
+    if (!generateDocumentsTableBody) return;
+    const items = allSubmissions
+        .filter((sub) => {
+            const status = String(sub.status || '').toLowerCase();
+            return status === 'processing_to_pfa' || status === 'approved';
+        })
+        .slice()
+        .sort((a, b) => getStageTimestampMillis(getSubmissionApprovalEntryAt(b)) - getStageTimestampMillis(getSubmissionApprovalEntryAt(a)));
+
+    if (!items.length) {
+        generateDocumentsTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No Processing to PFA applications available for document generation.</td></tr>';
+        return;
+    }
+
+    generateDocumentsTableBody.innerHTML = items.map((sub) => {
+        const details = sub.customerDetails || {};
+        return `
+            <tr>
+                <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
+                <td>${escapeHtml(getDisplayNameByEmail(sub.uploadedBy || ''))}</td>
+                <td>${escapeHtml(details.pfa || sub.pfa || '-')}</td>
+                <td>${escapeHtml(details.houseNumber || sub.houseNumber || '-')}</td>
+                <td>${escapeHtml(details.propertyType || details.houseType || '-')}</td>
+                <td>${escapeHtml(sub.assignedToRSA ? getDisplayNameByEmail(sub.assignedToRSA) : '-')}</td>
+                <td><span class="status-badge status-approved">${escapeHtml(formatStatusLabel(sub.status || '-'))}</span></td>
+                <td>
+                    <button class="action-btn view-btn-small" onclick="window.openDocumentGenerationModal('${sub.id}', this)">
+                        <i class="fas fa-file-circle-plus"></i> Generate
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function toggleAllDocumentSelections() {
+    const checks = Array.from(documentGenerationChecklist?.querySelectorAll('.document-check-input') || []);
+    if (!checks.length) return;
+    const shouldCheckAll = checks.some((check) => !check.checked);
+    checks.forEach((check) => { check.checked = shouldCheckAll; });
+}
+
+window.openDocumentGenerationModal = async (submissionId, triggerBtn) => {
+    const submission = allSubmissions.find((item) => item.id === submissionId);
+    if (!submission || !documentGenerationModal) return;
+    currentDocumentGenerationSubmissionId = submissionId;
+    const originalHtml = triggerBtn?.innerHTML || '';
+    if (triggerBtn) {
+        triggerBtn.disabled = true;
+        triggerBtn.classList.add('loading');
+        triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Opening...';
+    }
+    try {
+        renderDocumentGenerationChecklist(submission);
+        documentGenerationModal.classList.add('active');
+    } finally {
+        if (triggerBtn) {
+            triggerBtn.disabled = false;
+            triggerBtn.classList.remove('loading');
+            triggerBtn.innerHTML = originalHtml || '<i class="fas fa-file-circle-plus"></i> Generate';
+        }
+    }
+};
+
+function getSelectedDocumentTypes() {
+    return Array.from(documentGenerationChecklist?.querySelectorAll('.document-check-input:checked') || []).map((input) => input.value);
+}
+
+async function generateSelectedDocumentsForPreview() {
+    const submission = allSubmissions.find((item) => item.id === currentDocumentGenerationSubmissionId);
+    if (!submission) {
+        showNotification('Application not found for document generation.', 'error');
+        return;
+    }
+    const selectedTypes = getSelectedDocumentTypes();
+    if (!selectedTypes.length) {
+        showNotification('Select at least one document to generate.', 'warning');
+        return;
+    }
+
+    const generateBtn = document.getElementById('generateSelectedDocumentsBtn');
+    const originalBtnHtml = generateBtn?.innerHTML || '';
+    if (generateBtn) {
+        generateBtn.disabled = true;
+        generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+    }
+
+    try {
+        if (!adminSystemSettings?.pfaOptions) {
+            await loadAdminSystemSettings();
+        }
+        const data = buildLetterDocumentData(submission);
+        resetGeneratedDocumentPreviewItems();
+        const previewItems = [];
+
+        for (const type of selectedTypes) {
+            const config = GENERATED_DOCUMENT_TYPES.find((item) => item.id === type);
+            const isPostApprovalDocument = ['availability_letter', 'readiness_letter', 'title_letter'].includes(type);
+            const documentData = {
+                ...data,
+                currentDate: isPostApprovalDocument ? data.postApprovalDate : data.currentDate
+            };
+            const generated = await generateDocxDocumentFromContent(type, documentData);
+            previewItems.push({
+                type,
+                label: config?.label || type,
+                blob: null,
+                previewUrl: '',
+                previewHtml: generated.previewHtml,
+                fileExtension: 'pdf',
+                mimeType: 'application/pdf',
+                customerName: data.customerName
+            });
+        }
+
+        generatedDocumentPreviewItems = previewItems;
+        renderGeneratedDocumentsPreview(data.customerName);
+        closeDocumentGenerationModalFn();
+        if (generatedDocumentsPreviewModal) generatedDocumentsPreviewModal.classList.add('active');
+    } catch (error) {
+        showNotification(`Document generation failed: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+        if (generateBtn) {
+            generateBtn.disabled = false;
+            generateBtn.innerHTML = originalBtnHtml || '<i class="fas fa-file-circle-plus"></i> Generate Selected';
+        }
+    }
+}
+
+function renderGeneratedDocumentsPreview(customerName = 'Customer') {
+    if (!generatedDocumentsPreviewList || !generatedDocumentsPreviewMeta) return;
+    generatedDocumentsPreviewMeta.textContent = `${customerName} | ${generatedDocumentPreviewItems.length} document(s) generated`;
+    generatedDocumentsPreviewList.innerHTML = generatedDocumentPreviewItems.map((item, index) => `
+        <div class="generated-doc-card">
+            <div class="generated-doc-card-head">
+                <h3>${escapeHtml(item.label)}</h3>
+                <button class="action-btn" onclick="window.saveGeneratedDocumentPdf(${index}, this)">
+                    <i class="fas fa-file-pdf"></i> Save as PDF
+                </button>
+            </div>
+            <div class="generated-doc-render ${item.previewHtml ? 'word-generated-doc-render' : ''}" data-generated-doc-index="${index}">
+                ${item.previewUrl
+                    ? `<iframe class="generated-doc-frame" src="${escapeAttribute(item.previewUrl)}" title="${escapeAttribute(item.label)} preview"></iframe>`
+                    : (item.previewHtml || '<div class="no-data">Preview unavailable.</div>')}
+            </div>
+        </div>
+    `).join('');
+}
+
+function sanitizeFileNamePart(value = '') {
+    return String(value || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
+}
+
+async function saveGeneratedDocumentAtIndex(index, directoryHandle = null) {
+    const item = generatedDocumentPreviewItems[index];
+    if (!item?.blob && item?.previewHtml) {
+        item.blob = await createPdfBlobFromPreviewHtml(item.previewHtml);
+        item.mimeType = 'application/pdf';
+        item.fileExtension = 'pdf';
+        generatedDocumentPreviewItems[index] = item;
+    }
+    if (!item?.blob) throw new Error('Generated document preview is unavailable.');
+    const customerName = sanitizeFileNamePart(item.customerName || 'Customer') || 'Customer';
+    const extension = sanitizeFileNamePart(item.fileExtension || 'docx') || 'docx';
+    const fileName = `${customerName} - ${sanitizeFileNamePart(item.label)}.${extension}`;
+
+    if (directoryHandle && 'getDirectoryHandle' in directoryHandle) {
+        const customerFolder = await directoryHandle.getDirectoryHandle(customerName, { create: true });
+        const fileHandle = await customerFolder.getFileHandle(fileName, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(item.blob);
+        await writable.close();
+        return true;
+    }
+
+    return saveFileWithLocationPicker(item.blob, fileName);
+}
+
+async function ensureDirectoryWritePermission(directoryHandle) {
+    if (!directoryHandle || typeof directoryHandle.queryPermission !== 'function') return true;
+    const descriptor = { mode: 'readwrite' };
+    const current = await directoryHandle.queryPermission(descriptor);
+    if (current === 'granted') return true;
+    if (typeof directoryHandle.requestPermission !== 'function') return false;
+    const requested = await directoryHandle.requestPermission(descriptor);
+    return requested === 'granted';
+}
+
+window.saveGeneratedDocumentPdf = async (index, triggerBtn = null) => {
+    const originalHtml = triggerBtn?.innerHTML || '';
+    try {
+        if (triggerBtn) {
+            triggerBtn.disabled = true;
+            triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing PDF...';
+        }
+        await saveGeneratedDocumentAtIndex(index);
+    } catch (error) {
+        showNotification(`Failed to save document: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+        if (triggerBtn) {
+            triggerBtn.disabled = false;
+            triggerBtn.innerHTML = originalHtml || '<i class="fas fa-file-pdf"></i> Save as PDF';
+        }
+    }
+};
+
+async function saveAllGeneratedDocumentsToFolder() {
+    if (!generatedDocumentPreviewItems.length) {
+        showNotification('No generated documents available to save.', 'warning');
+        return;
+    }
+    const originalHtml = saveAllGeneratedDocumentsBtn?.innerHTML || '';
+    if (saveAllGeneratedDocumentsBtn) {
+        saveAllGeneratedDocumentsBtn.disabled = true;
+        saveAllGeneratedDocumentsBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing PDFs...';
+    }
+    if (!('showDirectoryPicker' in window)) {
+        try {
+            for (let index = 0; index < generatedDocumentPreviewItems.length; index += 1) {
+                await window.saveGeneratedDocumentPdf(index);
+            }
+        } finally {
+            if (saveAllGeneratedDocumentsBtn) {
+                saveAllGeneratedDocumentsBtn.disabled = false;
+                saveAllGeneratedDocumentsBtn.innerHTML = originalHtml || '<i class="fas fa-folder-plus"></i> Save All as PDF';
+            }
+        }
+        return;
+    }
+
+    try {
+        const rootFolder = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' });
+        const canWrite = await ensureDirectoryWritePermission(rootFolder);
+        if (!canWrite) throw new Error('Write permission was not granted for the selected folder.');
+        let successCount = 0;
+        const failures = [];
+        for (let index = 0; index < generatedDocumentPreviewItems.length; index += 1) {
+            showNotification(`Preparing PDF ${index + 1} of ${generatedDocumentPreviewItems.length}...`, 'info');
+            try {
+                await saveGeneratedDocumentAtIndex(index, rootFolder);
+                successCount += 1;
+                showNotification(`Saved ${index + 1} of ${generatedDocumentPreviewItems.length}`, 'success');
+            } catch (error) {
+                failures.push(`${generatedDocumentPreviewItems[index]?.label || `Document ${index + 1}`}: ${error.message || 'Failed'}`);
+            }
+        }
+        if (successCount) {
+            showNotification(`${successCount} document(s) exported to folder successfully.`, failures.length ? 'warning' : 'success');
+        }
+        if (failures.length) {
+            showNotification(`Some documents failed: ${failures.slice(0, 2).join(' | ')}`, 'error');
+        }
+    } catch (error) {
+        if (error?.name === 'AbortError') {
+            showNotification('Save cancelled', 'info');
+            return;
+        }
+        showNotification(`Failed to save generated documents: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+        if (saveAllGeneratedDocumentsBtn) {
+            saveAllGeneratedDocumentsBtn.disabled = false;
+            saveAllGeneratedDocumentsBtn.innerHTML = originalHtml || '<i class="fas fa-folder-plus"></i> Save All as PDF';
+        }
+    }
+}
+
+function setTrackReportInlineStatus(message, type = '') {
+    if (!trackReportInlineStatus) return;
+    trackReportInlineStatus.textContent = String(message || '');
+    trackReportInlineStatus.className = `track-report-inline-status ${type}`.trim();
+}
+
+function ensureXlsxLibrary() {
+    if (window.XLSX) return true;
+    showNotification('Excel library is unavailable. Please refresh and try again.', 'error');
+    return false;
+}
+
+function ensureExcelJsLibrary() {
+    if (window.ExcelJS) return true;
+    showNotification('Styled Excel export is unavailable right now. Please refresh and try again.', 'error');
+    return false;
+}
+
+function normalizeCustomerName(name) {
+    return String(name || '')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function getCustomerNameMatchKeys(name) {
+    const normalized = normalizeCustomerName(name);
+    const compact = normalized.replace(/\s+/g, '');
+    const tokens = normalized.split(' ').filter(Boolean);
+    const sortedTokens = tokens.slice().sort();
+    return { normalized, compact, tokens, sortedCompact: sortedTokens.join('') };
+}
+
+function scoreCustomerNameMatch(inputName, candidateName) {
+    const input = getCustomerNameMatchKeys(inputName);
+    const candidate = getCustomerNameMatchKeys(candidateName);
+    if (!input.normalized || !candidate.normalized) return 0;
+    if (input.normalized === candidate.normalized) return 100;
+    if (input.compact && input.compact === candidate.compact) return 95;
+    if (input.sortedCompact && input.sortedCompact === candidate.sortedCompact) return 93;
+    if (candidate.normalized.includes(input.normalized) || input.normalized.includes(candidate.normalized)) return 88;
+
+    if (!input.tokens.length || !candidate.tokens.length) return 0;
+    const shared = input.tokens.filter((token) => candidate.tokens.includes(token));
+    if (!shared.length) return 0;
+
+    const coverage = shared.length / Math.max(input.tokens.length, candidate.tokens.length);
+    if (shared.length >= Math.min(input.tokens.length, candidate.tokens.length) && coverage >= 0.66) {
+        return 82 + Math.round(coverage * 10);
+    }
+    if (shared.length === input.tokens.length || shared.length === candidate.tokens.length) {
+        return 75 + Math.round(coverage * 10);
+    }
+    return Math.round(coverage * 70);
+}
+
+function splitCustomerNames(rawText) {
+    return String(rawText || '')
+        .split(/\r?\n|,|;|\t/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+async function handleTrackReportFileSelected(event) {
+    const file = event?.target?.files?.[0];
+    if (!file) {
+        trackReportParsedNames = [];
+        return;
+    }
+    if (!ensureXlsxLibrary()) return;
+
+    try {
+        const buffer = await file.arrayBuffer();
+        const workbook = window.XLSX.read(buffer, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[firstSheetName];
+        const rows = window.XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
+        const names = rows
+            .flat()
+            .map((value) => String(value || '').trim())
+            .filter(Boolean)
+            .filter((value) => normalizeCustomerName(value) !== 'customer name');
+
+        trackReportParsedNames = Array.from(new Set(names));
+        setTrackReportInlineStatus(`${trackReportParsedNames.length} customer name(s) loaded from ${file.name}.`, 'success');
+    } catch (error) {
+        trackReportParsedNames = [];
+        setTrackReportInlineStatus('Could not read the uploaded file. Please use the provided template.', 'error');
+    }
+}
+
+function clearTrackReportInputs() {
+    trackReportParsedNames = [];
+    trackReportPreviewRows = [];
+    trackReportUnmatchedEntries = [];
+    if (trackReportFileInput) trackReportFileInput.value = '';
+    if (trackReportNamesInput) trackReportNamesInput.value = '';
+    setTrackReportInlineStatus('');
+}
+
+function getPaymentHandlingStatus(submission = {}) {
+    const status = String(submission.status || '').trim().toLowerCase();
+    const paymentOfficer = submission.assignedToPayment ? getDisplayNameByEmail(submission.assignedToPayment) : '';
+    if (status === 'cleared') return paymentOfficer ? `Cleared by ${paymentOfficer}` : 'Cleared';
+    if (status === 'paid') return paymentOfficer ? `Paid and handled by ${paymentOfficer}` : 'Paid';
+    if (['sent_to_pfa', 'rsa_submitted'].includes(status) || submission.finalSubmitted === true || submission.rsaSubmitted === true) {
+        return paymentOfficer ? `Assigned to ${paymentOfficer}` : 'Awaiting payment assignment';
+    }
+    return 'Not yet in payment stage';
+}
+
+function buildTrackReportRow(submission = {}) {
+    const currentStage = getApplicationCurrentStage(submission);
+    const reviewApprovedAt = submission.reviewedAt || null;
+    const rsaQueueAt = submission.rsaAssignedAt || getSubmissionApprovalEntryAt(submission) || null;
+    const rsaApprovedAt = submission.rsaSubmittedAt || submission.finalSubmittedAt || null;
+    const paymentQueueAt = submission.paymentAssignedAt || getSubmissionPaymentEntryAt(submission) || null;
+
+    return {
+        'Customer Name': submission.customerName || 'Unknown',
+        'Upload Timestamp': formatDate(getTrackStageTimestamp(submission, 'upload')),
+        'Assigned Reviewer': submission.assignedTo ? getDisplayNameByEmail(submission.assignedTo) : 'Unassigned',
+        'Reviewer Approval Timestamp': formatDate(reviewApprovedAt),
+        'RSA Queue Timestamp': formatDate(rsaQueueAt),
+        'Assigned RSA Officer': submission.assignedToRSA ? getDisplayNameByEmail(submission.assignedToRSA) : 'Unassigned',
+        'RSA Approval Timestamp': formatDate(rsaApprovedAt),
+        'Payment Queue Timestamp': formatDate(paymentQueueAt),
+        'Payment Handling Status': getPaymentHandlingStatus(submission),
+        'Current Processing Stage': currentStage.label
+    };
+}
+
+function sortSubmissionsByLatest(submissions = []) {
+    return submissions.slice().sort((a, b) => getStageTimestampMillis(getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(getSubmissionCurrentStageEntryAt(a)));
+}
+
+function getBestCustomerNameSuggestion(inputName, submissions = []) {
+    const ranked = submissions
+        .map((submission) => ({
+            customerName: submission.customerName || '',
+            score: scoreCustomerNameMatch(inputName, submission.customerName || '')
+        }))
+        .filter((item) => item.customerName)
+        .sort((a, b) => b.score - a.score);
+    return ranked[0] || null;
+}
+
+function findBestSubmissionByCustomerName(inputName, submissions = []) {
+    const ranked = submissions
+        .map((submission) => ({
+            submission,
+            score: scoreCustomerNameMatch(inputName, submission.customerName || '')
+        }))
+        .filter((item) => item.score >= 68)
+        .sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            return getStageTimestampMillis(getSubmissionCurrentStageEntryAt(b.submission)) - getStageTimestampMillis(getSubmissionCurrentStageEntryAt(a.submission));
+        });
+
+    return ranked[0]?.submission || null;
+}
+
+function renderTrackReportPreview() {
+    if (!trackReportPreviewSummary || !trackReportPreviewAlerts || !trackReportPreviewTableBody) return;
+
+    trackReportPreviewSummary.innerHTML = `
+        <div class="track-report-preview-card">
+            <span class="label">Names Submitted</span>
+            <div class="value">${trackReportPreviewRows.length + trackReportUnmatchedEntries.length}</div>
+        </div>
+        <div class="track-report-preview-card">
+            <span class="label">Matched Records</span>
+            <div class="value">${trackReportPreviewRows.length}</div>
+        </div>
+        <div class="track-report-preview-card">
+            <span class="label">Unmatched Names</span>
+            <div class="value">${trackReportUnmatchedEntries.length}</div>
+        </div>
+    `;
+
+    const alerts = [];
+    if (trackReportUnmatchedEntries.length) {
+        alerts.push(`
+            <div class="track-report-preview-alert warning">
+                ${trackReportUnmatchedEntries.map((entry) => {
+                    const suggestion = entry?.suggestion?.customerName
+                        ? ` (closest match: ${entry.suggestion.customerName})`
+                        : '';
+                    return escapeHtml(`${entry.inputName}${suggestion}`);
+                }).join('<br>')}
+            </div>
+        `);
+    }
+    if (trackReportPreviewRows.length) {
+        alerts.push(`
+            <div class="track-report-preview-alert info">
+                Review the preview below, then download the Excel report when you are satisfied.
+            </div>
+        `);
+    }
+    trackReportPreviewAlerts.innerHTML = alerts.join('');
+
+    if (!trackReportPreviewRows.length) {
+        trackReportPreviewTableBody.innerHTML = '<tr><td colspan="10" class="no-data">No matching applications found for the submitted customer names.</td></tr>';
+        return;
+    }
+
+    trackReportPreviewTableBody.innerHTML = trackReportPreviewRows.map((row) => `
+        <tr>
+            <td><strong>${escapeHtml(row['Customer Name'])}</strong></td>
+            <td>${escapeHtml(row['Upload Timestamp'])}</td>
+            <td>${escapeHtml(row['Assigned Reviewer'])}</td>
+            <td>${escapeHtml(row['Reviewer Approval Timestamp'])}</td>
+            <td>${escapeHtml(row['RSA Queue Timestamp'])}</td>
+            <td>${escapeHtml(row['Assigned RSA Officer'])}</td>
+            <td>${escapeHtml(row['RSA Approval Timestamp'])}</td>
+            <td>${escapeHtml(row['Payment Queue Timestamp'])}</td>
+            <td>${escapeHtml(row['Payment Handling Status'])}</td>
+            <td>${escapeHtml(row['Current Processing Stage'])}</td>
+        </tr>
+    `).join('');
+}
+
+async function generateTrackReportPreview() {
+    const typedNames = splitCustomerNames(trackReportNamesInput?.value || '');
+    const sourceNames = Array.from(new Set([...trackReportParsedNames, ...typedNames]));
+
+    if (!sourceNames.length) {
+        setTrackReportInlineStatus('Please upload a customer list or paste at least one customer name.', 'error');
+        return;
+    }
+
+    const sortableSubmissions = sortSubmissionsByLatest(allSubmissions);
+    const matchedRows = [];
+    const unmatched = [];
+
+    sourceNames.forEach((name) => {
+        const match = findBestSubmissionByCustomerName(name, sortableSubmissions);
+        if (!match) {
+            unmatched.push({
+                inputName: name,
+                suggestion: getBestCustomerNameSuggestion(name, sortableSubmissions)
+            });
+            return;
+        }
+        matchedRows.push(buildTrackReportRow(match));
+    });
+
+    trackReportPreviewRows = matchedRows;
+    trackReportUnmatchedEntries = unmatched;
+    renderTrackReportPreview();
+    closeTrackReportInputModalFn();
+    if (trackReportPreviewModal) trackReportPreviewModal.classList.add('active');
+    setTrackReportInlineStatus(`${matchedRows.length} record(s) prepared for preview.`, matchedRows.length ? 'success' : 'error');
+}
+
+function getTrackingReportHeaders() {
+    return [
+        'Customer Name',
+        'Upload Timestamp',
+        'Assigned Reviewer',
+        'Reviewer Approval Timestamp',
+        'RSA Queue Timestamp',
+        'Assigned RSA Officer',
+        'RSA Approval Timestamp',
+        'Payment Queue Timestamp',
+        'Payment Handling Status',
+        'Current Processing Stage'
+    ];
+}
+
+function applyTrackingHeaderStyle(row) {
+    row.eachCell((cell) => {
+        cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3B67' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        cell.border = {
+            top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+        };
+    });
+}
+
+function applyTrackingBodyStyle(row, fillColor = 'FFFFFFFF') {
+    row.eachCell((cell) => {
+        cell.font = { name: 'Calibri', size: 11, color: { argb: 'FF0F172A' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } };
+        cell.alignment = { vertical: 'middle', wrapText: true };
+        cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        };
+    });
+}
+
+function applyTrackingSummaryCellStyle(cell, { fill = 'FFF8FAFC', fontColor = 'FF0F172A', bold = true, align = 'left' } = {}) {
+    cell.font = { name: 'Calibri', size: 11, bold, color: { argb: fontColor } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
+    cell.alignment = { vertical: 'middle', horizontal: align, wrapText: true };
+    cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+    };
+}
+
+function styleTrackingStageCell(cell, value) {
+    const normalized = String(value || '').toLowerCase();
+    cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF0F172A' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    if (normalized.includes('rejected')) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+        cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF991B1B' } };
+    } else if (normalized.includes('payment') || normalized.includes('paid') || normalized.includes('cleared')) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
+        cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF166534' } };
+    } else if (normalized.includes('rsa')) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0F2FE' } };
+        cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF0C4A6E' } };
+    } else if (normalized.includes('reviewer') || normalized.includes('pending')) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+        cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF92400E' } };
+    }
+}
+
+async function downloadWorkbookFromRows(fileName, rows) {
+    if (!ensureExcelJsLibrary()) return;
+    const headers = getTrackingReportHeaders();
+    const workbook = new window.ExcelJS.Workbook();
+    workbook.creator = 'CMBank RSA Admin Dashboard';
+    workbook.company = 'CMBank';
+    workbook.created = new Date();
+    workbook.modified = new Date();
+
+    const worksheet = workbook.addWorksheet('Tracking Report', {
+        views: [{ state: 'frozen', ySplit: 5 }]
+    });
+
+    worksheet.columns = [
+        { header: headers[0], key: headers[0], width: 30 },
+        { header: headers[1], key: headers[1], width: 22 },
+        { header: headers[2], key: headers[2], width: 24 },
+        { header: headers[3], key: headers[3], width: 24 },
+        { header: headers[4], key: headers[4], width: 22 },
+        { header: headers[5], key: headers[5], width: 24 },
+        { header: headers[6], key: headers[6], width: 22 },
+        { header: headers[7], key: headers[7], width: 22 },
+        { header: headers[8], key: headers[8], width: 30 },
+        { header: headers[9], key: headers[9], width: 24 }
+    ];
+
+    const titleRow = worksheet.addRow(['Customer Application Tracking Report']);
+    worksheet.mergeCells(`A${titleRow.number}:J${titleRow.number}`);
+    titleRow.height = 28;
+    titleRow.getCell(1).font = { name: 'Calibri', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+    titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3B67' } };
+    titleRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+
+    const metaRow = worksheet.addRow([`Generated At: ${new Date().toLocaleString()}`]);
+    worksheet.mergeCells(`A${metaRow.number}:J${metaRow.number}`);
+    metaRow.height = 20;
+    metaRow.getCell(1).font = { name: 'Calibri', size: 11, italic: true, color: { argb: 'FF334155' } };
+    metaRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+    metaRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+
+    worksheet.addRow([]);
+
+    const summaryLabelRow = worksheet.addRow(['Report Summary', '', 'Matched Records', rows.length, 'Unmatched Names', trackReportUnmatchedEntries.length]);
+    worksheet.mergeCells(`A${summaryLabelRow.number}:B${summaryLabelRow.number}`);
+    summaryLabelRow.height = 22;
+    applyTrackingSummaryCellStyle(summaryLabelRow.getCell(1), { fill: 'FFE8F5E9', fontColor: 'FF166534', align: 'left' });
+    applyTrackingSummaryCellStyle(summaryLabelRow.getCell(2), { fill: 'FFE8F5E9', fontColor: 'FF166534', align: 'left' });
+    applyTrackingSummaryCellStyle(summaryLabelRow.getCell(3), { fill: 'FFE0F2FE', fontColor: 'FF0C4A6E', align: 'center' });
+    applyTrackingSummaryCellStyle(summaryLabelRow.getCell(4), { fill: 'FFE0F2FE', fontColor: 'FF0C4A6E', align: 'center' });
+    applyTrackingSummaryCellStyle(summaryLabelRow.getCell(5), { fill: 'FFFFF7ED', fontColor: 'FF9A3412', align: 'center' });
+    applyTrackingSummaryCellStyle(summaryLabelRow.getCell(6), { fill: 'FFFFF7ED', fontColor: 'FF9A3412', align: 'center' });
+
+    const sectionRow = worksheet.addRow(['Tracking Details']);
+    worksheet.mergeCells(`A${sectionRow.number}:J${sectionRow.number}`);
+    sectionRow.height = 20;
+    sectionRow.getCell(1).font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF166534' } };
+    sectionRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
+    sectionRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+    sectionRow.getCell(1).border = {
+        top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+        left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+        bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+        right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+    };
+
+    const headerRow = worksheet.addRow(headers);
+    headerRow.height = 22;
+    applyTrackingHeaderStyle(headerRow);
+
+    rows.forEach((row, index) => {
+        const dataRow = worksheet.addRow(headers.map((header) => row[header] || 'N/A'));
+        dataRow.height = 20;
+        applyTrackingBodyStyle(dataRow, index % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC');
+        styleTrackingStageCell(dataRow.getCell(10), row['Current Processing Stage']);
+        styleTrackingStageCell(dataRow.getCell(9), row['Payment Handling Status']);
+    });
+
+    worksheet.autoFilter = {
+        from: { row: headerRow.number, column: 1 },
+        to: { row: headerRow.number, column: headers.length }
+    };
+
+    if (trackReportUnmatchedEntries.length) {
+        const unmatchedSheet = workbook.addWorksheet('Unmatched Names');
+        unmatchedSheet.columns = [
+            { header: 'Submitted Name', key: 'inputName', width: 34 },
+            { header: 'Closest Match Suggestion', key: 'suggestion', width: 34 },
+            { header: 'Match Score', key: 'score', width: 16 }
+        ];
+        const unmatchedTitleRow = unmatchedSheet.addRow(['Unmatched Tracking Report Names']);
+        unmatchedSheet.mergeCells(`A${unmatchedTitleRow.number}:C${unmatchedTitleRow.number}`);
+        unmatchedTitleRow.getCell(1).font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+        unmatchedTitleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7C2D12' } };
+        unmatchedTitleRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+        unmatchedTitleRow.height = 24;
+        const unmatchedHeaderRow = unmatchedSheet.addRow(['Submitted Name', 'Closest Match Suggestion', 'Match Score']);
+        applyTrackingHeaderStyle(unmatchedHeaderRow);
+        trackReportUnmatchedEntries.forEach((entry, index) => {
+            const dataRow = unmatchedSheet.addRow([
+                entry.inputName || '',
+                entry?.suggestion?.customerName || 'No suggestion',
+                Number.isFinite(entry?.suggestion?.score) ? entry.suggestion.score : ''
+            ]);
+            applyTrackingBodyStyle(dataRow, index % 2 === 0 ? 'FFFFFFFF' : 'FFFFF7ED');
+        });
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
+function downloadTrackReportTemplate() {
+    if (!ensureXlsxLibrary()) return;
+    const worksheetData = [
+        ['Customer Tracking Upload Template'],
+        ['Enter one customer name per row in Column A'],
+        [],
+        ['Customer Name'],
+        ['Sample Customer Name 1'],
+        ['Sample Customer Name 2']
+    ];
+    const worksheet = window.XLSX.utils.aoa_to_sheet(worksheetData);
+    worksheet['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 2 } }
+    ];
+    worksheet['!cols'] = [{ wch: 40 }];
+    ['A1', 'A2', 'A4'].forEach((ref) => {
+        if (!worksheet[ref]) return;
+        worksheet[ref].s = ref === 'A4'
+            ? {
+                font: { bold: true, color: { rgb: 'FFFFFF' } },
+                fill: { fgColor: { rgb: '1D4ED8' } },
+                alignment: { horizontal: 'center' }
+            }
+            : {
+                font: { bold: ref === 'A1', sz: ref === 'A1' ? 14 : 11, color: { rgb: ref === 'A1' ? 'FFFFFF' : '334155' } },
+                fill: { fgColor: { rgb: ref === 'A1' ? '0F3B67' : 'E2E8F0' } },
+                alignment: { horizontal: ref === 'A1' ? 'center' : 'left' }
+            };
+    });
+    const workbook = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(workbook, worksheet, 'Template');
+    window.XLSX.writeFile(workbook, 'customer-tracking-template.xlsx');
+}
+
+function downloadTrackReportWorkbook() {
+    if (!trackReportPreviewRows.length) {
+        showNotification('There is no report data to download yet.', 'warning');
+        return;
+    }
+    downloadWorkbookFromRows('customer-tracking-report.xlsx', trackReportPreviewRows);
+}
+
+window.openTrackApplicationModal = (submissionId) => {
+    const submission = allSubmissions.find((item) => item.id === submissionId);
+    if (!submission || !trackApplicationModal) return;
+
+    const currentStage = getApplicationCurrentStage(submission);
+    const statusLabel = formatStatusLabel(submission.status || '-');
+    const statusClass = getTrackStatusBadgeClass(submission.status);
+    const uploaderName = getDisplayNameByEmail(submission.uploadedBy || '');
+    const reviewerName = submission.assignedTo ? getDisplayNameByEmail(submission.assignedTo) : 'Unassigned';
+    const rsaName = submission.assignedToRSA ? getDisplayNameByEmail(submission.assignedToRSA) : 'Unassigned';
+    const paymentName = submission.assignedToPayment ? getDisplayNameByEmail(submission.assignedToPayment) : 'Unassigned';
+    const agentName = getSubmissionAgentLabel(submission);
+    const lastStageTime = formatDate(getSubmissionCurrentStageEntryAt(submission));
+    const timelineItems = [
+        { key: 'upload', title: 'Uploaded', time: getTrackStageTimestamp(submission, 'upload'), meta: `Uploader: ${uploaderName}` },
+        { key: 'reviewer', title: 'Reviewer', time: getTrackStageTimestamp(submission, 'reviewer'), meta: `Assigned Reviewer: ${reviewerName}` },
+        { key: 'rsa', title: 'RSA', time: getTrackStageTimestamp(submission, 'rsa'), meta: `Assigned RSA: ${rsaName}` },
+        { key: 'payment', title: 'Payment', time: getTrackStageTimestamp(submission, 'payment'), meta: `Assigned Payment: ${paymentName}` }
+    ];
+
+    if (trackApplicationCustomerName) trackApplicationCustomerName.textContent = submission.customerName || 'Unknown Application';
+    if (trackApplicationMeta) {
+        trackApplicationMeta.textContent = `Application ID: ${submission.id || '-'} | Last stage update: ${lastStageTime}`;
+    }
+    if (trackApplicationStatusBadges) {
+        trackApplicationStatusBadges.innerHTML = `
+            <span class="status-badge ${statusClass}">${escapeHtml(statusLabel)}</span>
+            <span class="track-stage-pill current">${escapeHtml(currentStage.label)}</span>
+        `;
+    }
+    if (trackApplicationSummary) {
+        trackApplicationSummary.innerHTML = [
+            renderTrackSummaryCard('Uploaded By', uploaderName),
+            renderTrackSummaryCard('Agent', agentName),
+            renderTrackSummaryCard('Current Stage', currentStage.label),
+            renderTrackSummaryCard('Current Stage Time', lastStageTime),
+            renderTrackSummaryCard('Assigned Reviewer', reviewerName),
+            renderTrackSummaryCard('Assigned RSA', rsaName),
+            renderTrackSummaryCard('Assigned Payment', paymentName),
+            renderTrackSummaryCard('Cleared Time', formatDate(getSubmissionClearedEntryAt(submission)))
+        ].join('');
+    }
+    if (trackApplicationTimeline) {
+        trackApplicationTimeline.innerHTML = timelineItems.map((item) => {
+            const state = getTrackTimelineState(submission, item.key);
+            return `
+                <div class="track-modal-timeline-card">
+                    <div class="track-modal-timeline-head">
+                        <div>
+                            <span class="label">${escapeHtml(item.title)} Time</span>
+                            <h4>${escapeHtml(item.title)}</h4>
+                        </div>
+                        <span class="track-stage-pill ${state.className}">${escapeHtml(state.label)}</span>
+                    </div>
+                    <div class="time">${escapeHtml(formatDate(item.time))}</div>
+                    <div class="meta">${escapeHtml(item.meta)}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    trackApplicationModal.classList.add('active');
+};
+
 function renderTrackApplications() {
     if (!trackAppsTableBody) return;
 
@@ -2983,7 +5827,7 @@ function renderTrackApplications() {
         : [];
 
     if (statusFilter && statusFilter !== 'all') {
-        list = list.filter((s) => String(s.status || '').toLowerCase() === statusFilter);
+        list = list.filter((s) => matchesTrackStatusFilter(s, statusFilter));
     }
 
     if (start || end) {
@@ -3016,7 +5860,7 @@ function renderTrackApplications() {
     if (trackJumpPageInput) trackJumpPageInput.max = String(totalPages);
 
     if (list.length === 0) {
-        trackAppsTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No matching applications</td></tr>';
+        trackAppsTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No matching applications</td></tr>';
         return;
     }
 
@@ -3026,22 +5870,24 @@ function renderTrackApplications() {
     trackAppsTableBody.innerHTML = pageItems.map((s) => {
         const uploaderEmail = String(s.uploadedBy || '').toLowerCase();
         const uploaderLabel = uploaderEmail ? `${getDisplayNameByEmail(uploaderEmail)}` : 'Unknown';
-        const assignedReviewer = s.assignedTo ? getDisplayNameByEmail(s.assignedTo) : 'Unassigned';
-        const attendedAt = s.reviewedAt ? formatDate(s.reviewedAt) : '-';
-        const finalizedAt = s.rsaSubmittedAt ? formatDate(s.rsaSubmittedAt) : '-';
-        const assignedRsa = s.assignedToRSA ? getDisplayNameByEmail(s.assignedToRSA) : '-';
+        const currentStage = getApplicationCurrentStage(s);
+        const lastStageTime = formatDate(getSubmissionCurrentStageEntryAt(s));
         const status = String(s.status || '').trim() || '-';
+        const agentLabel = getSubmissionAgentLabel(s);
 
         return `
             <tr>
-                <td><strong>${s.customerName || 'Unknown'}</strong></td>
-                <td>${uploaderLabel}</td>
-                <td>${formatStatusLabel(status)}</td>
-                <td>${formatDate(getSubmissionCurrentStageEntryAt(s))}</td>
-                <td>${assignedReviewer}</td>
-                <td>${attendedAt}</td>
-                <td>${assignedRsa}</td>
-                <td>${finalizedAt}</td>
+                <td><strong>${escapeHtml(s.customerName || 'Unknown')}</strong></td>
+                <td>${escapeHtml(uploaderLabel)}</td>
+                <td>${escapeHtml(agentLabel)}</td>
+                <td><span class="status-badge ${getTrackStatusBadgeClass(status)}">${escapeHtml(formatStatusLabel(status))}</span></td>
+                <td>${escapeHtml(currentStage.label)}</td>
+                <td>${escapeHtml(lastStageTime)}</td>
+                <td>
+                    <button class="action-btn view-btn-small" onclick="window.openTrackApplicationModal('${s.id}')">
+                        <i class="fas fa-route"></i> Track
+                    </button>
+                </td>
             </tr>
         `;
     }).join('');
@@ -4672,9 +7518,11 @@ function formatDate(timestamp) {
 }
 
 // ==================== SIGN OUT ====================
-window.signOutUser = () => {
-    window.location.href = 'index.html';
-};
+if (typeof window.signOutUser !== 'function') {
+    window.signOutUser = () => {
+        window.location.href = 'index.html';
+    };
+}
 
 // ==================== MAKE FUNCTIONS GLOBAL ====================
 if (typeof signOutUser === 'function' && typeof window.signOutUser !== 'function') {

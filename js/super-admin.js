@@ -32,7 +32,7 @@ import {
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt
 } from './shared/submission-stage.js?v=20260610b';
-import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260508a';
+import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260615a';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 
 let currentUser = null;
@@ -50,6 +50,7 @@ let selectedSuperAgentId = '';
 let currentSettingsSubTab = 'system';
 let currentAgentBankOptions = [];
 let currentPfaOptions = [];
+let currentPfaAddresses = {};
 let currentDocumentRequirements = [];
 let currentDocumentRequirementRoles = {};
 let currentWorkflowLabels = {};
@@ -2669,6 +2670,7 @@ async function loadSettings() {
     if (announcementTone) announcementTone.value = String(systemSettings.dashboardAnnouncement.tone || 'info');
     if (announcementMessage) announcementMessage.value = String(systemSettings.dashboardAnnouncement.message || '');
     currentPfaOptions = Array.isArray(systemSettings.pfaOptions) ? [...systemSettings.pfaOptions] : [];
+    currentPfaAddresses = { ...(systemSettings.pfaAddresses || {}) };
     renderPfaManagement();
     currentDocumentRequirements = Array.isArray(systemSettings.documentRequirements) ? systemSettings.documentRequirements.map((doc) => ({ ...doc })) : [];
     renderDocumentRequirementsManager();
@@ -3086,15 +3088,46 @@ function renderPfaManagement() {
     const body = document.getElementById('pfaTableBody');
     if (!body) return;
     if (!currentPfaOptions.length) {
-        body.innerHTML = '<tr><td colspan="2" class="no-data">No PFAs configured yet</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" class="no-data">No PFAs configured yet</td></tr>';
         return;
     }
-    body.innerHTML = currentPfaOptions.map((name) => `
+    body.innerHTML = currentPfaOptions.map((name) => {
+        const encodedName = encodeURIComponent(name);
+        const addressInfo = normalizePfaAddressEntry(currentPfaAddresses?.[name]);
+        return `
         <tr>
             <td><strong>${escapeHtml(name)}</strong></td>
-            <td><button class="action-btn" type="button" onclick="window.removePfaOption('${encodeURIComponent(name)}')" style="background:#b91c1c;color:#fff;border:none;"><i class="fas fa-trash"></i> Remove</button></td>
+            <td>
+                <input
+                    type="text"
+                    placeholder="Address line"
+                    value="${escapeHtml(addressInfo.address)}"
+                    oninput="window.updatePfaAddressField('${encodedName}', 'address', this.value)"
+                    style="width:100%;min-width:220px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;"
+                >
+            </td>
+            <td>
+                <input
+                    type="text"
+                    placeholder="Landmark / City"
+                    value="${escapeHtml(addressInfo.landmark)}"
+                    oninput="window.updatePfaAddressField('${encodedName}', 'landmark', this.value)"
+                    style="width:100%;min-width:170px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;"
+                >
+            </td>
+            <td>
+                <input
+                    type="text"
+                    placeholder="State"
+                    value="${escapeHtml(addressInfo.state)}"
+                    oninput="window.updatePfaAddressField('${encodedName}', 'state', this.value)"
+                    style="width:100%;min-width:130px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;"
+                >
+            </td>
+            <td><button class="action-btn" type="button" onclick="window.removePfaOption('${encodedName}')" style="background:#b91c1c;color:#fff;border:none;"><i class="fas fa-trash"></i> Remove</button></td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function renderDocumentRequirementsManager() {
@@ -3581,13 +3614,45 @@ window.addPfaOption = () => {
         return showNotification('That PFA already exists', 'warning');
     }
     currentPfaOptions = [...currentPfaOptions, name].sort((a, b) => a.localeCompare(b));
+    currentPfaAddresses = { ...currentPfaAddresses, [name]: normalizePfaAddressEntry(currentPfaAddresses?.[name]) };
     if (input) input.value = '';
     renderPfaManagement();
+};
+
+function normalizePfaAddressEntry(value = {}) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        return {
+            address: String(value.address || value.addressLine || '').trim(),
+            landmark: String(value.landmark || '').trim(),
+            state: String(value.state || '').trim()
+        };
+    }
+    const bits = String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
+    return {
+        address: bits[0] || String(value || '').trim(),
+        landmark: bits[1] || '',
+        state: bits.slice(2).join(', ')
+    };
+}
+
+window.updatePfaAddressField = (encodedName, field, value) => {
+    const name = decodeURIComponent(String(encodedName || ''));
+    const current = normalizePfaAddressEntry(currentPfaAddresses?.[name]);
+    currentPfaAddresses = {
+        ...currentPfaAddresses,
+        [name]: {
+            ...current,
+            [field]: String(value || '').trim()
+        }
+    };
 };
 
 window.removePfaOption = (encodedName) => {
     const name = decodeURIComponent(String(encodedName || ''));
     currentPfaOptions = currentPfaOptions.filter((item) => item !== name);
+    const nextAddresses = { ...currentPfaAddresses };
+    delete nextAddresses[name];
+    currentPfaAddresses = nextAddresses;
     renderPfaManagement();
 };
 
@@ -4209,6 +4274,11 @@ window.saveSuperSettings = async (triggerButton = null) => {
     workflowLabels = { ...currentWorkflowLabels };
     if (!Object.keys(workflowLabels).length) workflowLabels = { ...getDefaultSystemSettings().workflowLabels };
     const pfaOptions = [...currentPfaOptions];
+    const pfaAddresses = Object.fromEntries(
+        pfaOptions
+            .map((name) => [name, normalizePfaAddressEntry(currentPfaAddresses?.[name])])
+            .filter(([, entry]) => entry.address || entry.landmark || entry.state)
+    );
     const seenDocumentIds = new Set();
     const documentRequirements = currentDocumentRequirements
         .map((doc, index) => {
@@ -4314,6 +4384,7 @@ window.saveSuperSettings = async (triggerButton = null) => {
                 reportDateMode: 'previous_day'
             },
             pfaOptions,
+            pfaAddresses,
             documentRequirements,
             documentRequirementRoles,
             rolePermissions,

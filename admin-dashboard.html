@@ -13,7 +13,7 @@
     <title>Admin Dashboard - CMBank RSA</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
-    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260616e">
     <!-- Security: DOMPurify for XSS protection -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 </head>
@@ -381,6 +381,11 @@
             <div id="track-appsTab" class="tab-content">
                 <div class="all-documents">
                     <h2>Track Customer Applications</h2>
+                    <div class="track-report-toolbar">
+                        <button class="action-btn" id="openTrackReportInputModalBtn" type="button">
+                            <i class="fas fa-file-circle-plus"></i> Bulk Tracking Report
+                        </button>
+                    </div>
                     <div class="filters-bar">
                         <div class="search-box">
                             <i class="fas fa-search"></i>
@@ -403,12 +408,11 @@
                                 <tr>
                                     <th>Customer</th>
                                     <th>Uploaded By</th>
+                                    <th>Agent</th>
                                     <th>Status</th>
-                                    <th>Current Stage Entry</th>
-                                    <th>Assigned Reviewer</th>
-                                    <th>Attended At</th>
-                                    <th>Assigned RSA</th>
-                                    <th>Finalized At</th>
+                                    <th>Current Stage</th>
+                                    <th>Last Stage Time</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="trackAppsTableBody">
@@ -428,6 +432,187 @@
                         <span style="color:#64748b; font-size:13px;">Jump to:</span>
                         <input id="trackJumpPageInput" type="number" min="1" step="1" style="width:90px; padding:6px 8px; border:1px solid #e5e7eb; border-radius:8px;">
                         <button class="action-btn" id="trackJumpPageBtn" style="padding: 6px 12px;">Go</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="generate-documentsTab" class="tab-content">
+                <div class="all-documents">
+                    <h2>Generate Customer Documents</h2>
+                    <p class="generate-documents-intro">Generate and preview customer mortgage letters for applications currently in Processing to PFA.</p>
+                    <div class="table-container">
+                        <table class="documents-table" data-no-enhance="true">
+                            <thead>
+                                <tr>
+                                    <th>Customer Name</th>
+                                    <th>Uploaded By</th>
+                                    <th>PFA</th>
+                                    <th>House Number</th>
+                                    <th>Property Type</th>
+                                    <th>RSA Officer</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="generateDocumentsTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="trackApplicationModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="trackApplicationModalTitle">
+                <div class="modal-content large-modal">
+                    <div class="modal-header">
+                        <h2 id="trackApplicationModalTitle">Application Tracking</h2>
+                        <button class="close-btn" id="closeTrackApplicationModal" aria-label="Close modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="track-modal-hero">
+                            <div>
+                                <h3 id="trackApplicationCustomerName">-</h3>
+                                <p id="trackApplicationMeta">-</p>
+                            </div>
+                            <div id="trackApplicationStatusBadges" class="track-modal-statuses"></div>
+                        </div>
+                        <div id="trackApplicationSummary" class="track-modal-summary"></div>
+                        <div id="trackApplicationTimeline" class="track-modal-timeline"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="cancel-btn" id="closeTrackApplicationModalFooterBtn">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="trackReportInputModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="trackReportInputTitle">
+                <div class="modal-content large-modal">
+                    <div class="modal-header">
+                        <h2 id="trackReportInputTitle">Bulk Tracking Report</h2>
+                        <button class="close-btn" id="closeTrackReportInputModal" aria-label="Close modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="track-report-panel">
+                            <div class="track-report-panel-head">
+                                <div>
+                                    <h3>Upload or Paste Customer Names</h3>
+                                    <p>Upload an Excel or CSV file, or paste customer names below to generate a tracking report preview before download.</p>
+                                </div>
+                                <button class="action-btn" id="downloadTrackTemplateBtn" type="button">
+                                    <i class="fas fa-file-excel"></i> Download Excel Template
+                                </button>
+                            </div>
+                            <div class="track-report-panel-grid">
+                                <div class="track-report-input-block">
+                                    <label for="trackReportFileInput">Upload customer list</label>
+                                    <input type="file" id="trackReportFileInput" accept=".xlsx,.xls,.csv" />
+                                    <small>Supported formats: Excel (`.xlsx`, `.xls`) and CSV.</small>
+                                </div>
+                                <div class="track-report-input-block">
+                                    <label for="trackReportNamesInput">Or paste customer names</label>
+                                    <textarea id="trackReportNamesInput" rows="6" placeholder="Enter one customer name per line"></textarea>
+                                    <small>One customer name per line works best.</small>
+                                </div>
+                            </div>
+                            <div class="track-report-panel-actions">
+                                <button class="action-btn" id="generateTrackReportBtn" type="button">
+                                    <i class="fas fa-chart-line"></i> Generate Report Preview
+                                </button>
+                                <button class="action-btn" id="clearTrackReportBtn" type="button">
+                                    <i class="fas fa-eraser"></i> Clear
+                                </button>
+                            </div>
+                            <div id="trackReportInlineStatus" class="track-report-inline-status"></div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="cancel-btn" id="closeTrackReportInputFooterBtn" type="button">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="documentGenerationModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="documentGenerationTitle">
+                <div class="modal-content large-modal">
+                    <div class="modal-header">
+                        <h2 id="documentGenerationTitle">Generate Documents</h2>
+                        <button class="close-btn" id="closeDocumentGenerationModal" aria-label="Close modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="document-generation-hero">
+                            <div>
+                                <h3 id="documentGenerationCustomerName">-</h3>
+                                <p id="documentGenerationMeta">-</p>
+                            </div>
+                            <button class="action-btn" id="selectAllDocumentsBtn" type="button">
+                                <i class="fas fa-layer-group"></i> Select All
+                            </button>
+                        </div>
+                        <div id="documentGenerationChecklist" class="document-generation-checklist"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="cancel-btn" id="closeDocumentGenerationFooterBtn" type="button">Close</button>
+                        <button class="confirm-btn" id="generateSelectedDocumentsBtn" type="button">
+                            <i class="fas fa-file-circle-plus"></i> Generate Selected
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="generatedDocumentsPreviewModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="generatedDocumentsPreviewTitle">
+                <div class="modal-content large-modal">
+                    <div class="modal-header">
+                        <h2 id="generatedDocumentsPreviewTitle">Generated Documents Preview</h2>
+                        <button class="close-btn" id="closeGeneratedDocumentsPreviewModal" aria-label="Close modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="generated-documents-preview-topbar">
+                            <div id="generatedDocumentsPreviewMeta" class="generated-documents-preview-meta"></div>
+                            <div class="generated-documents-preview-actions">
+                                <button class="action-btn" id="saveAllGeneratedDocumentsBtn" type="button">
+                                    <i class="fas fa-folder-plus"></i> Save All as PDF
+                                </button>
+                            </div>
+                        </div>
+                        <div id="generatedDocumentsPreviewList" class="generated-documents-preview-list"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="cancel-btn" id="closeGeneratedDocumentsPreviewFooterBtn" type="button">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="trackReportPreviewModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="trackReportPreviewTitle">
+                <div class="modal-content large-modal">
+                    <div class="modal-header">
+                        <h2 id="trackReportPreviewTitle">Tracking Report Preview</h2>
+                        <button class="close-btn" id="closeTrackReportPreviewModal" aria-label="Close modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="trackReportPreviewSummary" class="track-report-preview-summary"></div>
+                        <div id="trackReportPreviewAlerts" class="track-report-preview-alerts"></div>
+                        <div class="table-container">
+                            <table class="documents-table" data-no-enhance="true">
+                                <thead>
+                                    <tr>
+                                        <th>Customer Name</th>
+                                        <th>Upload Timestamp</th>
+                                        <th>Assigned Reviewer</th>
+                                        <th>Reviewer Approval Timestamp</th>
+                                        <th>RSA Queue Timestamp</th>
+                                        <th>Assigned RSA Officer</th>
+                                        <th>RSA Approval Timestamp</th>
+                                        <th>Payment Queue Timestamp</th>
+                                        <th>Payment Handling Status</th>
+                                        <th>Current Processing Stage</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="trackReportPreviewTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="action-btn" id="downloadTrackReportBtn" type="button">
+                            <i class="fas fa-download"></i> Download Excel Report
+                        </button>
+                        <button class="cancel-btn" id="closeTrackReportPreviewFooterBtn" type="button">Close</button>
                     </div>
                 </div>
             </div>
@@ -949,8 +1134,9 @@
                         <p>Confirm rejected reasons are specific and actionable to reduce rework cycle time.</p>
                     </div>
                     <div class="sop-topic">
-                        <h4>7. Application Management: Track & Final Submission</h4>
+                        <h4>7. Application Management: Track, Generate & Final Submission</h4>
                         <p>Use Track Applications to follow handoff from uploader to reviewer to RSA to payment.</p>
+                        <p>Use Generate Document to preview mortgage letters for Processing to PFA applications before saving PDFs.</p>
                         <p>Use Final Submission to verify records sent to PFA and investigate delayed transitions.</p>
                     </div>
                     <div class="sop-topic">
@@ -1010,9 +1196,16 @@
     </div>
 
     <script type="module" src="js/firebase-config.js"></script>
-    <script type="module" src="js/admin.js?v=20260518a"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pizzip@3.1.7/dist/pizzip.min.js"></script>
+    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+    <script src="https://unpkg.com/@pdf-lib/fontkit/dist/fontkit.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script type="module" src="js/admin.js?v=20260616h"></script>
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/profile-completion-guard.js?v=20260609b"></script>
+    <script type="module" src="js/profile-completion-guard.js?v=20260617a"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260518a">
     <script type="module" src="js/app-chat.js?v=20260518a"></script>
     <link rel="stylesheet" href="css/pwa-install.css">

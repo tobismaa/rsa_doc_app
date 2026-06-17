@@ -2571,7 +2571,9 @@ function closeViewerModal() {
     if (iframe) iframe.src = '';
 }
 
-window.signOutUser = () => { window.location.href = 'index.html'; };
+if (typeof window.signOutUser !== 'function') {
+    window.signOutUser = () => { window.location.href = 'index.html'; };
+}
 window.viewMergedPDF = viewMergedPDF;
 
 initializeRsaReportDates();
