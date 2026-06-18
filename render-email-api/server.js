@@ -15,7 +15,7 @@ const execFileAsync = promisify(execFile);
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const requireAuth = String(process.env.REQUIRE_FIREBASE_AUTH || 'true').toLowerCase() !== 'false';
-const maxPdfRenderPayloadSize = String(process.env.PDF_RENDER_BODY_LIMIT || '8mb').trim() || '8mb';
+const maxPdfRenderPayloadSize = String(process.env.PDF_RENDER_BODY_LIMIT || '24mb').trim() || '24mb';
 function resolveServicePath(value, fallback) {
     const raw = String(value || '').trim();
     if (!raw) return fallback;
@@ -454,6 +454,10 @@ const defaultFromEmail = normalizeEmail(process.env.SENDGRID_FROM_EMAIL);
 
 app.use(cors(corsOptionsDelegate));
 app.use(express.json({ limit: maxPdfRenderPayloadSize }));
+app.use('/assets', express.static(path.join(__dirname, 'assets'), {
+    maxAge: '30d',
+    immutable: true
+}));
 
 app.get('/health', (_req, res) => {
     res.json({

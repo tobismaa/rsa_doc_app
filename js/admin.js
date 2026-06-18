@@ -100,6 +100,7 @@ let pdfFontAssetCache = null;
 const pdfTemplateBytesCache = new Map();
 let adminSystemSettings = {};
 let generatedPdfApiWarningShown = false;
+const generatedDocumentDataUrlCache = new Map();
 
 const GENERATED_DOCUMENT_TYPES = [
     { id: 'offer_letter', label: 'Offer Letter', description: 'Mortgage facility offer and terms.' },
@@ -5170,6 +5171,16 @@ function getStaticAppBaseUrl() {
     return `${window.location.origin}${directoryPath || '/'}`;
 }
 
+function getPdfRenderAssetBaseUrl() {
+    const configured = String(window.__PDF_RENDER_ASSET_BASE_URL__ || '').trim();
+    if (configured) return configured.replace(/\/?$/, '/');
+
+    const apiBaseUrl = getConfiguredAdminApiBaseUrl();
+    if (apiBaseUrl) return `${apiBaseUrl}/`;
+
+    return getStaticAppBaseUrl();
+}
+
 function collectGeneratedDocumentCssFromSheets() {
     const patterns = [
         'word-generated-doc-render',
@@ -5214,6 +5225,51 @@ async function getGeneratedDocumentPreviewCss() {
     return generatedDocumentPreviewCssPromise;
 }
 
+function extractCssUrl(value = '') {
+    const match = String(value || '').match(/url\(["']?(.+?)["']?\)/);
+    return match ? match[1] : '';
+}
+
+function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(reader.error || new Error('Unable to read image asset.'));
+        reader.readAsDataURL(blob);
+    });
+}
+
+async function fetchAssetAsDataUrl(assetUrl = '') {
+    const rawUrl = String(assetUrl || '').trim();
+    if (!rawUrl || rawUrl.startsWith('data:')) return rawUrl;
+    const absoluteUrl = new URL(rawUrl, window.location.href).toString();
+    if (!generatedDocumentDataUrlCache.has(absoluteUrl)) {
+        generatedDocumentDataUrlCache.set(absoluteUrl, (async () => {
+            const response = await fetch(absoluteUrl, { cache: 'force-cache' });
+            if (!response.ok) throw new Error(`Unable to load preview asset: ${response.status}`);
+            return blobToDataUrl(await response.blob());
+        })());
+    }
+    return generatedDocumentDataUrlCache.get(absoluteUrl);
+}
+
+async function inlineGeneratedDocumentPreviewAssets(previewHtml = '') {
+    const host = document.createElement('div');
+    host.innerHTML = String(previewHtml || '');
+    const pages = Array.from(host.querySelectorAll('.word-preview-page'));
+    await Promise.all(pages.map(async (page) => {
+        const imageUrl = extractCssUrl(page.style.backgroundImage);
+        if (!imageUrl || imageUrl.startsWith('data:')) return;
+        try {
+            const dataUrl = await fetchAssetAsDataUrl(imageUrl);
+            if (dataUrl) page.style.backgroundImage = `url("${dataUrl}")`;
+        } catch (error) {
+            // Leave the original URL in place; the server can still try to resolve it.
+        }
+    }));
+    return host.innerHTML;
+}
+
 async function renderGeneratedDocumentPdfViaAdminApi(item = {}) {
     const baseUrl = getConfiguredAdminApiBaseUrl();
     if (!baseUrl || !item.previewHtml) return null;
@@ -5236,7 +5292,7 @@ async function renderGeneratedDocumentPdfViaAdminApi(item = {}) {
             body: JSON.stringify({
                 html: item.previewHtml,
                 css: await getGeneratedDocumentPreviewCss(),
-                baseUrl: getStaticAppBaseUrl(),
+                baseUrl: getPdfRenderAssetBaseUrl(),
                 title: item.label || 'Generated Document',
                 fileName: getGeneratedDocumentFileName(item)
             })
@@ -5262,7 +5318,7 @@ async function buildGeneratedDocumentBlob(item, index) {
             generatedPdfApiWarningShown = true;
             const message = String(error.message || 'Unknown error');
             const hint = message === 'Failed to fetch'
-                ? 'Failed to fetch. Check Render ALLOWED_ORIGINS includes this Admin page URL.'
+                ? `Failed to fetch. Add this origin to Render ALLOWED_ORIGINS: ${window.location.origin}`
                 : message;
             showNotification(`Clean PDF server unavailable, using browser fallback: ${hint}`, 'warning');
         }
