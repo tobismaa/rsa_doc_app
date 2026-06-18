@@ -1,6 +1,6 @@
 ﻿// js/admin.js - COMPLETE UPDATED VERSION WITH FIXED DOWNLOAD ALL
 import { auth, db } from './firebase-config.js';
-import { ADMIN_API_BASE_URL } from './admin-api-config.js';
+import { ADMIN_API_BASE_URL } from './admin-api-config.js?v=20260618a';
 import { notifyUserPushEvent } from './push-alerts.js';
 import { formatAppDateTime, getTrustedDateKey } from './shared/app-time.js';
 import {
@@ -99,6 +99,7 @@ let generatedDocumentPreviewItems = [];
 let pdfFontAssetCache = null;
 const pdfTemplateBytesCache = new Map();
 let adminSystemSettings = {};
+let generatedPdfApiWarningShown = false;
 
 const GENERATED_DOCUMENT_TYPES = [
     { id: 'offer_letter', label: 'Offer Letter', description: 'Mortgage facility offer and terms.' },
@@ -5257,7 +5258,10 @@ async function buildGeneratedDocumentBlob(item, index) {
         const serverBlob = await renderGeneratedDocumentPdfViaAdminApi(item);
         if (serverBlob) return serverBlob;
     } catch (error) {
-        // Keep the admin flow working if the PDF API is not deployed yet.
+        if (!generatedPdfApiWarningShown) {
+            generatedPdfApiWarningShown = true;
+            showNotification(`Clean PDF server unavailable, using browser fallback: ${error.message || 'Unknown error'}`, 'warning');
+        }
     }
     if (typeof item?.blobFactory === 'function') {
         const blob = await item.blobFactory();
