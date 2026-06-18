@@ -2,7 +2,7 @@ import { getMessaging, getToken, isSupported as isMessagingSupported } from 'htt
 import { arrayRemove, arrayUnion } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
 import { app, db, doc, updateDoc, serverTimestamp } from './firebase-config.js';
 import { EMAIL_API_BASE_URL, FCM_WEB_VAPID_KEY } from './email-api-config.js';
-import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
+import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 
 function getEmailApiBaseUrl() {
   const runtime = String(window.__EMAIL_API_BASE_URL__ || '').trim();

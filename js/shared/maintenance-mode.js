@@ -1,6 +1,6 @@
 import {
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
-import { getSystemSettings } from './system-settings.js?v=20260507c';
+import { getSystemSettings } from './system-settings.js?v=20260617a';
 
 export async function getMaintenanceSettings(db, { force = false } = {}) {
   try {

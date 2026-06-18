@@ -1,6 +1,6 @@
 import { EMAIL_API_BASE_URL } from './email-api-config.js';
 import { auth, db } from './firebase-config.js';
-import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
+import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 
 function getEmailApiBaseUrl() {
   const runtime = String(window.__EMAIL_API_BASE_URL__ || '').trim();

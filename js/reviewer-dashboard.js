@@ -2,7 +2,7 @@
 import { auth, db } from './firebase-config.js';
 import { queueUploaderApprovedEmail, queueUploaderRejectedEmail, queueRsaApprovalEmail } from './email-alerts.js';
 import { notifyStatusChangePush } from './status-push.js';
-import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
+import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import { formatAppDate, formatAppDateTime, getTrustedDateKey, getTrustedNowIso } from './shared/app-time.js';
 import {
     getCurrentUserProfile as getCurrentUserProfileShared,
@@ -1687,8 +1687,15 @@ function confirmReject() {
     }
 }
 
+function assertWritable(actionLabel) {
+    return typeof window.assertAppWritable === 'function'
+        ? window.assertAppWritable(actionLabel)
+        : true;
+}
+
 // ==================== REVIEW DOCUMENT ====================
 async function reviewDocument(action) {
+    if (!assertWritable(action === 'approved' ? 'Reviewer approval' : 'Reviewer rejection')) return;
     if (!currentSubmissionId) return;
 
     const comment = commentText.value.trim();

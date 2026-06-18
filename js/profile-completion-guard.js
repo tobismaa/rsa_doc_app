@@ -2,7 +2,7 @@ import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js';
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
 import { getMaintenanceSettings, isMaintenanceExemptRole, showMaintenanceOverlay } from './shared/maintenance-mode.js?v=20260507a';
-import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
+import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import { registerPushTokenForCurrentUser } from './push-alerts.js';
 
 const REQUIRED_FIELDS = [
@@ -27,7 +27,20 @@ let inactivityHandlersBound = false;
 let forceLogoutNoticeActive = false;
 let forceLogoutTimerId = null;
 let forceLogoutIntervalId = null;
-let lastForceLogoutDebugState = null;
+let currentSecurityUserData = {};
+let globalReadOnlyState = {
+  enabled: false,
+  active: false,
+  exempt: false,
+  role: '',
+  message: ''
+};
+let forceLogoutLockState = {
+  active: false,
+  token: '',
+  deadlineMs: 0
+};
+let forceLogoutActionBlockersBound = false;
 
 const WHATSAPP_COUNTRY_CODES = [
   { code: '+234', label: 'Nigeria', flag: '🇳🇬' },
@@ -275,72 +288,146 @@ function ensureForceLogoutNoticeStyles() {
       gap: 8px;
       flex-wrap: wrap;
     }
-    .force-logout-debug {
-      position: fixed;
-      left: 16px;
-      bottom: 16px;
-      z-index: 23999;
-      width: min(420px, calc(100vw - 32px));
-      background: rgba(15, 23, 42, 0.96);
-      color: #e2e8f0;
-      border: 1px solid rgba(148, 163, 184, 0.35);
-      border-radius: 16px;
-      box-shadow: 0 20px 40px rgba(15, 23, 42, 0.28);
-      padding: 14px 16px;
-      font-size: 12px;
-      line-height: 1.5;
+    .global-readonly-banner {
+      position: sticky;
+      top: 0;
+      z-index: 19998;
+      padding: 12px 18px;
+      background: #fff7ed;
+      border-bottom: 1px solid #fdba74;
+      color: #9a3412;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
     }
-    .force-logout-debug strong {
+    .global-readonly-banner strong {
       display: block;
-      color: #f8fafc;
-      margin-bottom: 8px;
+      margin-bottom: 4px;
+      color: #7c2d12;
+      font-size: 14px;
+    }
+    .global-readonly-banner span {
+      display: block;
       font-size: 13px;
-    }
-    .force-logout-debug-grid {
-      display: grid;
-      grid-template-columns: 120px 1fr;
-      gap: 4px 10px;
-    }
-    .force-logout-debug-grid code {
-      color: #93c5fd;
-      word-break: break-word;
+      line-height: 1.5;
     }
   `;
   document.head.appendChild(style);
 }
 
-function renderForceLogoutDebugStrip(state = {}) {
-  lastForceLogoutDebugState = { ...state };
+function getGlobalReadOnlyFallbackMessage() {
+  return 'Read-only mode is active. You can view records, but changes are temporarily disabled.';
+}
+
+function renderGlobalReadOnlyBanner(state = {}) {
   ensureForceLogoutNoticeStyles();
-  let host = document.getElementById('forceLogoutDebugStrip');
-  if (!host) {
-    host = document.createElement('div');
-    host.id = 'forceLogoutDebugStrip';
-    host.className = 'force-logout-debug';
-    document.body.appendChild(host);
+  const existing = document.getElementById('globalReadOnlyBanner');
+  if (!state.enabled) {
+    existing?.remove();
+    return;
   }
 
-  const tokenShort = String(state.forceLogoutToken || '').trim();
-  const activeShort = String(state.activeToken || '').trim();
-  const completedShort = String(state.completedToken || '').trim();
-  const dismissedShort = String(state.dismissedToken || '').trim();
-  host.innerHTML = `
-    <strong>Force Logout Debug</strong>
-    <div class="force-logout-debug-grid">
-      <div>Role</div><div><code>${String(state.role || '-')}</code></div>
-      <div>Status</div><div><code>${String(state.status || 'idle')}</code></div>
-      <div>Setting</div><div><code>${String(state.countdownSetting || '-')}</code></div>
-      <div>Remaining</div><div><code>${String(state.remaining || '-')}</code></div>
-      <div>Force Token</div><div><code>${tokenShort || '-'}</code></div>
-      <div>Active Token</div><div><code>${activeShort || '-'}</code></div>
-      <div>Dismissed</div><div><code>${dismissedShort || '-'}</code></div>
-      <div>Completed</div><div><code>${completedShort || '-'}</code></div>
-      <div>Deadline</div><div><code>${String(state.deadline || '-')}</code></div>
-      <div>Timer Running</div><div><code>${state.timerRunning ? 'yes' : 'no'}</code></div>
-      <div>Notice Open</div><div><code>${state.noticeOpen ? 'yes' : 'no'}</code></div>
-    </div>
+  const message = String(state.message || getGlobalReadOnlyFallbackMessage()).trim();
+  const roleLabel = state.exempt ? 'Super admin bypass is active on this browser.' : 'Viewing is still available, but changes are blocked.';
+  const markup = `
+    <strong>Global Read-Only Mode</strong>
+    <span>${message}</span>
+    <span style="margin-top:4px;opacity:0.9;">${roleLabel}</span>
   `;
+
+  if (existing) {
+    existing.innerHTML = markup;
+    return;
+  }
+
+  const banner = document.createElement('div');
+  banner.id = 'globalReadOnlyBanner';
+  banner.className = 'global-readonly-banner';
+  banner.innerHTML = markup;
+  document.body.prepend(banner);
 }
+
+function applyGlobalReadOnlyState({ enabled = false, message = '', role = '' } = {}) {
+  const normalizedRole = String(role || '').trim().toLowerCase();
+  const exempt = normalizedRole === 'super_admin';
+  globalReadOnlyState = {
+    enabled: enabled === true,
+    active: enabled === true && !exempt,
+    exempt,
+    role: normalizedRole,
+    message: String(message || '').trim() || getGlobalReadOnlyFallbackMessage()
+  };
+  document.body.dataset.appReadOnly = globalReadOnlyState.active ? 'true' : 'false';
+  renderGlobalReadOnlyBanner(globalReadOnlyState);
+  window.dispatchEvent(new CustomEvent('app-readonly-changed', { detail: { ...globalReadOnlyState } }));
+}
+
+function isForceLogoutLockActive() {
+  return forceLogoutLockState.active === true;
+}
+
+function applyForceLogoutLockState({ active = false, token = '', deadlineMs = 0 } = {}) {
+  forceLogoutLockState = {
+    active: active === true,
+    token: String(token || '').trim(),
+    deadlineMs: Number(deadlineMs || 0)
+  };
+  document.body.dataset.forceLogoutPending = forceLogoutLockState.active ? 'true' : 'false';
+  window.dispatchEvent(new CustomEvent('app-force-logout-changed', { detail: { ...forceLogoutLockState } }));
+}
+
+function bindForceLogoutActionBlockers() {
+  if (forceLogoutActionBlockersBound) return;
+  forceLogoutActionBlockersBound = true;
+
+  document.addEventListener('click', (event) => {
+    if (!isForceLogoutLockActive()) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    if (target.closest('#forceLogoutNoticeModal, #forceLogoutNoticeBanner, #globalReadOnlyBanner, #systemAnnouncementBanner')) return;
+    const blockedTrigger = target.closest('button, [role="button"], input[type="submit"], input[type="button"], .action-btn');
+    if (!blockedTrigger) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    if (typeof window.showNotification === 'function') {
+      window.showNotification('Actions are temporarily disabled while logout is pending.', 'warning');
+    }
+  }, true);
+
+  document.addEventListener('submit', (event) => {
+    if (!isForceLogoutLockActive()) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('#forceLogoutNoticeModal')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    if (typeof window.showNotification === 'function') {
+      window.showNotification('Form actions are temporarily disabled while logout is pending.', 'warning');
+    }
+  }, true);
+}
+
+window.isAppReadOnlyMode = () => globalReadOnlyState.active === true;
+window.getAppReadOnlyState = () => ({ ...globalReadOnlyState });
+window.isForceLogoutPending = () => isForceLogoutLockActive();
+window.assertAppWritable = (actionLabel = 'This action') => {
+  if (window.isForceLogoutPending && window.isForceLogoutPending()) {
+    const message = `${String(actionLabel || 'This action').trim()} is unavailable while logout is pending.`;
+    if (typeof window.showNotification === 'function') {
+      window.showNotification(message, 'warning');
+    } else {
+      window.alert(message);
+    }
+    return false;
+  }
+  if (!window.isAppReadOnlyMode()) return true;
+  const message = `${String(actionLabel || 'This action').trim()} is unavailable while read-only mode is active.`;
+  if (typeof window.showNotification === 'function') {
+    window.showNotification(message, 'warning');
+  } else {
+    window.alert(message);
+  }
+  return false;
+};
 
 function parseForceLogoutDurationMs(value) {
   const text = String(value || '').trim().toLowerCase();
@@ -377,12 +464,6 @@ function formatForceLogoutRemaining(deadlineMs) {
 function closeForceLogoutNotice() {
   document.getElementById('forceLogoutNoticeModal')?.remove();
   forceLogoutNoticeActive = false;
-  if (lastForceLogoutDebugState) {
-    renderForceLogoutDebugStrip({
-      ...lastForceLogoutDebugState,
-      noticeOpen: false
-    });
-  }
   if (!document.getElementById('profileGuardModal')) {
     document.body.style.overflow = '';
   }
@@ -427,12 +508,6 @@ function showForceLogoutNotice({ token = '', deadlineMs = 0 } = {}) {
   ensureForceLogoutNoticeStyles();
   closeForceLogoutNotice();
   forceLogoutNoticeActive = true;
-  if (lastForceLogoutDebugState) {
-    renderForceLogoutDebugStrip({
-      ...lastForceLogoutDebugState,
-      noticeOpen: true
-    });
-  }
 
   const backdrop = document.createElement('div');
   backdrop.id = 'forceLogoutNoticeModal';
@@ -472,15 +547,7 @@ function showForceLogoutNotice({ token = '', deadlineMs = 0 } = {}) {
 }
 
 async function executeForcedLogout(token) {
-  if (lastForceLogoutDebugState) {
-    renderForceLogoutDebugStrip({
-      ...lastForceLogoutDebugState,
-      status: 'executing logout',
-      timerRunning: false,
-      remaining: '0 seconds',
-      noticeOpen: false
-    });
-  }
+  applyForceLogoutLockState({ active: false, token: '', deadlineMs: 0 });
   localStorage.setItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY, String(token || '').trim());
   localStorage.removeItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY);
   localStorage.removeItem(FORCE_LOGOUT_DEADLINE_KEY);
@@ -510,14 +577,6 @@ function startForceLogoutCountdown({ token = '', deadlineMs = 0 } = {}) {
     const message = `Automatic logout in ${formatForceLogoutRemaining(deadlineMs)}.`;
     if (bannerCountdownEl) bannerCountdownEl.textContent = message;
     if (modalCountdownEl) modalCountdownEl.textContent = message;
-    if (lastForceLogoutDebugState) {
-      renderForceLogoutDebugStrip({
-        ...lastForceLogoutDebugState,
-        remaining: formatForceLogoutRemaining(deadlineMs),
-        timerRunning: true,
-        noticeOpen: forceLogoutNoticeActive
-      });
-    }
   };
 
   updateCountdownUi();
@@ -537,6 +596,19 @@ function startForceLogoutCountdown({ token = '', deadlineMs = 0 } = {}) {
     }
     executeForcedLogout(token);
   }, remainingMs);
+}
+
+function bootstrapPendingForceLogoutFromStorage() {
+  const token = String(localStorage.getItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY) || '').trim();
+  const completedToken = String(localStorage.getItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY) || '').trim();
+  const deadlineMs = Number(localStorage.getItem(FORCE_LOGOUT_DEADLINE_KEY) || 0);
+  if (!token || token === completedToken || !Number.isFinite(deadlineMs) || deadlineMs <= 0) {
+    applyForceLogoutLockState({ active: false, token: '', deadlineMs: 0 });
+    return;
+  }
+  applyForceLogoutLockState({ active: true, token, deadlineMs });
+  renderForceLogoutBanner({ token, deadlineMs });
+  startForceLogoutCountdown({ token, deadlineMs });
 }
 
 async function clearBrowserAppCaches(cacheClearToken = '') {
@@ -677,6 +749,8 @@ function buildLiveSecuritySettings(source = {}, fallback = {}) {
 
   return {
     dashboardAnnouncement: source?.dashboardAnnouncement ?? fallback?.dashboardAnnouncement ?? {},
+    globalReadOnlyMode: source?.globalReadOnlyMode ?? fallback?.globalReadOnlyMode ?? false,
+    globalReadOnlyMessage: String(source?.globalReadOnlyMessage ?? fallback?.globalReadOnlyMessage ?? '').trim(),
     securityControls: {
       sessionTimeoutMinutes,
       forceLogoutCountdown: /^\d+\s*[smh]$/i.test(String(forceLogoutCountdownRaw || '').trim()) || /^\d+(\.\d+)?$/.test(String(forceLogoutCountdownRaw || '').trim())
@@ -748,16 +822,25 @@ function watchForCacheClearSignal() {
 }
 
 function watchForSecuritySignals(userData = {}) {
+  currentSecurityUserData = {
+    ...currentSecurityUserData,
+    ...(userData && typeof userData === 'object' ? userData : {})
+  };
   if (securityWatchStarted) return;
   securityWatchStarted = true;
 
   const evaluateSecurityState = async (systemSettings) => {
     showDashboardAnnouncement(systemSettings.dashboardAnnouncement);
     bindInactivityHandlers(systemSettings.securityControls.sessionTimeoutMinutes);
+    applyGlobalReadOnlyState({
+      enabled: systemSettings.globalReadOnlyMode === true,
+      message: systemSettings.globalReadOnlyMessage || '',
+      role: currentSecurityUserData?.role || ''
+    });
 
     const configuredForceLogoutToken = String(systemSettings.securityControls.forceLogoutToken || '').trim();
     const completed = String(localStorage.getItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY) || '').trim();
-    const role = String(userData.role || '-').trim() || '-';
+    const role = String(currentSecurityUserData?.role || '-').trim() || '-';
     const countdownSetting = String(systemSettings.securityControls.forceLogoutCountdown || '11m');
     const activeTokenBefore = String(localStorage.getItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY) || '').trim();
     const dismissedTokenBefore = String(localStorage.getItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY) || '').trim();
@@ -766,19 +849,9 @@ function watchForSecuritySignals(userData = {}) {
     const forceLogoutToken = configuredForceLogoutToken || persistedForceLogoutToken;
     const hasPersistedDeadline = Number.isFinite(deadlineBefore) && deadlineBefore > 0;
     if (!forceLogoutToken || isMaintenanceExemptRole(userData.role) || forceLogoutToken === completed) {
-      renderForceLogoutDebugStrip({
-        role,
-        status: !forceLogoutToken ? 'waiting for token' : (forceLogoutToken === completed ? 'completed on this browser' : 'maintenance exempt'),
-        countdownSetting,
-        remaining: deadlineBefore > 0 ? formatForceLogoutRemaining(deadlineBefore) : '-',
-        forceLogoutToken,
-        activeToken: activeTokenBefore,
-        completedToken: completed,
-        dismissedToken: dismissedTokenBefore,
-        deadline: deadlineBefore > 0 ? new Date(deadlineBefore).toISOString() : '-',
-        timerRunning: Boolean(forceLogoutTimerId),
-        noticeOpen: forceLogoutNoticeActive
-      });
+      applyForceLogoutLockState({ active: false, token: '', deadlineMs: 0 });
+      document.getElementById('forceLogoutNoticeBanner')?.remove();
+      closeForceLogoutNotice();
       return;
     }
 
@@ -795,20 +868,7 @@ function watchForSecuritySignals(userData = {}) {
       deadlineMs = deadlineBefore;
     }
 
-    renderForceLogoutDebugStrip({
-      role,
-      status: 'token detected',
-      countdownSetting,
-      remaining: formatForceLogoutRemaining(deadlineMs),
-      forceLogoutToken,
-      activeToken: String(localStorage.getItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY) || '').trim(),
-      completedToken: completed,
-      dismissedToken: String(localStorage.getItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY) || '').trim(),
-      deadline: new Date(deadlineMs).toISOString(),
-      timerRunning: Boolean(forceLogoutTimerId),
-      noticeOpen: forceLogoutNoticeActive
-    });
-
+    applyForceLogoutLockState({ active: true, token: forceLogoutToken, deadlineMs });
     renderForceLogoutBanner({ token: forceLogoutToken, deadlineMs });
     startForceLogoutCountdown({ token: forceLogoutToken, deadlineMs });
 
@@ -947,37 +1007,69 @@ async function enforceProfileCompletion(user) {
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) return;
+  bindForceLogoutActionBlockers();
+  bootstrapPendingForceLogoutFromStorage();
+  watchForCacheClearSignal();
+
+  const fallbackUserData = {
+    role: '',
+    email: String(user.email || '').trim().toLowerCase()
+  };
+
   try {
-    watchForCacheClearSignal();
-    const userDoc = await findUserDocByUidOrEmail(user.uid, user.email);
-    const userData = userDoc?.data?.() || {
-      role: '',
-      email: String(user.email || '').trim().toLowerCase()
-    };
     const systemSettings = await getSystemSettings(db, { force: true });
     showDashboardAnnouncement(systemSettings.dashboardAnnouncement);
     bindInactivityHandlers(systemSettings.securityControls.sessionTimeoutMinutes);
-    watchForSecuritySignals(userData);
-    if (userDoc?.id) {
-      await registerPushTokenForCurrentUser(user, userDoc.id);
-    }
-    const maintenanceSettings = await getMaintenanceSettings(db, { force: true });
-    if (maintenanceSettings.maintenanceMode && !isMaintenanceExemptRole(userData.role)) {
-      showMaintenanceOverlay({
-        message: maintenanceSettings.maintenanceMessage || 'Maintenance mode is currently enabled. To protect live workflow data, portal access is temporarily restricted.',
-        onSignOut: async () => {
-          try {
-            await signOut(auth);
-          } finally {
-            window.location.href = 'index.html';
-          }
-        }
+    applyGlobalReadOnlyState({
+      enabled: systemSettings.globalReadOnlyMode === true,
+      message: systemSettings.globalReadOnlyMessage || '',
+      role: fallbackUserData.role || ''
+    });
+  } catch (_) {
+    bindInactivityHandlers(60);
+  }
+
+  watchForSecuritySignals(fallbackUserData);
+
+  try {
+    const userDoc = await findUserDocByUidOrEmail(user.uid, user.email);
+    const userData = userDoc?.data?.() || fallbackUserData;
+
+    try {
+      const systemSettings = await getSystemSettings(db, { force: true });
+      showDashboardAnnouncement(systemSettings.dashboardAnnouncement);
+      bindInactivityHandlers(systemSettings.securityControls.sessionTimeoutMinutes);
+      applyGlobalReadOnlyState({
+        enabled: systemSettings.globalReadOnlyMode === true,
+        message: systemSettings.globalReadOnlyMessage || '',
+        role: userData.role || ''
       });
-      return;
-    }
+    } catch (_) {}
+
+    try {
+      const maintenanceSettings = await getMaintenanceSettings(db, { force: true });
+      if (maintenanceSettings.maintenanceMode && !isMaintenanceExemptRole(userData.role)) {
+        showMaintenanceOverlay({
+          message: maintenanceSettings.maintenanceMessage || 'Maintenance mode is currently enabled. To protect live workflow data, portal access is temporarily restricted.',
+          onSignOut: async () => {
+            try {
+              await signOut(auth);
+            } finally {
+              window.location.href = 'index.html';
+            }
+          }
+        });
+        return;
+      }
+    } catch (_) {}
 
     if (userDoc?.id) {
-      await enforceProfileCompletion(user);
+      try {
+        await registerPushTokenForCurrentUser(user, userDoc.id);
+      } catch (_) {}
+      try {
+        await enforceProfileCompletion(user);
+      } catch (_) {}
     }
   } catch (_err) {
     // Fail open to avoid blocking legitimate users on transient issues.

@@ -1,5 +1,5 @@
 import { db } from './firebase-config.js';
-import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
+import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import {
     EMAILJS_PUBLIC_KEY,
     EMAILJS_SERVICE_ID,

@@ -33,7 +33,7 @@ import {
   getSubmissionApprovalEntryAt,
   getSubmissionRejectionEntryAt
 } from './shared/submission-stage.js?v=20260609a';
-import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260508a';
+import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import {
   collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, doc,
   serverTimestamp, arrayUnion, getDocs, getDoc, setDoc, runTransaction, deleteDoc
@@ -179,6 +179,12 @@ function getImageUploadLimitLabel() {
 
 function getPdfUploadLimitLabel() {
   return formatUploadLimitLabel(MAX_PDF_SIZE_BYTES);
+}
+
+function assertWritable(actionLabel) {
+  return typeof window.assertAppWritable === 'function'
+    ? window.assertAppWritable(actionLabel)
+    : true;
 }
 
 async function applyUploadSystemSettings() {
@@ -1297,6 +1303,7 @@ function enableDraftEditingState() {
 }
 
 async function persistCurrentDraft({ silent = false, source = 'manual' } = {}) {
+  if (!assertWritable('Draft saving')) return null;
   const uploaderEmail = normalizeEmail(currentUser?.email);
   if (!uploaderEmail) throw new Error('Unable to determine uploader email for draft save.');
   if (!hasAnyDraftContent()) {
@@ -3133,6 +3140,7 @@ function refreshBatchSelectOptions() {
 }
 
 async function uploadSingleDocument() {
+  if (!assertWritable('Document upload')) return;
   if (!currentFile || !currentDocType) return;
   if (!customerDetailsSaved && !currentEditId) { showNotification('Please save customer details first', 'error'); return; }
   if (currentFile.size > MAX_PDF_SIZE_BYTES) {
@@ -3380,6 +3388,7 @@ function getMissingRequiredSubmissionFields() {
 }
 
 async function submitCustomer() {
+  if (!assertWritable('Submission')) return;
   const customerName = customerNameInput.value.trim();
   const allowWithoutDocuments = canCurrentUserSubmitWithoutDocuments();
   if (!customerName) return;
@@ -3655,6 +3664,7 @@ window.openEditModal = async (id) => {
 };
 
 async function submitEdit() {
+  if (!assertWritable('Document re-upload')) return;
   if (!currentEditId) return;
   submitEditBtn.disabled = true;
   submitEditBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';

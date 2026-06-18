@@ -9,6 +9,7 @@ const { createDailyReportWorkbookBuffer, createOutstandingReportWorkbookBuffer, 
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const requireAuth = String(process.env.REQUIRE_FIREBASE_AUTH || 'true').toLowerCase() !== 'false';
+const maxPdfRenderPayloadSize = String(process.env.PDF_RENDER_BODY_LIMIT || '8mb').trim() || '8mb';
 const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((v) => v.trim())
@@ -429,7 +430,7 @@ if (sendgridApiKey) {
 const defaultFromEmail = normalizeEmail(process.env.SENDGRID_FROM_EMAIL);
 
 app.use(cors(corsOptionsDelegate));
-app.use(express.json({ limit: '256kb' }));
+app.use(express.json({ limit: maxPdfRenderPayloadSize }));
 
 app.get('/health', (_req, res) => {
     res.json({
@@ -1035,6 +1036,165 @@ async function requireAdminOrSuperAdminRole(req, res, next) {
         return res.status(500).json({ ok: false, error: 'Failed to validate admin role' });
     }
 }
+
+let pdfBrowserPromise = null;
+
+function getPdfRenderBaseUrl(req, candidate) {
+    const raw = String(candidate || '').trim();
+    if (raw) {
+        try {
+            const parsed = new URL(raw);
+            if (['http:', 'https:'].includes(parsed.protocol)) {
+                return parsed.toString().replace(/\/?$/, '/');
+            }
+        } catch (_) {}
+    }
+
+    const fallbackOrigin = resolveAllowedOrigin(req);
+    return fallbackOrigin ? `${fallbackOrigin.replace(/\/+$/, '')}/` : '';
+}
+
+function buildPreviewPdfDocument({ html = '', css = '', baseUrl = '', title = 'Generated Document' }) {
+    const safeBase = baseUrl ? `<base href="${escapeHtml(baseUrl)}">` : '';
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${safeBase}
+  <title>${escapeHtml(title)}</title>
+  <style>
+    ${css}
+    @page { size: A4; margin: 0; }
+    html, body {
+      width: 794px;
+      margin: 0;
+      padding: 0;
+      background: #ffffff !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .word-generated-doc-render {
+      width: 794px !important;
+      max-height: none !important;
+      min-height: 0 !important;
+      overflow: visible !important;
+      padding: 0 !important;
+      background: #ffffff !important;
+    }
+    .word-preview-page {
+      width: 794px !important;
+      min-width: 794px !important;
+      max-width: 794px !important;
+      min-height: 1123px !important;
+      margin: 0 !important;
+      border: 0 !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+      box-sizing: border-box !important;
+      page-break-after: always;
+      break-after: page;
+    }
+    .word-preview-page:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+    .word-preview-page-number {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <main class="word-generated-doc-render">${html}</main>
+</body>
+</html>`;
+}
+
+async function getPdfBrowser() {
+    if (!pdfBrowserPromise) {
+        pdfBrowserPromise = (async () => {
+            let puppeteer;
+            try {
+                puppeteer = require('puppeteer');
+            } catch (_) {
+                throw new Error('PDF renderer is not installed. Run npm install in render-email-api.');
+            }
+
+            const executablePath = String(process.env.PUPPETEER_EXECUTABLE_PATH || '').trim();
+            return puppeteer.launch({
+                headless: 'new',
+                executablePath: executablePath || undefined,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--font-render-hinting=medium'
+                ]
+            });
+        })().catch((err) => {
+            pdfBrowserPromise = null;
+            throw err;
+        });
+    }
+    return pdfBrowserPromise;
+}
+
+async function renderPreviewHtmlToPdfBuffer(req, payload = {}) {
+    const html = String(payload.html || '').trim();
+    if (!html) throw new Error('Preview HTML is required.');
+    if (html.length > 3_500_000) throw new Error('Preview HTML is too large.');
+
+    const css = String(payload.css || '');
+    const title = String(payload.title || 'Generated Document').trim() || 'Generated Document';
+    const baseUrl = getPdfRenderBaseUrl(req, payload.baseUrl);
+    const documentHtml = buildPreviewPdfDocument({ html, css, baseUrl, title });
+    const browser = await getPdfBrowser();
+    const page = await browser.newPage();
+
+    try {
+        await page.setJavaScriptEnabled(false);
+        await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 1 });
+        await page.setContent(documentHtml, {
+            waitUntil: ['load', 'networkidle0'],
+            timeout: 45000
+        });
+        await page.evaluate(async () => {
+            if (document.fonts?.ready) await document.fonts.ready;
+            const images = Array.from(document.images || []);
+            await Promise.all(images.map((img) => img.complete
+                ? Promise.resolve()
+                : new Promise((resolve) => {
+                    img.onload = resolve;
+                    img.onerror = resolve;
+                })));
+        });
+        return page.pdf({
+            format: 'A4',
+            printBackground: true,
+            preferCSSPageSize: true,
+            margin: { top: '0', right: '0', bottom: '0', left: '0' }
+        });
+    } finally {
+        await page.close().catch(() => {});
+    }
+}
+
+app.post('/api/admin/render-preview-pdf', authMiddleware, requireAdminOrSuperAdminRole, async (req, res) => {
+    try {
+        const pdfBuffer = await renderPreviewHtmlToPdfBuffer(req, req.body || {});
+        const rawFileName = String(req.body?.fileName || 'generated-document.pdf').trim();
+        const fileName = rawFileName.replace(/[\\/:*?"<>|]+/g, '_') || 'generated-document.pdf';
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Length', String(pdfBuffer.length));
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName.replace(/"/g, '')}"`);
+        return res.send(pdfBuffer);
+    } catch (err) {
+        return res.status(500).json({
+            ok: false,
+            error: String(err?.message || 'Failed to render PDF')
+        });
+    }
+});
 
 app.post('/api/send-alert', authMiddleware, async (req, res) => {
     try {

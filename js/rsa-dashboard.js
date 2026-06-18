@@ -1,5 +1,5 @@
 import { auth, db } from './firebase-config.js';
-import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
+import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
     collection,
@@ -1906,6 +1906,7 @@ function renderRsaRows(submissions) {
 }
 
 window.finalSubmitRsa = async (submissionId) => {
+    if (typeof window.assertAppWritable === 'function' && !window.assertAppWritable('RSA final submission')) return;
     const sub = allSubmissions.find(s => s.id === submissionId);
     if (!sub) return;
     const rolePermissions = (await getSystemSettings(db, { force: true })).rolePermissions || {};
@@ -2461,6 +2462,7 @@ window.downloadAllRsa = async (submissionId) => {
 };
 
 window.rejectRsaSubmission = async (submissionId) => {
+    if (typeof window.assertAppWritable === 'function' && !window.assertAppWritable('RSA rejection')) return;
     const sub = allSubmissions.find((s) => s.id === submissionId);
     if (!sub) return;
     currentRejectSubmissionId = submissionId;
@@ -2475,6 +2477,7 @@ window.rejectRsaSubmission = async (submissionId) => {
 };
 
 async function submitRsaRejection() {
+    if (typeof window.assertAppWritable === 'function' && !window.assertAppWritable('RSA rejection')) return;
     const submissionId = String(currentRejectSubmissionId || '').trim();
     if (!submissionId) return;
     const sub = allSubmissions.find((s) => s.id === submissionId);

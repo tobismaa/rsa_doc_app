@@ -28,7 +28,7 @@ import {
     getSubmissionCommissionAmount,
     resolveSubmissionCommissionRate
 } from './shared/commission-config.js?v=20260507a';
-import { getSystemSettings } from './shared/system-settings.js?v=20260615a';
+import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import {
     getTimestampMillis as getStageTimestampMillis,
     getSubmissionCurrentStageEntryAt,
@@ -97,6 +97,7 @@ let trackReportUnmatchedEntries = [];
 let currentDocumentGenerationSubmissionId = '';
 let generatedDocumentPreviewItems = [];
 let pdfFontAssetCache = null;
+const pdfTemplateBytesCache = new Map();
 let adminSystemSettings = {};
 
 const GENERATED_DOCUMENT_TYPES = [
@@ -4511,7 +4512,7 @@ async function createPdfBlobFromPreviewHtml(previewHtml = '') {
         const pages = Array.from(host.querySelectorAll('.word-preview-page'));
         if (!pages.length) throw new Error('Generated document preview is empty.');
 
-        const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+        const pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4', compress: true });
         const pageWidth = pdf.internal.pageSize.getWidth();
         const pageHeight = pdf.internal.pageSize.getHeight();
 
@@ -4928,12 +4929,16 @@ async function generatePdfDocumentFromTemplate(documentType, data = {}) {
     if (!window.PDFLib?.PDFDocument) throw new Error('PDF engine is unavailable. Please refresh and try again.');
 
     const fontAssets = await ensurePdfFontAssets();
-    const templateResponse = await fetch(`assets/document-templates/${config.fileName}`, { cache: 'no-store' });
-    if (!templateResponse.ok) {
-        throw new Error(`Template not found for ${documentType}.`);
+    const templatePath = `assets/document-templates/${config.fileName}`;
+    if (!pdfTemplateBytesCache.has(templatePath)) {
+        const templateResponse = await fetch(templatePath, { cache: 'force-cache' });
+        if (!templateResponse.ok) {
+            throw new Error(`Template not found for ${documentType}.`);
+        }
+        pdfTemplateBytesCache.set(templatePath, await templateResponse.arrayBuffer());
     }
 
-    const templateBytes = await templateResponse.arrayBuffer();
+    const templateBytes = pdfTemplateBytesCache.get(templatePath).slice(0);
     const templateDoc = await window.PDFLib.PDFDocument.load(templateBytes);
     templateDoc.registerFontkit(window.fontkit);
     const templatePages = templateDoc.getPages();
@@ -5089,13 +5094,15 @@ async function generateSelectedDocumentsForPreview() {
                 ...data,
                 currentDate: isPostApprovalDocument ? data.postApprovalDate : data.currentDate
             };
-            const generated = await generateDocxDocumentFromContent(type, documentData);
+            const generatedPreview = await generateDocxDocumentFromContent(type, documentData);
             previewItems.push({
                 type,
                 label: config?.label || type,
                 blob: null,
+                blobPromise: null,
+                blobFactory: () => createPdfBlobFromPreviewHtml(generatedPreview.previewHtml),
                 previewUrl: '',
-                previewHtml: generated.previewHtml,
+                previewHtml: generatedPreview.previewHtml,
                 fileExtension: 'pdf',
                 mimeType: 'application/pdf',
                 customerName: data.customerName
@@ -5106,6 +5113,7 @@ async function generateSelectedDocumentsForPreview() {
         renderGeneratedDocumentsPreview(data.customerName);
         closeDocumentGenerationModalFn();
         if (generatedDocumentsPreviewModal) generatedDocumentsPreviewModal.classList.add('active');
+        warmGeneratedDocumentPdfBlobs();
     } catch (error) {
         showNotification(`Document generation failed: ${error.message || 'Unknown error'}`, 'error');
     } finally {
@@ -5124,7 +5132,7 @@ function renderGeneratedDocumentsPreview(customerName = 'Customer') {
             <div class="generated-doc-card-head">
                 <h3>${escapeHtml(item.label)}</h3>
                 <button class="action-btn" onclick="window.saveGeneratedDocumentPdf(${index}, this)">
-                    <i class="fas fa-file-pdf"></i> Save as PDF
+                    <i class="fas fa-download"></i> Download PDF
                 </button>
             </div>
             <div class="generated-doc-render ${item.previewHtml ? 'word-generated-doc-render' : ''}" data-generated-doc-index="${index}">
@@ -5140,29 +5148,210 @@ function sanitizeFileNamePart(value = '') {
     return String(value || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
 }
 
-async function saveGeneratedDocumentAtIndex(index, directoryHandle = null) {
+function getGeneratedDocumentFileName(item = {}) {
+    const customerName = sanitizeFileNamePart(item.customerName || 'Customer') || 'Customer';
+    const extension = sanitizeFileNamePart(item.fileExtension || 'pdf') || 'pdf';
+    const label = sanitizeFileNamePart(item.label || 'Generated Document') || 'Generated Document';
+    return `${customerName} - ${label}.${extension}`;
+}
+
+let generatedDocumentPreviewCssPromise = null;
+
+function getConfiguredAdminApiBaseUrl() {
+    const baseUrl = String(ADMIN_API_BASE_URL || '').trim().replace(/\/+$/, '');
+    if (!baseUrl || baseUrl.includes('YOUR-RENDER-URL')) return '';
+    return baseUrl;
+}
+
+function getStaticAppBaseUrl() {
+    const path = window.location.pathname || '/';
+    const directoryPath = path.endsWith('/') ? path : path.slice(0, path.lastIndexOf('/') + 1);
+    return `${window.location.origin}${directoryPath || '/'}`;
+}
+
+function collectGeneratedDocumentCssFromSheets() {
+    const patterns = [
+        'word-generated-doc-render',
+        'word-preview-page',
+        'word-preview-spacer',
+        'compact-word-table',
+        'offer-terms-word-table',
+        'offer-terms-primary-table',
+        'offer-terms-continuation-table',
+        'four-column-word-table'
+    ];
+    const chunks = [];
+    Array.from(document.styleSheets || []).forEach((sheet) => {
+        let rules = [];
+        try {
+            rules = Array.from(sheet.cssRules || []);
+        } catch (error) {
+            return;
+        }
+        rules.forEach((rule) => {
+            const text = rule.cssText || '';
+            if (patterns.some((pattern) => text.includes(pattern))) {
+                chunks.push(text);
+            }
+        });
+    });
+    return chunks.join('\n');
+}
+
+async function getGeneratedDocumentPreviewCss() {
+    if (!generatedDocumentPreviewCssPromise) {
+        generatedDocumentPreviewCssPromise = (async () => {
+            try {
+                const response = await fetch('css/admin-dashboard.css', { cache: 'force-cache' });
+                if (response.ok) return response.text();
+            } catch (error) {
+                // Fall back to the loaded CSSOM below.
+            }
+            return collectGeneratedDocumentCssFromSheets();
+        })();
+    }
+    return generatedDocumentPreviewCssPromise;
+}
+
+async function renderGeneratedDocumentPdfViaAdminApi(item = {}) {
+    const baseUrl = getConfiguredAdminApiBaseUrl();
+    if (!baseUrl || !item.previewHtml) return null;
+
+    const currentUser = getAuth().currentUser || auth.currentUser;
+    const idToken = currentUser ? await currentUser.getIdToken() : '';
+    if (!idToken) return null;
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 60000);
+    let response;
+    try {
+        response = await fetch(`${baseUrl}/api/admin/render-preview-pdf`, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`
+            },
+            body: JSON.stringify({
+                html: item.previewHtml,
+                css: await getGeneratedDocumentPreviewCss(),
+                baseUrl: getStaticAppBaseUrl(),
+                title: item.label || 'Generated Document',
+                fileName: getGeneratedDocumentFileName(item)
+            })
+        });
+    } finally {
+        window.clearTimeout(timeout);
+    }
+
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error(errorBody.error || `PDF render API failed (${response.status})`);
+    }
+
+    return response.blob();
+}
+
+async function buildGeneratedDocumentBlob(item, index) {
+    try {
+        const serverBlob = await renderGeneratedDocumentPdfViaAdminApi(item);
+        if (serverBlob) return serverBlob;
+    } catch (error) {
+        // Keep the admin flow working if the PDF API is not deployed yet.
+    }
+    if (typeof item?.blobFactory === 'function') {
+        const blob = await item.blobFactory();
+        if (blob) return blob;
+    }
+    if (item?.previewHtml) return createPdfBlobFromPreviewHtml(item.previewHtml);
+    throw new Error(`Document ${index + 1} preview is unavailable.`);
+}
+
+async function ensureGeneratedDocumentBlobAtIndex(index) {
     const item = generatedDocumentPreviewItems[index];
-    if (!item?.blob && item?.previewHtml) {
-        item.blob = await createPdfBlobFromPreviewHtml(item.previewHtml);
-        item.mimeType = 'application/pdf';
-        item.fileExtension = 'pdf';
+    if (!item) throw new Error('Generated document is unavailable.');
+    if (item.blob) return item.blob;
+    if (!item.previewHtml) throw new Error('Generated document preview is unavailable.');
+
+    if (!item.blobPromise) {
+        item.blobPromise = buildGeneratedDocumentBlob(item, index)
+            .then((blob) => {
+                item.blob = blob;
+                item.mimeType = 'application/pdf';
+                item.fileExtension = 'pdf';
+                generatedDocumentPreviewItems[index] = item;
+                return blob;
+            })
+            .finally(() => {
+                item.blobPromise = null;
+            });
         generatedDocumentPreviewItems[index] = item;
     }
+
+    return item.blobPromise;
+}
+
+function warmGeneratedDocumentPdfBlobs() {
+    const idle = window.requestIdleCallback || ((callback) => window.setTimeout(callback, 0));
+    idle(() => {
+        const queue = generatedDocumentPreviewItems.map((_, index) => index);
+        const workers = Array.from({ length: Math.min(2, queue.length) }, async () => {
+            while (queue.length) {
+                const index = queue.shift();
+                try {
+                    await ensureGeneratedDocumentBlobAtIndex(index);
+                } catch (error) {
+                    // The explicit save action will surface any remaining export error.
+                }
+            }
+        });
+        Promise.allSettled(workers);
+    });
+}
+
+async function getGeneratedDocumentsCustomerFolder() {
+    if (!('showDirectoryPicker' in window)) return null;
+    showNotification('Select a destination folder to save all PDFs...', 'info');
+    const rootFolder = await window.showDirectoryPicker({
+        mode: 'readwrite',
+        startIn: 'downloads'
+    });
+    const hasPermission = await ensureDirectoryWritePermission(rootFolder);
+    if (!hasPermission) throw new Error('Folder write permission was not granted.');
+    const firstItem = generatedDocumentPreviewItems[0] || {};
+    const customerName = sanitizeFileNamePart(firstItem.customerName || 'Customer') || 'Customer';
+    return rootFolder.getDirectoryHandle(customerName, { create: true });
+}
+
+async function writeGeneratedDocumentToDirectory(item, directoryHandle) {
+    const fileName = getGeneratedDocumentFileName(item);
+    const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(item.blob);
+    await writable.close();
+    return fileName;
+}
+
+async function saveGeneratedDocumentAtIndex(index, directoryHandle = null) {
+    await ensureGeneratedDocumentBlobAtIndex(index);
+    const item = generatedDocumentPreviewItems[index];
     if (!item?.blob) throw new Error('Generated document preview is unavailable.');
     const customerName = sanitizeFileNamePart(item.customerName || 'Customer') || 'Customer';
-    const extension = sanitizeFileNamePart(item.fileExtension || 'docx') || 'docx';
-    const fileName = `${customerName} - ${sanitizeFileNamePart(item.label)}.${extension}`;
+    const fileName = getGeneratedDocumentFileName(item);
 
     if (directoryHandle && 'getDirectoryHandle' in directoryHandle) {
         const customerFolder = await directoryHandle.getDirectoryHandle(customerName, { create: true });
-        const fileHandle = await customerFolder.getFileHandle(fileName, { create: true });
-        const writable = await fileHandle.createWritable();
-        await writable.write(item.blob);
-        await writable.close();
+        await writeGeneratedDocumentToDirectory(item, customerFolder);
         return true;
     }
 
-    return saveFileWithLocationPicker(item.blob, fileName);
+    if (directoryHandle && 'getFileHandle' in directoryHandle) {
+        await writeGeneratedDocumentToDirectory(item, directoryHandle);
+        return true;
+    }
+
+    triggerDirectDownload(item.blob, fileName);
+    return true;
 }
 
 async function ensureDirectoryWritePermission(directoryHandle) {
@@ -5188,7 +5377,7 @@ window.saveGeneratedDocumentPdf = async (index, triggerBtn = null) => {
     } finally {
         if (triggerBtn) {
             triggerBtn.disabled = false;
-            triggerBtn.innerHTML = originalHtml || '<i class="fas fa-file-pdf"></i> Save as PDF';
+            triggerBtn.innerHTML = originalHtml || '<i class="fas fa-download"></i> Download PDF';
         }
     }
 };
@@ -5201,54 +5390,63 @@ async function saveAllGeneratedDocumentsToFolder() {
     const originalHtml = saveAllGeneratedDocumentsBtn?.innerHTML || '';
     if (saveAllGeneratedDocumentsBtn) {
         saveAllGeneratedDocumentsBtn.disabled = true;
-        saveAllGeneratedDocumentsBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing PDFs...';
-    }
-    if (!('showDirectoryPicker' in window)) {
-        try {
-            for (let index = 0; index < generatedDocumentPreviewItems.length; index += 1) {
-                await window.saveGeneratedDocumentPdf(index);
-            }
-        } finally {
-            if (saveAllGeneratedDocumentsBtn) {
-                saveAllGeneratedDocumentsBtn.disabled = false;
-                saveAllGeneratedDocumentsBtn.innerHTML = originalHtml || '<i class="fas fa-folder-plus"></i> Save All as PDF';
-            }
-        }
-        return;
+        saveAllGeneratedDocumentsBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Downloading PDFs...';
     }
 
     try {
-        const rootFolder = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' });
-        const canWrite = await ensureDirectoryWritePermission(rootFolder);
-        if (!canWrite) throw new Error('Write permission was not granted for the selected folder.');
-        let successCount = 0;
         const failures = [];
-        for (let index = 0; index < generatedDocumentPreviewItems.length; index += 1) {
-            showNotification(`Preparing PDF ${index + 1} of ${generatedDocumentPreviewItems.length}...`, 'info');
+        let directoryHandle = null;
+        if ('showDirectoryPicker' in window) {
             try {
-                await saveGeneratedDocumentAtIndex(index, rootFolder);
+                directoryHandle = await getGeneratedDocumentsCustomerFolder();
+            } catch (error) {
+                if (error?.name === 'AbortError') {
+                    showNotification('Save cancelled', 'info');
+                    return;
+                }
+                throw error;
+            }
+        }
+
+        if (saveAllGeneratedDocumentsBtn) {
+            saveAllGeneratedDocumentsBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing PDFs...';
+        }
+
+        const preparedResults = await Promise.allSettled(
+            generatedDocumentPreviewItems.map((_, index) => ensureGeneratedDocumentBlobAtIndex(index))
+        );
+        preparedResults.forEach((result, index) => {
+            if (result.status === 'rejected') {
+                failures.push(`${generatedDocumentPreviewItems[index]?.label || `Document ${index + 1}`}: ${result.reason?.message || 'Failed'}`);
+            }
+        });
+
+        let successCount = 0;
+        for (let index = 0; index < generatedDocumentPreviewItems.length; index += 1) {
+            if (!generatedDocumentPreviewItems[index]?.blob) continue;
+            if (saveAllGeneratedDocumentsBtn) {
+                saveAllGeneratedDocumentsBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving ${index + 1}/${generatedDocumentPreviewItems.length}...`;
+            }
+            try {
+                await saveGeneratedDocumentAtIndex(index, directoryHandle);
                 successCount += 1;
-                showNotification(`Saved ${index + 1} of ${generatedDocumentPreviewItems.length}`, 'success');
+                if (!directoryHandle) await new Promise((resolve) => setTimeout(resolve, 120));
             } catch (error) {
                 failures.push(`${generatedDocumentPreviewItems[index]?.label || `Document ${index + 1}`}: ${error.message || 'Failed'}`);
             }
         }
         if (successCount) {
-            showNotification(`${successCount} document(s) exported to folder successfully.`, failures.length ? 'warning' : 'success');
+            showNotification(`${successCount} document(s) saved successfully.`, failures.length ? 'warning' : 'success');
         }
         if (failures.length) {
             showNotification(`Some documents failed: ${failures.slice(0, 2).join(' | ')}`, 'error');
         }
     } catch (error) {
-        if (error?.name === 'AbortError') {
-            showNotification('Save cancelled', 'info');
-            return;
-        }
         showNotification(`Failed to save generated documents: ${error.message || 'Unknown error'}`, 'error');
     } finally {
         if (saveAllGeneratedDocumentsBtn) {
             saveAllGeneratedDocumentsBtn.disabled = false;
-            saveAllGeneratedDocumentsBtn.innerHTML = originalHtml || '<i class="fas fa-folder-plus"></i> Save All as PDF';
+            saveAllGeneratedDocumentsBtn.innerHTML = originalHtml || '<i class="fas fa-download"></i> Download All PDF';
         }
     }
 }

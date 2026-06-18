@@ -32,7 +32,7 @@ import {
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt
 } from './shared/submission-stage.js?v=20260610b';
-import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260615a';
+import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260617a';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 
 let currentUser = null;
@@ -2628,6 +2628,8 @@ async function loadSettings() {
     const announcementEnabled = document.getElementById('settingAnnouncementEnabled');
     const announcementTone = document.getElementById('settingAnnouncementTone');
     const announcementMessage = document.getElementById('settingAnnouncementMessage');
+    const globalReadOnlyMode = document.getElementById('settingGlobalReadOnlyMode');
+    const globalReadOnlyMessage = document.getElementById('settingGlobalReadOnlyMessage');
     const fallbackAssignmentMode = document.getElementById('settingFallbackAssignmentMode');
     const rejectionMinLength = document.getElementById('settingRejectionMinLength');
     const reviewerRejectRequired = document.getElementById('settingReviewerRejectRequired');
@@ -2669,6 +2671,8 @@ async function loadSettings() {
     if (announcementEnabled) announcementEnabled.value = String(systemSettings.dashboardAnnouncement.enabled ? 'true' : 'false');
     if (announcementTone) announcementTone.value = String(systemSettings.dashboardAnnouncement.tone || 'info');
     if (announcementMessage) announcementMessage.value = String(systemSettings.dashboardAnnouncement.message || '');
+    if (globalReadOnlyMode) globalReadOnlyMode.value = String(systemSettings.globalReadOnlyMode ? 'true' : 'false');
+    if (globalReadOnlyMessage) globalReadOnlyMessage.value = String(systemSettings.globalReadOnlyMessage || defaultSystemSettings.globalReadOnlyMessage || '');
     currentPfaOptions = Array.isArray(systemSettings.pfaOptions) ? [...systemSettings.pfaOptions] : [];
     currentPfaAddresses = { ...(systemSettings.pfaAddresses || {}) };
     renderPfaManagement();
@@ -4224,6 +4228,8 @@ window.saveSuperSettings = async (triggerButton = null) => {
     const announcementEnabled = String(document.getElementById('settingAnnouncementEnabled')?.value || 'false') === 'true';
     const announcementTone = String(document.getElementById('settingAnnouncementTone')?.value || 'info').trim() || 'info';
     const announcementMessage = String(document.getElementById('settingAnnouncementMessage')?.value || '').trim();
+    const globalReadOnlyMode = String(document.getElementById('settingGlobalReadOnlyMode')?.value || 'false') === 'true';
+    const globalReadOnlyMessage = String(document.getElementById('settingGlobalReadOnlyMessage')?.value || '').trim() || getDefaultSystemSettings().globalReadOnlyMessage;
     const defaultRouteMode = String(document.getElementById('settingDefaultRouteMode')?.value || 'normal').trim() || 'normal';
     const fallbackAssignmentMode = String(document.getElementById('settingFallbackAssignmentMode')?.value || 'round_robin').trim() || 'round_robin';
     const agentRegistrationApprovalRequired = String(document.getElementById('settingAgentRegistrationApprovalRequired')?.value || 'true') === 'true';
@@ -4365,6 +4371,8 @@ window.saveSuperSettings = async (triggerButton = null) => {
                 tone: announcementTone,
                 message: announcementMessage
             },
+            globalReadOnlyMode,
+            globalReadOnlyMessage,
             commissionRate,
             commissionRateEffectiveFrom,
             maxImageUploadMb,
@@ -4449,6 +4457,8 @@ window.saveSuperSettings = async (triggerButton = null) => {
             commissionBackfillCount: submissionsToBackfill.length,
             maintenanceMode,
             maintenanceMessage,
+            globalReadOnlyMode,
+            globalReadOnlyMessage,
             maxImageUploadMb,
             maxPdfUploadMb,
             reviewerRoundRobinEnabled,

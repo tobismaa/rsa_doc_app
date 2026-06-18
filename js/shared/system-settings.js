@@ -338,6 +338,8 @@ export function getDefaultSystemSettings() {
       message: '',
       tone: 'info'
     },
+    globalReadOnlyMode: false,
+    globalReadOnlyMessage: 'Read-only mode is active. You can view records, but changes are temporarily disabled.',
     securityControls: {
       sessionTimeoutMinutes: 60,
       forceLogoutCountdown: '11m',
@@ -423,6 +425,8 @@ function normalizeSystemSettings(data = {}) {
       message: parseText(data?.dashboardAnnouncement?.message, defaults.dashboardAnnouncement.message),
       tone: parseText(data?.dashboardAnnouncement?.tone, defaults.dashboardAnnouncement.tone)
     },
+    globalReadOnlyMode: parseBoolean(data.globalReadOnlyMode, defaults.globalReadOnlyMode),
+    globalReadOnlyMessage: parseText(data.globalReadOnlyMessage, defaults.globalReadOnlyMessage),
     securityControls: {
       ...defaults.securityControls,
       ...parseObject(data.securityControls, defaults.securityControls),

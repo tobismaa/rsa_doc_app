@@ -315,6 +315,15 @@
                             <label style="grid-column:1/-1;">Dashboard Announcement
                                 <textarea id="settingAnnouncementMessage" rows="3" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;"></textarea>
                             </label>
+                            <label>Global Read-Only Mode
+                                <select id="settingGlobalReadOnlyMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="false">Off</option>
+                                    <option value="true">On</option>
+                                </select>
+                            </label>
+                            <label style="grid-column:1/-1;">Read-Only Message
+                                <textarea id="settingGlobalReadOnlyMessage" rows="3" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;" placeholder="Shown across dashboards while editing is disabled."></textarea>
+                            </label>
                         </div>
                     </div>
                     <div style="margin-top:18px;padding:18px;border:1px solid #dbe6f2;border-radius:16px;background:#f8fbff;">
@@ -1284,8 +1293,8 @@
 <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="js/table-enhancer.js?v=20260512b"></script>
-<script type="module" src="js/super-admin.js?v=20260616a"></script>
-<script type="module" src="js/profile-completion-guard.js?v=20260617a"></script>
+<script type="module" src="js/super-admin.js?v=20260617a"></script>
+<script type="module" src="js/profile-completion-guard.js?v=20260617f"></script>
 <link rel="stylesheet" href="css/pwa-install.css">
     <script src="js/pwa-install.js?v=20260423a"></script>
 <link rel="stylesheet" href="css/sop-help.css">

@@ -10,7 +10,7 @@ import {
   updateDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { isActiveUserWithRole, normalizeEmail } from "./user-directory.js?v=20260427c";
-import { getSystemSettings } from "./system-settings.js?v=20260507c";
+import { getSystemSettings } from "./system-settings.js?v=20260617a";
 import { getTrustedDateKey } from "./app-time.js";
 
 export function routingRuleDocId(uploaderEmail) {

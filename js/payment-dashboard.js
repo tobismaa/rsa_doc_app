@@ -118,6 +118,12 @@ function showNotification(message, type = 'info') {
     setTimeout(() => { notification.style.display = 'none'; }, 3000);
 }
 
+function assertWritable(actionLabel) {
+    return typeof window.assertAppWritable === 'function'
+        ? window.assertAppWritable(actionLabel)
+        : true;
+}
+
 function escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
@@ -1778,6 +1784,7 @@ function loadSubmissions() {
 }
 
 window.markAgentPaid = async (groupKey) => {
+    if (!assertWritable('Payment approval')) return;
     const agentItems = getPaymentRecords().filter((sub) => {
         const currentStatus = String(sub.status || '').toLowerCase();
         return getAgentPaymentKey(sub) === groupKey && (currentStatus === 'sent_to_pfa' || currentStatus === 'rsa_submitted' || sub.finalSubmitted === true || sub.rsaSubmitted === true);
@@ -1827,6 +1834,7 @@ window.markAgentPaid = async (groupKey) => {
 };
 
 window.markSubmissionPaid = async (submissionId) => {
+    if (!assertWritable('Payment approval')) return;
     const sub = allSubmissions.find((item) => item.id === submissionId);
     if (!sub) {
         showNotification('Application not found', 'error');
@@ -1874,6 +1882,7 @@ window.markSubmissionPaid = async (submissionId) => {
 };
 
 window.markMatchedPaymentReconciliationRecords = async () => {
+    if (!assertWritable('Payment reconciliation update')) return;
     if (!paymentReconciliationResult?.matchedRows?.length) {
         showNotification('Run reconciliation first.', 'warning');
         return;
@@ -1918,6 +1927,7 @@ window.markMatchedPaymentReconciliationRecords = async () => {
 };
 
 window.markMatchedPaymentReconciliationRecord = async (submissionId) => {
+    if (!assertWritable('Payment reconciliation update')) return;
     const sub = allSubmissions.find((item) => item.id === submissionId);
     if (!sub) {
         showNotification('Matched application no longer exists in your queue.', 'warning');
@@ -1931,6 +1941,7 @@ window.markMatchedPaymentReconciliationRecord = async (submissionId) => {
 };
 
 window.clearPaidAgent = async (groupKey) => {
+    if (!assertWritable('Payment clearance')) return;
     const paidItems = allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'paid' && getAgentPaymentKey(s) === groupKey);
     if (paidItems.length === 0) {
         showNotification('No paid agent records to settle', 'info');
@@ -1983,6 +1994,7 @@ window.clearPaidAgent = async (groupKey) => {
 };
 
 window.clearPaidSubmissions = async () => {
+    if (!assertWritable('Payment clearance')) return;
     const paidItems = allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'paid');
     if (!paidItems.length) {
         showNotification('No paid agent records to settle', 'info');
@@ -2018,6 +2030,7 @@ window.clearPaidSubmissions = async () => {
 };
 
 window.clearNoAgentApplications = async (groupKey) => {
+    if (!assertWritable('Payment clearance')) return;
     const items = getPaymentRecords().filter((sub) => getAgentPaymentKey(sub) === groupKey);
     if (!items.length) {
         showNotification('Application batch not found', 'error');
@@ -2048,6 +2061,7 @@ window.clearNoAgentApplications = async (groupKey) => {
 };
 
 window.clearSubmissionWithoutAgent = async (submissionId) => {
+    if (!assertWritable('Payment clearance')) return;
     const sub = allSubmissions.find((item) => item.id === submissionId);
     if (!sub) {
         showNotification('Application not found', 'error');

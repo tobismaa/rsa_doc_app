@@ -4,7 +4,7 @@ import {
     getCurrentUserProfile as getCurrentUserProfileShared,
     getUserFullName as getUserFullNameShared
 } from './shared/user-directory.js?v=20260518a';
-import { getSystemSettings } from './shared/system-settings.js?v=20260508a';
+import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import { formatAppDateTime } from './shared/app-time.js';
 import {
     getTimestampMillis as getStageTimestampMillis,
