@@ -3,7 +3,10 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const rootDir = path.resolve(__dirname, '..');
-const cacheDir = process.env.PUPPETEER_CACHE_DIR || path.join(rootDir, '.cache', 'puppeteer');
+const configuredCacheDir = String(process.env.PUPPETEER_CACHE_DIR || '').trim();
+const cacheDir = configuredCacheDir
+    ? (path.isAbsolute(configuredCacheDir) ? configuredCacheDir : path.resolve(rootDir, configuredCacheDir))
+    : path.join(rootDir, '.cache', 'puppeteer');
 process.env.PUPPETEER_CACHE_DIR = cacheDir;
 fs.mkdirSync(cacheDir, { recursive: true });
 

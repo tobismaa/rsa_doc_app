@@ -16,7 +16,16 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 const requireAuth = String(process.env.REQUIRE_FIREBASE_AUTH || 'true').toLowerCase() !== 'false';
 const maxPdfRenderPayloadSize = String(process.env.PDF_RENDER_BODY_LIMIT || '8mb').trim() || '8mb';
-const puppeteerCacheDir = String(process.env.PUPPETEER_CACHE_DIR || path.join(__dirname, '.cache', 'puppeteer'));
+function resolveServicePath(value, fallback) {
+    const raw = String(value || '').trim();
+    if (!raw) return fallback;
+    return path.isAbsolute(raw) ? raw : path.resolve(__dirname, raw);
+}
+
+const puppeteerCacheDir = resolveServicePath(
+    process.env.PUPPETEER_CACHE_DIR,
+    path.join(__dirname, '.cache', 'puppeteer')
+);
 process.env.PUPPETEER_CACHE_DIR = puppeteerCacheDir;
 const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
     .split(',')
