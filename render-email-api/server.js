@@ -4,12 +4,20 @@ const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
 const sgMail = require('@sendgrid/mail');
+const path = require('path');
+const fs = require('fs');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const { createDailyReportWorkbookBuffer, createOutstandingReportWorkbookBuffer, getPreviousDateKeyInLagos, getLagosDateKey } = require('./scheduled-report');
+
+const execFileAsync = promisify(execFile);
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const requireAuth = String(process.env.REQUIRE_FIREBASE_AUTH || 'true').toLowerCase() !== 'false';
 const maxPdfRenderPayloadSize = String(process.env.PDF_RENDER_BODY_LIMIT || '8mb').trim() || '8mb';
+const puppeteerCacheDir = String(process.env.PUPPETEER_CACHE_DIR || path.join(__dirname, '.cache', 'puppeteer'));
+process.env.PUPPETEER_CACHE_DIR = puppeteerCacheDir;
 const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((v) => v.trim())
@@ -1038,6 +1046,7 @@ async function requireAdminOrSuperAdminRole(req, res, next) {
 }
 
 let pdfBrowserPromise = null;
+let pdfBrowserInstallPromise = null;
 
 function getPdfRenderBaseUrl(req, candidate) {
     const raw = String(candidate || '').trim();
@@ -1121,22 +1130,66 @@ async function getPdfBrowser() {
             }
 
             const executablePath = String(process.env.PUPPETEER_EXECUTABLE_PATH || '').trim();
-            return puppeteer.launch({
-                headless: 'new',
-                executablePath: executablePath || undefined,
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--font-render-hinting=medium'
-                ]
-            });
+            try {
+                return await launchPdfBrowser(puppeteer, executablePath);
+            } catch (err) {
+                if (!isMissingPuppeteerBrowserError(err) || executablePath) throw err;
+                await installPuppeteerChrome();
+                return launchPdfBrowser(puppeteer, executablePath);
+            }
         })().catch((err) => {
             pdfBrowserPromise = null;
             throw err;
         });
     }
     return pdfBrowserPromise;
+}
+
+function getPuppeteerBinPath() {
+    const binName = process.platform === 'win32' ? 'puppeteer.cmd' : 'puppeteer';
+    return path.join(__dirname, 'node_modules', '.bin', binName);
+}
+
+function isMissingPuppeteerBrowserError(err) {
+    const message = String(err?.message || err || '').toLowerCase();
+    return message.includes('could not find chrome') || message.includes('browser was not found');
+}
+
+async function launchPdfBrowser(puppeteer, executablePath = '') {
+    return puppeteer.launch({
+        headless: 'new',
+        executablePath: executablePath || undefined,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--font-render-hinting=medium'
+        ]
+    });
+}
+
+async function installPuppeteerChrome() {
+    if (!pdfBrowserInstallPromise) {
+        pdfBrowserInstallPromise = (async () => {
+            fs.mkdirSync(puppeteerCacheDir, { recursive: true });
+            const localBin = getPuppeteerBinPath();
+            const command = fs.existsSync(localBin)
+                ? localBin
+                : (process.platform === 'win32' ? 'npx.cmd' : 'npx');
+            const args = fs.existsSync(localBin)
+                ? ['browsers', 'install', 'chrome']
+                : ['puppeteer', 'browsers', 'install', 'chrome'];
+            await execFileAsync(command, args, {
+                cwd: __dirname,
+                env: { ...process.env, PUPPETEER_CACHE_DIR: puppeteerCacheDir },
+                timeout: 300000,
+                maxBuffer: 1024 * 1024 * 4
+            });
+        })().finally(() => {
+            pdfBrowserInstallPromise = null;
+        });
+    }
+    return pdfBrowserInstallPromise;
 }
 
 async function renderPreviewHtmlToPdfBuffer(req, payload = {}) {
