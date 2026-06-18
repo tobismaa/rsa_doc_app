@@ -6,8 +6,10 @@ const admin = require('firebase-admin');
 const sgMail = require('@sendgrid/mail');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
+const { pathToFileURL } = require('url');
 const { createDailyReportWorkbookBuffer, createOutstandingReportWorkbookBuffer, getPreviousDateKeyInLagos, getLagosDateKey } = require('./scheduled-report');
 
 const execFileAsync = promisify(execFile);
@@ -16,17 +18,6 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 const requireAuth = String(process.env.REQUIRE_FIREBASE_AUTH || 'true').toLowerCase() !== 'false';
 const maxPdfRenderPayloadSize = String(process.env.PDF_RENDER_BODY_LIMIT || '24mb').trim() || '24mb';
-function resolveServicePath(value, fallback) {
-    const raw = String(value || '').trim();
-    if (!raw) return fallback;
-    return path.isAbsolute(raw) ? raw : path.resolve(__dirname, raw);
-}
-
-const puppeteerCacheDir = resolveServicePath(
-    process.env.PUPPETEER_CACHE_DIR,
-    path.join(__dirname, '.cache', 'puppeteer')
-);
-process.env.PUPPETEER_CACHE_DIR = puppeteerCacheDir;
 const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((v) => v.trim())
@@ -1064,206 +1055,100 @@ async function requireAdminOrSuperAdminRole(req, res, next) {
     }
 }
 
-let pdfBrowserPromise = null;
-let pdfBrowserInstallPromise = null;
+function sanitizeDownloadFileName(value = '', fallback = 'generated-document.pdf') {
+    const clean = String(value || '').trim().replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ');
+    return (clean || fallback).replace(/"/g, '');
+}
 
-function getPdfRenderBaseUrl(req, candidate) {
-    const raw = String(candidate || '').trim();
-    if (raw) {
+async function resolveLibreOfficeCommand() {
+    const configured = String(process.env.LIBREOFFICE_PATH || '').trim();
+    const candidates = configured
+        ? [configured]
+        : (process.platform === 'win32'
+            ? ['soffice.exe', 'soffice', 'libreoffice']
+            : ['soffice', 'libreoffice']);
+
+    for (const command of candidates) {
         try {
-            const parsed = new URL(raw);
-            if (['http:', 'https:'].includes(parsed.protocol)) {
-                return parsed.toString().replace(/\/?$/, '/');
-            }
-        } catch (_) {}
+            await execFileAsync(command, ['--version'], { timeout: 15000, maxBuffer: 1024 * 1024 });
+            return command;
+        } catch (_) {
+            // Try the next common binary name.
+        }
     }
 
-    const fallbackOrigin = resolveAllowedOrigin(req);
-    return fallbackOrigin ? `${fallbackOrigin.replace(/\/+$/, '')}/` : '';
+    throw new Error('LibreOffice is not installed or LIBREOFFICE_PATH is not configured.');
 }
 
-function buildPreviewPdfDocument({ html = '', css = '', baseUrl = '', title = 'Generated Document' }) {
-    const safeBase = baseUrl ? `<base href="${escapeHtml(baseUrl)}">` : '';
-    return `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  ${safeBase}
-  <title>${escapeHtml(title)}</title>
-  <style>
-    ${css}
-    @page { size: A4; margin: 0; }
-    html, body {
-      width: 794px;
-      margin: 0;
-      padding: 0;
-      background: #ffffff !important;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
-    }
-    .word-generated-doc-render {
-      width: 794px !important;
-      max-height: none !important;
-      min-height: 0 !important;
-      overflow: visible !important;
-      padding: 0 !important;
-      background: #ffffff !important;
-    }
-    .word-preview-page {
-      width: 794px !important;
-      min-width: 794px !important;
-      max-width: 794px !important;
-      min-height: 1123px !important;
-      margin: 0 !important;
-      border: 0 !important;
-      border-radius: 0 !important;
-      box-shadow: none !important;
-      box-sizing: border-box !important;
-      page-break-after: always;
-      break-after: page;
-    }
-    .word-preview-page:last-child {
-      page-break-after: auto;
-      break-after: auto;
-    }
-    .word-preview-page-number {
-      display: none !important;
-    }
-  </style>
-</head>
-<body>
-  <main class="word-generated-doc-render">${html}</main>
-</body>
-</html>`;
+function parseBase64Document(value = '') {
+    const raw = String(value || '').trim();
+    if (!raw) throw new Error('DOCX payload is required.');
+    const base64 = raw.includes(',') ? raw.split(',').pop() : raw;
+    if (!/^[A-Za-z0-9+/=\r\n]+$/.test(base64)) throw new Error('DOCX payload must be base64.');
+    const buffer = Buffer.from(base64, 'base64');
+    if (buffer.length < 1000) throw new Error('DOCX payload is too small or invalid.');
+    if (buffer.length > 20 * 1024 * 1024) throw new Error('DOCX payload is too large.');
+    return buffer;
 }
 
-async function getPdfBrowser() {
-    if (!pdfBrowserPromise) {
-        pdfBrowserPromise = (async () => {
-            let puppeteer;
-            try {
-                puppeteer = require('puppeteer');
-            } catch (_) {
-                throw new Error('PDF renderer is not installed. Run npm install in render-email-api.');
-            }
+async function convertDocxBufferToPdfBuffer(docxBuffer, fileName = 'generated-document.docx') {
+    const command = await resolveLibreOfficeCommand();
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rsa-docx-pdf-'));
+    const profileDir = path.join(tempDir, 'profile');
+    fs.mkdirSync(profileDir, { recursive: true });
 
-            const executablePath = String(process.env.PUPPETEER_EXECUTABLE_PATH || '').trim();
-            try {
-                return await launchPdfBrowser(puppeteer, executablePath);
-            } catch (err) {
-                if (!isMissingPuppeteerBrowserError(err) || executablePath) throw err;
-                await installPuppeteerChrome();
-                return launchPdfBrowser(puppeteer, executablePath);
-            }
-        })().catch((err) => {
-            pdfBrowserPromise = null;
-            throw err;
-        });
-    }
-    return pdfBrowserPromise;
-}
-
-function getPuppeteerBinPath() {
-    const binName = process.platform === 'win32' ? 'puppeteer.cmd' : 'puppeteer';
-    return path.join(__dirname, 'node_modules', '.bin', binName);
-}
-
-function isMissingPuppeteerBrowserError(err) {
-    const message = String(err?.message || err || '').toLowerCase();
-    return message.includes('could not find chrome') || message.includes('browser was not found');
-}
-
-async function launchPdfBrowser(puppeteer, executablePath = '') {
-    return puppeteer.launch({
-        headless: 'new',
-        executablePath: executablePath || undefined,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--font-render-hinting=medium'
-        ]
-    });
-}
-
-async function installPuppeteerChrome() {
-    if (!pdfBrowserInstallPromise) {
-        pdfBrowserInstallPromise = (async () => {
-            fs.mkdirSync(puppeteerCacheDir, { recursive: true });
-            const localBin = getPuppeteerBinPath();
-            const command = fs.existsSync(localBin)
-                ? localBin
-                : (process.platform === 'win32' ? 'npx.cmd' : 'npx');
-            const args = fs.existsSync(localBin)
-                ? ['browsers', 'install', 'chrome']
-                : ['puppeteer', 'browsers', 'install', 'chrome'];
-            await execFileAsync(command, args, {
-                cwd: __dirname,
-                env: { ...process.env, PUPPETEER_CACHE_DIR: puppeteerCacheDir },
-                timeout: 300000,
-                maxBuffer: 1024 * 1024 * 4
-            });
-        })().finally(() => {
-            pdfBrowserInstallPromise = null;
-        });
-    }
-    return pdfBrowserInstallPromise;
-}
-
-async function renderPreviewHtmlToPdfBuffer(req, payload = {}) {
-    const html = String(payload.html || '').trim();
-    if (!html) throw new Error('Preview HTML is required.');
-    if (html.length > 3_500_000) throw new Error('Preview HTML is too large.');
-
-    const css = String(payload.css || '');
-    const title = String(payload.title || 'Generated Document').trim() || 'Generated Document';
-    const baseUrl = getPdfRenderBaseUrl(req, payload.baseUrl);
-    const documentHtml = buildPreviewPdfDocument({ html, css, baseUrl, title });
-    const browser = await getPdfBrowser();
-    const page = await browser.newPage();
+    const baseName = sanitizeDownloadFileName(fileName, 'generated-document.docx').replace(/\.docx?$/i, '') || 'generated-document';
+    const inputPath = path.join(tempDir, `${baseName}.docx`);
+    fs.writeFileSync(inputPath, docxBuffer);
 
     try {
-        await page.setJavaScriptEnabled(false);
-        await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 1 });
-        await page.setContent(documentHtml, {
-            waitUntil: ['load', 'networkidle0'],
-            timeout: 45000
+        await execFileAsync(command, [
+            '--headless',
+            '--nologo',
+            '--nofirststartwizard',
+            '--nodefault',
+            '--nolockcheck',
+            `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
+            '--convert-to',
+            'pdf',
+            '--outdir',
+            tempDir,
+            inputPath
+        ], {
+            cwd: tempDir,
+            timeout: 90000,
+            maxBuffer: 1024 * 1024 * 8
         });
-        await page.evaluate(async () => {
-            if (document.fonts?.ready) await document.fonts.ready;
-            const images = Array.from(document.images || []);
-            await Promise.all(images.map((img) => img.complete
-                ? Promise.resolve()
-                : new Promise((resolve) => {
-                    img.onload = resolve;
-                    img.onerror = resolve;
-                })));
-        });
-        return page.pdf({
-            format: 'A4',
-            printBackground: true,
-            preferCSSPageSize: true,
-            margin: { top: '0', right: '0', bottom: '0', left: '0' }
-        });
+
+        const expectedPath = path.join(tempDir, `${baseName}.pdf`);
+        const pdfPath = fs.existsSync(expectedPath)
+            ? expectedPath
+            : fs.readdirSync(tempDir)
+                .map((name) => path.join(tempDir, name))
+                .find((candidate) => candidate.toLowerCase().endsWith('.pdf'));
+
+        if (!pdfPath) throw new Error('LibreOffice did not produce a PDF.');
+        return fs.readFileSync(pdfPath);
     } finally {
-        await page.close().catch(() => {});
+        fs.rmSync(tempDir, { recursive: true, force: true });
     }
 }
 
-app.post('/api/admin/render-preview-pdf', authMiddleware, requireAdminOrSuperAdminRole, async (req, res) => {
+app.post('/api/admin/convert-docx-pdf', authMiddleware, requireAdminOrSuperAdminRole, async (req, res) => {
     try {
-        const pdfBuffer = await renderPreviewHtmlToPdfBuffer(req, req.body || {});
         const rawFileName = String(req.body?.fileName || 'generated-document.pdf').trim();
-        const fileName = rawFileName.replace(/[\\/:*?"<>|]+/g, '_') || 'generated-document.pdf';
+        const pdfFileName = sanitizeDownloadFileName(rawFileName.replace(/\.docx?$/i, '.pdf'), 'generated-document.pdf');
+        const docxBuffer = parseBase64Document(req.body?.docxBase64 || req.body?.data || '');
+        const pdfBuffer = await convertDocxBufferToPdfBuffer(docxBuffer, rawFileName || pdfFileName.replace(/\.pdf$/i, '.docx'));
+
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Length', String(pdfBuffer.length));
-        res.setHeader('Content-Disposition', `attachment; filename="${fileName.replace(/"/g, '')}"`);
+        res.setHeader('Content-Disposition', `attachment; filename="${pdfFileName}"`);
         return res.send(pdfBuffer);
     } catch (err) {
         return res.status(500).json({
             ok: false,
-            error: String(err?.message || 'Failed to render PDF')
+            error: String(err?.message || 'Failed to convert DOCX to PDF')
         });
     }
 });

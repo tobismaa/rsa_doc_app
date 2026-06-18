@@ -13,7 +13,7 @@
     <title>Admin Dashboard - CMBank RSA</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
-    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260616e">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260618a">
     <!-- Security: DOMPurify for XSS protection -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 </head>
@@ -567,7 +567,10 @@
                             <div id="generatedDocumentsPreviewMeta" class="generated-documents-preview-meta"></div>
                             <div class="generated-documents-preview-actions">
                                 <button class="action-btn" id="saveAllGeneratedDocumentsBtn" type="button">
-                                    <i class="fas fa-download"></i> Download All PDF
+                                    <i class="fas fa-file-pdf"></i> Download All PDF
+                                </button>
+                                <button class="action-btn" id="saveAllGeneratedDocxBtn" type="button">
+                                    <i class="fas fa-file-word"></i> Download All DOCX
                                 </button>
                             </div>
                         </div>
@@ -1136,7 +1139,7 @@
                     <div class="sop-topic">
                         <h4>7. Application Management: Track, Generate & Final Submission</h4>
                         <p>Use Track Applications to follow handoff from uploader to reviewer to RSA to payment.</p>
-                        <p>Use Generate Document to preview mortgage letters for Processing to PFA applications before saving PDFs.</p>
+                        <p>Use Generate Document to preview mortgage letters for Processing to PFA applications before saving PDFs or DOCX files.</p>
                         <p>Use Final Submission to verify records sent to PFA and investigate delayed transitions.</p>
                     </div>
                     <div class="sop-topic">
@@ -1203,7 +1206,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=20260618i"></script>
+    <script type="module" src="js/admin.js?v=20260618n"></script>
     <script src="js/table-enhancer.js?v=20260512b"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260617f"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260518a">

@@ -1,4 +1,4 @@
-﻿// js/admin.js - COMPLETE UPDATED VERSION WITH FIXED DOWNLOAD ALL
+// js/admin.js - COMPLETE UPDATED VERSION WITH FIXED DOWNLOAD ALL
 import { auth, db } from './firebase-config.js';
 import { ADMIN_API_BASE_URL } from './admin-api-config.js?v=20260618a';
 import { notifyUserPushEvent } from './push-alerts.js';
@@ -99,8 +99,6 @@ let generatedDocumentPreviewItems = [];
 let pdfFontAssetCache = null;
 const pdfTemplateBytesCache = new Map();
 let adminSystemSettings = {};
-let generatedPdfApiWarningShown = false;
-const generatedDocumentDataUrlCache = new Map();
 
 const GENERATED_DOCUMENT_TYPES = [
     { id: 'offer_letter', label: 'Offer Letter', description: 'Mortgage facility offer and terms.' },
@@ -511,6 +509,7 @@ const generatedDocumentsPreviewModal = document.getElementById('generatedDocumen
 const generatedDocumentsPreviewMeta = document.getElementById('generatedDocumentsPreviewMeta');
 const generatedDocumentsPreviewList = document.getElementById('generatedDocumentsPreviewList');
 const saveAllGeneratedDocumentsBtn = document.getElementById('saveAllGeneratedDocumentsBtn');
+const saveAllGeneratedDocxBtn = document.getElementById('saveAllGeneratedDocxBtn');
 const auditTableBody = document.getElementById('auditTableBody');
 const notification = document.getElementById('notification');
 let notificationTimer = null;
@@ -856,7 +855,7 @@ async function saveBlobToFolderPicker(blob, defaultFileName, customerName = 'Cus
         return true;
     }
     try {
-        showNotification('📁 Please select a destination folder...', 'info');
+        showNotification('Please select a destination folder...', 'info');
         const dirHandle = await window.showDirectoryPicker({
             mode: 'readwrite',
             startIn: 'downloads'
@@ -867,7 +866,7 @@ async function saveBlobToFolderPicker(blob, defaultFileName, customerName = 'Cus
         const writable = await fileHandle.createWritable();
         await writable.write(blob);
         await writable.close();
-        showNotification(`✅ Saved to ${safeCustomerName}/${defaultFileName}`, 'success');
+        showNotification(`Saved to ${safeCustomerName}/${defaultFileName}`, 'success');
         return true;
     } catch (error) {
         if (error.name === 'AbortError') {
@@ -1184,6 +1183,7 @@ function setupEventListeners() {
     document.getElementById('closeGeneratedDocumentsPreviewModal')?.addEventListener('click', closeGeneratedDocumentsPreviewModalFn);
     document.getElementById('closeGeneratedDocumentsPreviewFooterBtn')?.addEventListener('click', closeGeneratedDocumentsPreviewModalFn);
     saveAllGeneratedDocumentsBtn?.addEventListener('click', saveAllGeneratedDocumentsToFolder);
+    saveAllGeneratedDocxBtn?.addEventListener('click', saveAllGeneratedDocxToFolder);
     openTrackReportInputModalBtn?.addEventListener('click', openTrackReportInputModalFn);
     document.getElementById('closeTrackReportInputModal')?.addEventListener('click', closeTrackReportInputModalFn);
     document.getElementById('closeTrackReportInputFooterBtn')?.addEventListener('click', closeTrackReportInputModalFn);
@@ -2391,7 +2391,7 @@ function formatCurrency(value) {
     try {
         return num.toLocaleString('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 2 });
     } catch (e) {
-        return `₦${num.toLocaleString()}`;
+        return `\u20a6${num.toLocaleString()}`;
     }
 }
 
@@ -2798,9 +2798,9 @@ window.downloadAllSubmission = async (submissionId) => {
                     showNotification(`Downloaded ${successCount}, opened ${directOpenedCount} directly because storage blocked secure fetch`, 'warning');
                 } else
                 if (useFolderPicker) {
-                    showNotification(`✅ All ${successCount} documents saved to folder: ${safeCustomerName}`, 'success');
+                    showNotification(`All ${successCount} documents saved to folder: ${safeCustomerName}`, 'success');
                 } else {
-                    showNotification(`✅ All ${successCount} documents downloaded successfully`, 'success');
+                    showNotification(`All ${successCount} documents downloaded successfully`, 'success');
                 }
             } else {
                 showNotification(`Downloaded ${successCount}, opened ${directOpenedCount} directly, ${failedCount} failed`, 'warning');
@@ -3677,10 +3677,10 @@ function buildShortLetterDate(dateValue = new Date()) {
 
 function toPdfSafeText(value = '') {
     return String(value || '')
-        .replace(/₦/g, '#')
-        .replace(/[“”]/g, '"')
-        .replace(/[‘’]/g, "'")
-        .replace(/–/g, '-');
+        .replace(/\u20a6/g, '#')
+        .replace(/[\u201c\u201d]/g, '"')
+        .replace(/[\u2018\u2019]/g, "'")
+        .replace(/\u2013/g, '-');
 }
 
 function formatAmountForLetter(amount) {
@@ -4323,7 +4323,7 @@ function createWordPageBreakXml() {
     return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
 }
 
-const DOCX_TEMPLATE_PAGE_IMAGES = {
+const DOCX_TEMPLATE_CONFIGS = {
     offer_letter: { stem: 'offer-letter-master', pages: 4 },
     allocation_letter: { stem: 'allocation-letter-master', pages: 2 },
     availability_letter: { stem: 'availability-letter-master', pages: 1 },
@@ -4333,28 +4333,48 @@ const DOCX_TEMPLATE_PAGE_IMAGES = {
     verification_letter: { stem: 'verification-letter-master', pages: 1 }
 };
 
-async function loadDocxTemplatePageAssets(documentType, pageCount) {
-    const config = DOCX_TEMPLATE_PAGE_IMAGES[documentType];
+const docxTemplateBytesCache = new Map();
+
+async function loadDocxTemplateZip(documentType) {
+    const config = DOCX_TEMPLATE_CONFIGS[documentType];
+    if (!config) throw new Error(`Unsupported document template: ${documentType}`);
+    const templatePath = `assets/document-templates/docx/${config.stem}.docx`;
+    if (!docxTemplateBytesCache.has(templatePath)) {
+        const response = await fetch(templatePath, { cache: 'force-cache' });
+        if (!response.ok) {
+            throw new Error(`Empty DOCX template not found for ${documentType}.`);
+        }
+        docxTemplateBytesCache.set(templatePath, await response.arrayBuffer());
+    }
+    return new window.PizZip(docxTemplateBytesCache.get(templatePath).slice(0));
+}
+
+function createDocxTemplatePageAssets(documentType, pageCount) {
+    const config = DOCX_TEMPLATE_CONFIGS[documentType];
     if (!config) return [];
     const assets = [];
     for (let index = 0; index < pageCount; index += 1) {
         const imageIndex = Math.min(index + 1, config.pages);
         const fileName = `${config.stem}-page-${imageIndex}.png`;
-        const url = `assets/document-templates/docx-page-images/${fileName}`;
-        const response = await fetch(url, { cache: 'force-cache' });
-        if (!response.ok) {
-            assets.push(null);
-            continue;
-        }
         assets.push({
-            rId: `rIdTemplatePage${index + 1}`,
+            rId: `rId${imageIndex}`,
             fileName,
-            zipName: `template-page-${index + 1}.png`,
-            url,
-            bytes: await response.arrayBuffer()
+            url: `assets/document-templates/docx-page-images/${fileName}`
         });
     }
     return assets;
+}
+
+function ensureDocxStylesRelationshipXml(relsXml = '') {
+    const xml = String(relsXml || '').trim() || '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+    if (xml.includes('officeDocument/2006/relationships/styles')) return xml;
+    return xml.replace('</Relationships>', '  <Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>\n</Relationships>');
+}
+
+function ensureDocxStylesContentTypeXml(contentTypesXml = '') {
+    const xml = String(contentTypesXml || '').trim();
+    if (!xml || xml.includes('/word/styles.xml')) return xml;
+    return xml.replace('</Types>', '  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>\n</Types>');
 }
 
 function createWordBackgroundImageXml(asset = null, pageIndex = 0) {
@@ -4438,38 +4458,15 @@ async function generateDocxDocumentFromContent(documentType, data = {}) {
     if (!ensureDocxZipLibrary()) throw new Error('Word document engine is unavailable.');
     const contentModel = buildDocumentContent(documentType, data);
     const contentPages = Array.isArray(contentModel.pages) ? contentModel.pages : [];
-    const pageAssets = await loadDocxTemplatePageAssets(documentType, contentPages.length);
-    const zip = new window.PizZip();
-    zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Default Extension="png" ContentType="image/png"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
-  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
-</Types>`);
-    zip.folder('_rels').file('.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
-</Relationships>`);
+    const pageAssets = createDocxTemplatePageAssets(documentType, contentPages.length);
+    const zip = await loadDocxTemplateZip(documentType);
+    const contentTypes = zip.file('[Content_Types].xml')?.asText() || '';
+    if (contentTypes) zip.file('[Content_Types].xml', ensureDocxStylesContentTypeXml(contentTypes));
     zip.folder('word').file('document.xml', createDocxDocumentXml(documentType, contentModel, pageAssets));
     zip.folder('word').file('styles.xml', createDocxStylesXml());
-    const imageRelationships = pageAssets
-        .filter(Boolean)
-        .map((asset) => `  <Relationship Id="${asset.rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${asset.zipName}"/>`)
-        .join('\n');
-    zip.folder('word').folder('_rels').file('document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-${imageRelationships}
-</Relationships>`);
-    pageAssets.filter(Boolean).forEach((asset) => {
-        zip.folder('word').folder('media').file(asset.zipName, asset.bytes, { binary: true });
-    });
+    const relsPath = 'word/_rels/document.xml.rels';
+    const relsXml = zip.file(relsPath)?.asText() || '';
+    zip.file(relsPath, ensureDocxStylesRelationshipXml(relsXml));
     zip.folder('docProps').file('app.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>CMBank RSA Admin Dashboard</Application></Properties>`);
     zip.folder('docProps').file('core.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -5100,13 +5097,15 @@ async function generateSelectedDocumentsForPreview() {
             previewItems.push({
                 type,
                 label: config?.label || type,
-                blob: null,
-                blobPromise: null,
-                blobFactory: () => createPdfBlobFromPreviewHtml(generatedPreview.previewHtml),
+                blob: generatedPreview.blob,
+                docxBlob: generatedPreview.blob,
+                pdfBlob: null,
+                pdfBlobPromise: null,
+                blobFactory: null,
                 previewUrl: '',
                 previewHtml: generatedPreview.previewHtml,
-                fileExtension: 'pdf',
-                mimeType: 'application/pdf',
+                fileExtension: 'docx',
+                mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                 customerName: data.customerName
             });
         }
@@ -5115,7 +5114,6 @@ async function generateSelectedDocumentsForPreview() {
         renderGeneratedDocumentsPreview(data.customerName);
         closeDocumentGenerationModalFn();
         if (generatedDocumentsPreviewModal) generatedDocumentsPreviewModal.classList.add('active');
-        warmGeneratedDocumentPdfBlobs();
     } catch (error) {
         showNotification(`Document generation failed: ${error.message || 'Unknown error'}`, 'error');
     } finally {
@@ -5133,9 +5131,14 @@ function renderGeneratedDocumentsPreview(customerName = 'Customer') {
         <div class="generated-doc-card">
             <div class="generated-doc-card-head">
                 <h3>${escapeHtml(item.label)}</h3>
-                <button class="action-btn" onclick="window.saveGeneratedDocumentPdf(${index}, this)">
-                    <i class="fas fa-download"></i> Download PDF
-                </button>
+                <div class="generated-doc-actions">
+                    <button class="action-btn" onclick="window.saveGeneratedDocumentPdf(${index}, this)">
+                        <i class="fas fa-file-pdf"></i> Download PDF
+                    </button>
+                    <button class="action-btn" onclick="window.saveGeneratedDocumentDocx(${index}, this)">
+                        <i class="fas fa-file-word"></i> DOCX
+                    </button>
+                </div>
             </div>
             <div class="generated-doc-render ${item.previewHtml ? 'word-generated-doc-render' : ''}" data-generated-doc-index="${index}">
                 ${item.previewUrl
@@ -5150,14 +5153,12 @@ function sanitizeFileNamePart(value = '') {
     return String(value || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
 }
 
-function getGeneratedDocumentFileName(item = {}) {
+function getGeneratedDocumentFileName(item = {}, extensionOverride = '') {
     const customerName = sanitizeFileNamePart(item.customerName || 'Customer') || 'Customer';
-    const extension = sanitizeFileNamePart(item.fileExtension || 'pdf') || 'pdf';
+    const extension = sanitizeFileNamePart(extensionOverride || item.fileExtension || 'pdf') || 'pdf';
     const label = sanitizeFileNamePart(item.label || 'Generated Document') || 'Generated Document';
     return `${customerName} - ${label}.${extension}`;
 }
-
-let generatedDocumentPreviewCssPromise = null;
 
 function getConfiguredAdminApiBaseUrl() {
     const baseUrl = String(ADMIN_API_BASE_URL || '').trim().replace(/\/+$/, '');
@@ -5165,217 +5166,77 @@ function getConfiguredAdminApiBaseUrl() {
     return baseUrl;
 }
 
-function getStaticAppBaseUrl() {
-    const path = window.location.pathname || '/';
-    const directoryPath = path.endsWith('/') ? path : path.slice(0, path.lastIndexOf('/') + 1);
-    return `${window.location.origin}${directoryPath || '/'}`;
-}
-
-function getPdfRenderAssetBaseUrl() {
-    const configured = String(window.__PDF_RENDER_ASSET_BASE_URL__ || '').trim();
-    if (configured) return configured.replace(/\/?$/, '/');
-
-    const apiBaseUrl = getConfiguredAdminApiBaseUrl();
-    if (apiBaseUrl) return `${apiBaseUrl}/`;
-
-    return getStaticAppBaseUrl();
-}
-
-function collectGeneratedDocumentCssFromSheets() {
-    const patterns = [
-        'word-generated-doc-render',
-        'word-preview-page',
-        'word-preview-spacer',
-        'compact-word-table',
-        'offer-terms-word-table',
-        'offer-terms-primary-table',
-        'offer-terms-continuation-table',
-        'four-column-word-table'
-    ];
-    const chunks = [];
-    Array.from(document.styleSheets || []).forEach((sheet) => {
-        let rules = [];
-        try {
-            rules = Array.from(sheet.cssRules || []);
-        } catch (error) {
-            return;
-        }
-        rules.forEach((rule) => {
-            const text = rule.cssText || '';
-            if (patterns.some((pattern) => text.includes(pattern))) {
-                chunks.push(text);
-            }
-        });
-    });
-    return chunks.join('\n');
-}
-
-async function getGeneratedDocumentPreviewCss() {
-    if (!generatedDocumentPreviewCssPromise) {
-        generatedDocumentPreviewCssPromise = (async () => {
-            try {
-                const response = await fetch('css/admin-dashboard.css', { cache: 'force-cache' });
-                if (response.ok) return response.text();
-            } catch (error) {
-                // Fall back to the loaded CSSOM below.
-            }
-            return collectGeneratedDocumentCssFromSheets();
-        })();
-    }
-    return generatedDocumentPreviewCssPromise;
-}
-
-function extractCssUrl(value = '') {
-    const match = String(value || '').match(/url\(["']?(.+?)["']?\)/);
-    return match ? match[1] : '';
-}
-
-function blobToDataUrl(blob) {
+function blobToBase64(blob) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ''));
-        reader.onerror = () => reject(reader.error || new Error('Unable to read image asset.'));
+        reader.onload = () => {
+            const result = String(reader.result || '');
+            resolve(result.includes(',') ? result.split(',').pop() : result);
+        };
+        reader.onerror = () => reject(reader.error || new Error('Unable to read generated document.'));
         reader.readAsDataURL(blob);
     });
 }
 
-async function fetchAssetAsDataUrl(assetUrl = '') {
-    const rawUrl = String(assetUrl || '').trim();
-    if (!rawUrl || rawUrl.startsWith('data:')) return rawUrl;
-    const absoluteUrl = new URL(rawUrl, window.location.href).toString();
-    if (!generatedDocumentDataUrlCache.has(absoluteUrl)) {
-        generatedDocumentDataUrlCache.set(absoluteUrl, (async () => {
-            const response = await fetch(absoluteUrl, { cache: 'force-cache' });
-            if (!response.ok) throw new Error(`Unable to load preview asset: ${response.status}`);
-            return blobToDataUrl(await response.blob());
-        })());
-    }
-    return generatedDocumentDataUrlCache.get(absoluteUrl);
-}
-
-async function inlineGeneratedDocumentPreviewAssets(previewHtml = '') {
-    const host = document.createElement('div');
-    host.innerHTML = String(previewHtml || '');
-    const pages = Array.from(host.querySelectorAll('.word-preview-page'));
-    await Promise.all(pages.map(async (page) => {
-        const imageUrl = extractCssUrl(page.style.backgroundImage);
-        if (!imageUrl || imageUrl.startsWith('data:')) return;
-        try {
-            const dataUrl = await fetchAssetAsDataUrl(imageUrl);
-            if (dataUrl) page.style.backgroundImage = `url("${dataUrl}")`;
-        } catch (error) {
-            // Leave the original URL in place; the server can still try to resolve it.
-        }
-    }));
-    return host.innerHTML;
-}
-
-async function renderGeneratedDocumentPdfViaAdminApi(item = {}) {
-    const baseUrl = getConfiguredAdminApiBaseUrl();
-    if (!baseUrl || !item.previewHtml) return null;
-
+async function getAdminApiIdToken() {
     const currentUser = getAuth().currentUser || auth.currentUser;
     const idToken = currentUser ? await currentUser.getIdToken() : '';
-    if (!idToken) return null;
-
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 60000);
-    let response;
-    try {
-        response = await fetch(`${baseUrl}/api/admin/render-preview-pdf`, {
-            method: 'POST',
-            signal: controller.signal,
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${idToken}`
-            },
-            body: JSON.stringify({
-                html: item.previewHtml,
-                css: await getGeneratedDocumentPreviewCss(),
-                baseUrl: getPdfRenderAssetBaseUrl(),
-                title: item.label || 'Generated Document',
-                fileName: getGeneratedDocumentFileName(item)
-            })
-        });
-    } finally {
-        window.clearTimeout(timeout);
-    }
-
-    if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}));
-        throw new Error(errorBody.error || `PDF render API failed (${response.status})`);
-    }
-
-    return response.blob();
+    if (!idToken) throw new Error('Admin session token is missing. Please login again.');
+    return idToken;
 }
 
-async function buildGeneratedDocumentBlob(item, index) {
-    try {
-        const serverBlob = await renderGeneratedDocumentPdfViaAdminApi(item);
-        if (serverBlob) return serverBlob;
-    } catch (error) {
-        if (!generatedPdfApiWarningShown) {
-            generatedPdfApiWarningShown = true;
-            const message = String(error.message || 'Unknown error');
-            const hint = message === 'Failed to fetch'
-                ? `Failed to fetch. Add this origin to Render ALLOWED_ORIGINS: ${window.location.origin}`
-                : message;
-            showNotification(`Clean PDF server unavailable, using browser fallback: ${hint}`, 'warning');
-        }
-    }
-    if (typeof item?.blobFactory === 'function') {
-        const blob = await item.blobFactory();
-        if (blob) return blob;
-    }
-    if (item?.previewHtml) return createPdfBlobFromPreviewHtml(item.previewHtml);
-    throw new Error(`Document ${index + 1} preview is unavailable.`);
-}
-
-async function ensureGeneratedDocumentBlobAtIndex(index) {
+async function ensureGeneratedDocumentDocxBlobAtIndex(index) {
     const item = generatedDocumentPreviewItems[index];
     if (!item) throw new Error('Generated document is unavailable.');
-    if (item.blob) return item.blob;
-    if (!item.previewHtml) throw new Error('Generated document preview is unavailable.');
+    const blob = item.docxBlob || item.blob;
+    if (blob) return blob;
+    throw new Error(`Document ${index + 1} DOCX is unavailable.`);
+}
 
-    if (!item.blobPromise) {
-        item.blobPromise = buildGeneratedDocumentBlob(item, index)
-            .then((blob) => {
-                item.blob = blob;
-                item.mimeType = 'application/pdf';
-                item.fileExtension = 'pdf';
-                generatedDocumentPreviewItems[index] = item;
-                return blob;
-            })
-            .finally(() => {
-                item.blobPromise = null;
+async function ensureGeneratedDocumentPdfBlobAtIndex(index) {
+    const item = generatedDocumentPreviewItems[index];
+    if (!item) throw new Error('Generated document is unavailable.');
+    if (item.pdfBlob) return item.pdfBlob;
+
+    if (!item.pdfBlobPromise) {
+        item.pdfBlobPromise = (async () => {
+            const baseUrl = getConfiguredAdminApiBaseUrl();
+            if (!baseUrl) throw new Error('Admin API URL is not configured.');
+
+            const docxBlob = await ensureGeneratedDocumentDocxBlobAtIndex(index);
+            const response = await fetch(`${baseUrl}/api/admin/convert-docx-pdf`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${await getAdminApiIdToken()}`
+                },
+                body: JSON.stringify({
+                    fileName: getGeneratedDocumentFileName(item, 'docx'),
+                    docxBase64: await blobToBase64(docxBlob)
+                })
             });
+
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => ({}));
+                throw new Error(errorBody.error || `DOCX to PDF conversion failed (${response.status})`);
+            }
+
+            const pdfBlob = await response.blob();
+            item.pdfBlob = pdfBlob;
+            generatedDocumentPreviewItems[index] = item;
+            return pdfBlob;
+        })().finally(() => {
+            item.pdfBlobPromise = null;
+        });
         generatedDocumentPreviewItems[index] = item;
     }
 
-    return item.blobPromise;
+    return item.pdfBlobPromise;
 }
 
-function warmGeneratedDocumentPdfBlobs() {
-    const idle = window.requestIdleCallback || ((callback) => window.setTimeout(callback, 0));
-    idle(() => {
-        const queue = generatedDocumentPreviewItems.map((_, index) => index);
-        const workers = Array.from({ length: Math.min(2, queue.length) }, async () => {
-            while (queue.length) {
-                const index = queue.shift();
-                try {
-                    await ensureGeneratedDocumentBlobAtIndex(index);
-                } catch (error) {
-                    // The explicit save action will surface any remaining export error.
-                }
-            }
-        });
-        Promise.allSettled(workers);
-    });
-}
-
-async function getGeneratedDocumentsCustomerFolder() {
+async function getGeneratedDocumentsCustomerFolder(extension = 'PDF') {
     if (!('showDirectoryPicker' in window)) return null;
-    showNotification('Select a destination folder to save all PDFs...', 'info');
+    showNotification(`Select a destination folder to save all ${extension} files...`, 'info');
     const rootFolder = await window.showDirectoryPicker({
         mode: 'readwrite',
         startIn: 'downloads'
@@ -5387,34 +5248,39 @@ async function getGeneratedDocumentsCustomerFolder() {
     return rootFolder.getDirectoryHandle(customerName, { create: true });
 }
 
-async function writeGeneratedDocumentToDirectory(item, directoryHandle) {
-    const fileName = getGeneratedDocumentFileName(item);
+async function writeBlobToDirectory(blob, fileName, directoryHandle) {
     const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
     const writable = await fileHandle.createWritable();
-    await writable.write(item.blob);
+    await writable.write(blob);
     await writable.close();
     return fileName;
 }
 
-async function saveGeneratedDocumentAtIndex(index, directoryHandle = null) {
-    await ensureGeneratedDocumentBlobAtIndex(index);
+async function saveGeneratedDocumentDocxAtIndex(index, directoryHandle = null) {
     const item = generatedDocumentPreviewItems[index];
-    if (!item?.blob) throw new Error('Generated document preview is unavailable.');
-    const customerName = sanitizeFileNamePart(item.customerName || 'Customer') || 'Customer';
-    const fileName = getGeneratedDocumentFileName(item);
-
-    if (directoryHandle && 'getDirectoryHandle' in directoryHandle) {
-        const customerFolder = await directoryHandle.getDirectoryHandle(customerName, { create: true });
-        await writeGeneratedDocumentToDirectory(item, customerFolder);
-        return true;
-    }
+    const docxBlob = await ensureGeneratedDocumentDocxBlobAtIndex(index);
+    const fileName = getGeneratedDocumentFileName(item, 'docx');
 
     if (directoryHandle && 'getFileHandle' in directoryHandle) {
-        await writeGeneratedDocumentToDirectory(item, directoryHandle);
+        await writeBlobToDirectory(docxBlob, fileName, directoryHandle);
         return true;
     }
 
-    triggerDirectDownload(item.blob, fileName);
+    triggerDirectDownload(docxBlob, fileName);
+    return true;
+}
+
+async function saveGeneratedDocumentPdfAtIndex(index, directoryHandle = null) {
+    const item = generatedDocumentPreviewItems[index];
+    const pdfBlob = await ensureGeneratedDocumentPdfBlobAtIndex(index);
+    const fileName = getGeneratedDocumentFileName(item, 'pdf');
+
+    if (directoryHandle && 'getFileHandle' in directoryHandle) {
+        await writeBlobToDirectory(pdfBlob, fileName, directoryHandle);
+        return true;
+    }
+
+    triggerDirectDownload(pdfBlob, fileName);
     return true;
 }
 
@@ -5435,13 +5301,31 @@ window.saveGeneratedDocumentPdf = async (index, triggerBtn = null) => {
             triggerBtn.disabled = true;
             triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing PDF...';
         }
-        await saveGeneratedDocumentAtIndex(index);
+        await saveGeneratedDocumentPdfAtIndex(index);
     } catch (error) {
         showNotification(`Failed to save document: ${error.message || 'Unknown error'}`, 'error');
     } finally {
         if (triggerBtn) {
             triggerBtn.disabled = false;
-            triggerBtn.innerHTML = originalHtml || '<i class="fas fa-download"></i> Download PDF';
+            triggerBtn.innerHTML = originalHtml || '<i class="fas fa-file-pdf"></i> Download PDF';
+        }
+    }
+};
+
+window.saveGeneratedDocumentDocx = async (index, triggerBtn = null) => {
+    const originalHtml = triggerBtn?.innerHTML || '';
+    try {
+        if (triggerBtn) {
+            triggerBtn.disabled = true;
+            triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing DOCX...';
+        }
+        await saveGeneratedDocumentDocxAtIndex(index);
+    } catch (error) {
+        showNotification(`Failed to save DOCX: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+        if (triggerBtn) {
+            triggerBtn.disabled = false;
+            triggerBtn.innerHTML = originalHtml || '<i class="fas fa-file-word"></i> DOCX';
         }
     }
 };
@@ -5454,7 +5338,7 @@ async function saveAllGeneratedDocumentsToFolder() {
     const originalHtml = saveAllGeneratedDocumentsBtn?.innerHTML || '';
     if (saveAllGeneratedDocumentsBtn) {
         saveAllGeneratedDocumentsBtn.disabled = true;
-        saveAllGeneratedDocumentsBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Downloading PDFs...';
+        saveAllGeneratedDocumentsBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Downloading PDF...';
     }
 
     try {
@@ -5462,7 +5346,7 @@ async function saveAllGeneratedDocumentsToFolder() {
         let directoryHandle = null;
         if ('showDirectoryPicker' in window) {
             try {
-                directoryHandle = await getGeneratedDocumentsCustomerFolder();
+                directoryHandle = await getGeneratedDocumentsCustomerFolder('PDF');
             } catch (error) {
                 if (error?.name === 'AbortError') {
                     showNotification('Save cancelled', 'info');
@@ -5473,26 +5357,16 @@ async function saveAllGeneratedDocumentsToFolder() {
         }
 
         if (saveAllGeneratedDocumentsBtn) {
-            saveAllGeneratedDocumentsBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing PDFs...';
+            saveAllGeneratedDocumentsBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing PDF...';
         }
-
-        const preparedResults = await Promise.allSettled(
-            generatedDocumentPreviewItems.map((_, index) => ensureGeneratedDocumentBlobAtIndex(index))
-        );
-        preparedResults.forEach((result, index) => {
-            if (result.status === 'rejected') {
-                failures.push(`${generatedDocumentPreviewItems[index]?.label || `Document ${index + 1}`}: ${result.reason?.message || 'Failed'}`);
-            }
-        });
 
         let successCount = 0;
         for (let index = 0; index < generatedDocumentPreviewItems.length; index += 1) {
-            if (!generatedDocumentPreviewItems[index]?.blob) continue;
             if (saveAllGeneratedDocumentsBtn) {
                 saveAllGeneratedDocumentsBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving ${index + 1}/${generatedDocumentPreviewItems.length}...`;
             }
             try {
-                await saveGeneratedDocumentAtIndex(index, directoryHandle);
+                await saveGeneratedDocumentPdfAtIndex(index, directoryHandle);
                 successCount += 1;
                 if (!directoryHandle) await new Promise((resolve) => setTimeout(resolve, 120));
             } catch (error) {
@@ -5506,11 +5380,66 @@ async function saveAllGeneratedDocumentsToFolder() {
             showNotification(`Some documents failed: ${failures.slice(0, 2).join(' | ')}`, 'error');
         }
     } catch (error) {
-        showNotification(`Failed to save generated documents: ${error.message || 'Unknown error'}`, 'error');
+        showNotification(`Failed to save generated PDFs: ${error.message || 'Unknown error'}`, 'error');
     } finally {
         if (saveAllGeneratedDocumentsBtn) {
             saveAllGeneratedDocumentsBtn.disabled = false;
-            saveAllGeneratedDocumentsBtn.innerHTML = originalHtml || '<i class="fas fa-download"></i> Download All PDF';
+            saveAllGeneratedDocumentsBtn.innerHTML = originalHtml || '<i class="fas fa-file-pdf"></i> Download All PDF';
+        }
+    }
+}
+
+async function saveAllGeneratedDocxToFolder() {
+    if (!generatedDocumentPreviewItems.length) {
+        showNotification('No generated documents available to save.', 'warning');
+        return;
+    }
+    const originalHtml = saveAllGeneratedDocxBtn?.innerHTML || '';
+    if (saveAllGeneratedDocxBtn) {
+        saveAllGeneratedDocxBtn.disabled = true;
+        saveAllGeneratedDocxBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Downloading DOCX...';
+    }
+
+    try {
+        const failures = [];
+        let directoryHandle = null;
+        if ('showDirectoryPicker' in window) {
+            try {
+                directoryHandle = await getGeneratedDocumentsCustomerFolder('DOCX');
+            } catch (error) {
+                if (error?.name === 'AbortError') {
+                    showNotification('Save cancelled', 'info');
+                    return;
+                }
+                throw error;
+            }
+        }
+
+        let successCount = 0;
+        for (let index = 0; index < generatedDocumentPreviewItems.length; index += 1) {
+            if (saveAllGeneratedDocxBtn) {
+                saveAllGeneratedDocxBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving ${index + 1}/${generatedDocumentPreviewItems.length}...`;
+            }
+            try {
+                await saveGeneratedDocumentDocxAtIndex(index, directoryHandle);
+                successCount += 1;
+                if (!directoryHandle) await new Promise((resolve) => setTimeout(resolve, 120));
+            } catch (error) {
+                failures.push(`${generatedDocumentPreviewItems[index]?.label || `Document ${index + 1}`}: ${error.message || 'Failed'}`);
+            }
+        }
+        if (successCount) {
+            showNotification(`${successCount} DOCX document(s) saved successfully.`, failures.length ? 'warning' : 'success');
+        }
+        if (failures.length) {
+            showNotification(`Some DOCX files failed: ${failures.slice(0, 2).join(' | ')}`, 'error');
+        }
+    } catch (error) {
+        showNotification(`Failed to save generated DOCX files: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+        if (saveAllGeneratedDocxBtn) {
+            saveAllGeneratedDocxBtn.disabled = false;
+            saveAllGeneratedDocxBtn.innerHTML = originalHtml || '<i class="fas fa-file-word"></i> Download All DOCX';
         }
     }
 }

@@ -3360,6 +3360,13 @@ body {
     font-size: 18px;
 }
 
+.generated-doc-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
 .generated-doc-render {
     width: 100%;
     min-height: 920px;
