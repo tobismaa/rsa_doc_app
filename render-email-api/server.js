@@ -31,6 +31,12 @@ const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((v) => v.trim())
     .filter(Boolean);
+const localDevOrigins = new Set([
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+    'http://localhost:63342',
+    'http://127.0.0.1:63342'
+]);
 
 const allowedTypes = new Set([
     'submission_assigned_viewer',
@@ -414,7 +420,7 @@ function corsOptionsDelegate(req, callback) {
     }
 
     const reqOrigin = req.header('Origin');
-    const allowed = reqOrigin && allowedOrigins.includes(reqOrigin);
+    const allowed = reqOrigin && (allowedOrigins.includes(reqOrigin) || localDevOrigins.has(reqOrigin));
     callback(null, { origin: Boolean(allowed) });
 }
 

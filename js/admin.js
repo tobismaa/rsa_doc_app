@@ -5260,7 +5260,11 @@ async function buildGeneratedDocumentBlob(item, index) {
     } catch (error) {
         if (!generatedPdfApiWarningShown) {
             generatedPdfApiWarningShown = true;
-            showNotification(`Clean PDF server unavailable, using browser fallback: ${error.message || 'Unknown error'}`, 'warning');
+            const message = String(error.message || 'Unknown error');
+            const hint = message === 'Failed to fetch'
+                ? 'Failed to fetch. Check Render ALLOWED_ORIGINS includes this Admin page URL.'
+                : message;
+            showNotification(`Clean PDF server unavailable, using browser fallback: ${hint}`, 'warning');
         }
     }
     if (typeof item?.blobFactory === 'function') {
