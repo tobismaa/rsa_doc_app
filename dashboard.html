@@ -18,7 +18,7 @@
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <!-- External CSS -->
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260427b">
-    <link rel="stylesheet" href="css/uploader-dashboard.css?v=20260506d">
+    <link rel="stylesheet" href="css/uploader-dashboard.css?v=20260623a">
     <style>
         /* Additional modal styles to ensure visibility */
         .modal {
@@ -1022,27 +1022,21 @@
                         <div class="section-body">
                             <div class="customer-input-grid">
                                 <div>
-                                    <label for="customerName">Full Name *</label>
-                                    <input type="text" id="customerName" placeholder="e.g. John Doe">
-                                </div>
-                                <div>
-                                    <label for="customerDob">Date of Birth *</label>
-                                    <input type="date" id="customerDob">
-                                </div>
-                                <div>
                                     <label for="accountNo">Account No *</label>
                                     <input type="text" id="accountNo" placeholder="10 digits" maxlength="10" inputmode="numeric">
                                     <div id="accountLookupStatus" style="display:none;margin-top:6px;font-size:12px;font-weight:700;"></div>
                                 </div>
                                 <div>
                                     <label for="accountBank">Account Bank *</label>
-                                    <select id="accountBank">
-                                        <option value="">Select Bank</option>
-                                    </select>
+                                    <input type="text" id="accountBank" value="Coop Savings and Loans / Cooperative Mortgage Bank" readonly>
                                 </div>
                                 <div>
-                                    <label for="accountName">Account Name (auto)</label>
-                                    <input type="text" id="accountName" readonly placeholder="Auto-filled after bank verification">
+                                    <label for="customerName">Full Name *</label>
+                                    <input type="text" id="customerName" placeholder="Auto-filled after account verification" readonly>
+                                </div>
+                                <div>
+                                    <label for="customerDob">Date of Birth *</label>
+                                    <input type="date" id="customerDob">
                                 </div>
                                 <div>
                                     <label for="customerEmail">Email *</label>
@@ -1380,18 +1374,10 @@
                 <button class="close-btn" id="closeGlobalTrackModal">&times;</button>
             </div>
             <div class="modal-body">
-                <p class="track-description">Search for any application by ID or Customer Name</p>
-
-                <div class="search-type-selector">
-                    <label>Search by:</label>
-                    <select id="trackSearchType">
-                        <option value="id">Application ID</option>
-                        <option value="name" selected>Customer Name</option>
-                    </select>
-                </div>
+                <p class="track-description">Search for any application by PEN number, customer name, or application ID</p>
 
                 <div class="search-input-group">
-                    <input type="text" id="trackSearchInput" placeholder="Enter search term...">
+                    <input type="text" id="trackSearchInput" placeholder="Enter PEN number, customer name, or application ID...">
                 </div>
 
                 <div class="search-actions">
@@ -1519,10 +1505,10 @@
     <script type="module" src="js/backblaze-storage.js?v=20260416b"></script>
 
     <!-- 6. Document Uploader (main upload logic) -->
-<script type="module" src="js/document-uploader-v2.js?v=20260617a"></script>
+<script type="module" src="js/document-uploader-v2.js?v=20260623a"></script>
 
     <!-- 7. Dashboard (Track & Calculator only) -->
-<script type="module" src="js/uploader-dashboard.js?v=20260515a"></script>
+<script type="module" src="js/uploader-dashboard.js?v=20260623a"></script>
 
     <script>
         // `window.signOutUser` is provided by `js/auth.js` (Firebase sign-out).
@@ -1667,7 +1653,7 @@ document.addEventListener('DOMContentLoaded', function() {
 })();
 </script>
 <script src="js/table-enhancer.js?v=20260512b"></script>
-<script type="module" src="js/profile-completion-guard.js?v=20260617f"></script>
+<script type="module" src="js/profile-completion-guard.js?v=20260623a"></script>
 <link rel="stylesheet" href="css/app-chat.css?v=20260518a">
 <script type="module" src="js/app-chat.js?v=20260617a"></script>
 <link rel="stylesheet" href="css/pwa-install.css">

@@ -1893,6 +1893,18 @@ body {
   border-color: #0ea5e9;
 }
 
+.users-table .action-buttons .warning-btn {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fdba74;
+}
+
+.users-table .action-buttons .warning-btn:hover {
+  background: #f97316;
+  color: #ffffff;
+  border-color: #f97316;
+}
+
 .view-btn-small {
   background: #eff6ff;
   color: var(--info);

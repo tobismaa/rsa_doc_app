@@ -169,12 +169,13 @@ const userFullNames = new Map();
 let customerDetailsSaved = false;
 const RR_COUNTER_DOC = doc(db, 'counters', 'roundRobin');
 const DEFAULT_CUSTOMER_ACCOUNT_BANK_CODE = '90089';
+const DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME = 'Coop Savings and Loans / Cooperative Mortgage Bank';
 const FALLBACK_CUSTOMER_ACCOUNT_BANKS = [
   { name: 'Access Bank', code: '044', slug: 'access-bank' },
   { name: 'Access Bank (Diamond)', code: '063', slug: 'access-bank-diamond' },
   { name: 'ALAT by WEMA', code: '035A', slug: 'alat-by-wema' },
   { name: 'Citibank Nigeria', code: '023', slug: 'citibank-nigeria' },
-  { name: 'Coop Savings and Loans / Cooperative Mortgage Bank', code: '90089', slug: 'cooperative-mortgage-bank-ng' },
+  { name: DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME, code: DEFAULT_CUSTOMER_ACCOUNT_BANK_CODE, slug: 'cooperative-mortgage-bank-ng' },
   { name: 'Ecobank Nigeria', code: '050', slug: 'ecobank-nigeria' },
   { name: 'Fidelity Bank', code: '070', slug: 'fidelity-bank' },
   { name: 'First Bank of Nigeria', code: '011', slug: 'first-bank-of-nigeria' },
@@ -290,13 +291,21 @@ function setAccountLookupStatus(message = '', type = 'info') {
 function clearVerifiedAccountLookup() {
   verifiedAccountLookup = { accountNumber: '', bankCode: '', accountName: '' };
   if (accountNameInput) accountNameInput.value = '';
+  if (customerNameInput) customerNameInput.value = '';
 }
 
 function getSelectedAccountBank() {
+  if (!accountBankSelect || accountBankSelect.tagName !== 'SELECT') {
+    if (accountBankSelect) accountBankSelect.value = DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME;
+    return { code: DEFAULT_CUSTOMER_ACCOUNT_BANK_CODE, name: DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME };
+  }
   const code = String(accountBankSelect?.value || '').trim();
   const option = accountBankSelect?.selectedOptions?.[0] || null;
   const name = String(option?.dataset?.name || option?.textContent || '').trim();
-  return { code, name };
+  return {
+    code: code || DEFAULT_CUSTOMER_ACCOUNT_BANK_CODE,
+    name: name || DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME
+  };
 }
 
 function getCustomerAccountBankLabel(bank = {}) {
@@ -310,6 +319,10 @@ function getCustomerAccountBankLabel(bank = {}) {
 
 function renderCustomerAccountBankOptions(banks = [], currentCode = '') {
   if (!accountBankSelect) return;
+  if (accountBankSelect.tagName !== 'SELECT') {
+    accountBankSelect.value = DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME;
+    return;
+  }
   const options = Array.isArray(banks) ? banks : [];
   accountBankSelect.innerHTML = '<option value="">Select Bank</option>' + options.map((bank) => (
     `<option value="${escapeHtml(bank.code)}" data-name="${escapeHtml(getCustomerAccountBankLabel(bank))}">${escapeHtml(getCustomerAccountBankLabel(bank))}</option>`
@@ -345,6 +358,12 @@ async function backendFetchJson(path, options = {}) {
 
 async function populateCustomerAccountBankOptions() {
   if (!accountBankSelect) return;
+  if (accountBankSelect.tagName !== 'SELECT') {
+    accountLookupBanks = [...FALLBACK_CUSTOMER_ACCOUNT_BANKS];
+    accountBankSelect.value = DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME;
+    setAccountLookupStatus('', 'info');
+    return;
+  }
   const currentCode = String(accountBankSelect.value || '').trim();
   try {
     const data = await backendFetchJson('/api/paystack/banks');
@@ -396,7 +415,7 @@ async function resolveCustomerAccountName({ silent = false } = {}) {
     const accountName = String(data.accountName || '').trim();
     verifiedAccountLookup = { accountNumber, bankCode: bank.code, accountName };
     if (accountNameInput) accountNameInput.value = accountName;
-    if (customerNameInput && !String(customerNameInput.value || '').trim()) {
+    if (customerNameInput) {
       customerNameInput.value = accountName;
       updateSubmitButton();
     }
@@ -1318,7 +1337,7 @@ function collectDraftableCustomerDetails() {
     accountNo: String(getFormValue('accountNo')).trim(),
     accountBank: getSelectedAccountBank().name,
     accountBankCode: getSelectedAccountBank().code,
-    accountName: String(getFormValue('accountName')).trim(),
+    accountName: String(verifiedAccountLookup.accountName || getFormValue('customerName')).trim(),
     employer: String(getFormValue('employer')).trim(),
     originatingTP: String(getFormValue('originatingTP')).trim() || String(currentUserProfile?.location || '').trim(),
     mortgageLoanApplicationFormDate: getFormValue('mortgageLoanApplicationFormDate'),
@@ -1576,7 +1595,6 @@ function applyDraftFormValues(sub) {
     { id: 'customerAddress', keys: ['address', 'customerAddress'] },
     { id: 'accountNo', keys: ['accountNo'] },
     { id: 'accountBank', keys: ['accountBankCode', 'bankCode'] },
-    { id: 'accountName', keys: ['accountName'] },
     { id: 'employer', keys: ['employer'] },
     { id: 'originatingTP', keys: ['originatingTP'], fallback: String(currentUserProfile?.location || '').trim() },
     { id: 'mortgageLoanApplicationFormDate', keys: ['mortgageLoanApplicationFormDate'] },
@@ -1599,6 +1617,10 @@ function applyDraftFormValues(sub) {
     if (field.id === 'loanAmount') {
       el.value = normalizeLoanAmountValue(rawValue);
     } else if (field.id === 'accountBank') {
+      if (el.tagName !== 'SELECT') {
+        el.value = DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME;
+        return;
+      }
       const bankName = pick(['accountBank', 'bankName'], '');
       const bank = accountLookupBanks.find((item) => item.code === rawValue || item.name === bankName);
       el.value = bank?.code || rawValue;
@@ -1606,11 +1628,11 @@ function applyDraftFormValues(sub) {
       el.value = rawValue;
     }
   });
-  if (accountNoInput && accountBankSelect?.value && accountNameInput?.value) {
+  if (accountNoInput && accountBankSelect?.value && customerNameInput?.value) {
     verifiedAccountLookup = {
       accountNumber: String(accountNoInput.value || '').replace(/\D/g, ''),
-      bankCode: String(accountBankSelect.value || '').trim(),
-      accountName: String(accountNameInput.value || '').trim()
+      bankCode: getSelectedAccountBank().code,
+      accountName: String(customerNameInput.value || '').trim()
     };
     setAccountLookupStatus(`Verified: ${verifiedAccountLookup.accountName}`, 'success');
   }
@@ -2343,6 +2365,12 @@ async function saveCustomerDetails() {
     'originatingTP', 'mortgageLoanApplicationFormDate', 'pfa', 'penNo', 'rsaStatementDate', 'rsaBalance'
   ];
 
+  if (String(document.getElementById('accountNo')?.value || '').trim()) {
+    if (!(await resolveCustomerAccountName({ silent: false }))) {
+      return false;
+    }
+  }
+
   const missingFields = [];
   const invalidFields = [];
 
@@ -2365,10 +2393,6 @@ async function saveCustomerDetails() {
 
   if (invalidFields.length > 0) {
     showNotification('Invalid fields: ' + invalidFields.join(', '), 'error');
-    return false;
-  }
-
-  if (!(await resolveCustomerAccountName({ silent: false }))) {
     return false;
   }
 
@@ -2460,7 +2484,7 @@ async function saveCustomerDetails() {
 function resetCustomerDetails() {
   const fields = [
     'customerName', 'customerDob', 'customerEmail', 'customerPhone',
-    'customerNIN', 'customerAddress', 'accountNo', 'accountBank', 'accountName', 'employer',
+    'customerNIN', 'customerAddress', 'accountNo', 'accountBank', 'employer',
     'originatingTP', 'mortgageLoanApplicationFormDate', 'pfa', 'penNo', 'rsaStatementDate', 'rsaBalance',
     'propertyType', 'houseNumber', 'tenor'
   ];
@@ -2470,6 +2494,7 @@ function resetCustomerDetails() {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
+  if (accountBankSelect) accountBankSelect.value = DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME;
   clearPenNoError();
   clearVerifiedAccountLookup();
   setAccountLookupStatus('', 'info');
@@ -2867,7 +2892,7 @@ function openUploadModal() {
 
   const fieldsToClear = [
     'customerName', 'customerDob', 'customerEmail', 'customerPhone',
-    'customerNIN', 'customerAddress', 'accountNo', 'accountBank', 'accountName', 'employer',
+    'customerNIN', 'customerAddress', 'accountNo', 'accountBank', 'employer',
     'originatingTP', 'mortgageLoanApplicationFormDate', 'pfa', 'penNo',
     'rsaStatementDate', 'rsaBalance', 'propertyType', 'propertyValue',
     'facilityFee', 'loanAmount', 'tenor'
@@ -2877,6 +2902,9 @@ function openUploadModal() {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
+  if (accountBankSelect) accountBankSelect.value = DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME;
+  clearVerifiedAccountLookup();
+  setAccountLookupStatus('', 'info');
 
   const rsa25PercentEl = document.getElementById('rsa25Percent');
   if (rsa25PercentEl) rsa25PercentEl.value = '';
@@ -3680,8 +3708,21 @@ window.viewSubmissionDocs = (submissionId) => {
 
 // ==================== SHOW APPLICATION TRACKING ====================
 window.showApplicationTrack = async (submissionId) => {
-  const sub = allSubmissions.find(s => s.id === submissionId);
-  if (!sub) return;
+  let sub = allSubmissions.find(s => s.id === submissionId);
+  if (!sub && submissionId) {
+    try {
+      const subSnap = await getDoc(doc(db, 'submissions', submissionId));
+      if (subSnap.exists()) {
+        sub = { id: subSnap.id, ...(subSnap.data() || {}) };
+      }
+    } catch (error) {
+      console.warn('Could not fetch application for tracking', error);
+    }
+  }
+  if (!sub) {
+    showNotification('Application not found', 'error');
+    return;
+  }
   if (String(sub.status || '').toLowerCase() === 'draft') {
     showNotification('Draft applications are managed from the Draft tab.', 'info');
     return;
@@ -4086,7 +4127,7 @@ window.openEditModal = async (id) => {
   }
   updateSubmitButton();
   syncUploadRequirementUi();
-  if (customerNameInput) customerNameInput.focus();
+  if (accountNoInput) accountNoInput.focus();
   uploadModal.classList.add('active');
 };
 

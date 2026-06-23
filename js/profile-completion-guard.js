@@ -18,6 +18,7 @@ const FORCE_LOGOUT_ACTIVE_TOKEN_KEY = 'cmbank_force_logout_active_token';
 const FORCE_LOGOUT_COMPLETED_TOKEN_KEY = 'cmbank_force_logout_completed_token';
 const FORCE_LOGOUT_DEADLINE_KEY = 'cmbank_force_logout_deadline_ms';
 const FORCE_LOGOUT_DISMISSED_TOKEN_KEY = 'cmbank_force_logout_dismissed_token';
+const TARGETED_LOGOUT_COMPLETED_PREFIX = 'cmbank_targeted_logout_completed_';
 const FORCE_LOGOUT_GRACE_MS = 5 * 60 * 1000;
 let cacheClearInProgress = false;
 let securityWatchStarted = false;
@@ -40,6 +41,7 @@ let forceLogoutLockState = {
   deadlineMs: 0
 };
 let forceLogoutActionBlockersBound = false;
+let targetedLogoutWatchStarted = false;
 
 const WHATSAPP_COUNTRY_CODES = [
   { code: '+234', label: 'Nigeria', flag: '🇳🇬' },
@@ -912,6 +914,38 @@ function watchForSecuritySignals(userData = {}) {
 
 }
 
+function watchForTargetedLogout(userDocId = '') {
+  const normalizedUserDocId = String(userDocId || '').trim();
+  if (!normalizedUserDocId || targetedLogoutWatchStarted) return;
+  targetedLogoutWatchStarted = true;
+
+  onSnapshot(doc(db, 'users', normalizedUserDocId), async (snap) => {
+    try {
+      if (!snap.exists()) return;
+      const data = snap.data() || {};
+      const token = String(data.targetedForceLogoutToken || '').trim();
+      if (!token) return;
+
+      const completedOnDoc = String(data.targetedForceLogoutCompletedToken || '').trim();
+      const localCompletedKey = `${TARGETED_LOGOUT_COMPLETED_PREFIX}${normalizedUserDocId}`;
+      const completedLocally = String(localStorage.getItem(localCompletedKey) || '').trim();
+      if (completedOnDoc === token || completedLocally === token) return;
+
+      localStorage.setItem(localCompletedKey, token);
+      try {
+        await updateDoc(doc(db, 'users', normalizedUserDocId), {
+          targetedForceLogoutCompletedToken: token,
+          targetedForceLogoutCompletedAt: serverTimestamp(),
+          isOnline: false,
+          lastLogoutAt: serverTimestamp()
+        });
+      } catch (_) {}
+
+      await executeForcedLogout(token);
+    } catch (_) {}
+  }, () => {});
+}
+
 async function findUserDocByUidOrEmail(uid, email) {
   if (uid) {
     const directDoc = await getDoc(doc(db, 'users', uid));
@@ -1071,6 +1105,7 @@ onAuthStateChanged(auth, async (user) => {
     } catch (_) {}
 
     if (userDoc?.id) {
+      watchForTargetedLogout(userDoc.id);
       try {
         await registerPushTokenForCurrentUser(user, userDoc.id);
       } catch (_) {}

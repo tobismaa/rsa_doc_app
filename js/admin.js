@@ -1782,6 +1782,9 @@ function renderUsersTable(users) {
                         <button class="action-btn view-btn" onclick="window.viewUser('${user.id}')" title="View">
                             <i class="fas fa-eye"></i>
                         </button>
+                        <button class="action-btn warning-btn" onclick="window.forceLogoutUser('${user.id}')" title="Force logout this user">
+                            <i class="fas fa-right-from-bracket"></i>
+                        </button>
                         ${user.status === 'active' ?
                             `<button class="action-btn deactivate-btn" onclick="window.deactivateUser('${user.id}')" title="Deactivate">
                                 <i class="fas fa-ban"></i>
@@ -6519,6 +6522,55 @@ window.activateUser = (userId) => {
     });
 };
 
+window.forceLogoutUser = (userId) => {
+    const target = allUsers.find((user) => user.id === userId) || {};
+    const targetName = target.fullName || target.email || 'this user';
+    showConfirmModal('Force Logout User', `Force logout ${targetName}? Only this user will be signed out on their active browser/session.`, async () => {
+        try {
+            const userSnap = await getDoc(doc(db, 'users', userId));
+            if (!userSnap.exists()) {
+                showNotification('User not found', 'error');
+                closeConfirmModal();
+                return;
+            }
+
+            const userData = userSnap.data() || {};
+            if (normalizeUserRole(userData.role) === 'super_admin') {
+                showNotification('Access denied for Super Admin account', 'error');
+                closeConfirmModal();
+                return;
+            }
+            const targetEmail = String(userData.email || '').trim().toLowerCase();
+            const currentEmail = String(currentAdmin?.email || auth.currentUser?.email || '').trim().toLowerCase();
+            if ((auth.currentUser?.uid && userId === auth.currentUser.uid) || (targetEmail && targetEmail === currentEmail)) {
+                showNotification('Use Sign Out to log out your own admin session.', 'warning');
+                closeConfirmModal();
+                return;
+            }
+
+            const token = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+            await updateDoc(doc(db, 'users', userId), {
+                targetedForceLogoutToken: token,
+                targetedForceLogoutRequestedAt: serverTimestamp(),
+                targetedForceLogoutRequestedBy: currentEmail || currentAdmin?.email || 'admin'
+            });
+
+            await addDoc(collection(db, 'audit'), {
+                action: 'user_force_logout',
+                userId,
+                userEmail: targetEmail,
+                performedBy: currentEmail || currentAdmin?.email,
+                timestamp: serverTimestamp()
+            });
+
+            showNotification(`Force logout sent to ${userData.fullName || targetEmail || 'user'}`, 'success');
+            closeConfirmModal();
+        } catch (error) {
+            showNotification('Failed to force logout user', 'error');
+        }
+    });
+};
+
 window.resetUserPassword = (userId) => {
     showConfirmModal(
         'Reset Password',
@@ -7896,6 +7948,7 @@ function formatAuditDescription(audit) {
         case 'user_updated': return `User details updated: ${audit.userFullName || resolveName(audit.userEmail || audit.userId)}`;
         case 'user_deactivated': return `User account deactivated`;
         case 'user_activated': return `User account activated`;
+        case 'user_force_logout': return `Force logout sent to ${resolveName(audit.userEmail || audit.userId)}`;
         case 'user_leave_activated': return `${resolveName(audit.userEmail || audit.userId)} placed on leave; ${audit.movedCount || 0} application(s) moved to ${resolveName(audit.relieverEmail)}`;
         case 'user_leave_resumed': return `${resolveName(audit.userEmail || audit.userId)} resumed; ${audit.returnedCount || 0} application(s) returned and ${audit.finalizedCount || 0} finalized`;
         case 'user_deleted': return `User permanently deleted: ${resolveName(audit.userEmail || audit.userId)}`;

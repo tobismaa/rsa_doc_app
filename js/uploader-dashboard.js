@@ -8,7 +8,11 @@ import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import { formatAppDateTime } from './shared/app-time.js';
 import {
     getTimestampMillis as getStageTimestampMillis,
-    getSubmissionCurrentStageEntryAt
+    getSubmissionCurrentStageEntryAt,
+    getSubmissionReviewEntryAt,
+    getSubmissionApprovalEntryAt,
+    getSubmissionPaymentEntryAt,
+    getSubmissionClearedEntryAt
 } from './shared/submission-stage.js?v=20260609a';
 import {
     collection, query, where, orderBy, onSnapshot, getDocs, getDoc, doc, limit, serverTimestamp, updateDoc
@@ -53,6 +57,56 @@ function formatCurrency(value) {
     }
 }
 
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function normalizeTrackSearchText(value) {
+    return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function normalizePenNumber(value) {
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function getSubmissionPenNo(submission = {}) {
+    return normalizePenNumber(
+        submission?.customerDetails?.penNoNormalized ||
+        submission?.penNoNormalized ||
+        submission?.customerDetails?.penNo ||
+        submission?.penNo ||
+        ''
+    );
+}
+
+function getSubmissionCustomerName(submission = {}) {
+    return String(submission?.customerName || submission?.customerDetails?.name || '').trim();
+}
+
+function getPenNumberQueryVariants(penNo = '') {
+    const raw = String(penNo || '').trim();
+    const normalized = normalizePenNumber(raw);
+    return Array.from(new Set([
+        raw,
+        raw.toUpperCase(),
+        raw.toLowerCase(),
+        normalized,
+        normalized.toUpperCase()
+    ].filter(Boolean))).slice(0, 10);
+}
+
+function addTrackResult(resultMap, docSnap) {
+    if (!docSnap?.exists?.()) return;
+    const submission = { id: docSnap.id, ...(docSnap.data() || {}) };
+    if (String(submission.status || '').toLowerCase() === 'draft') return;
+    resultMap.set(docSnap.id, submission);
+}
+
 // DOM Elements
 const userName = document.getElementById('userName');
 const userAvatar = document.getElementById('userAvatar');
@@ -64,7 +118,6 @@ const globalTrackModal = document.getElementById('globalTrackModal');
 const closeGlobalTrackModal = document.getElementById('closeGlobalTrackModal');
 const cancelGlobalTrack = document.getElementById('cancelGlobalTrack');
 const searchTrackBtn = document.getElementById('searchTrackBtn');
-const trackSearchType = document.getElementById('trackSearchType');
 const trackSearchInput = document.getElementById('trackSearchInput');
 const trackSearchResults = document.getElementById('trackSearchResults');
 const trackResultsList = document.getElementById('trackResultsList');
@@ -329,7 +382,6 @@ function calculateLoan() {
 }
 
 async function performGlobalTrackSearch() {
-    const searchType = trackSearchType.value;
     const searchTerm = trackSearchInput.value.trim();
     if (!searchTerm) {
         showNotification('Please enter a search term', 'error');
@@ -338,29 +390,42 @@ async function performGlobalTrackSearch() {
     showLoader('Searching applications...');
     try {
         const submissionsRef = collection(db, 'submissions');
-        let results = [];
-        if (searchType === 'id') {
-            const docRef = doc(db, 'submissions', searchTerm);
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-                const data = docSnap.data() || {};
-                if (String(data.status || '').toLowerCase() !== 'draft') {
-                    results = [{ id: docSnap.id, ...data }];
-                }
-            }
-        } else {
-            const allSubmissionsQuery = query(submissionsRef, orderBy('customerName'), limit(100));
-            const querySnapshot = await getDocs(allSubmissionsQuery);
-            querySnapshot.forEach((doc) => {
-                const data = doc.data();
-                const customerName = (data.customerName || '').toLowerCase();
-                const status = String(data.status || '').toLowerCase();
-                if (status !== 'draft' && customerName.includes(searchTerm.toLowerCase())) {
-                    results.push({ id: doc.id, ...data });
-                }
-            });
+        const resultMap = new Map();
+
+        const docSnap = await getDoc(doc(db, 'submissions', searchTerm)).catch(() => null);
+        addTrackResult(resultMap, docSnap);
+
+        const normalizedPenNo = normalizePenNumber(searchTerm);
+        const variants = getPenNumberQueryVariants(searchTerm);
+        const penQueries = [
+            query(submissionsRef, where('customerDetails.penNoNormalized', '==', normalizedPenNo)),
+            query(submissionsRef, where('penNoNormalized', '==', normalizedPenNo))
+        ];
+        if (variants.length) {
+            penQueries.push(
+                query(submissionsRef, where('customerDetails.penNo', 'in', variants)),
+                query(submissionsRef, where('penNo', 'in', variants))
+            );
         }
-        results.sort((a, b) => (a.customerName || '').localeCompare(b.customerName || ''));
+        const snapshots = await Promise.all(penQueries.map((q) => getDocs(q).catch(() => null)));
+        snapshots.filter(Boolean).forEach((snapshot) => {
+            snapshot.forEach((docSnapItem) => addTrackResult(resultMap, docSnapItem));
+        });
+
+        const normalizedName = normalizeTrackSearchText(searchTerm);
+        const allSubmissionsQuery = query(submissionsRef, limit(5000));
+        const querySnapshot = await getDocs(allSubmissionsQuery);
+        querySnapshot.forEach((docSnapItem) => {
+            const data = docSnapItem.data();
+            const customerName = normalizeTrackSearchText(getSubmissionCustomerName(data));
+            const status = String(data.status || '').toLowerCase();
+            if (status !== 'draft' && customerName.includes(normalizedName)) {
+                resultMap.set(docSnapItem.id, { id: docSnapItem.id, ...data });
+            }
+        });
+
+        const results = Array.from(resultMap.values())
+            .sort((a, b) => getSubmissionCustomerName(a).localeCompare(getSubmissionCustomerName(b)));
         displayTrackResults(results);
     } catch (error) {
         showNotification('Error searching applications: ' + error.message, 'error');
@@ -383,7 +448,7 @@ async function displayTrackResults(results) {
 
     for (const sub of results) {
         const resultItem = document.createElement('div');
-        resultItem.className = 'result-item';
+        resultItem.className = 'track-result-item';
         resultItem.style.cssText = 'padding: 15px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s;';
         resultItem.onmouseover = () => { resultItem.style.backgroundColor = '#f8fafc'; };
         resultItem.onmouseout = () => { resultItem.style.backgroundColor = 'white'; };
@@ -397,21 +462,23 @@ async function displayTrackResults(results) {
         };
 
         const uploadedByName = sub.uploadedBy ? await getUserFullName(sub.uploadedBy) : 'Unknown';
+        const customerName = getSubmissionCustomerName(sub) || 'Unknown';
+        const status = String(sub.status || 'pending').trim();
         resultItem.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <strong style="font-size: 16px; color: #003366;">${sub.customerName || 'Unknown'}</strong>
+                <strong style="font-size: 16px; color: #003366;">${escapeHtml(customerName)}</strong>
                 <span style="padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; background: ${
                     sub.status === 'approved' ? '#d1fae5' :
                     sub.status === 'rejected' ? '#fee2e2' : '#fef3c7'
                 }; color: ${
                     sub.status === 'approved' ? '#065f46' :
                     sub.status === 'rejected' ? '#991b1b' : '#92400e'
-                };">${sub.status || 'pending'}</span>
+                };">${escapeHtml(status)}</span>
             </div>
             <div style="display: flex; gap: 15px; font-size: 12px; color: #64748b; margin-bottom: 8px; flex-wrap: wrap;">
-                <span><i class="fas fa-id-card"></i> ID: ${sub.id.substring(0, 8)}...</span>
+                <span><i class="fas fa-id-card"></i> ID: ${escapeHtml(sub.id.substring(0, 8))}...</span>
                 <span><i class="fas fa-calendar"></i> ${safeFormatDate(sub.uploadedAt)}</span>
-                ${sub.uploadedBy ? `<span><i class="fas fa-user"></i> Uploader: ${uploadedByName}</span>` : ''}
+                ${sub.uploadedBy ? `<span><i class="fas fa-user"></i> Uploader: ${escapeHtml(uploadedByName)}</span>` : ''}
             </div>
         `;
         trackResultsList.appendChild(resultItem);
@@ -482,6 +549,111 @@ async function ensureUserFullNames(emails) {
 
 function safeFormatDate(dateValue) {
     return formatAppDateTime(dateValue, 'N/A');
+}
+
+function formatStatusLabel(status) {
+    const text = String(status || '').trim();
+    if (!text) return '-';
+    return text
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getDisplayNameByEmail(email) {
+    const raw = String(email || '').trim();
+    if (!raw) return '-';
+    return userFullNames.get(raw) || raw;
+}
+
+function getSubmissionAgentLabel(sub = {}) {
+    return String(
+        sub.agentName ||
+        sub.agentFullName ||
+        sub.agent?.fullName ||
+        sub.agent?.name ||
+        sub.customerDetails?.agentName ||
+        ''
+    ).trim() || '-';
+}
+
+function getTrackStatusBadgeClass(status) {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (['rejected', 'rejected_by_reviewer', 'rejected_by_rsa'].includes(normalized)) return 'status-rejected';
+    if (['pending', 'submitted', 'resubmitted', 'draft'].includes(normalized)) return 'status-pending';
+    return 'status-approved';
+}
+
+function getApplicationCurrentStage(submission = {}) {
+    const status = String(submission.status || '').trim().toLowerCase();
+    if (status === 'draft') return { key: 'draft', label: 'Draft' };
+    if (['pending', 'submitted', 'resubmitted', 'rejected', 'rejected_by_reviewer'].includes(status)) {
+        return { key: 'reviewer', label: status === 'rejected' || status === 'rejected_by_reviewer' ? 'Reviewer Rejected' : 'Reviewer Stage' };
+    }
+    if (['approved', 'processing_to_pfa', 'rejected_by_rsa'].includes(status)) {
+        return { key: 'rsa', label: status === 'rejected_by_rsa' ? 'RSA Rejected' : 'RSA Stage' };
+    }
+    if (['sent_to_pfa', 'rsa_submitted', 'paid'].includes(status) || submission.finalSubmitted === true || submission.rsaSubmitted === true) {
+        return { key: 'payment', label: status === 'paid' ? 'Payment Confirmed' : 'Payment Stage' };
+    }
+    if (status === 'cleared') return { key: 'cleared', label: 'Cleared' };
+    return { key: 'unknown', label: formatStatusLabel(status) };
+}
+
+function getTrackStageTimestamp(submission = {}, stageKey) {
+    if (stageKey === 'upload') {
+        return submission.reuploadedAt || submission.uploadedAt || submission.submittedAt || submission.createdAt || null;
+    }
+    if (stageKey === 'reviewer') {
+        return submission.reviewedAt || getSubmissionReviewEntryAt(submission) || null;
+    }
+    if (stageKey === 'rsa') {
+        return submission.rsaSubmittedAt ||
+            submission.finalSubmittedAt ||
+            submission.rsaAssignedAt ||
+            getSubmissionApprovalEntryAt(submission) ||
+            null;
+    }
+    if (stageKey === 'payment') {
+        return submission.paidAt ||
+            submission.paymentAssignedAt ||
+            getSubmissionPaymentEntryAt(submission) ||
+            null;
+    }
+    return null;
+}
+
+function getTrackTimelineState(submission = {}, stageKey) {
+    const currentStage = getApplicationCurrentStage(submission);
+    const normalizedStatus = String(submission.status || '').trim().toLowerCase();
+    const order = { upload: 0, reviewer: 1, rsa: 2, payment: 3, cleared: 4 };
+    const currentOrder = order[currentStage.key] ?? -1;
+    const stageOrder = order[stageKey] ?? -1;
+
+    if ((normalizedStatus === 'rejected' || normalizedStatus === 'rejected_by_reviewer') && stageKey === 'reviewer') {
+        return { label: 'Attention', className: 'attention' };
+    }
+    if (normalizedStatus === 'rejected_by_rsa' && stageKey === 'rsa') {
+        return { label: 'Attention', className: 'attention' };
+    }
+    if (currentStage.key === 'cleared') {
+        return { label: 'Completed', className: 'completed' };
+    }
+    if (stageOrder < currentOrder) {
+        return { label: 'Completed', className: 'completed' };
+    }
+    if (stageOrder === currentOrder) {
+        return { label: 'Current', className: 'current' };
+    }
+    return { label: 'Pending', className: 'pending' };
+}
+
+function renderTrackSummaryCard(label, value) {
+    return `
+        <div class="track-modal-summary-card">
+            <span class="label">${escapeHtml(label)}</span>
+            <div class="value">${escapeHtml(value || '-')}</div>
+        </div>
+    `;
 }
 
 function updateDashboardCards() {
@@ -590,116 +762,93 @@ function hideLoader() {
 window.showApplicationTrack = async function(submissionId) {
 
     // Find the submission in our local data
-    const sub = allSubmissions.find(s => s.id === submissionId);
+    let sub = allSubmissions.find(s => s.id === submissionId);
+    if (!sub && submissionId) {
+        try {
+            const subSnap = await getDoc(doc(db, 'submissions', submissionId));
+            if (subSnap.exists()) {
+                sub = { id: subSnap.id, ...(subSnap.data() || {}) };
+            }
+        } catch (error) {
+            console.warn('Could not fetch application for tracking', error);
+        }
+    }
     if (!sub) {
         showNotification('Application not found', 'error');
         return;
     }
 
-    const peopleWorked = [];
-    const seenPeople = new Set();
-    const addPerson = async (label, emailLike) => {
-        const raw = String(emailLike || '').trim();
-        if (!raw) return;
-        const key = `${label}|${raw.toLowerCase()}`;
-        if (seenPeople.has(key)) return;
-        seenPeople.add(key);
-        let displayName = raw;
-        try {
-            displayName = await getUserFullName(raw);
-        } catch (_) { /* keep raw */ }
-        peopleWorked.push({ label, displayName, raw });
-    };
+    const currentStage = getApplicationCurrentStage(sub);
+    const statusLabel = formatStatusLabel(sub.status || '-');
+    const statusClass = getTrackStatusBadgeClass(sub.status);
+    const uploaderName = sub.uploadedBy ? await getUserFullName(sub.uploadedBy) : '-';
+    const reviewerName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Unassigned';
+    const rsaName = sub.assignedToRSA ? await getUserFullName(sub.assignedToRSA) : 'Unassigned';
+    const paymentName = sub.assignedToPayment ? await getUserFullName(sub.assignedToPayment) : 'Unassigned';
+    const agentName = getSubmissionAgentLabel(sub);
+    const lastStageTime = safeFormatDate(getSubmissionCurrentStageEntryAt(sub));
+    const timelineItems = [
+        { key: 'upload', title: 'Uploaded', time: getTrackStageTimestamp(sub, 'upload'), meta: `Uploader: ${uploaderName}` },
+        { key: 'reviewer', title: 'Reviewer', time: getTrackStageTimestamp(sub, 'reviewer'), meta: `Assigned Reviewer: ${reviewerName}` },
+        { key: 'rsa', title: 'RSA', time: getTrackStageTimestamp(sub, 'rsa'), meta: `Assigned RSA: ${rsaName}` },
+        { key: 'payment', title: 'Payment', time: getTrackStageTimestamp(sub, 'payment'), meta: `Assigned Payment: ${paymentName}` }
+    ];
 
-    await addPerson('Uploaded By', sub.uploadedBy);
-    await addPerson('Reviewer Assigned', sub.assignedTo);
-    await addPerson('Reviewed By', sub.reviewedBy);
-    await addPerson('RSA Assigned', sub.assignedToRSA);
-    await addPerson('RSA Submitted By', sub.rsaSubmittedBy);
-    await addPerson('Payment Assigned', sub.assignedToPayment);
-    await addPerson('Paid By', sub.paidBy);
-    await addPerson('Cleared By', sub.clearedBy);
-
-    // Create a simple tracking modal with HIGH z-index
     const modal = document.createElement('div');
     modal.className = 'modal active';
     modal.id = 'trackModal-' + Date.now();
     modal.style.cssText = 'display: flex !important; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999999; align-items: center; justify-content: center;';
 
-    // Get stage info
-    const stage = getApplicationStageSimple(sub);
-    const stageColor = stage.includes('Reviewer') ? '#3b82f6' :
-                      stage.includes('Approved') ? '#10b981' :
-                      stage.includes('Rejected') ? '#ef4444' : '#f59e0b';
-    const stageIcon = stage.includes('Reviewer') ? 'fa-user-check' :
-                     stage.includes('Approved') ? 'fa-check-circle' :
-                     stage.includes('Rejected') ? 'fa-times-circle' : 'fa-clock';
-
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 500px; background: white; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); position: relative; z-index: 10000000;">
-            <div class="modal-header" style="padding: 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
-                <h2 style="margin:0; color:#003366;"><i class="fas fa-map-marker-alt"></i> Application Tracking</h2>
-                <button class="close-btn" onclick="this.closest('.modal').remove()" style="background:none; border:none; font-size:24px; cursor:pointer;">&times;</button>
+        <div class="modal-content large-modal" style="position: relative; z-index: 10000000;">
+            <div class="modal-header">
+                <h2>Application Tracking</h2>
+                <button class="close-btn" onclick="this.closest('.modal').remove()" aria-label="Close modal">&times;</button>
             </div>
-            <div class="modal-body" style="padding: 30px;">
-                <div style="text-align: center; margin-bottom: 30px;">
-                    <i class="fas fa-file-alt" style="font-size: 60px; color: #003366;"></i>
-                    <h3 style="margin: 15px 0 5px;">${sub.customerName || 'Unknown'}</h3>
-                    <p style="color: #64748b;">Application ID: ${sub.id.substring(0, 8)}...</p>
-                </div>
-                <div style="background: #f8fafc; border-radius: 12px; padding: 20px;">
-                    <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
-                        <div style="width: 40px; height: 40px; background: ${stageColor}; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas ${stageIcon}" style="color: white;"></i>
-                        </div>
-                        <div>
-                            <div style="font-size: 12px; color: #64748b;">Current Stage</div>
-                            <div style="font-size: 18px; font-weight: 600; color: #1e293b;">${stage}</div>
-                        </div>
+            <div class="modal-body">
+                <div class="track-modal-hero">
+                    <div>
+                        <h3>${escapeHtml(sub.customerName || 'Unknown Application')}</h3>
+                        <p>Application ID: ${escapeHtml(sub.id || '-')} | Last stage update: ${escapeHtml(lastStageTime)}</p>
                     </div>
-                    <div style="border-top: 1px solid #e2e8f0; padding-top: 15px;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                            <span style="color: #64748b;">Status:</span>
-                            <span class="status-badge status-${sub.status}" style="padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; background: ${
-                                sub.status === 'approved' ? '#d1fae5' :
-                                sub.status === 'rejected' ? '#fee2e2' : '#fef3c7'
-                            }; color: ${
-                                sub.status === 'approved' ? '#065f46' :
-                                sub.status === 'rejected' ? '#991b1b' : '#92400e'
-                            };">${sub.status || 'pending'}</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                            <span style="color: #64748b;">Uploaded:</span>
-                            <span>${safeFormatDate(sub.uploadedAt)}</span>
-                        </div>
-                        ${peopleWorked.length ? `
-                            <div style="margin: 12px 0;">
-                                <div style="color: #64748b; margin-bottom: 8px;">People Worked On:</div>
-                                ${peopleWorked.map(p => `
-                                    <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                                        <span style="color:#64748b;">${p.label}:</span>
-                                        <span>${p.displayName}${p.displayName !== p.raw ? ` (${p.raw})` : ''}</span>
+                    <div class="track-modal-statuses">
+                        <span class="status-badge ${escapeHtml(statusClass)}">${escapeHtml(statusLabel)}</span>
+                        <span class="track-stage-pill current">${escapeHtml(currentStage.label)}</span>
+                    </div>
+                </div>
+                <div class="track-modal-summary">
+                    ${[
+                        renderTrackSummaryCard('Uploaded By', uploaderName),
+                        renderTrackSummaryCard('Agent', agentName),
+                        renderTrackSummaryCard('Current Stage', currentStage.label),
+                        renderTrackSummaryCard('Current Stage Time', lastStageTime),
+                        renderTrackSummaryCard('Assigned Reviewer', reviewerName),
+                        renderTrackSummaryCard('Assigned RSA', rsaName),
+                        renderTrackSummaryCard('Assigned Payment', paymentName),
+                        renderTrackSummaryCard('Cleared Time', safeFormatDate(getSubmissionClearedEntryAt(sub)))
+                    ].join('')}
+                </div>
+                <div class="track-modal-timeline">
+                    ${timelineItems.map((item) => {
+                        const state = getTrackTimelineState(sub, item.key);
+                        return `
+                            <div class="track-modal-timeline-card">
+                                <div class="track-modal-timeline-head">
+                                    <div>
+                                        <span class="label">${escapeHtml(item.title)} Time</span>
+                                        <h4>${escapeHtml(item.title)}</h4>
                                     </div>
-                                `).join('')}
+                                    <span class="track-stage-pill ${escapeHtml(state.className)}">${escapeHtml(state.label)}</span>
+                                </div>
+                                <div class="time">${escapeHtml(safeFormatDate(item.time))}</div>
+                                <div class="meta">${escapeHtml(item.meta)}</div>
                             </div>
-                        ` : ''}
-                        ${sub.reviewedAt ? `
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                                <span style="color: #64748b;">Reviewed:</span>
-                                <span>${safeFormatDate(sub.reviewedAt)}</span>
-                            </div>
-                        ` : ''}
-                        ${sub.comment ? `
-                            <div style="margin-top: 15px;">
-                                <span style="color: #64748b;">Comment:</span>
-                                <p style="background: white; padding: 10px; border-radius: 8px; margin-top: 5px;">${sub.comment}</p>
-                            </div>
-                        ` : ''}
-                    </div>
+                        `;
+                    }).join('')}
                 </div>
-                <div style="margin-top: 25px; text-align: center;">
-                    <button class="action-btn" onclick="this.closest('.modal').remove()" style="padding: 10px 30px; background: #003366; color: white; border: none; border-radius: 6px; cursor: pointer;">Close</button>
-                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="cancel-btn" onclick="this.closest('.modal').remove()">Close</button>
             </div>
         </div>
     `;
