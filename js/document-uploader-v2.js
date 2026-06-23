@@ -168,6 +168,7 @@ let MAX_PDF_SIZE_BYTES = 1.5 * 1024 * 1024; // 1.5MB
 const userFullNames = new Map();
 let customerDetailsSaved = false;
 const RR_COUNTER_DOC = doc(db, 'counters', 'roundRobin');
+const DEFAULT_CUSTOMER_ACCOUNT_BANK_CODE = '90089';
 const FALLBACK_CUSTOMER_ACCOUNT_BANKS = [
   { name: 'Access Bank', code: '044', slug: 'access-bank' },
   { name: 'Access Bank (Diamond)', code: '063', slug: 'access-bank-diamond' },
@@ -313,8 +314,9 @@ function renderCustomerAccountBankOptions(banks = [], currentCode = '') {
   accountBankSelect.innerHTML = '<option value="">Select Bank</option>' + options.map((bank) => (
     `<option value="${escapeHtml(bank.code)}" data-name="${escapeHtml(getCustomerAccountBankLabel(bank))}">${escapeHtml(getCustomerAccountBankLabel(bank))}</option>`
   )).join('');
-  if (currentCode && options.some((bank) => bank.code === currentCode)) {
-    accountBankSelect.value = currentCode;
+  const selectedCode = currentCode || DEFAULT_CUSTOMER_ACCOUNT_BANK_CODE;
+  if (selectedCode && options.some((bank) => bank.code === selectedCode)) {
+    accountBankSelect.value = selectedCode;
   }
 }
 
