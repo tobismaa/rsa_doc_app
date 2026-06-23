@@ -96,9 +96,19 @@ let trackReportPreviewRows = [];
 let trackReportUnmatchedEntries = [];
 let currentDocumentGenerationSubmissionId = '';
 let generatedDocumentPreviewItems = [];
+const generatedDocumentFolderHandles = { pdf: null, docx: null };
 let pdfFontAssetCache = null;
 const pdfTemplateBytesCache = new Map();
 let adminSystemSettings = {};
+let usersListenerStarted = false;
+let pendingUsersListenerStarted = false;
+let pendingAgentsListenerStarted = false;
+let approvedAgentsListenerStarted = false;
+let submissionsListenerStarted = false;
+let escalationsListenerStarted = false;
+let auditListenerStarted = false;
+let adminNamesLoaded = false;
+let uploaderNamesLoaded = false;
 
 const GENERATED_DOCUMENT_TYPES = [
     { id: 'offer_letter', label: 'Offer Letter', description: 'Mortgage facility offer and terms.' },
@@ -1023,11 +1033,6 @@ async function checkAdminAuth() {
                 loadPendingUsers();
                 loadPendingAgents();
                 loadApprovedAgents();
-                loadSubmissions();
-                loadEscalations();
-                loadAuditLog();
-                loadAdminNames();
-                loadUploaderNames();
                 switchTab('user-management');
             } else {
                 showNotification('Access denied. Admin privileges required.', 'error');
@@ -1041,6 +1046,8 @@ async function checkAdminAuth() {
 
 // ==================== LOAD ADMIN NAMES ====================
 async function loadAdminNames() {
+    if (adminNamesLoaded) return;
+    adminNamesLoaded = true;
     const usersQuery = query(collection(db, 'users'), where('role', '==', 'admin'));
     const snapshot = await getDocs(usersQuery);
     snapshot.forEach(doc => {
@@ -1054,6 +1061,8 @@ async function loadAdminNames() {
 
 // ==================== LOAD UPLOADER NAMES ====================
 async function loadUploaderNames() {
+    if (uploaderNamesLoaded) return;
+    uploaderNamesLoaded = true;
     const usersQuery = query(collection(db, 'users'));
     const snapshot = await getDocs(usersQuery);
     snapshot.forEach(doc => {
@@ -1361,7 +1370,20 @@ function renderAdminSubTabs(parentTabId) {
     });
 }
 
+function ensureAdminDataForTab(tabId) {
+    if (TAB_GROUPS['application-management'].includes(tabId)) {
+        loadSubmissions();
+        loadEscalations();
+        loadUploaderNames();
+    }
+    if (tabId === 'audit') {
+        loadAuditLog();
+        loadAdminNames();
+    }
+}
+
 function runTabEffects(tabId) {
+    ensureAdminDataForTab(tabId);
     if (tabId === 'draft-docs') {
         renderDraftDocs();
     }
@@ -1479,6 +1501,8 @@ window.switchRoundRobinMonitor = (type = 'reviewer') => {
 
 // ==================== LOAD USERS ====================
 function loadUsers() {
+    if (usersListenerStarted) return;
+    usersListenerStarted = true;
     const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
 
     onSnapshot(q, (snapshot) => {
@@ -1512,6 +1536,8 @@ function loadUsers() {
 
 // ==================== LOAD PENDING USERS ====================
 function loadPendingUsers() {
+    if (pendingUsersListenerStarted) return;
+    pendingUsersListenerStarted = true;
     const q = query(collection(db, 'users'), where('status', '==', 'pending'));
 
     onSnapshot(q, (snapshot) => {
@@ -1532,6 +1558,8 @@ function loadPendingUsers() {
 }
 
 function loadPendingAgents() {
+    if (pendingAgentsListenerStarted) return;
+    pendingAgentsListenerStarted = true;
     const q = query(collection(db, 'agents'), where('status', '==', 'pending'));
     onSnapshot(q, (snapshot) => {
         allPendingAgents = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
@@ -1547,6 +1575,8 @@ function loadPendingAgents() {
 }
 
 function loadApprovedAgents() {
+    if (approvedAgentsListenerStarted) return;
+    approvedAgentsListenerStarted = true;
     const q = query(collection(db, 'agents'), where('status', '==', 'approved'));
     onSnapshot(q, (snapshot) => {
         allApprovedAgents = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
@@ -1774,6 +1804,8 @@ function renderUsersTable(users) {
 
 // ==================== LOAD SUBMISSIONS ====================
 function loadSubmissions() {
+    if (submissionsListenerStarted) return;
+    submissionsListenerStarted = true;
     const q = query(collection(db, 'submissions'), orderBy('uploadedAt', 'desc'));
 
     onSnapshot(q, (snapshot) => {
@@ -1803,6 +1835,8 @@ function loadSubmissions() {
 }
 
 function loadEscalations() {
+    if (escalationsListenerStarted) return;
+    escalationsListenerStarted = true;
     const q = query(collection(db, 'applicationChats'), where('escalated', '==', true));
 
     onSnapshot(q, (snapshot) => {
@@ -3079,7 +3113,9 @@ window.rejectAgentRegistration = async (agentId, btnEl = null) => {
 
 // ==================== LOAD AUDIT LOG ====================
 function loadAuditLog() {
-    const q = query(collection(db, 'audit'), orderBy('timestamp', 'desc'), limit(500));
+    if (auditListenerStarted) return;
+    auditListenerStarted = true;
+    const q = query(collection(db, 'audit'), orderBy('timestamp', 'desc'), limit(200));
 
     onSnapshot(q, async (snapshot) => {
         const audits = [];
@@ -4490,23 +4526,25 @@ function ensurePreviewPdfLibraries() {
     }
 }
 
-async function createPdfBlobFromPreviewHtml(previewHtml = '') {
+async function createPdfBlobFromPreviewHtml(previewHtml = '', onProgress = null) {
     ensurePreviewPdfLibraries();
     const host = document.createElement('div');
     host.className = 'generated-pdf-capture-host word-generated-doc-render';
     host.style.position = 'fixed';
-    host.style.left = '-10000px';
+    host.style.left = '-9000px';
     host.style.top = '0';
-    host.style.width = '850px';
-    host.style.background = '#eef4fb';
-    host.style.padding = '26px';
+    host.style.width = '794px';
+    host.style.background = '#ffffff';
+    host.style.padding = '0';
     host.style.zIndex = '0';
     host.style.pointerEvents = 'none';
+    host.style.maxHeight = 'none';
+    host.style.overflow = 'visible';
     host.innerHTML = previewHtml;
     document.body.appendChild(host);
 
     try {
-        await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         await withTimeout(waitForPreviewBackgroundImages(host), 10000, 'PDF template images took too long to load.');
         const pages = Array.from(host.querySelectorAll('.word-preview-page'));
         if (!pages.length) throw new Error('Generated document preview is empty.');
@@ -4517,16 +4555,17 @@ async function createPdfBlobFromPreviewHtml(previewHtml = '') {
 
         for (let index = 0; index < pages.length; index += 1) {
             const page = pages[index];
+            if (typeof onProgress === 'function') onProgress({ phase: 'rendering', page: index + 1, total: pages.length });
             const canvas = await withTimeout(window.html2canvas(page, {
-                scale: 2.5,
+                scale: 1.45,
                 backgroundColor: '#ffffff',
                 useCORS: true,
                 allowTaint: true,
                 logging: false
-            }), 45000, `PDF page ${index + 1} took too long to render.`);
-            const imgData = canvas.toDataURL('image/png');
+            }), 25000, `PDF page ${index + 1} took too long to render.`);
+            const imgData = canvas.toDataURL('image/jpeg', 0.92);
             if (index > 0) pdf.addPage();
-            pdf.addImage(imgData, 'PNG', 0, 0, pageWidth, pageHeight, undefined, 'SLOW');
+            pdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight, undefined, 'FAST');
         }
 
         return pdf.output('blob');
@@ -4772,6 +4811,13 @@ function wrapRichTextLine(text = '', fonts, fontSize, maxWidth, boldPhrases = []
     return lines;
 }
 
+function measureRichTextLineWidth(lineTokens = [], fonts, fontSize) {
+    return lineTokens.reduce((width, token) => {
+        const font = token.bold ? fonts.bold : fonts.regular;
+        return width + font.widthOfTextAtSize(token.text, fontSize);
+    }, 0);
+}
+
 function drawRichTextLine(page, lineTokens, x, y, fonts, fontSize) {
     let cursorX = x;
     lineTokens.forEach((token) => {
@@ -4790,17 +4836,33 @@ function drawRichTextLine(page, lineTokens, x, y, fonts, fontSize) {
 function renderParagraphBlock(page, paragraph = '', boldWords = [], layout, fonts) {
     const sourceLines = String(paragraph || '').split('\n');
     const contentWidth = layout.contentWidth;
+    const heading = isDocumentHeading(paragraph);
+    const fontSize = heading ? layout.headingFontSize : layout.fontSize;
+    const lineHeight = heading ? layout.headingLineHeight : layout.lineHeight;
     sourceLines.forEach((sourceLine) => {
         if (!sourceLine) {
             layout.cursorY -= layout.paragraphSpacing;
             return;
         }
-        const wrappedLines = wrapRichTextLine(sourceLine, fonts, layout.fontSize, contentWidth, boldWords);
+        const safeLine = toPdfSafeText(sourceLine);
+        const wrappedLines = wrapRichTextLine(safeLine, fonts, fontSize, contentWidth, heading ? [safeLine] : boldWords);
         wrappedLines.forEach((lineTokens) => {
-            drawRichTextLine(page, lineTokens, layout.marginLeft, layout.cursorY, fonts, layout.fontSize);
-            layout.cursorY -= layout.lineHeight;
+            const lineWidth = measureRichTextLineWidth(lineTokens, fonts, fontSize);
+            const x = heading
+                ? layout.marginLeft + Math.max(0, (contentWidth - lineWidth) / 2)
+                : layout.marginLeft;
+            drawRichTextLine(page, lineTokens, x, layout.cursorY, fonts, fontSize);
+            if (heading && lineWidth > 0) {
+                page.drawLine({
+                    start: { x, y: layout.cursorY - 2 },
+                    end: { x: x + lineWidth, y: layout.cursorY - 2 },
+                    thickness: 0.6,
+                    color: window.PDFLib.rgb(0, 0, 0)
+                });
+            }
+            layout.cursorY -= lineHeight;
         });
-        layout.cursorY -= Math.max(0, layout.paragraphSpacing - layout.lineHeight);
+        layout.cursorY -= Math.max(0, layout.paragraphSpacing - lineHeight);
     });
 }
 
@@ -4808,50 +4870,98 @@ function wrapPlainText(text = '', font, fontSize, maxWidth) {
     return wrapPdfText(String(text || ''), font, fontSize, maxWidth);
 }
 
-function renderTableBlock(page, rows = [], layout, fonts) {
-    const labelWidth = pointsFromMillimeters(50);
-    const valueWidth = layout.contentWidth - labelWidth;
-    rows.forEach(([label, value]) => {
-        const valueLines = wrapPlainText(String(value || ''), fonts.regular, layout.tableFontSize, valueWidth - 8);
-        const rowHeight = Math.max(layout.tableLineHeight, valueLines.length * layout.tableLineHeight);
-        const rowBottom = layout.cursorY - rowHeight;
-        page.drawRectangle({
-            x: layout.marginLeft,
-            y: rowBottom,
-            width: labelWidth,
-            height: rowHeight,
-            borderWidth: 1,
-            borderColor: window.PDFLib.rgb(0, 0, 0)
-        });
-        page.drawRectangle({
-            x: layout.marginLeft + labelWidth,
-            y: rowBottom,
-            width: valueWidth,
-            height: rowHeight,
-            borderWidth: 1,
-            borderColor: window.PDFLib.rgb(0, 0, 0)
-        });
+function getPdfTableProfile(rows = [], options = {}, layout = {}) {
+    const compact = Boolean(options.compact);
+    const offerTermsMode = options.offerTerms || '';
+    const offerTerms = Boolean(offerTermsMode);
+    const offerPrimaryTerms = offerTermsMode === 'primary';
+    const hasFourColumns = rows.some((row) => Array.isArray(row) && row.length > 2);
+    const twipWidths = hasFourColumns
+        ? (compact ? [1500, 3100, 1500, 3100] : [1700, 2900, 1700, 2900])
+        : (offerTerms ? [2600, 6600] : [compact ? 2500 : 3000, compact ? 6700 : 6200]);
+    const totalTwips = twipWidths.reduce((sum, width) => sum + width, 0) || 1;
+    return {
+        hasFourColumns,
+        widths: twipWidths.map((width) => (width / totalTwips) * layout.contentWidth),
+        fontSize: offerPrimaryTerms ? 8.8 : (offerTerms ? 8.2 : (compact ? 7.4 : 8.4)),
+        lineHeight: offerPrimaryTerms ? 11.8 : (offerTerms ? 10.5 : (compact ? 8.7 : 10.6)),
+        padX: compact ? 3.2 : 4.4,
+        padY: offerPrimaryTerms ? 8.6 : (offerTerms ? 6.9 : (compact ? 2.4 : 4.4)),
+        rowGap: offerTerms ? 0 : 0.8,
+        borderColor: window.PDFLib.rgb(0.82, 0.86, 0.91),
+        labelFill: window.PDFLib.rgb(0.97, 0.98, 0.99)
+    };
+}
 
-        page.drawText(String(label || ''), {
-            x: layout.marginLeft + 4,
-            y: layout.cursorY - layout.tableFontSize - 3,
-            size: layout.tableFontSize,
-            font: fonts.bold,
+function drawPdfTableCell(page, text = '', x, yTop, width, rowHeight, profile, font) {
+    const lines = wrapPlainText(toPdfSafeText(text), font, profile.fontSize, Math.max(4, width - (profile.padX * 2)));
+    lines.forEach((line, index) => {
+        const y = yTop - profile.padY - profile.fontSize - (index * profile.lineHeight);
+        if (y < yTop - rowHeight + profile.padY) return;
+        page.drawText(line, {
+            x: x + profile.padX,
+            y,
+            size: profile.fontSize,
+            font,
             color: window.PDFLib.rgb(0, 0, 0)
         });
-
-        valueLines.forEach((line, index) => {
-            page.drawText(line, {
-                x: layout.marginLeft + labelWidth + 4,
-                y: layout.cursorY - layout.tableFontSize - 3 - (index * layout.tableLineHeight),
-                size: layout.tableFontSize,
-                font: fonts.regular,
-                color: window.PDFLib.rgb(0, 0, 0)
-            });
-        });
-
-        layout.cursorY = rowBottom - pointsFromMillimeters(1.4);
     });
+    return lines.length;
+}
+
+function renderTableBlock(page, rows = [], layout, fonts, options = {}) {
+    const profile = getPdfTableProfile(rows, options, layout);
+    rows.forEach((row) => {
+        const safeRow = Array.isArray(row) ? row : [];
+        const cells = profile.hasFourColumns
+            ? [
+                { text: safeRow[0] || '', font: fonts.bold, fill: true },
+                { text: safeRow[1] || '', font: fonts.regular, fill: false },
+                { text: safeRow[2] || '', font: fonts.bold, fill: true },
+                { text: safeRow[3] || '', font: fonts.regular, fill: false }
+            ]
+            : [
+                { text: safeRow[0] || '', font: fonts.bold, fill: true },
+                { text: safeRow[1] || '', font: fonts.regular, fill: false }
+            ];
+        const lineCounts = cells.map((cell, index) => wrapPlainText(
+            toPdfSafeText(cell.text),
+            cell.font,
+            profile.fontSize,
+            Math.max(4, profile.widths[index] - (profile.padX * 2))
+        ).length);
+        const rowHeight = Math.max(
+            profile.lineHeight + (profile.padY * 2),
+            Math.max(...lineCounts) * profile.lineHeight + (profile.padY * 2)
+        );
+        const rowBottom = layout.cursorY - rowHeight;
+        let cursorX = layout.marginLeft;
+        cells.forEach((cell, index) => {
+            const width = profile.widths[index];
+            if (cell.fill) {
+                page.drawRectangle({
+                    x: cursorX,
+                    y: rowBottom,
+                    width,
+                    height: rowHeight,
+                    color: profile.labelFill,
+                    borderWidth: 0
+                });
+            }
+            page.drawRectangle({
+                x: cursorX,
+                y: rowBottom,
+                width,
+                height: rowHeight,
+                borderWidth: 0.65,
+                borderColor: profile.borderColor
+            });
+            drawPdfTableCell(page, cell.text, cursorX, layout.cursorY, width, rowHeight, profile, cell.font);
+            cursorX += width;
+        });
+        layout.cursorY = rowBottom - profile.rowGap;
+    });
+    layout.cursorY -= options.offerTerms ? 8 : 12;
 }
 
 function getOverlayPageFormatPoints(documentType, pageIndex, page) {
@@ -4867,6 +4977,46 @@ function getOverlayPageFormatPoints(documentType, pageIndex, page) {
         offsetX: 0,
         offsetY: Math.max(0, page.getHeight() - height)
     };
+}
+
+function createPdfContentLayout(documentType, pageIndex, page) {
+    const scale = page.getWidth() / 794;
+    const marginLeft = 76 * scale;
+    const marginRight = 76 * scale;
+    const topPadding = getDocxPreviewPaddingPx(documentType, pageIndex) * scale;
+    const bottomPadding = 84 * scale;
+    return {
+        marginLeft,
+        marginRight,
+        contentWidth: page.getWidth() - marginLeft - marginRight,
+        cursorY: page.getHeight() - topPadding,
+        bottomY: bottomPadding,
+        fontSize: 9.7,
+        headingFontSize: 9.9,
+        lineHeight: 14.8,
+        headingLineHeight: 15.6,
+        paragraphSpacing: 7.5,
+        tableFontSize: 8.7,
+        tableLineHeight: 11.7
+    };
+}
+
+function renderContentModelPageToPdf(page, documentType, pageIndex, contentPage = {}, fonts = {}) {
+    const layout = createPdfContentLayout(documentType, pageIndex, page);
+    const boldWords = normalizeBoldPhraseList(contentPage.boldWords || []).map(toPdfSafeText);
+    const table = Array.isArray(contentPage.table) ? contentPage.table : [];
+    const renderTable = () => {
+        if (table.length) renderTableBlock(page, table, layout, fonts, {
+            compact: contentPage.compactTable,
+            offerTerms: contentPage.offerTermsTable
+        });
+    };
+
+    if (contentPage.tablePosition === 'before') renderTable();
+    (contentPage.paragraphs || []).forEach((paragraph) => {
+        renderParagraphBlock(page, paragraph, boldWords, layout, fonts);
+    });
+    if (contentPage.tablePosition !== 'before') renderTable();
 }
 
 function pdfRectFromTopLeft(page, rect = []) {
@@ -4922,46 +5072,48 @@ function drawPdfField(page, field = {}, value = '', embeddedFonts = {}) {
     });
 }
 
+async function loadTemplatePageImageBytes(url) {
+    if (!pdfTemplateBytesCache.has(url)) {
+        const response = await fetch(url, { cache: 'force-cache' });
+        if (!response.ok) throw new Error(`Template page image not found: ${url}`);
+        pdfTemplateBytesCache.set(url, await response.arrayBuffer());
+    }
+    return pdfTemplateBytesCache.get(url).slice(0);
+}
+
 async function generatePdfDocumentFromTemplate(documentType, data = {}) {
-    const config = PDF_TEMPLATE_CONFIGS[documentType];
+    const config = DOCX_TEMPLATE_CONFIGS[documentType];
     if (!config) throw new Error(`Unsupported document template: ${documentType}`);
     if (!window.PDFLib?.PDFDocument) throw new Error('PDF engine is unavailable. Please refresh and try again.');
 
+    const contentModel = buildDocumentContent(documentType, data);
+    const contentPages = Array.isArray(contentModel.pages) ? contentModel.pages : [];
     const fontAssets = await ensurePdfFontAssets();
-    const templatePath = `assets/document-templates/${config.fileName}`;
-    if (!pdfTemplateBytesCache.has(templatePath)) {
-        const templateResponse = await fetch(templatePath, { cache: 'force-cache' });
-        if (!templateResponse.ok) {
-            throw new Error(`Template not found for ${documentType}.`);
-        }
-        pdfTemplateBytesCache.set(templatePath, await templateResponse.arrayBuffer());
-    }
-
-    const templateBytes = pdfTemplateBytesCache.get(templatePath).slice(0);
-    const templateDoc = await window.PDFLib.PDFDocument.load(templateBytes);
-    templateDoc.registerFontkit(window.fontkit);
-    const templatePages = templateDoc.getPages();
-    const embeddedFonts = {
-        dejavu: await templateDoc.embedFont(fontAssets.dejavu),
-        dejavuBold: await templateDoc.embedFont(fontAssets.dejavuBold),
-        trebuchet: fontAssets.trebuchet ? await templateDoc.embedFont(fontAssets.trebuchet) : null,
-        trebuchetBold: fontAssets.trebuchetBold ? await templateDoc.embedFont(fontAssets.trebuchetBold) : null
+    const pdfDoc = await window.PDFLib.PDFDocument.create();
+    pdfDoc.registerFontkit(window.fontkit);
+    const fonts = {
+        regular: await pdfDoc.embedFont(fontAssets.dejavu),
+        bold: await pdfDoc.embedFont(fontAssets.dejavuBold)
     };
 
-    (config.wipeZones || []).forEach((zone) => {
-        const page = templatePages[zone.page];
-        if (page) wipePdfRect(page, zone.rect);
-    });
+    for (let pageIndex = 0; pageIndex < contentPages.length; pageIndex += 1) {
+        const imageIndex = Math.min(pageIndex + 1, config.pages);
+        const fileName = `${config.stem}-page-${imageIndex}.png`;
+        const imageUrl = `assets/document-templates/docx-page-images/${fileName}`;
+        const imageBytes = await loadTemplatePageImageBytes(imageUrl);
+        const image = await pdfDoc.embedPng(imageBytes);
+        const page = pdfDoc.addPage([pointsFromMillimeters(210), pointsFromMillimeters(297)]);
+        page.drawImage(image, {
+            x: 0,
+            y: 0,
+            width: page.getWidth(),
+            height: page.getHeight()
+        });
+        const contentPage = contentPages[pageIndex];
+        renderContentModelPageToPdf(page, documentType, pageIndex, contentPage, fonts);
+    }
 
-    (config.fields || []).forEach((field) => {
-        const page = templatePages[field.page];
-        if (!page) return;
-        wipePdfRect(page, field.rect);
-        const value = resolveGeneratedDocumentFieldValue(field.key, data);
-        drawPdfField(page, field, value, embeddedFonts);
-    });
-
-    const pdfBytes = await templateDoc.save();
+    const pdfBytes = await pdfDoc.save();
     return new Blob([pdfBytes], { type: 'application/pdf' });
 }
 
@@ -4970,6 +5122,8 @@ function resetGeneratedDocumentPreviewItems() {
         if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
     });
     generatedDocumentPreviewItems = [];
+    generatedDocumentFolderHandles.pdf = null;
+    generatedDocumentFolderHandles.docx = null;
 }
 
 function renderDocumentGenerationChecklist(submission = {}) {
@@ -5094,12 +5248,13 @@ async function generateSelectedDocumentsForPreview() {
                 currentDate: isPostApprovalDocument ? data.postApprovalDate : data.currentDate
             };
             const generatedPreview = await generateDocxDocumentFromContent(type, documentData);
+            const generatedPdfBlob = await generatePdfDocumentFromTemplate(type, documentData);
             previewItems.push({
                 type,
                 label: config?.label || type,
                 blob: generatedPreview.blob,
                 docxBlob: generatedPreview.blob,
-                pdfBlob: null,
+                pdfBlob: generatedPdfBlob,
                 pdfBlobPromise: null,
                 blobFactory: null,
                 previewUrl: '',
@@ -5193,50 +5348,24 @@ async function ensureGeneratedDocumentDocxBlobAtIndex(index) {
     throw new Error(`Document ${index + 1} DOCX is unavailable.`);
 }
 
-async function ensureGeneratedDocumentPdfBlobAtIndex(index) {
+async function ensureGeneratedDocumentPdfBlobAtIndex(index, onProgress = null) {
     const item = generatedDocumentPreviewItems[index];
     if (!item) throw new Error('Generated document is unavailable.');
     if (item.pdfBlob) return item.pdfBlob;
-
-    if (!item.pdfBlobPromise) {
-        item.pdfBlobPromise = (async () => {
-            const baseUrl = getConfiguredAdminApiBaseUrl();
-            if (!baseUrl) throw new Error('Admin API URL is not configured.');
-
-            const docxBlob = await ensureGeneratedDocumentDocxBlobAtIndex(index);
-            const response = await fetch(`${baseUrl}/api/admin/convert-docx-pdf`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${await getAdminApiIdToken()}`
-                },
-                body: JSON.stringify({
-                    fileName: getGeneratedDocumentFileName(item, 'docx'),
-                    docxBase64: await blobToBase64(docxBlob)
-                })
-            });
-
-            if (!response.ok) {
-                const errorBody = await response.json().catch(() => ({}));
-                throw new Error(errorBody.error || `DOCX to PDF conversion failed (${response.status})`);
-            }
-
-            const pdfBlob = await response.blob();
-            item.pdfBlob = pdfBlob;
-            generatedDocumentPreviewItems[index] = item;
-            return pdfBlob;
-        })().finally(() => {
-            item.pdfBlobPromise = null;
-        });
-        generatedDocumentPreviewItems[index] = item;
-    }
-
-    return item.pdfBlobPromise;
+    throw new Error('Generated PDF is unavailable. Please regenerate the document.');
 }
 
-async function getGeneratedDocumentsCustomerFolder(extension = 'PDF') {
+async function getGeneratedDocumentsCustomerFolder(extension = 'PDF', options = {}) {
+    const key = String(extension || '').trim().toLowerCase() === 'docx' ? 'docx' : 'pdf';
+    if (options.reuse && generatedDocumentFolderHandles[key]) {
+        const hasPermission = await ensureDirectoryWritePermission(generatedDocumentFolderHandles[key]);
+        if (hasPermission) return generatedDocumentFolderHandles[key];
+        generatedDocumentFolderHandles[key] = null;
+    }
+
     if (!('showDirectoryPicker' in window)) return null;
-    showNotification(`Select a destination folder to save all ${extension} files...`, 'info');
+    const scopeText = options.single ? `${extension} file` : `all ${extension} files`;
+    showNotification(`Select a destination folder to save ${scopeText}...`, 'info');
     const rootFolder = await window.showDirectoryPicker({
         mode: 'readwrite',
         startIn: 'downloads'
@@ -5245,14 +5374,48 @@ async function getGeneratedDocumentsCustomerFolder(extension = 'PDF') {
     if (!hasPermission) throw new Error('Folder write permission was not granted.');
     const firstItem = generatedDocumentPreviewItems[0] || {};
     const customerName = sanitizeFileNamePart(firstItem.customerName || 'Customer') || 'Customer';
-    return rootFolder.getDirectoryHandle(customerName, { create: true });
+    const customerFolder = await rootFolder.getDirectoryHandle(customerName, { create: true });
+    generatedDocumentFolderHandles[key] = customerFolder;
+    return customerFolder;
 }
 
-async function writeBlobToDirectory(blob, fileName, directoryHandle) {
-    const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(blob);
-    await writable.close();
+async function writeBlobToDirectory(blob, fileName, directoryHandle, onProgress = null) {
+    if (typeof onProgress === 'function') onProgress('opening');
+    const fileHandle = await withTimeout(
+        directoryHandle.getFileHandle(fileName, { create: true }),
+        10000,
+        `Could not open ${fileName} in the selected folder.`
+    );
+    const writable = await withTimeout(
+        fileHandle.createWritable(),
+        10000,
+        `Could not create ${fileName} in the selected folder.`
+    );
+    try {
+        if (typeof onProgress === 'function') onProgress('reading');
+        const bytes = await withTimeout(
+            blob.arrayBuffer(),
+            15000,
+            `Could not prepare ${fileName} for saving.`
+        );
+        if (typeof onProgress === 'function') onProgress('writing');
+        await withTimeout(
+            writable.write(new Uint8Array(bytes)),
+            30000,
+            `Writing ${fileName} took too long.`
+        );
+        if (typeof onProgress === 'function') onProgress('closing');
+        await withTimeout(
+            writable.close(),
+            10000,
+            `Could not finish saving ${fileName}.`
+        );
+    } catch (error) {
+        try {
+            if (typeof writable.abort === 'function') await writable.abort();
+        } catch (_) {}
+        throw error;
+    }
     return fileName;
 }
 
@@ -5270,13 +5433,16 @@ async function saveGeneratedDocumentDocxAtIndex(index, directoryHandle = null) {
     return true;
 }
 
-async function saveGeneratedDocumentPdfAtIndex(index, directoryHandle = null) {
+async function saveGeneratedDocumentPdfAtIndex(index, directoryHandle = null, onProgress = null) {
     const item = generatedDocumentPreviewItems[index];
+    if (typeof onProgress === 'function') onProgress({ phase: 'preparing' });
     const pdfBlob = await ensureGeneratedDocumentPdfBlobAtIndex(index);
     const fileName = getGeneratedDocumentFileName(item, 'pdf');
 
     if (directoryHandle && 'getFileHandle' in directoryHandle) {
-        await writeBlobToDirectory(pdfBlob, fileName, directoryHandle);
+        await writeBlobToDirectory(pdfBlob, fileName, directoryHandle, (phase) => {
+            if (typeof onProgress === 'function') onProgress({ phase, fileName });
+        });
         return true;
     }
 
@@ -5301,9 +5467,27 @@ window.saveGeneratedDocumentPdf = async (index, triggerBtn = null) => {
             triggerBtn.disabled = true;
             triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing PDF...';
         }
-        await saveGeneratedDocumentPdfAtIndex(index);
+        const directoryHandle = await getGeneratedDocumentsCustomerFolder('PDF', { reuse: true, single: true });
+        await saveGeneratedDocumentPdfAtIndex(index, directoryHandle, (progress = {}) => {
+            if (triggerBtn) {
+                if (progress.phase === 'rendering') {
+                    triggerBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Rendering ${progress.page}/${progress.total}...`;
+                } else if (progress.phase === 'writing') {
+                    triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Writing file...';
+                } else if (progress.phase === 'closing') {
+                    triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Finishing...';
+                } else {
+                    triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing PDF...';
+                }
+            }
+        });
+        showNotification('PDF saved successfully.', 'success');
     } catch (error) {
-        showNotification(`Failed to save document: ${error.message || 'Unknown error'}`, 'error');
+        if (error?.name === 'AbortError') {
+            showNotification('Save cancelled', 'info');
+        } else {
+            showNotification(`Failed to save PDF: ${error.message || 'Unknown error'}`, 'error');
+        }
     } finally {
         if (triggerBtn) {
             triggerBtn.disabled = false;
@@ -5319,9 +5503,15 @@ window.saveGeneratedDocumentDocx = async (index, triggerBtn = null) => {
             triggerBtn.disabled = true;
             triggerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing DOCX...';
         }
-        await saveGeneratedDocumentDocxAtIndex(index);
+        const directoryHandle = await getGeneratedDocumentsCustomerFolder('DOCX', { reuse: true, single: true });
+        await saveGeneratedDocumentDocxAtIndex(index, directoryHandle);
+        showNotification('DOCX saved successfully.', 'success');
     } catch (error) {
-        showNotification(`Failed to save DOCX: ${error.message || 'Unknown error'}`, 'error');
+        if (error?.name === 'AbortError') {
+            showNotification('Save cancelled', 'info');
+        } else {
+            showNotification(`Failed to save DOCX: ${error.message || 'Unknown error'}`, 'error');
+        }
     } finally {
         if (triggerBtn) {
             triggerBtn.disabled = false;
@@ -5346,7 +5536,7 @@ async function saveAllGeneratedDocumentsToFolder() {
         let directoryHandle = null;
         if ('showDirectoryPicker' in window) {
             try {
-                directoryHandle = await getGeneratedDocumentsCustomerFolder('PDF');
+                directoryHandle = await getGeneratedDocumentsCustomerFolder('PDF', { reuse: true });
             } catch (error) {
                 if (error?.name === 'AbortError') {
                     showNotification('Save cancelled', 'info');
@@ -5366,7 +5556,19 @@ async function saveAllGeneratedDocumentsToFolder() {
                 saveAllGeneratedDocumentsBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving ${index + 1}/${generatedDocumentPreviewItems.length}...`;
             }
             try {
-                await saveGeneratedDocumentPdfAtIndex(index, directoryHandle);
+                await saveGeneratedDocumentPdfAtIndex(index, directoryHandle, (progress = {}) => {
+                    if (saveAllGeneratedDocumentsBtn) {
+                        if (progress.phase === 'rendering') {
+                            saveAllGeneratedDocumentsBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${index + 1}/${generatedDocumentPreviewItems.length} page ${progress.page}/${progress.total}...`;
+                        } else if (progress.phase === 'writing') {
+                            saveAllGeneratedDocumentsBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Writing ${index + 1}/${generatedDocumentPreviewItems.length}...`;
+                        } else if (progress.phase === 'closing') {
+                            saveAllGeneratedDocumentsBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Finishing ${index + 1}/${generatedDocumentPreviewItems.length}...`;
+                        } else {
+                            saveAllGeneratedDocumentsBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Preparing ${index + 1}/${generatedDocumentPreviewItems.length}...`;
+                        }
+                    }
+                });
                 successCount += 1;
                 if (!directoryHandle) await new Promise((resolve) => setTimeout(resolve, 120));
             } catch (error) {
@@ -5405,7 +5607,7 @@ async function saveAllGeneratedDocxToFolder() {
         let directoryHandle = null;
         if ('showDirectoryPicker' in window) {
             try {
-                directoryHandle = await getGeneratedDocumentsCustomerFolder('DOCX');
+                directoryHandle = await getGeneratedDocumentsCustomerFolder('DOCX', { reuse: true });
             } catch (error) {
                 if (error?.name === 'AbortError') {
                     showNotification('Save cancelled', 'info');

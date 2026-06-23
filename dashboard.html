@@ -1032,6 +1032,17 @@
                                 <div>
                                     <label for="accountNo">Account No *</label>
                                     <input type="text" id="accountNo" placeholder="10 digits" maxlength="10" inputmode="numeric">
+                                    <div id="accountLookupStatus" style="display:none;margin-top:6px;font-size:12px;font-weight:700;"></div>
+                                </div>
+                                <div>
+                                    <label for="accountBank">Account Bank *</label>
+                                    <select id="accountBank">
+                                        <option value="">Select Bank</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="accountName">Account Name (auto)</label>
+                                    <input type="text" id="accountName" readonly placeholder="Auto-filled after bank verification">
                                 </div>
                                 <div>
                                     <label for="customerEmail">Email *</label>
@@ -1086,6 +1097,7 @@
                                 <div>
                                     <label for="penNo">PEN No *</label>
                                     <input type="text" id="penNo" placeholder="e.g. penXXXXXXXXXXXX" maxlength="15">
+                                    <div id="penNoError" style="display:none;margin-top:6px;color:#dc2626;font-size:12px;font-weight:700;"></div>
                                 </div>
                                 <div>
                                     <label for="rsaStatementDate">RSA Statement Date *</label>

@@ -92,6 +92,15 @@ function getRejectionOfficerName(sub = {}, resolveName = () => 'Unassigned') {
     return resolveName(sub?.reviewedBy || sub?.assignedTo || '');
 }
 
+function getCustomerDetailsValue(sub = {}, keys = []) {
+    const details = sub?.customerDetails && typeof sub.customerDetails === 'object' ? sub.customerDetails : {};
+    for (const key of keys) {
+        const value = details?.[key] ?? sub?.[key];
+        if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+    }
+    return '';
+}
+
 function compareGroupedRows(a = {}, b = {}) {
     const ownerA = String(a.owner || '').toLowerCase();
     const ownerB = String(b.owner || '').toLowerCase();
@@ -114,6 +123,10 @@ function normalizeRsaReportRow(row = {}) {
         customerName: row.customerName || '',
         uploaderName: row.uploaderName || '',
         reviewerName: row.reviewerName || '',
+        accountNumber: row.accountNumber || '',
+        tenor: row.tenor || '',
+        houseType: row.houseType || '',
+        houseNumber: row.houseNumber || '',
         rsaBalance: row.rsaBalance ?? '',
         rsa25: row.rsa25 ?? '',
         commission: row.commission ?? '',
@@ -162,6 +175,10 @@ function buildRsaSheetRows(records = [], resolveName = () => 'Unassigned') {
             customerName: sub.customerName || '',
             uploaderName: resolveName(sub.uploadedBy),
             reviewerName: resolveName(sub.assignedTo || sub.reviewedBy),
+            accountNumber: getCustomerDetailsValue(sub, ['accountNo', 'accountNumber']),
+            tenor: getCustomerDetailsValue(sub, ['tenor']),
+            houseType: getCustomerDetailsValue(sub, ['propertyType', 'houseType']),
+            houseNumber: getCustomerDetailsValue(sub, ['houseNumber']),
             rsaBalance: formatMoneyForSheet(getSubmissionRsaBalance(sub)),
             rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
             commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
@@ -264,7 +281,7 @@ function buildPreviewValues(sheetId, row) {
         return [row.customerName, row.uploaderName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, String(row.rejectionCount || 0)];
     }
     if (sheetId === 'rsa') {
-        return [row.customerName, row.uploaderName, row.reviewerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt];
+        return [row.customerName, row.uploaderName, row.reviewerName, row.accountNumber, row.tenor, row.houseType, row.houseNumber, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt];
     }
     if (sheetId === 'payment') {
         return [row.customerName, row.uploaderName, row.rsaOfficerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt];
@@ -277,7 +294,7 @@ function buildDashboardTableValues(sheetId, row) {
         return [row.owner, row.customerName, row.uploaderName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, row.rejectionReason, String(row.rejectionCount || 0)];
     }
     if (sheetId === 'rsa') {
-        return [row.owner, row.customerName, row.uploaderName, row.reviewerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt];
+        return [row.owner, row.customerName, row.uploaderName, row.reviewerName, row.accountNumber, row.tenor, row.houseType, row.houseNumber, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt];
     }
     if (sheetId === 'payment') {
         return [row.owner, row.customerName, row.uploaderName, row.rsaOfficerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt];
@@ -302,10 +319,10 @@ function getStageSheetConfig(stageId = '') {
         return {
             id: 'rsa',
             title: 'RSA Report',
-            excelHeaders: ['Customer Name', 'Uploader Name', 'Reviewer Name', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time'],
-            previewHeaders: ['Customer', 'Uploader', 'Reviewer', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned'],
-            columns: [{ width: 28 }, { width: 24 }, { width: 24 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }],
-            decimalColumns: [4, 5, 6],
+            excelHeaders: ['Customer Name', 'Uploader Name', 'Reviewer Name', 'Account Number', 'Tenor', 'House Type', 'House Number', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time'],
+            previewHeaders: ['Customer', 'Uploader', 'Reviewer', 'Account No', 'Tenor', 'House Type', 'House No', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned'],
+            columns: [{ width: 28 }, { width: 24 }, { width: 24 }, { width: 18 }, { width: 12 }, { width: 28 }, { width: 18 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }],
+            decimalColumns: [8, 9, 10],
             integerColumns: []
         };
     }
@@ -423,7 +440,7 @@ export function renderDashboardStageReport(report, refs = {}) {
         const displayRows = report.rows.map((row) => buildDashboardTableValues(report.stageId, row));
         detailsBodyEl.innerHTML = displayRows.length
             ? displayRows.map((values) => `<tr>${values.map((value) => `<td>${String(value ?? '-')}</td>`).join('')}</tr>`).join('')
-            : `<tr><td colspan="${displayRows[0]?.length || (report.stageId === 'uploader' || report.stageId === 'reviewer' ? 10 : 9)}" class="no-data">No records found for the selected date range.</td></tr>`;
+            : `<tr><td colspan="${displayRows[0]?.length || (report.stageId === 'rsa' ? 13 : (report.stageId === 'uploader' || report.stageId === 'reviewer' ? 10 : 9))}" class="no-data">No records found for the selected date range.</td></tr>`;
     }
 }
 

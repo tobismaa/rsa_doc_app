@@ -127,7 +127,9 @@ const DEFAULT_HOUSE_NUMBER_RULES = {
   '3 BEDROOM SEMI DETACHED BUNGALOW': { mode: 'block_100', startPrefix: 'M', startNumber: 60 },
   '4 BEDROOM DETACHED BUNGALOW': { mode: 'block_100', startPrefix: 'N', startNumber: 71 },
   '4 BEDROOM DETACHED LUXURY BUNGALOW': { mode: 'block_100', startPrefix: 'P', startNumber: 26 },
-  '4 BEDROOM TERRACE DUPLEX': { mode: 'house_infinite', startNumber: 20 }
+  '4 BEDROOM TERRACE DUPLEX': { mode: 'house_infinite', startNumber: 20 },
+  '5 BEDROOM TERRACE DUPLEX': { mode: 'house_block_100', startPrefix: 'B', startNumber: 6 },
+  '6 BEDROOM TERRACE DUPLEX': { mode: 'house_block_100', startPrefix: 'A', startNumber: 12 }
 };
 
 const DEFAULT_BULK_IMPORT_COLUMNS = [
@@ -186,6 +188,27 @@ function parseStringArray(value, fallback = []) {
 
 function parseObject(value, fallback = {}) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
+function normalizeHouseNumberRules(value, fallback = {}) {
+  const base = parseObject(fallback, {});
+  const source = parseObject(value, {});
+  const merged = Object.keys(source).length ? { ...base, ...source } : base;
+  return Object.fromEntries(
+    Object.entries(merged)
+      .map(([propertyType, rule]) => {
+        const name = parseText(propertyType, '');
+        if (!name || !rule || typeof rule !== 'object' || Array.isArray(rule)) return null;
+        return [name, {
+          mode: parseText(rule.mode, 'alpha_suffix'),
+          prefix: parseText(rule.prefix, ''),
+          startNumber: parseNumber(rule.startNumber, 0),
+          startLetter: parseText(rule.startLetter, ''),
+          startPrefix: parseText(rule.startPrefix, '')
+        }];
+      })
+      .filter(Boolean)
+  );
 }
 
 function normalizeDocumentRequirementRoles(value, fallback = {}) {
@@ -350,7 +373,7 @@ export function getDefaultSystemSettings() {
       retentionDays: 30
     },
     propertyRules,
-    houseNumberRules: parseObject(DEFAULT_HOUSE_NUMBER_RULES, {})
+    houseNumberRules: normalizeHouseNumberRules(DEFAULT_HOUSE_NUMBER_RULES, {})
   };
 }
 
@@ -444,7 +467,7 @@ function normalizeSystemSettings(data = {}) {
       retentionDays: Math.max(1, parseNumber(data?.auditControls?.retentionDays, defaults.auditControls.retentionDays))
     },
     propertyRules: normalizePropertyRules(data.propertyRules, defaults.propertyRules),
-    houseNumberRules: parseObject(data.houseNumberRules, defaults.houseNumberRules)
+    houseNumberRules: normalizeHouseNumberRules(data.houseNumberRules, defaults.houseNumberRules)
   };
 }
 

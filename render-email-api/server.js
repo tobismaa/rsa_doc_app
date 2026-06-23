@@ -44,6 +44,8 @@ const EMAILJS_PRIVATE_KEY = String(process.env.EMAILJS_PRIVATE_KEY || '').trim()
 const EMAILJS_ATTACHMENT_PARAM = String(process.env.EMAILJS_ATTACHMENT_PARAM || 'report_attachment').trim() || 'report_attachment';
 const EMAILJS_ATTACHMENT_FILENAME_PARAM = String(process.env.EMAILJS_ATTACHMENT_FILENAME_PARAM || 'report_attachment_filename').trim() || 'report_attachment_filename';
 const ENABLE_SCHEDULED_REPORT_SENDER = String(process.env.ENABLE_SCHEDULED_REPORT_SENDER || 'true').toLowerCase() !== 'false';
+const PAYSTACK_SECRET_KEY = String(process.env.PAYSTACK_SECRET_KEY || '').trim();
+let paystackBanksCache = { fetchedAt: 0, banks: [] };
 
 function initFirebaseAdmin() {
     if (admin.apps.length > 0) return;
@@ -469,6 +471,102 @@ app.get('/api/server-time', (_req, res) => {
         lagosDateTime: lagosDateTimeFormatter.format(now),
         lagosDateKey: lagosDateKeyFormatter.format(now)
     });
+});
+
+async function fetchPaystackJson(url, options = {}) {
+    if (!PAYSTACK_SECRET_KEY) {
+        const error = new Error('Paystack is not configured on this service');
+        error.statusCode = 503;
+        throw error;
+    }
+    const response = await fetch(url, {
+        ...options,
+        headers: {
+            Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+            ...(options.headers || {})
+        }
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.status === false) {
+        const error = new Error(String(data.message || `Paystack returned ${response.status}`));
+        error.statusCode = response.ok ? 400 : response.status;
+        throw error;
+    }
+    return data;
+}
+
+async function fetchPaystackBankList() {
+    const headers = PAYSTACK_SECRET_KEY
+        ? { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
+        : {};
+    const response = await fetch('https://api.paystack.co/bank?country=nigeria&currency=NGN', { headers });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.status === false) {
+        const error = new Error(String(data.message || `Paystack returned ${response.status}`));
+        error.statusCode = response.ok ? 400 : response.status;
+        throw error;
+    }
+    return data;
+}
+
+app.get('/api/paystack/banks', authMiddleware, async (_req, res) => {
+    try {
+        const now = Date.now();
+        if (paystackBanksCache.banks.length && now - paystackBanksCache.fetchedAt < 24 * 60 * 60 * 1000) {
+            return res.json({ ok: true, banks: paystackBanksCache.banks });
+        }
+
+        const data = await fetchPaystackBankList();
+        const banks = Array.isArray(data.data)
+            ? data.data
+                .filter((bank) => bank && bank.active !== false && bank.is_deleted !== true && bank.code && bank.name)
+                .map((bank) => ({
+                    name: String(bank.name || '').trim(),
+                    code: String(bank.code || '').trim(),
+                    slug: String(bank.slug || '').trim()
+                }))
+                .filter((bank) => bank.name && bank.code)
+                .sort((a, b) => a.name.localeCompare(b.name))
+            : [];
+        paystackBanksCache = { fetchedAt: now, banks };
+        return res.json({ ok: true, banks });
+    } catch (err) {
+        return res.status(err.statusCode || 500).json({
+            ok: false,
+            error: String(err?.message || 'Failed to fetch banks')
+        });
+    }
+});
+
+app.post('/api/paystack/resolve-account', authMiddleware, async (req, res) => {
+    try {
+        const accountNumber = String(req.body?.accountNumber || '').replace(/\D/g, '');
+        const bankCode = String(req.body?.bankCode || '').trim();
+        if (!/^\d{10}$/.test(accountNumber)) {
+            return res.status(400).json({ ok: false, error: 'Account number must be exactly 10 digits' });
+        }
+        if (!bankCode) {
+            return res.status(400).json({ ok: false, error: 'Bank is required' });
+        }
+
+        const url = `https://api.paystack.co/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`;
+        const data = await fetchPaystackJson(url);
+        const accountName = String(data?.data?.account_name || '').trim();
+        if (!accountName) {
+            return res.status(404).json({ ok: false, error: 'Could not resolve account name' });
+        }
+        return res.json({
+            ok: true,
+            accountNumber: String(data?.data?.account_number || accountNumber).trim(),
+            accountName,
+            bankId: data?.data?.bank_id || null
+        });
+    } catch (err) {
+        return res.status(err.statusCode || 500).json({
+            ok: false,
+            error: String(err?.message || 'Failed to resolve account')
+        });
+    }
 });
 
 function isEmailJsConfigured() {

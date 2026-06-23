@@ -4,6 +4,7 @@ import { BackblazeStorage } from './backblaze-storage.js';
 import { queueViewerAssignmentEmail } from './email-alerts.js';
 import { notifyStatusChangePush } from './status-push.js';
 import { notifyAdminPushEvent } from './push-alerts.js';
+import { EMAIL_API_BASE_URL } from './email-api-config.js';
 import { formatAppDateTime, getTrustedDateKey, getTrustedNowIso } from './shared/app-time.js';
 import {
   getCurrentUserProfile as getCurrentUserProfileShared,
@@ -167,6 +168,42 @@ let MAX_PDF_SIZE_BYTES = 1.5 * 1024 * 1024; // 1.5MB
 const userFullNames = new Map();
 let customerDetailsSaved = false;
 const RR_COUNTER_DOC = doc(db, 'counters', 'roundRobin');
+const FALLBACK_CUSTOMER_ACCOUNT_BANKS = [
+  { name: 'Access Bank', code: '044', slug: 'access-bank' },
+  { name: 'Access Bank (Diamond)', code: '063', slug: 'access-bank-diamond' },
+  { name: 'ALAT by WEMA', code: '035A', slug: 'alat-by-wema' },
+  { name: 'Citibank Nigeria', code: '023', slug: 'citibank-nigeria' },
+  { name: 'Coop Savings and Loans / Cooperative Mortgage Bank', code: '90089', slug: 'cooperative-mortgage-bank-ng' },
+  { name: 'Ecobank Nigeria', code: '050', slug: 'ecobank-nigeria' },
+  { name: 'Fidelity Bank', code: '070', slug: 'fidelity-bank' },
+  { name: 'First Bank of Nigeria', code: '011', slug: 'first-bank-of-nigeria' },
+  { name: 'First City Monument Bank', code: '214', slug: 'first-city-monument-bank' },
+  { name: 'Globus Bank', code: '00103', slug: 'globus-bank' },
+  { name: 'Guaranty Trust Bank', code: '058', slug: 'guaranty-trust-bank' },
+  { name: 'Keystone Bank', code: '082', slug: 'keystone-bank' },
+  { name: 'Kuda Bank', code: '50211', slug: 'kuda-bank' },
+  { name: 'Lotus Bank', code: '303', slug: 'lotus-bank' },
+  { name: 'Moniepoint MFB', code: '50515', slug: 'moniepoint-mfb-ng' },
+  { name: 'OPay Digital Services Limited (OPay)', code: '999992', slug: 'paycom' },
+  { name: 'Optimus Bank Limited', code: '107', slug: 'optimus-bank-ltd' },
+  { name: 'PalmPay', code: '999991', slug: 'palmpay' },
+  { name: 'Parallex Bank', code: '104', slug: 'parallex-bank' },
+  { name: 'Polaris Bank', code: '076', slug: 'polaris-bank' },
+  { name: 'PremiumTrust Bank', code: '105', slug: 'premiumtrust-bank-ng' },
+  { name: 'Providus Bank', code: '101', slug: 'providus-bank' },
+  { name: 'Rubies MFB', code: '125', slug: 'rubies-mfb' },
+  { name: 'Stanbic IBTC Bank', code: '221', slug: 'stanbic-ibtc-bank' },
+  { name: 'Standard Chartered Bank', code: '068', slug: 'standard-chartered-bank' },
+  { name: 'Sterling Bank', code: '232', slug: 'sterling-bank' },
+  { name: 'Suntrust Bank', code: '100', slug: 'suntrust-bank' },
+  { name: 'Titan Bank', code: '102', slug: 'titan-bank' },
+  { name: 'Union Bank of Nigeria', code: '032', slug: 'union-bank-of-nigeria' },
+  { name: 'United Bank For Africa', code: '033', slug: 'united-bank-for-africa' },
+  { name: 'Unity Bank', code: '215', slug: 'unity-bank' },
+  { name: 'VFD Microfinance Bank Limited', code: '566', slug: 'vfd' },
+  { name: 'Wema Bank', code: '035', slug: 'wema-bank' },
+  { name: 'Zenith Bank', code: '057', slug: 'zenith-bank' }
+];
 function formatUploadLimitLabel(bytes) {
   const mb = Number(bytes || 0) / (1024 * 1024);
   if (!Number.isFinite(mb) || mb <= 0) return '0 MB';
@@ -219,6 +256,162 @@ async function populateAgentBankOptions({ force = false } = {}) {
   if (currentValue && bankOptions.some((bank) => bank.name === currentValue)) {
     agentAccountBankSelect.value = currentValue;
   }
+}
+
+function getBackendApiBaseUrl() {
+  const runtime = String(window.__EMAIL_API_BASE_URL__ || '').trim();
+  const configured = runtime || String(EMAIL_API_BASE_URL || '').trim();
+  if (!configured || configured.includes('YOUR-RENDER-URL')) return '';
+  return configured.replace(/\/+$/, '');
+}
+
+function setAccountLookupStatus(message = '', type = 'info') {
+  if (!accountLookupStatus) return;
+  const text = String(message || '').trim();
+  accountLookupStatus.textContent = text;
+  accountLookupStatus.style.display = text ? 'block' : 'none';
+  const colors = {
+    error: '#dc2626',
+    success: '#15803d',
+    info: '#64748b'
+  };
+  accountLookupStatus.style.color = colors[type] || colors.info;
+  if (accountNoInput) {
+    accountNoInput.style.borderColor = type === 'error' ? '#dc2626' : '';
+    accountNoInput.style.boxShadow = type === 'error' ? '0 0 0 3px rgba(220, 38, 38, 0.12)' : '';
+  }
+  if (accountBankSelect) {
+    accountBankSelect.style.borderColor = type === 'error' ? '#dc2626' : '';
+    accountBankSelect.style.boxShadow = type === 'error' ? '0 0 0 3px rgba(220, 38, 38, 0.12)' : '';
+  }
+}
+
+function clearVerifiedAccountLookup() {
+  verifiedAccountLookup = { accountNumber: '', bankCode: '', accountName: '' };
+  if (accountNameInput) accountNameInput.value = '';
+}
+
+function getSelectedAccountBank() {
+  const code = String(accountBankSelect?.value || '').trim();
+  const option = accountBankSelect?.selectedOptions?.[0] || null;
+  const name = String(option?.dataset?.name || option?.textContent || '').trim();
+  return { code, name };
+}
+
+function getCustomerAccountBankLabel(bank = {}) {
+  const code = String(bank.code || '').trim();
+  const slug = String(bank.slug || '').trim();
+  if (code === '90089' || slug === 'cooperative-mortgage-bank-ng') {
+    return 'Coop Savings and Loans / Cooperative Mortgage Bank';
+  }
+  return String(bank.name || '').trim();
+}
+
+function renderCustomerAccountBankOptions(banks = [], currentCode = '') {
+  if (!accountBankSelect) return;
+  const options = Array.isArray(banks) ? banks : [];
+  accountBankSelect.innerHTML = '<option value="">Select Bank</option>' + options.map((bank) => (
+    `<option value="${escapeHtml(bank.code)}" data-name="${escapeHtml(getCustomerAccountBankLabel(bank))}">${escapeHtml(getCustomerAccountBankLabel(bank))}</option>`
+  )).join('');
+  if (currentCode && options.some((bank) => bank.code === currentCode)) {
+    accountBankSelect.value = currentCode;
+  }
+}
+
+async function backendFetchJson(path, options = {}) {
+  const baseUrl = getBackendApiBaseUrl();
+  if (!baseUrl) throw new Error('Account lookup service is not configured');
+  const idToken = await auth.currentUser?.getIdToken?.();
+  if (!idToken) throw new Error('Please sign in again to verify account details');
+  const response = await fetch(`${baseUrl}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+      ...(options.headers || {})
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok === false) {
+    if (response.status === 404 && String(path || '').startsWith('/api/paystack/')) {
+      throw new Error('Account lookup endpoint is not deployed on the backend yet.');
+    }
+    throw new Error(String(data.error || data.message || `Request failed with ${response.status}`));
+  }
+  return data;
+}
+
+async function populateCustomerAccountBankOptions() {
+  if (!accountBankSelect) return;
+  const currentCode = String(accountBankSelect.value || '').trim();
+  try {
+    const data = await backendFetchJson('/api/paystack/banks');
+    accountLookupBanks = Array.isArray(data.banks) ? data.banks : [];
+    if (!accountLookupBanks.length) {
+      accountLookupBanks = [...FALLBACK_CUSTOMER_ACCOUNT_BANKS];
+      setAccountLookupStatus('Using saved bank list. Account name verification still needs Paystack.', 'info');
+    } else {
+      setAccountLookupStatus('', 'info');
+    }
+    renderCustomerAccountBankOptions(accountLookupBanks, currentCode);
+  } catch (error) {
+    accountLookupBanks = [...FALLBACK_CUSTOMER_ACCOUNT_BANKS];
+    renderCustomerAccountBankOptions(accountLookupBanks, currentCode);
+    setAccountLookupStatus(
+      `${error.message || 'Bank list unavailable'} Using saved bank list for now.`,
+      'error'
+    );
+  }
+}
+
+async function resolveCustomerAccountName({ silent = false } = {}) {
+  const sequence = ++accountLookupSequence;
+  const accountNumber = String(accountNoInput?.value || '').replace(/\D/g, '');
+  const bank = getSelectedAccountBank();
+  clearVerifiedAccountLookup();
+
+  if (!accountNumber && !bank.code) {
+    setAccountLookupStatus('', 'info');
+    return true;
+  }
+  if (accountNumber && accountNumber.length !== 10) {
+    setAccountLookupStatus('Enter a valid 10-digit account number.', 'error');
+    return false;
+  }
+  if (accountNumber.length === 10 && !bank.code) {
+    setAccountLookupStatus('Select account bank to verify account name.', 'error');
+    return false;
+  }
+  if (accountNumber.length !== 10 || !bank.code) return true;
+
+  if (!silent) setAccountLookupStatus('Verifying account name...', 'info');
+  try {
+    const data = await backendFetchJson('/api/paystack/resolve-account', {
+      method: 'POST',
+      body: JSON.stringify({ accountNumber, bankCode: bank.code })
+    });
+    if (sequence !== accountLookupSequence) return true;
+    const accountName = String(data.accountName || '').trim();
+    verifiedAccountLookup = { accountNumber, bankCode: bank.code, accountName };
+    if (accountNameInput) accountNameInput.value = accountName;
+    if (customerNameInput && !String(customerNameInput.value || '').trim()) {
+      customerNameInput.value = accountName;
+      updateSubmitButton();
+    }
+    setAccountLookupStatus(accountName ? `Verified: ${accountName}` : 'Account verified.', 'success');
+    return true;
+  } catch (error) {
+    if (sequence !== accountLookupSequence) return true;
+    setAccountLookupStatus(error.message || 'Could not verify account name.', 'error');
+    return false;
+  }
+}
+
+function scheduleCustomerAccountLookup() {
+  if (accountLookupDebounce) window.clearTimeout(accountLookupDebounce);
+  accountLookupDebounce = window.setTimeout(() => {
+    void resolveCustomerAccountName();
+  }, 500);
 }
 
 function applyDocumentRequirements(documentRequirements = []) {
@@ -814,6 +1007,12 @@ const batchUploadBtn = document.getElementById('batchUploadBtn');
 const batchFileInput = document.getElementById('batchFileInput');
 const saveDetailsBtn = document.getElementById('saveDetailsBtn');
 const resetDetailsBtn = document.getElementById('resetDetailsBtn');
+const accountNoInput = document.getElementById('accountNo');
+const accountBankSelect = document.getElementById('accountBank');
+const accountNameInput = document.getElementById('accountName');
+const accountLookupStatus = document.getElementById('accountLookupStatus');
+const penNoInput = document.getElementById('penNo');
+const penNoError = document.getElementById('penNoError');
 const batchMappingModal = document.getElementById('batchMappingModal');
 const batchMappingList = document.getElementById('batchMappingList');
 const closeBatchMappingBtn = document.getElementById('closeBatchMappingBtn');
@@ -928,12 +1127,59 @@ function getSubmissionCustomerNin(submission) {
   return normalizeDigitsOnly(submission?.customerDetails?.nin || submission?.customerNIN || submission?.nin || '');
 }
 
+function normalizePenNumber(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
 function getSubmissionCustomerPenNo(submission) {
-  return String(submission?.customerDetails?.penNo || submission?.penNo || '').trim().toLowerCase();
+  return normalizePenNumber(submission?.customerDetails?.penNoNormalized || submission?.penNoNormalized || submission?.customerDetails?.penNo || submission?.penNo || '');
+}
+
+function getPenNumberQueryVariants(penNo = '') {
+  const raw = String(penNo || '').trim();
+  const normalized = normalizePenNumber(raw);
+  return Array.from(new Set([
+    raw,
+    raw.toUpperCase(),
+    raw.toLowerCase(),
+    normalized,
+    normalized.toUpperCase()
+  ].filter(Boolean))).slice(0, 10);
 }
 
 function isCurrentEditableSubmission(submissionId) {
   return Boolean(submissionId) && (submissionId === currentDraftId || submissionId === currentEditId);
+}
+
+async function findExistingPenNumberSubmissions({ penNo = '', excludeSubmissionId = '' } = {}) {
+  const normalizedPenNo = normalizePenNumber(penNo);
+  if (!normalizedPenNo) return [];
+
+  const variants = getPenNumberQueryVariants(penNo);
+  const matches = new Map();
+  const addSnapshotMatches = (snapshot) => {
+    snapshot.forEach((docSnap) => {
+      if (excludeSubmissionId && docSnap.id === excludeSubmissionId) return;
+      const submission = { id: docSnap.id, ...(docSnap.data() || {}) };
+      if (getSubmissionCustomerPenNo(submission) === normalizedPenNo) {
+        matches.set(docSnap.id, submission);
+      }
+    });
+  };
+
+  const queries = [
+    query(collection(db, 'submissions'), where('customerDetails.penNo', 'in', variants)),
+    query(collection(db, 'submissions'), where('penNo', 'in', variants)),
+    query(collection(db, 'submissions'), where('customerDetails.penNoNormalized', '==', normalizedPenNo)),
+    query(collection(db, 'submissions'), where('penNoNormalized', '==', normalizedPenNo))
+  ];
+
+  try {
+    const snapshots = await Promise.all(queries.map((q) => getDocs(q).catch(() => null)));
+    snapshots.filter(Boolean).forEach(addSnapshotMatches);
+  } catch (_) {}
+
+  return Array.from(matches.values());
 }
 
 function findDuplicateCustomerContacts({ email = '', phone = '', accountNo = '', nin = '', penNo = '', excludeSubmissionId = '' } = {}) {
@@ -941,7 +1187,7 @@ function findDuplicateCustomerContacts({ email = '', phone = '', accountNo = '',
   const normalizedPhone = normalizeCustomerPhone(phone);
   const normalizedAccountNo = normalizeDigitsOnly(accountNo);
   const normalizedNin = normalizeDigitsOnly(nin);
-  const normalizedPenNo = String(penNo || '').trim().toLowerCase();
+  const normalizedPenNo = normalizePenNumber(penNo);
   return allSubmissions.filter((submission) => {
     if (excludeSubmissionId && submission.id === excludeSubmissionId) return false;
     if (isCurrentEditableSubmission(submission.id) && submission.id === excludeSubmissionId) return false;
@@ -959,7 +1205,7 @@ function formatDuplicateCustomerSummary(submission, { email = '', phone = '', ac
   const phoneMatch = normalizeCustomerPhone(phone) && getSubmissionCustomerPhone(submission) === normalizeCustomerPhone(phone);
   const accountMatch = normalizeDigitsOnly(accountNo) && getSubmissionCustomerAccountNo(submission) === normalizeDigitsOnly(accountNo);
   const ninMatch = normalizeDigitsOnly(nin) && getSubmissionCustomerNin(submission) === normalizeDigitsOnly(nin);
-  const penMatch = String(penNo || '').trim().toLowerCase() && getSubmissionCustomerPenNo(submission) === String(penNo || '').trim().toLowerCase();
+  const penMatch = normalizePenNumber(penNo) && getSubmissionCustomerPenNo(submission) === normalizePenNumber(penNo);
   const reasons = [];
   if (emailMatch) reasons.push('email');
   if (phoneMatch) reasons.push('phone');
@@ -972,7 +1218,9 @@ function formatDuplicateCustomerSummary(submission, { email = '', phone = '', ac
 }
 
 async function validateCustomerDuplicateContact({ email = '', phone = '', accountNo = '', nin = '', penNo = '', excludeSubmissionId = '' } = {}) {
-  const existingMatches = findDuplicateCustomerContacts({ email, phone, accountNo, nin, penNo, excludeSubmissionId });
+  const localMatches = findDuplicateCustomerContacts({ email, phone, accountNo, nin, penNo, excludeSubmissionId });
+  const remotePenMatches = await findExistingPenNumberSubmissions({ penNo, excludeSubmissionId });
+  const existingMatches = Array.from(new Map([...localMatches, ...remotePenMatches].map((submission) => [submission.id, submission])).values());
   if (!existingMatches.length) return null;
 
   const reasons = [];
@@ -980,12 +1228,79 @@ async function validateCustomerDuplicateContact({ email = '', phone = '', accoun
   if (normalizeCustomerPhone(phone) && existingMatches.some((submission) => getSubmissionCustomerPhone(submission) === normalizeCustomerPhone(phone))) reasons.push('phone number');
   if (normalizeDigitsOnly(accountNo) && existingMatches.some((submission) => getSubmissionCustomerAccountNo(submission) === normalizeDigitsOnly(accountNo))) reasons.push('account number');
   if (normalizeDigitsOnly(nin) && existingMatches.some((submission) => getSubmissionCustomerNin(submission) === normalizeDigitsOnly(nin))) reasons.push('NIN');
-  if (String(penNo || '').trim().toLowerCase() && existingMatches.some((submission) => getSubmissionCustomerPenNo(submission) === String(penNo || '').trim().toLowerCase())) reasons.push('PEN number');
+  if (normalizePenNumber(penNo) && existingMatches.some((submission) => getSubmissionCustomerPenNo(submission) === normalizePenNumber(penNo))) reasons.push('PEN number');
   const duplicateLines = existingMatches.map((submission) => formatDuplicateCustomerSummary(submission, { email, phone, accountNo, nin, penNo }));
   return {
     submissions: existingMatches,
     message: `Duplicate customer details found for this ${reasons.join(' and ')}.\n\nExisting matching record(s):\n${duplicateLines.join('\n')}`
   };
+}
+
+function clearPenNoError() {
+  if (penNoError) {
+    penNoError.textContent = '';
+    penNoError.style.display = 'none';
+  }
+  if (penNoInput) {
+    penNoInput.style.borderColor = '';
+    penNoInput.style.boxShadow = '';
+    penNoInput.removeAttribute('aria-invalid');
+  }
+}
+
+function showPenNoError(message = 'PEN No already existed.') {
+  if (penNoError) {
+    penNoError.textContent = message;
+    penNoError.style.display = 'block';
+  }
+  if (penNoInput) {
+    penNoInput.style.borderColor = '#dc2626';
+    penNoInput.style.boxShadow = '0 0 0 3px rgba(220, 38, 38, 0.12)';
+    penNoInput.setAttribute('aria-invalid', 'true');
+  }
+}
+
+function getDuplicateCustomerDisplayName(duplicate) {
+  const submission = duplicate?.submissions?.[0] || {};
+  return String(submission?.customerName || submission?.customerDetails?.name || '').trim();
+}
+
+function formatPenNoDuplicateMessage(duplicate) {
+  const customerName = getDuplicateCustomerDisplayName(duplicate);
+  return customerName ? `PEN No already existed.\n"${customerName}"` : 'PEN No already existed.';
+}
+
+async function validatePenNumberAvailable(penNo = '', excludeSubmissionId = '', options = {}) {
+  const { inline = false, notify = true } = options || {};
+  const duplicate = await validateCustomerDuplicateContact({ penNo, excludeSubmissionId });
+  if (!duplicate) {
+    if (inline) clearPenNoError();
+    return true;
+  }
+  if (inline) {
+    showPenNoError(formatPenNoDuplicateMessage(duplicate));
+  } else if (notify) {
+    showNotification(duplicate.message, 'error');
+  }
+  return false;
+}
+
+async function validatePenNoFieldInline() {
+  const currentSequence = ++penNoValidationSequence;
+  const penNo = penNoInput?.value?.trim() || '';
+  if (!penNo) {
+    clearPenNoError();
+    return true;
+  }
+  const excludeSubmissionId = currentEditId || currentDraftId || '';
+  const duplicate = await validateCustomerDuplicateContact({ penNo, excludeSubmissionId });
+  if (currentSequence !== penNoValidationSequence) return true;
+  if (duplicate) {
+    showPenNoError(formatPenNoDuplicateMessage(duplicate));
+    return false;
+  }
+  clearPenNoError();
+  return true;
 }
 
 function collectDraftableCustomerDetails() {
@@ -999,11 +1314,15 @@ function collectDraftableCustomerDetails() {
     nin: String(getFormValue('customerNIN')).trim(),
     address: String(getFormValue('customerAddress')).trim(),
     accountNo: String(getFormValue('accountNo')).trim(),
+    accountBank: getSelectedAccountBank().name,
+    accountBankCode: getSelectedAccountBank().code,
+    accountName: String(getFormValue('accountName')).trim(),
     employer: String(getFormValue('employer')).trim(),
     originatingTP: String(getFormValue('originatingTP')).trim() || String(currentUserProfile?.location || '').trim(),
     mortgageLoanApplicationFormDate: getFormValue('mortgageLoanApplicationFormDate'),
     pfa: String(getFormValue('pfa')).trim(),
     penNo: String(getFormValue('penNo')).trim(),
+    penNoNormalized: normalizePenNumber(getFormValue('penNo')),
     rsaStatementDate: getFormValue('rsaStatementDate'),
     rsaBalance: getFormValue('rsaBalance'),
     rsa25: getFormValue('rsa25Percent'),
@@ -1254,6 +1573,8 @@ function applyDraftFormValues(sub) {
     { id: 'customerNIN', keys: ['nin', 'customerNIN'] },
     { id: 'customerAddress', keys: ['address', 'customerAddress'] },
     { id: 'accountNo', keys: ['accountNo'] },
+    { id: 'accountBank', keys: ['accountBankCode', 'bankCode'] },
+    { id: 'accountName', keys: ['accountName'] },
     { id: 'employer', keys: ['employer'] },
     { id: 'originatingTP', keys: ['originatingTP'], fallback: String(currentUserProfile?.location || '').trim() },
     { id: 'mortgageLoanApplicationFormDate', keys: ['mortgageLoanApplicationFormDate'] },
@@ -1273,8 +1594,24 @@ function applyDraftFormValues(sub) {
     const el = document.getElementById(field.id);
     if (!el) return;
     const rawValue = pick(field.keys, field.fallback || '');
-    el.value = field.id === 'loanAmount' ? normalizeLoanAmountValue(rawValue) : rawValue;
+    if (field.id === 'loanAmount') {
+      el.value = normalizeLoanAmountValue(rawValue);
+    } else if (field.id === 'accountBank') {
+      const bankName = pick(['accountBank', 'bankName'], '');
+      const bank = accountLookupBanks.find((item) => item.code === rawValue || item.name === bankName);
+      el.value = bank?.code || rawValue;
+    } else {
+      el.value = rawValue;
+    }
   });
+  if (accountNoInput && accountBankSelect?.value && accountNameInput?.value) {
+    verifiedAccountLookup = {
+      accountNumber: String(accountNoInput.value || '').replace(/\D/g, ''),
+      bankCode: String(accountBankSelect.value || '').trim(),
+      accountName: String(accountNameInput.value || '').trim()
+    };
+    setAccountLookupStatus(`Verified: ${verifiedAccountLookup.accountName}`, 'success');
+  }
 
   const rsa25Value = pick(['rsa25', 'rsa25Percent'], '');
   const rsa25PercentEl = document.getElementById('rsa25Percent');
@@ -1329,6 +1666,7 @@ async function persistCurrentDraft({ silent = false, source = 'manual' } = {}) {
     documents,
     documentTypes,
     houseNumber: storedCustomerDetails.houseNumber || '',
+    penNoNormalized: normalizePenNumber(storedCustomerDetails.penNo),
     agentId: agentPayload.agentId,
     agentName: agentPayload.agentName,
     agentContactNumber: agentPayload.agentContactNumber,
@@ -1601,6 +1939,7 @@ document.addEventListener('DOMContentLoaded', () => {
       await applyUploadSystemSettings();
       await applyWorkflowSystemSettings({ force: true });
       await populateAgentBankOptions({ force: true });
+      await populateCustomerAccountBankOptions();
       syncUploadRequirementUi();
       await loadRegisteredAgents();
       await loadApprovedAgents();
@@ -1636,10 +1975,21 @@ const DEFAULT_HOUSE_NUMBER_RULES = {
   '3 BEDROOM SEMI DETACHED BUNGALOW': { mode: 'block_100', startPrefix: 'M', startNumber: 60 },
   '4 BEDROOM DETACHED BUNGALOW': { mode: 'block_100', startPrefix: 'N', startNumber: 71 },
   '4 BEDROOM DETACHED LUXURY BUNGALOW': { mode: 'block_100', startPrefix: 'P', startNumber: 26 },
-  '4 BEDROOM TERRACE DUPLEX': { mode: 'house_infinite', startNumber: 20 }
+  '4 BEDROOM TERRACE DUPLEX': { mode: 'house_infinite', startNumber: 20 },
+  '5 BEDROOM TERRACE DUPLEX': { mode: 'house_block_100', startPrefix: 'B', startNumber: 6 },
+  '6 BEDROOM TERRACE DUPLEX': { mode: 'house_block_100', startPrefix: 'A', startNumber: 12 }
 };
 let PROPERTY_RULES = [...DEFAULT_PROPERTY_RULES];
 let HOUSE_NUMBER_RULES = { ...DEFAULT_HOUSE_NUMBER_RULES };
+let penNoValidationSequence = 0;
+let accountLookupSequence = 0;
+let accountLookupDebounce = null;
+let accountLookupBanks = [];
+let verifiedAccountLookup = {
+  accountNumber: '',
+  bankCode: '',
+  accountName: ''
+};
 
 const HOUSE_COUNTER_COLLECTION = 'houseNumberCounters';
 const HOUSE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -1653,7 +2003,11 @@ function determinePropertyByRsa(rsaAmount) {
 }
 
 function getHouseNumberRule(propertyType) {
-  return HOUSE_NUMBER_RULES[String(propertyType || '').trim()] || null;
+  const normalizedType = String(propertyType || '').trim();
+  if (!normalizedType) return null;
+  if (HOUSE_NUMBER_RULES[normalizedType]) return HOUSE_NUMBER_RULES[normalizedType];
+  const matchedKey = Object.keys(HOUSE_NUMBER_RULES).find((key) => key.toLowerCase() === normalizedType.toLowerCase());
+  return matchedKey ? HOUSE_NUMBER_RULES[matchedKey] : null;
 }
 
 function houseCounterDocId(propertyType) {
@@ -1720,6 +2074,17 @@ function formatGeneratedHouseNumber(rule, index) {
     return `House ${Number(rule.startNumber) + safeIndex}`;
   }
 
+  if (rule.mode === 'house_block_100') {
+    const firstSpan = 101 - Number(rule.startNumber);
+    if (safeIndex < firstSpan) {
+      return `House ${rule.startPrefix}${Number(rule.startNumber) + safeIndex}`;
+    }
+    const remainder = safeIndex - firstSpan;
+    const prefixOffset = Math.floor(remainder / 100) + 1;
+    const numberValue = (remainder % 100) + 1;
+    return `House ${indexToLetters(lettersToIndex(rule.startPrefix) + prefixOffset)}${numberValue}`;
+  }
+
   return '';
 }
 
@@ -1745,19 +2110,24 @@ async function reserveHouseNumber(propertyType) {
   if (!rule || !counterId) return '';
 
   const counterRef = doc(db, HOUSE_COUNTER_COLLECTION, counterId);
-  return runTransaction(db, async (transaction) => {
-    const counterSnap = await transaction.get(counterRef);
-    const lastIndex = counterSnap.exists() ? Number(counterSnap.data()?.lastIndex) : -1;
-    const nextIndex = Number.isFinite(lastIndex) ? lastIndex + 1 : 0;
-    const houseNumber = formatGeneratedHouseNumber(rule, nextIndex);
-    transaction.set(counterRef, {
-      propertyType: normalizedPropertyType,
-      lastIndex: nextIndex,
-      lastHouseNumber: houseNumber,
-      updatedAt: serverTimestamp()
-    }, { merge: true });
-    return houseNumber;
-  });
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const counterSnap = await transaction.get(counterRef);
+      const lastIndex = counterSnap.exists() ? Number(counterSnap.data()?.lastIndex) : -1;
+      const nextIndex = Number.isFinite(lastIndex) ? lastIndex + 1 : 0;
+      const houseNumber = formatGeneratedHouseNumber(rule, nextIndex);
+      transaction.set(counterRef, {
+        propertyType: normalizedPropertyType,
+        lastIndex: nextIndex,
+        lastHouseNumber: houseNumber,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      return houseNumber;
+    });
+  } catch (error) {
+    console.warn('Failed to reserve house number', error);
+    return '';
+  }
 }
 
 async function refreshHouseNumberPreview(options = {}) {
@@ -1967,7 +2337,7 @@ async function saveCustomerDetails() {
   // Define requiredFields INSIDE the function
   const requiredFields = [
     'customerName', 'customerDob', 'customerEmail', 'customerPhone',
-    'customerNIN', 'customerAddress', 'accountNo', 'employer',
+    'customerNIN', 'customerAddress', 'accountNo', 'accountBank', 'employer',
     'originatingTP', 'mortgageLoanApplicationFormDate', 'pfa', 'penNo', 'rsaStatementDate', 'rsaBalance'
   ];
 
@@ -1993,6 +2363,16 @@ async function saveCustomerDetails() {
 
   if (invalidFields.length > 0) {
     showNotification('Invalid fields: ' + invalidFields.join(', '), 'error');
+    return false;
+  }
+
+  if (!(await resolveCustomerAccountName({ silent: false }))) {
+    return false;
+  }
+
+  const penNo = document.getElementById('penNo')?.value?.trim() || '';
+  const duplicateExcludeId = currentEditId || currentDraftId || '';
+  if (!(await validatePenNumberAvailable(penNo, duplicateExcludeId, { inline: true, notify: false }))) {
     return false;
   }
 
@@ -2078,7 +2458,7 @@ async function saveCustomerDetails() {
 function resetCustomerDetails() {
   const fields = [
     'customerName', 'customerDob', 'customerEmail', 'customerPhone',
-    'customerNIN', 'customerAddress', 'accountNo', 'employer',
+    'customerNIN', 'customerAddress', 'accountNo', 'accountBank', 'accountName', 'employer',
     'originatingTP', 'mortgageLoanApplicationFormDate', 'pfa', 'penNo', 'rsaStatementDate', 'rsaBalance',
     'propertyType', 'houseNumber', 'tenor'
   ];
@@ -2088,6 +2468,9 @@ function resetCustomerDetails() {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
+  clearPenNoError();
+  clearVerifiedAccountLookup();
+  setAccountLookupStatus('', 'info');
 
   syncOriginatingTpField();
 
@@ -2268,6 +2651,34 @@ function setupEventListeners() {
     });
   });
   if (customerNameInput) customerNameInput.addEventListener('input', updateSubmitButton);
+  if (accountNoInput) {
+    accountNoInput.addEventListener('input', () => {
+      const digits = String(accountNoInput.value || '').replace(/\D/g, '').slice(0, 10);
+      accountNoInput.value = digits;
+      clearVerifiedAccountLookup();
+      setAccountLookupStatus('', 'info');
+      scheduleCustomerAccountLookup();
+    });
+    accountNoInput.addEventListener('blur', () => {
+      void resolveCustomerAccountName();
+    });
+  }
+  if (accountBankSelect) {
+    accountBankSelect.addEventListener('change', () => {
+      clearVerifiedAccountLookup();
+      setAccountLookupStatus('', 'info');
+      void resolveCustomerAccountName();
+    });
+  }
+  if (penNoInput) {
+    penNoInput.addEventListener('input', () => {
+      penNoValidationSequence += 1;
+      clearPenNoError();
+    });
+    penNoInput.addEventListener('blur', () => {
+      void validatePenNoFieldInline();
+    });
+  }
   if (saveDetailsBtn) saveDetailsBtn.addEventListener('click', saveCustomerDetails);
   if (resetDetailsBtn) resetDetailsBtn.addEventListener('click', resetCustomerDetails);
   if (agentRegistrationForm) {
@@ -2454,7 +2865,7 @@ function openUploadModal() {
 
   const fieldsToClear = [
     'customerName', 'customerDob', 'customerEmail', 'customerPhone',
-    'customerNIN', 'customerAddress', 'accountNo', 'employer',
+    'customerNIN', 'customerAddress', 'accountNo', 'accountBank', 'accountName', 'employer',
     'originatingTP', 'mortgageLoanApplicationFormDate', 'pfa', 'penNo',
     'rsaStatementDate', 'rsaBalance', 'propertyType', 'propertyValue',
     'facilityFee', 'loanAmount', 'tenor'
@@ -3368,7 +3779,7 @@ function getMissingRequiredSubmissionFields() {
     { id: 'customerName', label: 'Customer Name' }, { id: 'customerDob', label: 'Date of Birth' },
     { id: 'customerEmail', label: 'Email' }, { id: 'customerPhone', label: 'Phone' },
     { id: 'customerNIN', label: 'NIN' }, { id: 'customerAddress', label: 'Address' },
-    { id: 'accountNo', label: 'Account Number' }, { id: 'employer', label: 'Employer' },
+    { id: 'accountNo', label: 'Account Number' }, { id: 'accountBank', label: 'Account Bank' }, { id: 'employer', label: 'Employer' },
     { id: 'originatingTP', label: 'Originating Transfer Pin' }, { id: 'mortgageLoanApplicationFormDate', label: 'Mortgage Loan Application Form Date' }, { id: 'pfa', label: 'PFA' },
     { id: 'penNo', label: 'PEN Number' }, { id: 'rsaStatementDate', label: 'RSA Statement Date' },
     { id: 'rsaBalance', label: 'RSA Balance' }, { id: 'propertyType', label: 'Property Type' },
@@ -3407,6 +3818,18 @@ async function submitCustomer() {
       submitCustomerBtn.disabled = false;
       syncUploadRequirementUi();
       return showNotification('All fields are compulsory. Missing or invalid: ' + missingFields.join(', '), 'error');
+    }
+    if (!(await resolveCustomerAccountName({ silent: false }))) {
+      submitCustomerBtn.disabled = false;
+      syncUploadRequirementUi();
+      return;
+    }
+    const penNo = document.getElementById('penNo')?.value?.trim() || '';
+    const duplicateExcludeId = currentEditId || currentDraftId || '';
+    if (!(await validatePenNumberAvailable(penNo, duplicateExcludeId, { inline: true, notify: false }))) {
+      submitCustomerBtn.disabled = false;
+      syncUploadRequirementUi();
+      return;
     }
     if (currentEditId) {
       const hasAnyDoc = Object.keys(currentCustomerUploads || {}).some(id => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0);
@@ -3453,6 +3876,7 @@ async function submitCustomer() {
         customerName, customerDetails, status: rsaRejectFlow ? 'processing_to_pfa' : 'pending', documents,
         documentTypes: getUploadedDocumentTypes(), reuploadedAt: serverTimestamp(),
         houseNumber: customerDetails.houseNumber || '',
+        penNoNormalized: normalizePenNumber(customerDetails.penNo),
         agentId: agentPayload.agentId,
         agentName: agentPayload.agentName,
         agentContactNumber: agentPayload.agentContactNumber,
@@ -3545,6 +3969,7 @@ async function submitCustomer() {
       documents,
       documentTypes: getUploadedDocumentTypes(),
       houseNumber: allocatedHouseNumber,
+      penNoNormalized: normalizePenNumber(customerDetails.penNo),
       agentId: agentPayload.agentId,
       agentName: agentPayload.agentName,
       agentContactNumber: agentPayload.agentContactNumber,
@@ -3847,6 +4272,7 @@ async function buildImportedDraftPayload(rowMap) {
     mortgageLoanApplicationFormDate: getCellText(rowMap.mortgageformdate),
     pfa: getCellText(rowMap.pfa),
     penNo: getCellText(rowMap.penno),
+    penNoNormalized: normalizePenNumber(getCellText(rowMap.penno)),
     rsaStatementDate: getCellText(rowMap.rsastatementdate),
     rsaBalance: rsaBalanceValue,
     rsa25: rsaBalance ? String(calculateRoundedRsa25(rsaBalance)) : '',
@@ -3869,6 +4295,7 @@ async function buildImportedDraftPayload(rowMap) {
     documents: [],
     documentTypes: [],
     houseNumber: customerDetails.houseNumber || '',
+    penNoNormalized: normalizePenNumber(customerDetails.penNo),
     agentId: '',
     agentName: '',
     agentContactNumber: '',
@@ -3921,6 +4348,7 @@ async function handleBulkImportSelection(event) {
 
     let importedCount = 0;
     const skipped = [];
+    const importedPenNumbers = new Set();
     for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
       const row = sheet.getRow(rowNumber);
       const rowMap = {};
@@ -3938,7 +4366,18 @@ async function handleBulkImportSelection(event) {
         skipped.push('Missing Customer Name');
         continue;
       }
-      await addDoc(collection(db, 'submissions'), await buildImportedDraftPayload(rowMap));
+      const importedPenNo = normalizePenNumber(getCellText(rowMap.penno));
+      if (importedPenNo && importedPenNumbers.has(importedPenNo)) {
+        skipped.push(`Row ${rowNumber}: duplicate PEN number inside import file`);
+        continue;
+      }
+      if (importedPenNo && !(await validatePenNumberAvailable(importedPenNo, ''))) {
+        skipped.push(`Row ${rowNumber}: PEN number already exists`);
+        continue;
+      }
+      const draftPayload = await buildImportedDraftPayload(rowMap);
+      await addDoc(collection(db, 'submissions'), draftPayload);
+      if (importedPenNo) importedPenNumbers.add(importedPenNo);
       importedCount += 1;
     }
 

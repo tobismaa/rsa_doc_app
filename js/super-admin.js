@@ -69,6 +69,11 @@ let scheduledReportConfirmResolver = null;
 let lastScheduledReportLogSnapshot = null;
 let currentScheduledReportSendTab = 'daily';
 let currentScheduledReportDownloadTab = 'daily';
+let usersListenerStarted = false;
+let submissionsListenerStarted = false;
+let auditsListenerStarted = false;
+let routingRulesListenerStarted = false;
+let agentsListenerStarted = false;
 
 const OUTSTANDING_REPORT_OPTIONS = [
     { id: 'all', label: 'All Dashboards' },
@@ -2084,6 +2089,7 @@ function roleHome(role) {
 function switchTab(tabId) {
     currentTab = tabId;
     if (tabId !== 'settings') closeSettingsSectionModal();
+    ensureRealtimeDataForTab(tabId);
     document.querySelectorAll('.nav-item').forEach((n) => n.classList.remove('active'));
     document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
     document.querySelectorAll('.tab-content').forEach((t) => t.classList.remove('active'));
@@ -3366,6 +3372,7 @@ function renderHouseNumberRulesManager() {
                     <option value="alpha_suffix" ${rule.mode === 'alpha_suffix' ? 'selected' : ''}>Alpha Suffix</option>
                     <option value="block_100" ${rule.mode === 'block_100' ? 'selected' : ''}>Block 100</option>
                     <option value="house_infinite" ${rule.mode === 'house_infinite' ? 'selected' : ''}>House Infinite</option>
+                    <option value="house_block_100" ${rule.mode === 'house_block_100' ? 'selected' : ''}>House Block 100</option>
                 </select>
             </td>
             <td><input type="text" value="${escapeHtml(rule.prefix || '')}" oninput="window.updateHouseNumberRule(${index},'prefix',this.value)" style="width:100px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;"></td>
@@ -4412,7 +4419,7 @@ window.saveSuperSettings = async (triggerButton = null) => {
             securityControls: {
                 sessionTimeoutMinutes,
                 forceLogoutCountdown,
-                forceLogoutToken: String(existing?.securityControls?.forceLogoutToken || '').trim()
+                forceLogoutToken: ''
             },
             notificationTemplates: normalizedNotificationTemplates,
             auditControls: {
@@ -4705,6 +4712,24 @@ window.signOutUser = async () => {
 };
 
 function setupRealtimeData() {
+    ensureRealtimeDataForTab('global');
+}
+
+function ensureRealtimeDataForTab(tabId) {
+    if (tabId === 'global' || tabId === 'admins' || tabId === 'settings' || tabId === 'security' || tabId === 'round-robin') {
+        startUsersListener();
+    }
+    if (tabId === 'global' || tabId === 'settings' || tabId === 'round-robin') {
+        startSubmissionsListener();
+    }
+    if (tabId === 'audit') startAuditsListener();
+    if (tabId === 'routing-rules') startRoutingRulesListener();
+    if (tabId === 'agents') startAgentsListener();
+}
+
+function startUsersListener() {
+    if (usersListenerStarted) return;
+    usersListenerStarted = true;
     onSnapshot(query(collection(db, 'users')), (snap) => {
         allUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         refreshScheduledReportRecipientPicker();
@@ -4712,26 +4737,42 @@ function setupRealtimeData() {
         renderCurrentTab();
         if (currentTab !== 'global') renderGlobalView();
     });
+}
 
+function startSubmissionsListener() {
+    if (submissionsListenerStarted) return;
+    submissionsListenerStarted = true;
     onSnapshot(query(collection(db, 'submissions'), orderBy('uploadedAt', 'desc')), (snap) => {
         allSubmissions = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         updateNavigationCounts();
         renderCurrentTab();
         if (currentTab !== 'global') renderGlobalView();
     });
+}
 
+function startAuditsListener() {
+    if (auditsListenerStarted) return;
+    auditsListenerStarted = true;
     onSnapshot(query(collection(db, 'audit'), orderBy('timestamp', 'desc'), limit(200)), (snap) => {
         allAudits = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         updateNavigationCounts();
         if (currentTab === 'audit') renderAudit();
     });
+}
 
+function startRoutingRulesListener() {
+    if (routingRulesListenerStarted) return;
+    routingRulesListenerStarted = true;
     onSnapshot(query(collection(db, 'uploaderRoutingRules')), (snap) => {
         allRoutingRules = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         updateNavigationCounts();
         if (currentTab === 'routing-rules') renderRoutingRules();
     });
+}
 
+function startAgentsListener() {
+    if (agentsListenerStarted) return;
+    agentsListenerStarted = true;
     onSnapshot(query(collection(db, 'agents')), (snap) => {
         allAgents = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         if (currentTab === 'agents') renderCurrentTab();

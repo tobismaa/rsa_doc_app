@@ -2,7 +2,7 @@ import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js';
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
 import { getMaintenanceSettings, isMaintenanceExemptRole, showMaintenanceOverlay } from './shared/maintenance-mode.js?v=20260507a';
-import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
+import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import { registerPushTokenForCurrentUser } from './push-alerts.js';
 
 const REQUIRED_FIELDS = [
@@ -18,10 +18,9 @@ const FORCE_LOGOUT_ACTIVE_TOKEN_KEY = 'cmbank_force_logout_active_token';
 const FORCE_LOGOUT_COMPLETED_TOKEN_KEY = 'cmbank_force_logout_completed_token';
 const FORCE_LOGOUT_DEADLINE_KEY = 'cmbank_force_logout_deadline_ms';
 const FORCE_LOGOUT_DISMISSED_TOKEN_KEY = 'cmbank_force_logout_dismissed_token';
-let cacheClearWatcherStarted = false;
+const FORCE_LOGOUT_GRACE_MS = 5 * 60 * 1000;
 let cacheClearInProgress = false;
 let securityWatchStarted = false;
-let securityPollTimer = null;
 let sessionTimeoutTimer = null;
 let inactivityHandlersBound = false;
 let forceLogoutNoticeActive = false;
@@ -451,6 +450,34 @@ function getForceLogoutDeadlineMs(token, durationMsValue) {
   return baseMs + durationMs;
 }
 
+function clearLocalForceLogoutState(token = '') {
+  applyForceLogoutLockState({ active: false, token: '', deadlineMs: 0 });
+  if (token) {
+    localStorage.setItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY, String(token || '').trim());
+  }
+  localStorage.removeItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY);
+  localStorage.removeItem(FORCE_LOGOUT_DEADLINE_KEY);
+  localStorage.removeItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY);
+  closeForceLogoutNotice();
+  document.getElementById('forceLogoutNoticeBanner')?.remove();
+  if (forceLogoutTimerId) {
+    window.clearTimeout(forceLogoutTimerId);
+    forceLogoutTimerId = null;
+  }
+  if (forceLogoutIntervalId) {
+    window.clearInterval(forceLogoutIntervalId);
+    forceLogoutIntervalId = null;
+  }
+}
+
+function isForceLogoutWindowExpired(token = '', countdownSetting = '11m', deadlineMs = 0) {
+  const parsedDeadline = Number(deadlineMs || 0);
+  const effectiveDeadline = Number.isFinite(parsedDeadline) && parsedDeadline > 0
+    ? parsedDeadline
+    : getForceLogoutDeadlineMs(token, parseForceLogoutDurationMs(countdownSetting));
+  return Date.now() > effectiveDeadline + FORCE_LOGOUT_GRACE_MS;
+}
+
 function formatForceLogoutRemaining(deadlineMs) {
   const remainingMs = Math.max(0, Number(deadlineMs || 0) - Date.now());
   const totalSeconds = Math.ceil(remainingMs / 1000);
@@ -547,13 +574,7 @@ function showForceLogoutNotice({ token = '', deadlineMs = 0 } = {}) {
 }
 
 async function executeForcedLogout(token) {
-  applyForceLogoutLockState({ active: false, token: '', deadlineMs: 0 });
-  localStorage.setItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY, String(token || '').trim());
-  localStorage.removeItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY);
-  localStorage.removeItem(FORCE_LOGOUT_DEADLINE_KEY);
-  localStorage.removeItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY);
-  closeForceLogoutNotice();
-  document.getElementById('forceLogoutNoticeBanner')?.remove();
+  clearLocalForceLogoutState(token);
   try {
     await signOut(auth);
   } finally {
@@ -603,7 +624,11 @@ function bootstrapPendingForceLogoutFromStorage() {
   const completedToken = String(localStorage.getItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY) || '').trim();
   const deadlineMs = Number(localStorage.getItem(FORCE_LOGOUT_DEADLINE_KEY) || 0);
   if (!token || token === completedToken || !Number.isFinite(deadlineMs) || deadlineMs <= 0) {
-    applyForceLogoutLockState({ active: false, token: '', deadlineMs: 0 });
+    clearLocalForceLogoutState();
+    return;
+  }
+  if (Date.now() > deadlineMs + FORCE_LOGOUT_GRACE_MS) {
+    clearLocalForceLogoutState(token);
     return;
   }
   applyForceLogoutLockState({ active: true, token, deadlineMs });
@@ -772,53 +797,45 @@ function bindInactivityHandlers(minutes = 60) {
   restart();
 }
 
-function watchForCacheClearSignal() {
-  if (cacheClearWatcherStarted) return;
-  cacheClearWatcherStarted = true;
+async function handleCacheClearSignal(data = {}) {
+  const token = String(data.cacheClearToken || '').trim();
+  const handled = String(localStorage.getItem(CACHE_CLEAR_HANDLED_KEY) || '').trim();
+  if (!token || token === handled || cacheClearInProgress) return;
 
-  onSnapshot(doc(db, 'settings', 'system'), async (snap) => {
-    const data = snap.exists() ? (snap.data() || {}) : {};
-    const token = String(data.cacheClearToken || '').trim();
-    const handled = String(localStorage.getItem(CACHE_CLEAR_HANDLED_KEY) || '').trim();
-    if (!token || token === handled || cacheClearInProgress) return;
-
-    cacheClearInProgress = true;
-    try {
-      const securityControls = data?.securityControls && typeof data.securityControls === 'object'
-        ? data.securityControls
-        : {};
-      const forceLogoutToken = String(securityControls.forceLogoutToken || '').trim();
-      const completedToken = String(localStorage.getItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY) || '').trim();
-      const countdownSetting = String(securityControls.forceLogoutCountdown || '11m').trim() || '11m';
-      if (forceLogoutToken && forceLogoutToken !== completedToken) {
-        const currentActiveToken = String(localStorage.getItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY) || '').trim();
-        const existingDeadline = Number(localStorage.getItem(FORCE_LOGOUT_DEADLINE_KEY) || 0);
-        const nextDeadline = getForceLogoutDeadlineMs(forceLogoutToken, parseForceLogoutDurationMs(countdownSetting));
-        if (currentActiveToken !== forceLogoutToken || !Number.isFinite(existingDeadline) || existingDeadline <= 0) {
-          localStorage.setItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY, forceLogoutToken);
-          localStorage.setItem(FORCE_LOGOUT_DEADLINE_KEY, String(nextDeadline));
-          localStorage.removeItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY);
-        }
+  cacheClearInProgress = true;
+  try {
+    const securityControls = data?.securityControls && typeof data.securityControls === 'object'
+      ? data.securityControls
+      : {};
+    const forceLogoutToken = String(securityControls.forceLogoutToken || '').trim();
+    const completedToken = String(localStorage.getItem(FORCE_LOGOUT_COMPLETED_TOKEN_KEY) || '').trim();
+    const countdownSetting = String(securityControls.forceLogoutCountdown || '11m').trim() || '11m';
+    if (forceLogoutToken && forceLogoutToken !== completedToken && !isForceLogoutWindowExpired(forceLogoutToken, countdownSetting)) {
+      const currentActiveToken = String(localStorage.getItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY) || '').trim();
+      const existingDeadline = Number(localStorage.getItem(FORCE_LOGOUT_DEADLINE_KEY) || 0);
+      const nextDeadline = getForceLogoutDeadlineMs(forceLogoutToken, parseForceLogoutDurationMs(countdownSetting));
+      if (currentActiveToken !== forceLogoutToken || !Number.isFinite(existingDeadline) || existingDeadline <= 0) {
+        localStorage.setItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY, forceLogoutToken);
+        localStorage.setItem(FORCE_LOGOUT_DEADLINE_KEY, String(nextDeadline));
+        localStorage.removeItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY);
       }
-    } catch (_) {}
-
-    try {
-      localStorage.setItem(CACHE_CLEAR_HANDLED_KEY, token);
-      localStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
-      sessionStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
-      await clearBrowserAppCaches(token);
-    } catch (_) {
-      localStorage.setItem(CACHE_CLEAR_HANDLED_KEY, token);
-      localStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
-      sessionStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
     }
+  } catch (_) {}
 
-    const url = new URL(window.location.href);
-    url.searchParams.set('_cacheReset', token || Date.now().toString());
-    window.location.replace(url.toString());
-  }, () => {
-    // Fail open if the signal watcher cannot start.
-  });
+  try {
+    localStorage.setItem(CACHE_CLEAR_HANDLED_KEY, token);
+    localStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
+    sessionStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
+    await clearBrowserAppCaches(token);
+  } catch (_) {
+    localStorage.setItem(CACHE_CLEAR_HANDLED_KEY, token);
+    localStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
+    sessionStorage.setItem(CACHE_BUST_TOKEN_KEY, token);
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set('_cacheReset', token || Date.now().toString());
+  window.location.replace(url.toString());
 }
 
 function watchForSecuritySignals(userData = {}) {
@@ -843,15 +860,16 @@ function watchForSecuritySignals(userData = {}) {
     const role = String(currentSecurityUserData?.role || '-').trim() || '-';
     const countdownSetting = String(systemSettings.securityControls.forceLogoutCountdown || '11m');
     const activeTokenBefore = String(localStorage.getItem(FORCE_LOGOUT_ACTIVE_TOKEN_KEY) || '').trim();
-    const dismissedTokenBefore = String(localStorage.getItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY) || '').trim();
     const deadlineBefore = Number(localStorage.getItem(FORCE_LOGOUT_DEADLINE_KEY) || 0);
-    const persistedForceLogoutToken = activeTokenBefore && activeTokenBefore !== completed ? activeTokenBefore : '';
-    const forceLogoutToken = configuredForceLogoutToken || persistedForceLogoutToken;
+    const forceLogoutToken = configuredForceLogoutToken;
     const hasPersistedDeadline = Number.isFinite(deadlineBefore) && deadlineBefore > 0;
     if (!forceLogoutToken || isMaintenanceExemptRole(userData.role) || forceLogoutToken === completed) {
-      applyForceLogoutLockState({ active: false, token: '', deadlineMs: 0 });
-      document.getElementById('forceLogoutNoticeBanner')?.remove();
-      closeForceLogoutNotice();
+      clearLocalForceLogoutState(forceLogoutToken === completed ? forceLogoutToken : '');
+      return;
+    }
+
+    if (isForceLogoutWindowExpired(forceLogoutToken, countdownSetting, activeTokenBefore === forceLogoutToken ? deadlineBefore : 0)) {
+      clearLocalForceLogoutState(forceLogoutToken);
       return;
     }
 
@@ -864,7 +882,7 @@ function watchForSecuritySignals(userData = {}) {
       localStorage.setItem(FORCE_LOGOUT_DEADLINE_KEY, String(deadlineMs));
       localStorage.removeItem(FORCE_LOGOUT_DISMISSED_TOKEN_KEY);
       forceLogoutNoticeActive = false;
-    } else if (!configuredForceLogoutToken && persistedForceLogoutToken && hasPersistedDeadline) {
+    } else if (hasPersistedDeadline) {
       deadlineMs = deadlineBefore;
     }
 
@@ -885,24 +903,13 @@ function watchForSecuritySignals(userData = {}) {
 
   onSnapshot(doc(db, 'settings', 'system'), async (snap) => {
     try {
-      const fallbackSettings = await getSystemSettings(db, { force: true });
       const rawSettings = snap.exists() ? (snap.data() || {}) : {};
-      const systemSettings = buildLiveSecuritySettings(rawSettings, fallbackSettings);
+      await handleCacheClearSignal(rawSettings);
+      const systemSettings = buildLiveSecuritySettings(rawSettings, getDefaultSystemSettings());
       await evaluateSecurityState(systemSettings);
     } catch (_) {}
   }, () => {});
 
-  if (!securityPollTimer) {
-    securityPollTimer = window.setInterval(async () => {
-      try {
-        const settingsSnap = await getDoc(doc(db, 'settings', 'system'));
-        const fallbackSettings = await getSystemSettings(db, { force: true });
-        const rawSettings = settingsSnap.exists() ? (settingsSnap.data() || {}) : {};
-        const systemSettings = buildLiveSecuritySettings(rawSettings, fallbackSettings);
-        await evaluateSecurityState(systemSettings);
-      } catch (_) {}
-    }, 5000);
-  }
 }
 
 async function findUserDocByUidOrEmail(uid, email) {
@@ -1009,7 +1016,6 @@ onAuthStateChanged(auth, async (user) => {
   if (!user) return;
   bindForceLogoutActionBlockers();
   bootstrapPendingForceLogoutFromStorage();
-  watchForCacheClearSignal();
 
   const fallbackUserData = {
     role: '',
@@ -1034,9 +1040,10 @@ onAuthStateChanged(auth, async (user) => {
   try {
     const userDoc = await findUserDocByUidOrEmail(user.uid, user.email);
     const userData = userDoc?.data?.() || fallbackUserData;
+    watchForSecuritySignals(userData);
 
     try {
-      const systemSettings = await getSystemSettings(db, { force: true });
+      const systemSettings = await getSystemSettings(db);
       showDashboardAnnouncement(systemSettings.dashboardAnnouncement);
       bindInactivityHandlers(systemSettings.securityControls.sessionTimeoutMinutes);
       applyGlobalReadOnlyState({

@@ -10,6 +10,7 @@ import {
     updateDoc,
     doc,
     orderBy,
+    limit,
     serverTimestamp
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { notifyStatusChangePush } from './status-push.js';
@@ -591,7 +592,7 @@ function buildPaymentLeaveHistoryRecords(audits, mode = 'mine') {
 }
 
 async function loadPaymentLeaveHistory() {
-    const auditSnap = await getDocs(query(collection(db, 'audit'), orderBy('timestamp', 'desc')));
+    const auditSnap = await getDocs(query(collection(db, 'audit'), orderBy('timestamp', 'desc'), limit(500)));
     const audits = auditSnap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
     paymentMyLeaveHistory = buildPaymentLeaveHistoryRecords(audits, 'mine');
     paymentReliefLeaveHistory = buildPaymentLeaveHistoryRecords(audits, 'relief');
@@ -636,7 +637,7 @@ window.openPaymentLeaveApplications = async (recordId, buttonEl = null) => {
             buttonEl.disabled = true;
             buttonEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading...';
         }
-        const submissionsSnap = await getDocs(collection(db, 'submissions'));
+        const submissionsSnap = await getDocs(query(collection(db, 'submissions'), where('leaveCoverOriginalEmail', '==', record.originalUserEmail)));
         const endMs = record.endAtMs || Number.MAX_SAFE_INTEGER;
         const rows = submissionsSnap.docs
             .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))
@@ -1771,6 +1772,8 @@ function loadSubmissions() {
                 const bMs = getPaymentTableEntryMillis(b);
                 return bMs - aMs;
             });
+        window.__paymentSubmissionsForAppChat = allSubmissions;
+        window.syncAppChatAccessibleSubmissions?.(allSubmissions);
         await primeUploaderNames(allSubmissions);
         renderDashboardOverview();
         rerunPaymentReconciliation();

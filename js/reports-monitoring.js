@@ -19,6 +19,8 @@ let currentUserData = null;
 let allUsers = [];
 let allSubmissions = [];
 let currentTab = 'overview';
+let usersListenerStarted = false;
+let submissionsListenerStarted = false;
 
 const pageTitle = document.getElementById('pageTitle');
 const monitorName = document.getElementById('monitorName');
@@ -433,6 +435,7 @@ function renderCurrentTab() {
 
 function switchTab(tabId) {
     currentTab = tabId;
+    ensureDataForTab(tabId);
     document.querySelectorAll('.nav-item').forEach((item) => item.classList.remove('active'));
     document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
     document.querySelectorAll('.tab-content').forEach((tab) => tab.classList.remove('active'));
@@ -447,6 +450,11 @@ function switchTab(tabId) {
         help: 'Help & SOP'
     };
     if (pageTitle) pageTitle.textContent = titles[tabId] || 'Reports & Monitoring';
+}
+
+function ensureDataForTab(tabId) {
+    if (tabId === 'overview' || tabId === 'users' || tabId === 'reports') loadUsers();
+    if (tabId === 'overview' || tabId === 'applications' || tabId === 'reports') loadSubmissions();
 }
 
 function toggleSidebar(open) {
@@ -546,6 +554,8 @@ function bindEvents() {
 }
 
 function loadUsers() {
+    if (usersListenerStarted) return;
+    usersListenerStarted = true;
     onSnapshot(collection(db, 'users'), (snapshot) => {
         allUsers = snapshot.docs
             .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))
@@ -557,6 +567,8 @@ function loadUsers() {
 }
 
 function loadSubmissions() {
+    if (submissionsListenerStarted) return;
+    submissionsListenerStarted = true;
     onSnapshot(collection(db, 'submissions'), (snapshot) => {
         allSubmissions = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
         renderCurrentTab();
@@ -596,8 +608,6 @@ auth.onAuthStateChanged(async (user) => {
         renderProfile();
         bindEvents();
         switchTab('overview');
-        loadUsers();
-        loadSubmissions();
     } catch (_) {
         showNotification('Could not validate session', 'error');
         window.location.href = 'index.html';

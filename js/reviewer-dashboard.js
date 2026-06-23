@@ -35,6 +35,7 @@ import {
     getDoc,
     serverTimestamp,
     runTransaction,
+    limit,
     addDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
@@ -2130,7 +2131,7 @@ function buildReviewerLeaveHistoryRecords(audits, mode = 'mine') {
 }
 
 async function loadReviewerLeaveHistory() {
-    const auditSnap = await getDocs(query(collection(db, 'audit'), orderBy('timestamp', 'desc')));
+    const auditSnap = await getDocs(query(collection(db, 'audit'), orderBy('timestamp', 'desc'), limit(500)));
     const audits = auditSnap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
     reviewerMyLeaveHistory = buildReviewerLeaveHistoryRecords(audits, 'mine');
     reviewerReliefLeaveHistory = buildReviewerLeaveHistoryRecords(audits, 'relief');
@@ -2169,7 +2170,7 @@ async function renderReviewerLeaveHistory() {
 window.openReviewerLeaveApplications = async (recordId) => {
     const record = [...reviewerMyLeaveHistory, ...reviewerReliefLeaveHistory].find((item) => item.id === recordId);
     if (!record) return;
-    const submissionsSnap = await getDocs(collection(db, 'submissions'));
+    const submissionsSnap = await getDocs(query(collection(db, 'submissions'), where('leaveCoverOriginalEmail', '==', record.originalUserEmail)));
     const endMs = record.endAtMs || Number.MAX_SAFE_INTEGER;
     const rows = submissionsSnap.docs
         .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))

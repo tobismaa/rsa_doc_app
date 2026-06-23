@@ -13,6 +13,7 @@ import {
     getDocs,
     updateDoc,
     runTransaction,
+    limit,
     serverTimestamp
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { queueUploaderFinalSubmissionEmail } from './email-alerts.js';
@@ -678,6 +679,7 @@ function getRsaExcelRows(submissions) {
         const expected25 = Number.isFinite(Number(rsaBalance)) ? Number(rsaBalance) * 0.25 : '';
         const equityValue = expected25 === '' ? '' : roundDownToThousand(expected25);
         const houseNumber = details.houseNumber || sub.houseNumber || '';
+        const tenor = details.tenor || sub.tenor || '';
 
         return [
             index + 1,
@@ -692,6 +694,7 @@ function getRsaExcelRows(submissions) {
             details.propertyType || '',
             toTitleCaseWords(details.originatingTP || ''),
             houseNumber,
+            tenor,
             propertyValue === '' ? '' : Number(formatMoneyForExcel(propertyValue)),
             equityValue === '' ? '' : Number(formatMoneyForExcel(equityValue)),
             loanAmount === '' ? '' : Number(formatMoneyForExcel(loanAmount)),
@@ -714,7 +717,7 @@ async function downloadRsaExcel(submissions, scopeLabel = 'selected') {
 
     const headers = [
         'S/N',
-        'account No',
+        'ACCOUNT NUMBER',
         'Full Name (Surname First)',
         'Originating Contact Centre',
         'Name of PFA',
@@ -722,9 +725,10 @@ async function downloadRsaExcel(submissions, scopeLabel = 'selected') {
         'RSA STATEMENT DATE',
         'RSA BALANCE (NGN)',
         'EXPECTED 25 %RSA (NGN)',
-        'PROPERTY TYPE',
+        'HOUSE TYPE',
         'LOCATION',
         'HOUSE NUMBER',
+        'TENOR',
         'PROPERTY VALUE',
         'EQUITY VALUE',
         'LOAN AMOUNT',
@@ -751,6 +755,7 @@ async function downloadRsaExcel(submissions, scopeLabel = 'selected') {
         { width: 22 },
         { width: 24 },
         { width: 16 },
+        { width: 12 },
         { width: 18 },
         { width: 18 },
         { width: 18 },
@@ -776,9 +781,9 @@ async function downloadRsaExcel(submissions, scopeLabel = 'selected') {
                     fgColor: { argb: 'FFD9EAD3' }
                 };
             }
-            const numberColumns = new Set([1, 8, 9, 13, 14, 15, 17]);
+            const numberColumns = new Set([1, 8, 9, 14, 15, 16, 18]);
             if (rowNumber > 1 && numberColumns.has(colNumber) && typeof cell.value === 'number') {
-                cell.numFmt = colNumber === 1 || colNumber === 17 ? '0' : '0.00';
+                cell.numFmt = colNumber === 1 || colNumber === 18 ? '0' : '0.00';
             }
         });
     });
@@ -1661,7 +1666,7 @@ function buildLeaveHistoryRecords(audits, mode = 'mine') {
 
 async function loadRsaLeaveHistory() {
     const [auditSnap] = await Promise.all([
-        getDocs(query(collection(db, 'audit'), orderBy('timestamp', 'desc')))
+        getDocs(query(collection(db, 'audit'), orderBy('timestamp', 'desc'), limit(500)))
     ]);
     const audits = auditSnap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
     rsaMyLeaveHistory = buildLeaveHistoryRecords(audits, 'mine');
@@ -1701,7 +1706,7 @@ async function renderRsaLeaveHistory() {
 window.openRsaLeaveApplications = async (recordId) => {
     const record = [...rsaMyLeaveHistory, ...rsaReliefLeaveHistory].find((item) => item.id === recordId);
     if (!record) return;
-    const submissionsSnap = await getDocs(collection(db, 'submissions'));
+    const submissionsSnap = await getDocs(query(collection(db, 'submissions'), where('leaveCoverOriginalEmail', '==', record.originalUserEmail)));
     const startMs = record.startAtMs || 0;
     const endMs = record.endAtMs || Number.MAX_SAFE_INTEGER;
     const matches = submissionsSnap.docs
