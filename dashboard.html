@@ -1669,11 +1669,17 @@ document.addEventListener('DOMContentLoaded', function() {
 document.addEventListener('DOMContentLoaded', function() {
     const btnMobile = document.getElementById('signOutBtnMobile');
     const btnSidebar = document.getElementById('signOutBtnSidebar');
-    if (btnMobile && typeof window.signOutUser === 'function') {
-        btnMobile.addEventListener('click', window.signOutUser);
+    const handleSignOut = function(event) {
+        event.preventDefault();
+        if (typeof window.signOutUser === 'function') {
+            window.signOutUser();
+        }
+    };
+    if (btnMobile) {
+        btnMobile.addEventListener('click', handleSignOut);
     }
-    if (btnSidebar && typeof window.signOutUser === 'function') {
-        btnSidebar.addEventListener('click', window.signOutUser);
+    if (btnSidebar) {
+        btnSidebar.addEventListener('click', handleSignOut);
     }
 });
 </script>

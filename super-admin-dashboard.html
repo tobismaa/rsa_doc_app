@@ -1306,8 +1306,13 @@
 // Attach sign-out event listener after DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
     const btnSidebar = document.getElementById('signOutBtnSidebar');
-    if (btnSidebar && typeof window.signOutUser === 'function') {
-        btnSidebar.addEventListener('click', window.signOutUser);
+    if (btnSidebar) {
+        btnSidebar.addEventListener('click', function(event) {
+            event.preventDefault();
+            if (typeof window.signOutUser === 'function') {
+                window.signOutUser();
+            }
+        });
     }
 });
 </script>

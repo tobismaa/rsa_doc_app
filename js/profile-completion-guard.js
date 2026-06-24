@@ -384,6 +384,7 @@ function bindForceLogoutActionBlockers() {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
     if (target.closest('#forceLogoutNoticeModal, #forceLogoutNoticeBanner, #globalReadOnlyBanner, #systemAnnouncementBanner')) return;
+    if (target.closest('#signOutBtnMobile, #signOutBtnSidebar, .sign-out-btn')) return;
     const blockedTrigger = target.closest('button, [role="button"], input[type="submit"], input[type="button"], .action-btn');
     if (!blockedTrigger) return;
     event.preventDefault();

@@ -537,8 +537,14 @@ function bindEvents() {
     [usersRoleFilter, usersStatusFilter, applicationsStatusFilter, applicationsStageFilter]
         .forEach((el) => el?.addEventListener('change', renderCurrentTab));
 
-    document.getElementById('signOutBtnSidebar')?.addEventListener('click', window.signOutUser);
-    document.getElementById('signOutBtnMobile')?.addEventListener('click', window.signOutUser);
+    const handleSignOut = (event) => {
+        event.preventDefault();
+        if (typeof window.signOutUser === 'function') {
+            window.signOutUser();
+        }
+    };
+    document.getElementById('signOutBtnSidebar')?.addEventListener('click', handleSignOut);
+    document.getElementById('signOutBtnMobile')?.addEventListener('click', handleSignOut);
     document.getElementById('forceRefreshBtn')?.addEventListener('click', () => window.location.reload());
     document.getElementById('forceRefreshBtnMobile')?.addEventListener('click', () => window.location.reload());
 
