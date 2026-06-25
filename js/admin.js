@@ -1,5 +1,5 @@
 // js/admin.js - COMPLETE UPDATED VERSION WITH FIXED DOWNLOAD ALL
-import { auth, db } from './firebase-config.js';
+import { auth, db } from './firebase-config.js?v=20260625b';
 import { ADMIN_API_BASE_URL } from './admin-api-config.js?v=20260618a';
 import { notifyUserPushEvent } from './push-alerts.js';
 import { formatAppDateTime, getTrustedDateKey } from './shared/app-time.js';

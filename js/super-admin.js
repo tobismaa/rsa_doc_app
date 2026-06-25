@@ -1,4 +1,4 @@
-import { auth, db } from './firebase-config.js';
+import { auth, db } from './firebase-config.js?v=20260625b';
 import { EMAIL_API_BASE_URL } from './email-api-config.js';
 import { formatAppDateTime } from './shared/app-time.js';
 import { performAppLogout } from './shared/logout.js?v=20260625b';

@@ -1,4 +1,4 @@
-import { auth, db } from './firebase-config.js';
+import { auth, db } from './firebase-config.js?v=20260625b';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
 import {
     collection,

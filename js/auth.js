@@ -1,5 +1,5 @@
 // js/auth.js - COMPLETE WORKING VERSION WITH DEPARTMENT FIELD
-import { auth, db } from './firebase-config.js';
+import { auth, db } from './firebase-config.js?v=20260625b';
 import { notifyAdminPushEvent } from './push-alerts.js';
 import { EMAIL_API_BASE_URL } from './email-api-config.js';
 import { performAppLogout } from './shared/logout.js?v=20260625b';

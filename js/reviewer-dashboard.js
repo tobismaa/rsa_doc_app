@@ -1,5 +1,5 @@
 // js/reviewer-dashboard.js - FIXED VERSION WITH DIRECT SAVE ONLY
-import { auth, db } from './firebase-config.js';
+import { auth, db } from './firebase-config.js?v=20260625b';
 import { queueUploaderApprovedEmail, queueUploaderRejectedEmail, queueRsaApprovalEmail } from './email-alerts.js';
 import { notifyStatusChangePush } from './status-push.js';
 import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
