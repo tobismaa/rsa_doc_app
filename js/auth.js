@@ -2,6 +2,7 @@
 import { auth, db } from './firebase-config.js';
 import { notifyAdminPushEvent } from './push-alerts.js';
 import { EMAIL_API_BASE_URL } from './email-api-config.js';
+import { performAppLogout } from './shared/logout.js?v=20260625b';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 import { getMaintenanceSettings, isMaintenanceExemptRole } from './shared/maintenance-mode.js?v=20260507a';
 import {
@@ -822,23 +823,22 @@ if (loginFormElement) {
 
 // ==================== SIGN OUT FUNCTION ====================
 window.signOutUser = async () => {
-    try {
-        const user = auth.currentUser;
-        if (user) {
-            const writableUserRef = await findWritableUserRef(user);
-            if (writableUserRef) {
-                await updateDoc(writableUserRef, {
-                    isOnline: false,
-                    lastSeenAt: serverTimestamp(),
-                    lastLogoutAt: serverTimestamp()
-                }).catch(() => {});
+    await performAppLogout({
+        auth,
+        beforeSignOut: async () => {
+            const user = auth.currentUser;
+            if (user) {
+                const writableUserRef = await findWritableUserRef(user);
+                if (writableUserRef) {
+                    await updateDoc(writableUserRef, {
+                        isOnline: false,
+                        lastSeenAt: serverTimestamp(),
+                        lastLogoutAt: serverTimestamp()
+                    }).catch(() => {});
+                }
             }
         }
-        await signOut(auth);
-        window.location.href = 'index.html';
-    } catch (error) {
-        showError('Error signing out');
-    }
+    });
 };
 
 // Make functions globally available with security

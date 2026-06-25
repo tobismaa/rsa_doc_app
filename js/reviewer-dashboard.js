@@ -4,6 +4,7 @@ import { queueUploaderApprovedEmail, queueUploaderRejectedEmail, queueRsaApprova
 import { notifyStatusChangePush } from './status-push.js';
 import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import { formatAppDate, formatAppDateTime, getTrustedDateKey, getTrustedNowIso } from './shared/app-time.js';
+import { performAppLogout } from './shared/logout.js?v=20260625b';
 import {
     getCurrentUserProfile as getCurrentUserProfileShared,
     getUserProfileByEmail as getUserProfileByEmailShared,
@@ -22,7 +23,6 @@ import {
     renderDashboardStageReport,
     exportDashboardStageReportExcel
 } from './shared/dashboard-stage-report.js?v=20260610a';
-import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
     collection,
     query,
@@ -923,18 +923,19 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 window.signOutUser = async () => {
-    try {
-        const userId = currentUserData?.id || currentUser?.uid || '';
-        if (userId) {
-            await updateDoc(doc(db, 'users', userId), {
-                isOnline: false,
-                lastSeenAt: serverTimestamp(),
-                lastLogoutAt: serverTimestamp()
-            }).catch(() => {});
+    await performAppLogout({
+        auth,
+        beforeSignOut: async () => {
+            const userId = currentUserData?.id || currentUser?.uid || '';
+            if (userId) {
+                await updateDoc(doc(db, 'users', userId), {
+                    isOnline: false,
+                    lastSeenAt: serverTimestamp(),
+                    lastLogoutAt: serverTimestamp()
+                }).catch(() => {});
+            }
         }
-        await signOut(auth);
-    } catch (e) { }
-    window.location.href = 'index.html';
+    });
 };
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;

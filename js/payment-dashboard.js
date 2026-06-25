@@ -1,5 +1,5 @@
 import { auth, db } from './firebase-config.js';
-import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
+import { performAppLogout } from './shared/logout.js?v=20260625b';
 import {
     collection,
     addDoc,
@@ -2110,18 +2110,19 @@ window.togglePaymentAgentBreakdown = (rowId, btn) => {
 };
 
 window.signOutUser = async () => {
-    try {
-        const userId = currentUserData?.id || currentUser?.uid || '';
-        if (userId) {
-            await updateDoc(doc(db, 'users', userId), {
-                isOnline: false,
-                lastSeenAt: serverTimestamp(),
-                lastLogoutAt: serverTimestamp()
-            }).catch(() => {});
+    await performAppLogout({
+        auth,
+        beforeSignOut: async () => {
+            const userId = currentUserData?.id || currentUser?.uid || '';
+            if (userId) {
+                await updateDoc(doc(db, 'users', userId), {
+                    isOnline: false,
+                    lastSeenAt: serverTimestamp(),
+                    lastLogoutAt: serverTimestamp()
+                }).catch(() => {});
+            }
         }
-        await signOut(auth);
-    } catch (e) {}
-    window.location.href = 'index.html';
+    });
 };
 
 function forceHardRefresh() {

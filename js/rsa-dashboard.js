@@ -1,6 +1,6 @@
 import { auth, db } from './firebase-config.js';
 import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
-import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
+import { performAppLogout } from './shared/logout.js?v=20260625b';
 import {
     collection,
     addDoc,
@@ -2131,18 +2131,19 @@ auth.onAuthStateChanged(user=>{
 });
 
 window.signOutUser = async () => {
-    try {
-        const userId = currentRsaProfileData?.id || currentUser?.uid || '';
-        if (userId) {
-            await updateDoc(doc(db, 'users', userId), {
-                isOnline: false,
-                lastSeenAt: serverTimestamp(),
-                lastLogoutAt: serverTimestamp()
-            }).catch(() => {});
+    await performAppLogout({
+        auth,
+        beforeSignOut: async () => {
+            const userId = currentRsaProfileData?.id || currentUser?.uid || '';
+            if (userId) {
+                await updateDoc(doc(db, 'users', userId), {
+                    isOnline: false,
+                    lastSeenAt: serverTimestamp(),
+                    lastLogoutAt: serverTimestamp()
+                }).catch(() => {});
+            }
         }
-        await signOut(auth);
-    } catch (e) { }
-    window.location.href = 'index.html';
+    });
 };
 
 // merge modal controls

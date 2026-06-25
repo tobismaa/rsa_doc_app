@@ -3,6 +3,7 @@ import { auth, db } from './firebase-config.js';
 import { ADMIN_API_BASE_URL } from './admin-api-config.js?v=20260618a';
 import { notifyUserPushEvent } from './push-alerts.js';
 import { formatAppDateTime, getTrustedDateKey } from './shared/app-time.js';
+import { performAppLogout } from './shared/logout.js?v=20260625b';
 import {
     collection,
     addDoc,
@@ -21,8 +22,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import {
     getAuth,
-    createUserWithEmailAndPassword,
-    signOut
+    createUserWithEmailAndPassword
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import {
     getSubmissionCommissionAmount,
@@ -899,18 +899,19 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 window.signOutUser = async () => {
-    try {
-        const userId = currentAdminProfileData?.id || currentAdmin?.uid || '';
-        if (userId) {
-            await updateDoc(doc(db, 'users', userId), {
-                isOnline: false,
-                lastSeenAt: serverTimestamp(),
-                lastLogoutAt: serverTimestamp()
-            }).catch(() => {});
+    await performAppLogout({
+        auth,
+        beforeSignOut: async () => {
+            const userId = currentAdminProfileData?.id || currentAdmin?.uid || '';
+            if (userId) {
+                await updateDoc(doc(db, 'users', userId), {
+                    isOnline: false,
+                    lastSeenAt: serverTimestamp(),
+                    lastLogoutAt: serverTimestamp()
+                }).catch(() => {});
+            }
         }
-        await signOut(auth);
-    } catch (e) { }
-    window.location.href = 'index.html';
+    });
 };
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -6522,6 +6523,31 @@ window.activateUser = (userId) => {
     });
 };
 
+async function getForceLogoutTargetRefs(userId, userData = {}) {
+    const refsById = new Map();
+    const addId = (id) => {
+        const normalized = String(id || '').trim();
+        if (normalized) refsById.set(normalized, doc(db, 'users', normalized));
+    };
+    const targetUid = String(userData.uid || userId || '').trim();
+    const targetEmail = String(userData.email || '').trim().toLowerCase();
+
+    addId(userId);
+    addId(userData.uid);
+
+    if (targetUid) {
+        const uidSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', targetUid))).catch(() => null);
+        uidSnap?.docs?.forEach((docSnap) => addId(docSnap.id));
+    }
+
+    if (targetEmail) {
+        const emailSnap = await getDocs(query(collection(db, 'users'), where('email', '==', targetEmail))).catch(() => null);
+        emailSnap?.docs?.forEach((docSnap) => addId(docSnap.id));
+    }
+
+    return Array.from(refsById.values());
+}
+
 window.forceLogoutUser = (userId) => {
     const target = allUsers.find((user) => user.id === userId) || {};
     const targetName = target.fullName || target.email || 'this user';
@@ -6549,16 +6575,18 @@ window.forceLogoutUser = (userId) => {
             }
 
             const token = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-            await updateDoc(doc(db, 'users', userId), {
+            const targetRefs = await getForceLogoutTargetRefs(userId, userData);
+            await Promise.all(targetRefs.map((userRef) => updateDoc(userRef, {
                 targetedForceLogoutToken: token,
                 targetedForceLogoutRequestedAt: serverTimestamp(),
                 targetedForceLogoutRequestedBy: currentEmail || currentAdmin?.email || 'admin'
-            });
+            })));
 
             await addDoc(collection(db, 'audit'), {
                 action: 'user_force_logout',
                 userId,
                 userEmail: targetEmail,
+                targetDocIds: targetRefs.map((userRef) => userRef.id),
                 performedBy: currentEmail || currentAdmin?.email,
                 timestamp: serverTimestamp()
             });

@@ -6,6 +6,7 @@ import {
 } from './shared/user-directory.js?v=20260518a';
 import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import { formatAppDateTime } from './shared/app-time.js';
+import { performAppLogout } from './shared/logout.js?v=20260625b';
 import {
     getTimestampMillis as getStageTimestampMillis,
     getSubmissionCurrentStageEntryAt,
@@ -17,7 +18,6 @@ import {
 import {
     collection, query, where, orderBy, onSnapshot, getDocs, getDoc, doc, limit, serverTimestamp, updateDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
-import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 
 let currentUser = null;
 let allSubmissions = [];
@@ -172,18 +172,19 @@ function ensureSignOutUser() {
         // `js/auth.js` defines a non-writable `signOutUser`; reuse it when present.
         if (desc && desc.writable === false) return;
         window.signOutUser = async () => {
-            try {
-                const userId = currentUser?.uid || '';
-                if (userId) {
-                    await updateDoc(doc(db, 'users', userId), {
-                        isOnline: false,
-                        lastSeenAt: serverTimestamp(),
-                        lastLogoutAt: serverTimestamp()
-                    }).catch(() => {});
+            await performAppLogout({
+                auth,
+                beforeSignOut: async () => {
+                    const userId = currentUser?.uid || '';
+                    if (userId) {
+                        await updateDoc(doc(db, 'users', userId), {
+                            isOnline: false,
+                            lastSeenAt: serverTimestamp(),
+                            lastLogoutAt: serverTimestamp()
+                        }).catch(() => {});
+                    }
                 }
-                await signOut(auth);
-            } catch (e) { }
-            window.location.href = 'index.html';
+            });
         };
     } catch (e) { /* ignore */ }
 }

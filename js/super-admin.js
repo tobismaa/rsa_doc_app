@@ -1,7 +1,7 @@
 import { auth, db } from './firebase-config.js';
 import { EMAIL_API_BASE_URL } from './email-api-config.js';
 import { formatAppDateTime } from './shared/app-time.js';
-import { signOut } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
+import { performAppLogout } from './shared/logout.js?v=20260625b';
 import {
     collection,
     addDoc,
@@ -4697,18 +4697,19 @@ window.exportAuditCsv = () => {
 };
 
 window.signOutUser = async () => {
-    try {
-        const userId = currentUserData?.id || currentUser?.uid || '';
-        if (userId) {
-            await updateDoc(doc(db, 'users', userId), {
-                isOnline: false,
-                lastSeenAt: serverTimestamp(),
-                lastLogoutAt: serverTimestamp()
-            }).catch(() => {});
+    await performAppLogout({
+        auth,
+        beforeSignOut: async () => {
+            const userId = currentUserData?.id || currentUser?.uid || '';
+            if (userId) {
+                await updateDoc(doc(db, 'users', userId), {
+                    isOnline: false,
+                    lastSeenAt: serverTimestamp(),
+                    lastLogoutAt: serverTimestamp()
+                }).catch(() => {});
+            }
         }
-        await signOut(auth);
-    } catch (_) {}
-    window.location.href = 'index.html';
+    });
 };
 
 function setupRealtimeData() {

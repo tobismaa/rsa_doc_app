@@ -3,6 +3,7 @@ import { onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
 import { getMaintenanceSettings, isMaintenanceExemptRole, showMaintenanceOverlay } from './shared/maintenance-mode.js?v=20260507a';
 import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260617a';
+import { performAppLogout } from './shared/logout.js?v=20260625b';
 import { registerPushTokenForCurrentUser } from './push-alerts.js';
 
 const REQUIRED_FIELDS = [
@@ -41,7 +42,7 @@ let forceLogoutLockState = {
   deadlineMs: 0
 };
 let forceLogoutActionBlockersBound = false;
-let targetedLogoutWatchStarted = false;
+const targetedLogoutWatchedDocIds = new Set();
 
 const WHATSAPP_COUNTRY_CODES = [
   { code: '+234', label: 'Nigeria', flag: '🇳🇬' },
@@ -577,12 +578,12 @@ function showForceLogoutNotice({ token = '', deadlineMs = 0 } = {}) {
 }
 
 async function executeForcedLogout(token) {
-  clearLocalForceLogoutState(token);
-  try {
-    await signOut(auth);
-  } finally {
-    window.location.href = 'index.html';
-  }
+  await performAppLogout({
+    auth,
+    beforeSignOut: async () => {
+      clearLocalForceLogoutState(token);
+    }
+  });
 }
 
 function startForceLogoutCountdown({ token = '', deadlineMs = 0 } = {}) {
@@ -917,8 +918,8 @@ function watchForSecuritySignals(userData = {}) {
 
 function watchForTargetedLogout(userDocId = '') {
   const normalizedUserDocId = String(userDocId || '').trim();
-  if (!normalizedUserDocId || targetedLogoutWatchStarted) return;
-  targetedLogoutWatchStarted = true;
+  if (!normalizedUserDocId || targetedLogoutWatchedDocIds.has(normalizedUserDocId)) return;
+  targetedLogoutWatchedDocIds.add(normalizedUserDocId);
 
   onSnapshot(doc(db, 'users', normalizedUserDocId), async (snap) => {
     try {
@@ -962,6 +963,27 @@ async function findUserDocByUidOrEmail(uid, email) {
   if (!emailSnap.empty) return emailSnap.docs[0];
 
   return null;
+}
+
+async function findUserDocsByUidOrEmail(uid, email) {
+  const docsById = new Map();
+  const normalizedUid = String(uid || '').trim();
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+
+  if (normalizedUid) {
+    const directDoc = await getDoc(doc(db, 'users', normalizedUid)).catch(() => null);
+    if (directDoc?.exists?.()) docsById.set(directDoc.id, directDoc);
+
+    const byUidSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', normalizedUid))).catch(() => null);
+    byUidSnap?.docs?.forEach((docSnap) => docsById.set(docSnap.id, docSnap));
+  }
+
+  if (normalizedEmail) {
+    const byEmailSnap = await getDocs(query(collection(db, 'users'), where('email', '==', normalizedEmail))).catch(() => null);
+    byEmailSnap?.docs?.forEach((docSnap) => docsById.set(docSnap.id, docSnap));
+  }
+
+  return Array.from(docsById.values());
 }
 
 async function enforceProfileCompletion(user) {
@@ -1105,8 +1127,15 @@ onAuthStateChanged(auth, async (user) => {
       }
     } catch (_) {}
 
-    if (userDoc?.id) {
+    const logoutWatchDocs = await findUserDocsByUidOrEmail(user.uid, user.email).catch(() => []);
+    logoutWatchDocs.forEach((docSnap) => {
+      if (docSnap?.id) watchForTargetedLogout(docSnap.id);
+    });
+    if (userDoc?.id && !targetedLogoutWatchedDocIds.has(userDoc.id)) {
       watchForTargetedLogout(userDoc.id);
+    }
+
+    if (userDoc?.id) {
       try {
         await registerPushTokenForCurrentUser(user, userDoc.id);
       } catch (_) {}
