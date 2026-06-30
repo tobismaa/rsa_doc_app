@@ -124,7 +124,16 @@ service cloud.firestore {
         resource.data.assignedTo == myEmail() ||
         resource.data.reviewedBy == myEmail() ||
         resource.data.assignedToRSA == myEmail() ||
-        resource.data.assignedToPayment == myEmail()
+        resource.data.assignedToPayment == myEmail() ||
+        (
+          resource.data.agentId is string &&
+          resource.data.status == 'paid' &&
+          exists(/databases/$(database)/documents/agents/$(resource.data.agentId)) &&
+          (
+            get(/databases/$(database)/documents/agents/$(resource.data.agentId)).data.createdByUid == request.auth.uid ||
+            get(/databases/$(database)/documents/agents/$(resource.data.agentId)).data.createdBy == myEmail()
+          )
+        )
       );
     }
 

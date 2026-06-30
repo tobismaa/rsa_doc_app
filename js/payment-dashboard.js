@@ -145,6 +145,10 @@ function endPaymentAction(key) {
     paymentActionLocks.delete(key);
 }
 
+function showPaymentMovedToAuditNotice() {
+    showNotification('Paid and cleared actions are now handled in Audit.', 'warning');
+}
+
 function escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
@@ -578,6 +582,8 @@ function renderDashboardOverview() {
 }
 
 function switchTab(tabId) {
+    const allowedTabs = ['dashboard', 'sent-to-pfa', 'leave', 'profile'];
+    tabId = allowedTabs.includes(tabId) ? tabId : 'dashboard';
     activePaymentTab = tabId;
     document.querySelectorAll('.nav-item').forEach((nav) => nav.classList.remove('active'));
     document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
@@ -1585,9 +1591,7 @@ function renderPaymentReconciliation() {
 
     const matchedCount = paymentReconciliationResult.matchedRows.length;
     const unmatchedCount = paymentReconciliationResult.unmatchedRows.length;
-    const actionableCount = paymentReconciliationResult.matchedRows.filter((item) => hasCommissionEligibleAgent(item.submission)).length;
     syncPaymentReconciliationSelection();
-    const selectedCount = paymentReconciliationResult.matchedRows.filter((item) => paymentReconciliationSelectedIds.has(item.submissionId)).length;
 
     if (paymentReconciliationSummary) {
         paymentReconciliationSummary.style.display = 'flex';
@@ -1602,13 +1606,13 @@ function renderPaymentReconciliation() {
     if (paymentReconciliationNotes) {
         paymentReconciliationNotes.style.display = 'block';
         paymentReconciliationNotes.textContent = matchedCount
-            ? `${matchedCount} row(s) matched automatically. Tick the applications you want to bulk mark as paid, or use single-row action for one-off handling.`
+            ? `${matchedCount} row(s) matched automatically.`
             : 'No queue rows matched this Excel file.';
     }
 
     if (paymentReconciliationMarkMatchedBtn) {
-        paymentReconciliationMarkMatchedBtn.disabled = selectedCount === 0;
-        paymentReconciliationMarkMatchedBtn.innerHTML = `<i class="fas fa-check-circle"></i> Mark Selected Paid${selectedCount ? ` (${selectedCount})` : ''}`;
+        paymentReconciliationMarkMatchedBtn.disabled = true;
+        paymentReconciliationMarkMatchedBtn.style.display = 'none';
     }
     updatePaymentReconciliationSelectAllState();
     if (paymentReconciliationMatchedWrap) paymentReconciliationMatchedWrap.style.display = matchedCount ? 'block' : 'none';
@@ -1617,19 +1621,10 @@ function renderPaymentReconciliation() {
             ? paymentReconciliationResult.matchedRows.map((item) => {
                 const sub = item.submission || {};
                 const { pfa, twentyFive } = getSubmissionFinancials(sub);
-                const canMarkPaid = hasCommissionEligibleAgent(sub);
-                const checked = paymentReconciliationSelectedIds.has(sub.id) ? 'checked' : '';
-                const checkboxHtml = canMarkPaid
-                    ? `<input type="checkbox" class="payment-reconciliation-row-check" data-submission-id="${escapeHtml(sub.id)}" ${checked}>`
-                    : `<span style="color:#94a3b8;font-size:12px;">N/A</span>`;
-                const actionHtml = canMarkPaid
-                    ? `<button class="action-btn" style="background:#16a34a;color:#fff;border:none;" onclick="window.markMatchedPaymentReconciliationRecord('${sub.id}')"><i class="fas fa-check-circle"></i> Mark Paid</button>`
-                    : `<button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.markMatchedPaymentReconciliationRecord('${sub.id}')"><i class="fas fa-check-double"></i> Clear</button>`;
                 const matchLabel = item.matchMethod === 'accountNumber' ? 'Matched by Account No' : 'Matched by Name';
                 const accountNumber = item.queueAccountNumber || item.accountNumber || '-';
                 return `
                     <tr>
-                        <td>${checkboxHtml}</td>
                         <td>${escapeHtml(String(item.rowNumber))}</td>
                         <td><strong>${escapeHtml(sub.customerName || item.customerName || '-')}</strong></td>
                         <td>${escapeHtml(accountNumber || '-')}</td>
@@ -1638,7 +1633,6 @@ function renderPaymentReconciliation() {
                         <td>${formatCurrency(item.normalizedAmount || 0)}</td>
                         <td>${formatCurrency(twentyFive || 0)}</td>
                         <td><span class="status-badge status-approved">${escapeHtml(matchLabel)}</span></td>
-                        <td>${actionHtml}</td>
                     </tr>
                 `;
             }).join('')
@@ -1686,9 +1680,7 @@ function renderPaymentQueue() {
         const reconciliationBadge = reconciliationMatch
             ? `<div style="margin-top:6px;"><span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;"><i class="fas fa-link"></i> Excel matched</span></div>`
             : '';
-        const actionHtml = hasCommissionEligibleAgent(sub)
-            ? `<button class="action-btn" style="background:#16a34a;color:#fff;border:none;" onclick="window.markSubmissionPaid('${sub.id}')"><i class="fas fa-check-circle"></i> Mark Paid</button>`
-            : `<button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.clearSubmissionWithoutAgent('${sub.id}')"><i class="fas fa-check-double"></i> Clear</button>`;
+        const actionHtml = `<button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>`;
 
         return `
             <tr>
@@ -1698,12 +1690,13 @@ function renderPaymentQueue() {
                     <div style="font-size:12px;color:#64748b;margin-top:4px;">${escapeHtml(String(sub?.agentAccountBank || '').trim() || '-')} • ${escapeHtml(String(sub?.agentAccountNumber || '').trim() || '-')}</div>
                 </td>
                 <td>${escapeHtml(uploaderLabel || '-')}</td>
+                <td>${escapeHtml(assignedLabel || '-')}</td>
                 <td>${escapeHtml(pfa)}</td>
                 <td>${formatCurrency(twentyFive)}<div style="font-size:12px;color:#64748b;margin-top:4px;">Rate: ${escapeHtml(rateLabel)}</div></td>
                 <td>${formatCurrency(commission2)}</td>
                 <td>${escapeHtml(queueDate)}</td>
                 <td><span class="status-badge status-approved">Sent to PFA</span></td>
-                <td>${actionHtml} <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button></td>
+                <td>${actionHtml}</td>
             </tr>
         `;
     }).join('');
@@ -1962,6 +1955,8 @@ window.markAgentPaid = async (groupKey) => {
 };
 
 window.markSubmissionPaid = async (submissionId) => {
+    showPaymentMovedToAuditNotice();
+    return;
     if (!assertWritable('Payment approval')) return;
     const sub = allSubmissions.find((item) => item.id === submissionId);
     if (!sub) {
@@ -2017,6 +2012,8 @@ window.markSubmissionPaid = async (submissionId) => {
 };
 
 window.markMatchedPaymentReconciliationRecords = async () => {
+    showPaymentMovedToAuditNotice();
+    return;
     if (!assertWritable('Payment reconciliation update')) return;
     if (!paymentReconciliationResult?.matchedRows?.length) {
         showNotification('Run reconciliation first.', 'warning');
@@ -2067,6 +2064,8 @@ window.markMatchedPaymentReconciliationRecords = async () => {
 };
 
 window.markMatchedPaymentReconciliationRecord = async (submissionId) => {
+    showPaymentMovedToAuditNotice();
+    return;
     if (!assertWritable('Payment reconciliation update')) return;
     const sub = allSubmissions.find((item) => item.id === submissionId);
     if (!sub) {
@@ -2087,6 +2086,8 @@ window.markMatchedPaymentReconciliationRecord = async (submissionId) => {
 };
 
 window.clearPaidAgent = async (groupKey) => {
+    showPaymentMovedToAuditNotice();
+    return;
     if (!assertWritable('Payment clearance')) return;
     const paidItems = allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'paid' && getAgentPaymentKey(s) === groupKey);
     if (paidItems.length === 0) {
@@ -2146,6 +2147,8 @@ window.clearPaidAgent = async (groupKey) => {
 };
 
 window.clearPaidSubmissions = async () => {
+    showPaymentMovedToAuditNotice();
+    return;
     if (!assertWritable('Payment clearance')) return;
     const paidItems = allSubmissions.filter((s) => String(s.status || '').toLowerCase() === 'paid');
     if (!paidItems.length) {
@@ -2187,6 +2190,8 @@ window.clearPaidSubmissions = async () => {
 };
 
 window.clearNoAgentApplications = async (groupKey) => {
+    showPaymentMovedToAuditNotice();
+    return;
     if (!assertWritable('Payment clearance')) return;
     const items = getPaymentRecords().filter((sub) => getAgentPaymentKey(sub) === groupKey);
     if (!items.length) {
@@ -2223,6 +2228,8 @@ window.clearNoAgentApplications = async (groupKey) => {
 };
 
 window.clearSubmissionWithoutAgent = async (submissionId) => {
+    showPaymentMovedToAuditNotice();
+    return;
     if (!assertWritable('Payment clearance')) return;
     const sub = allSubmissions.find((item) => item.id === submissionId);
     if (!sub) {

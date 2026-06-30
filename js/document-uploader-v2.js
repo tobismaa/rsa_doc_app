@@ -154,6 +154,8 @@ function getFinancials(submission) {
 let currentUser = null;
 let currentUserProfile = null;
 let allSubmissions = [];
+let submissionListenerUnsubs = [];
+const submissionSnapshotSources = new Map();
 let currentCustomerUploads = {};
 let currentEditId = null;
 let currentDraftId = null;
@@ -1198,6 +1200,7 @@ const submitAgentFormBtn = document.getElementById('submitAgentFormBtn');
 let __batchFilesBuffer = [];
 let currentCommissionTab = 'sent_to_pfa';
 let currentUploaderApplicationTab = 'draft';
+let currentUploaderPaidScope = 'mine';
 let registeredAgents = [];
 let agentAccountLookupSequence = 0;
 let agentAccountLookupDebounce = null;
@@ -1884,6 +1887,31 @@ function getRejectionHistoryEntries(submission) {
     .filter(Boolean);
 
   if (normalizedHistory.length > 0) return normalizedHistory;
+
+  const auditHistory = Array.isArray(submission?.auditCommissionRejections)
+    ? submission.auditCommissionRejections
+      .map((entry) => {
+        const reason = String(entry?.reason || '').trim();
+        if (!reason) return null;
+        return {
+          reason,
+          rejectedAt: entry?.rejectedAt || null,
+          rejectedBy: entry?.rejectedBy || entry?.performedBy || null
+        };
+      })
+      .filter(Boolean)
+    : [];
+
+  if (auditHistory.length > 0) return auditHistory;
+
+  const auditReason = String(submission?.auditCommissionRejectionReason || '').trim();
+  if (auditReason) {
+    return [{
+      reason: auditReason,
+      rejectedAt: submission?.auditCommissionRejectedAt || null,
+      rejectedBy: submission?.auditCommissionRejectedBy || null
+    }];
+  }
 
   const fallbackReason = String(
     submission?.latestRejectionReason ||
@@ -2752,6 +2780,12 @@ function setupEventListeners() {
   });
   document.querySelectorAll('[data-uploader-application-tab]').forEach((button) => {
     button.addEventListener('click', () => switchUploaderApplicationTab(button.dataset.uploaderApplicationTab || 'pending'));
+  });
+  document.querySelectorAll('[data-active-commission-scope]').forEach((button) => {
+    button.addEventListener('click', () => {
+      currentUploaderPaidScope = button.dataset.activeCommissionScope === 'others' ? 'others' : 'mine';
+      renderUploaderApplicationsTable();
+    });
   });
   if (applicationsSearch) {
     applicationsSearch.addEventListener('input', renderUploaderApplicationsTable);
@@ -4658,18 +4692,28 @@ async function handleBulkImportSelection(event) {
 async function loadSubmissions() {
   const uploaderEmail = normalizeEmail(currentUser?.email);
   if (!uploaderEmail) return;
-  const q = query(collection(db, 'submissions'), where('uploadedBy', '==', uploaderEmail), orderBy('uploadedAt', 'desc'));
-  onSnapshot(q, async (snapshot) => {
-    allSubmissions = [];
+
+  submissionListenerUnsubs.forEach((unsubscribe) => {
+    try { unsubscribe(); } catch (_) {}
+  });
+  submissionListenerUnsubs = [];
+  submissionSnapshotSources.clear();
+
+  const refreshMergedSubmissions = async () => {
+    const merged = new Map();
+    submissionSnapshotSources.forEach((rows) => {
+      rows.forEach((row) => merged.set(row.id, row));
+    });
+    allSubmissions = Array.from(merged.values()).sort((a, b) => getSubmissionSortMillis(b) - getSubmissionSortMillis(a));
     const emails = new Set();
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      allSubmissions.push(normalizeSubmissionAgentFields({ id: doc.id, ...data }));
+    allSubmissions.forEach((data) => {
       if (data.uploadedBy) emails.add(data.uploadedBy);
       if (data.reviewedBy) emails.add(data.reviewedBy);
       if (data.assignedTo) emails.add(data.assignedTo);
       if (data.assignedToRSA) emails.add(data.assignedToRSA);
       if (data.assignedToPayment) emails.add(data.assignedToPayment);
+      if (data.paidBy) emails.add(data.paidBy);
+      if (data.clearedBy) emails.add(data.clearedBy);
     });
     try { await ensureUserFullNames(Array.from(emails)); } catch (e) { }
     await renderRecentTable();
@@ -4680,7 +4724,36 @@ async function loadSubmissions() {
     renderUploaderApplicationsTable();
     renderPaidTable();
     updateDashboardCards();
-  }, (error) => { showNotification('Error loading submissions', 'error'); });
+  };
+
+  const attachSubmissionListener = (sourceKey, submissionQuery) => {
+    const unsubscribe = onSnapshot(submissionQuery, async (snapshot) => {
+      const rows = [];
+      snapshot.forEach((docSnap) => {
+        rows.push(normalizeSubmissionAgentFields({ id: docSnap.id, ...(docSnap.data() || {}) }));
+      });
+      submissionSnapshotSources.set(sourceKey, rows);
+      await refreshMergedSubmissions();
+    }, () => {
+      showNotification('Error loading submissions', 'error');
+    });
+    submissionListenerUnsubs.push(unsubscribe);
+  };
+
+  attachSubmissionListener(
+    'own',
+    query(collection(db, 'submissions'), where('uploadedBy', '==', uploaderEmail), orderBy('uploadedAt', 'desc'))
+  );
+
+  registeredAgents
+    .map((agent) => String(agent.id || '').trim())
+    .filter(Boolean)
+    .forEach((agentId) => {
+      attachSubmissionListener(
+        `agent-paid:${agentId}`,
+        query(collection(db, 'submissions'), where('agentId', '==', agentId), where('status', '==', 'paid'))
+      );
+    });
 }
 
 async function ensureUserFullNames(emails) {
@@ -4754,6 +4827,7 @@ function renderWhatsAppLink(raw) {
 async function renderRecentTable() {
   if (!recentTableBody) return;
   const recentItems = [...allSubmissions]
+    .filter(isOwnUploaderSubmission)
     .filter((sub) => String(sub.status || '').toLowerCase() !== 'draft')
     .sort((a, b) => getSubmissionSortMillis(b) - getSubmissionSortMillis(a))
     .slice(0, 6);
@@ -4777,6 +4851,7 @@ async function renderRecentTable() {
 function renderDraftTable() {
   if (!draftTableBody) return;
   const drafts = [...allSubmissions]
+    .filter(isOwnUploaderSubmission)
     .filter((sub) => String(sub.status || '').toLowerCase() === 'draft')
     .sort((a, b) => getSubmissionSortMillis(b) - getSubmissionSortMillis(a));
 
@@ -4830,12 +4905,13 @@ window.deleteDraftSubmission = async (id) => {
 };
 
 function updateDashboardCards() {
-  const draft = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'draft').length;
-  const pending = allSubmissions.filter(s => s.status === 'pending').length;
-  const approved = allSubmissions.filter((s) => getUploaderApplicationBucket(s) === 'approved').length;
-  const rejected = allSubmissions.filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase())).length;
-  const paid = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'paid').length;
+  const ownSubmissions = allSubmissions.filter(isOwnUploaderSubmission);
+  const draft = ownSubmissions.filter(s => String(s.status || '').toLowerCase() === 'draft').length;
+  const pending = ownSubmissions.filter(s => s.status === 'pending').length;
+  const approved = ownSubmissions.filter((s) => getUploaderApplicationBucket(s) === 'approved').length;
   const applicationCounts = getUploaderApplicationCounts();
+  const rejected = applicationCounts.rejected;
+  const paid = applicationCounts.paid;
   const applicationsTotal = Object.values(applicationCounts).reduce((sum, value) => sum + value, 0);
   document.getElementById('cardPendingCount').textContent = pending;
   document.getElementById('cardApprovedCount').textContent = approved;
@@ -4885,22 +4961,48 @@ function isUploaderSentToPfaStatus(submission = {}) {
 
 function getUploaderApplicationBucket(submission = {}) {
   const status = String(submission.status || '').toLowerCase();
+  const auditStatus = String(submission.auditCommissionStatus || '').toLowerCase();
   if (status === 'draft') return 'draft';
   if (status === 'pending') return 'pending';
+  if (auditStatus === 'rejected') return 'rejected';
   if (status === 'rejected' || status === 'rejected_by_rsa') return 'rejected';
   if (status === 'paid') return 'paid';
   if (status === 'cleared') return 'cleared';
+  if (submission.paymentMadeByUploader === true && auditStatus === 'pending') return 'audit';
   if (isUploaderSentToPfaStatus(submission)) return 'sent_to_pfa';
   if (status === 'approved' || status === 'processing_to_pfa') return 'approved';
   return '';
 }
 
+function isAuditCommissionRejected(submission = {}) {
+  return String(submission.auditCommissionStatus || '').toLowerCase() === 'rejected';
+}
+
+function isOwnUploaderSubmission(submission = {}) {
+  return normalizeEmail(submission.uploadedBy) === normalizeEmail(currentUser?.email);
+}
+
+function isLinkedAgentPaidSubmission(submission = {}) {
+  if (String(submission.status || '').toLowerCase() !== 'paid') return false;
+  const agentId = String(submission.agentId || '').trim();
+  return !!agentId && registeredAgents.some((agent) => String(agent.id || '').trim() === agentId);
+}
+
+function isVisibleUploaderApplicationForTab(submission = {}, tab = currentUploaderApplicationTab) {
+  if (tab === 'paid') return isOwnUploaderSubmission(submission) || isLinkedAgentPaidSubmission(submission);
+  return isOwnUploaderSubmission(submission);
+}
+
+function getActiveCommissionScopeLabel(scope = currentUploaderPaidScope) {
+  return scope === 'others' ? 'Other Users Applications' : 'My Applications';
+}
+
 function getUploaderApplicationCounts() {
   return allSubmissions.reduce((acc, sub) => {
     const bucket = getUploaderApplicationBucket(sub);
-    if (bucket && Object.prototype.hasOwnProperty.call(acc, bucket)) acc[bucket] += 1;
+    if (bucket && Object.prototype.hasOwnProperty.call(acc, bucket) && isVisibleUploaderApplicationForTab(sub, bucket)) acc[bucket] += 1;
     return acc;
-  }, { draft: 0, pending: 0, approved: 0, rejected: 0, sent_to_pfa: 0, paid: 0, cleared: 0 });
+  }, { draft: 0, pending: 0, approved: 0, rejected: 0, sent_to_pfa: 0, audit: 0, paid: 0, cleared: 0 });
 }
 
 function getSubmissionPfaName(submission = {}) {
@@ -4921,6 +5023,7 @@ function getUploaderPaymentStageEntryAt(submission = {}) {
   const bucket = getUploaderApplicationBucket(submission);
   if (bucket === 'paid') return getSubmissionPaidEntryAt(submission);
   if (bucket === 'cleared') return getSubmissionClearedEntryAt(submission);
+  if (bucket === 'audit') return submission.auditCommissionResubmittedAt || submission.auditCommissionSubmittedAt || submission.paymentMadeAt || getSubmissionPaymentEntryAt(submission);
   if (bucket === 'sent_to_pfa') return getSubmissionPaymentEntryAt(submission);
   return getSubmissionCurrentStageEntryAt(submission);
 }
@@ -4929,7 +5032,7 @@ async function getUploaderPaymentResidentOfficer(submission = {}) {
   const bucket = getUploaderApplicationBucket(submission);
   const auditStatus = String(submission.auditCommissionStatus || '').toLowerCase();
 
-  if (bucket === 'sent_to_pfa' && auditStatus === 'pending') return 'Audit';
+  if (bucket === 'audit' || (bucket === 'sent_to_pfa' && auditStatus === 'pending')) return 'Audit';
   if (bucket === 'sent_to_pfa' && submission.paymentMadeByUploader !== true) return 'Uploader';
 
   const officerEmail =
@@ -4948,6 +5051,12 @@ function getUploaderApplicationRows(tab = currentUploaderApplicationTab) {
   const search = String(applicationsSearch?.value || '').trim().toLowerCase();
   return allSubmissions
     .filter((sub) => getUploaderApplicationBucket(sub) === tab)
+    .filter((sub) => isVisibleUploaderApplicationForTab(sub, tab))
+    .filter((sub) => {
+      if (tab !== 'paid') return true;
+      const isMine = isOwnUploaderSubmission(sub);
+      return currentUploaderPaidScope === 'others' ? !isMine : isMine;
+    })
     .filter((sub) => {
       if (!search) return true;
       return [
@@ -4969,6 +5078,7 @@ function renderUploaderApplicationBadges() {
     appApprovedCount: counts.approved,
     appRejectedCount: counts.rejected,
     appSentToPfaCount: counts.sent_to_pfa,
+    appAuditCount: counts.audit,
     appPaidCount: counts.paid,
     appClearedCount: counts.cleared
   };
@@ -4989,12 +5099,23 @@ function getUploaderApplicationColumnCount() {
 
 function renderUploaderApplicationsEmpty(label) {
   if (!applicationsTableBody) return;
-  applicationsTableBody.innerHTML = `<tr><td colspan="${getUploaderApplicationColumnCount()}" class="no-data">No ${escapeHtml(label)} applications</td></tr>`;
+  const text = currentUploaderApplicationTab === 'paid'
+    ? `No ${label}`
+    : `No ${label} applications`;
+  applicationsTableBody.innerHTML = `<tr><td colspan="${getUploaderApplicationColumnCount()}" class="no-data">${escapeHtml(text)}</td></tr>`;
 }
 
 async function renderUploaderApplicationsTable() {
   renderUploaderApplicationBadges();
   if (!applicationsTableBody) return;
+
+  const activeCommissionScopeStrip = document.getElementById('activeCommissionScopeStrip');
+  if (activeCommissionScopeStrip) {
+    activeCommissionScopeStrip.style.display = currentUploaderApplicationTab === 'paid' ? 'flex' : 'none';
+    activeCommissionScopeStrip.querySelectorAll('[data-active-commission-scope]').forEach((button) => {
+      button.classList.toggle('active', button.dataset.activeCommissionScope === currentUploaderPaidScope);
+    });
+  }
 
   const rows = getUploaderApplicationRows();
 
@@ -5069,23 +5190,36 @@ async function renderUploaderApplicationsTable() {
     }
     let html = '';
     for (const sub of rows) {
-      const fixCount = Number(sub.fixCount || 0);
-      const date = safeFormatDate(getSubmissionReviewEntryAt(sub));
-      const assignedName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned';
+      const auditRejected = isAuditCommissionRejected(sub);
+      const fixCount = auditRejected ? Number(sub.auditCommissionResubmitCount || 0) : Number(sub.fixCount || 0);
+      const date = safeFormatDate(auditRejected ? (sub.auditCommissionRejectedAt || sub.auditCommissionSubmittedAt || sub.paymentMadeAt) : getSubmissionReviewEntryAt(sub));
+      const assignedName = auditRejected ? 'Audit' : (sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned');
       const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
       const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button>`;
       const reasonBtn = hasRejectionHistory(sub)
         ? `<button class="action-btn reason-btn" onclick="window.openUploaderRejectionReasonModal('${sub.id}')"><i class="fas fa-eye"></i> View Details</button>`
         : 'No reason provided';
-      html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${reasonBtn}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-edit"></i> Re-upload</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+      const actionCell = auditRejected
+        ? `<div class="audit-rejection-actions">
+            <button class="action-btn edit-btn" onclick="window.openAuditPaymentResubmitModal('${sub.id}')" title="Submit correction to Audit"><i class="fas fa-paper-plane"></i> Resubmit</button>
+            <button class="action-btn dissolve-btn" onclick="window.dissolveAuditPaymentRequest('${sub.id}')" title="Return to Sent to PFA"><i class="fas fa-rotate-left"></i> Dissolve</button>
+          </div>`
+        : `<button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-edit"></i> Re-upload</button>`;
+      html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${reasonBtn}</td><td>${actionCell}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
     }
     applicationsTableBody.innerHTML = html;
     return;
   }
 
-  setUploaderApplicationsColumns(['Customer Name', 'Agent', 'PFA', 'Time Entered', 'Current Officer', 'Action']);
+  setUploaderApplicationsColumns(
+    currentUploaderApplicationTab === 'paid'
+      ? ['Customer Name', 'Agent', 'PFA', 'Uploaded By', 'Time Entered', 'Current Officer', 'Action']
+      : ['Customer Name', 'Agent', 'PFA', 'Time Entered', 'Current Officer', 'Action']
+  );
   if (!rows.length) {
-    const label = currentUploaderApplicationTab.replace(/_/g, ' ');
+    const label = currentUploaderApplicationTab === 'paid'
+      ? getActiveCommissionScopeLabel()
+      : currentUploaderApplicationTab.replace(/_/g, ' ');
     renderUploaderApplicationsEmpty(label);
     return;
   }
@@ -5098,16 +5232,24 @@ async function renderUploaderApplicationsTable() {
     const paymentButton = currentUploaderApplicationTab === 'sent_to_pfa'
       ? `<button class="action-btn view-btn-small" ${canReportPayment ? '' : 'disabled'} onclick="window.markUploaderPaymentMade('${sub.id}')"><i class="fas fa-money-bill-wave"></i> ${auditStatus === 'pending' ? 'Reported' : 'Payment Made'}</button>`
       : '';
+    const auditLabel = currentUploaderApplicationTab === 'audit'
+      ? '<span class="audit-pending-pill"><i class="fas fa-hourglass-half"></i> Pending Audit</span>'
+      : '';
     const residentOfficer = await getUploaderPaymentResidentOfficer(sub);
+    const uploadedByCell = currentUploaderApplicationTab === 'paid'
+      ? `<td>${escapeHtml(isOwnUploaderSubmission(sub) ? 'Me' : (sub.uploadedBy || '-'))}</td>`
+      : '';
     html += `
       <tr data-submission-id="${sub.id}">
         <td><strong>${escapeHtml(sub.customerName || '-')}</strong></td>
         <td>${escapeHtml(getSubmissionAgentDisplayName(sub))}</td>
         <td>${escapeHtml(getSubmissionPfaName(sub))}</td>
+        ${uploadedByCell}
         <td>${safeFormatDate(getUploaderPaymentStageEntryAt(sub))}</td>
         <td>${escapeHtml(residentOfficer)}</td>
         <td>
           ${paymentButton}
+          ${auditLabel}
           <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button>
           <button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button>
         </td>
@@ -5118,11 +5260,136 @@ async function renderUploaderApplicationsTable() {
 }
 
 function switchUploaderApplicationTab(tab = 'pending') {
-  currentUploaderApplicationTab = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'paid', 'cleared'].includes(tab) ? tab : 'draft';
+  currentUploaderApplicationTab = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'audit', 'paid', 'cleared'].includes(tab) ? tab : 'draft';
+  if (currentUploaderApplicationTab !== 'paid') currentUploaderPaidScope = 'mine';
   document.querySelectorAll('[data-uploader-application-tab]').forEach((button) => {
     button.classList.toggle('active', button.dataset.uploaderApplicationTab === currentUploaderApplicationTab);
   });
   renderUploaderApplicationsTable();
+}
+
+function showPaymentMadeConfirmation(submission = {}) {
+  return new Promise((resolve) => {
+    const pfaName = getSubmissionPfaName(submission);
+    const customerName = String(submission.customerName || 'this customer').trim();
+    const modal = document.createElement('div');
+    modal.className = 'modal active payment-made-confirm-modal';
+    modal.innerHTML = `
+      <div class="modal-content payment-made-confirm-card">
+        <div class="payment-made-confirm-icon">
+          <i class="fas fa-money-check-dollar"></i>
+        </div>
+        <h2>Confirm Payment Made</h2>
+        <p>Are you sure payment has been made by <strong>${escapeHtml(pfaName)}</strong> for <strong>${escapeHtml(customerName)}</strong>?</p>
+        <div class="payment-made-confirm-actions">
+          <button type="button" class="cancel-btn" data-confirm-payment="no">Cancel</button>
+          <button type="button" class="submit-btn" data-confirm-payment="yes">
+            <i class="fas fa-check"></i> Confirm
+          </button>
+        </div>
+      </div>
+    `;
+    const close = (value) => {
+      modal.remove();
+      resolve(value);
+    };
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) close(false);
+      const button = event.target.closest('[data-confirm-payment]');
+      if (!button) return;
+      close(button.dataset.confirmPayment === 'yes');
+    });
+    document.body.appendChild(modal);
+  });
+}
+
+function showAuditPaymentResubmitDialog(submission = {}) {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal active audit-payment-resubmit-modal';
+    modal.innerHTML = `
+      <div class="modal-content audit-payment-resubmit-card">
+        <div class="payment-made-confirm-icon">
+          <i class="fas fa-file-circle-plus"></i>
+        </div>
+        <h2>Resubmit Payment Request</h2>
+        <p>Add a correction comment and upload the supporting document for <strong>${escapeHtml(submission.customerName || 'this application')}</strong>.</p>
+        <label class="audit-resubmit-field">
+          <span>Correction Comment</span>
+          <textarea id="auditPaymentResubmitComment" rows="4" placeholder="Enter correction comment"></textarea>
+        </label>
+        <label class="audit-resubmit-field">
+          <span>Correction Document</span>
+          <input id="auditPaymentResubmitFile" type="file" accept=".pdf,image/*">
+        </label>
+        <div class="payment-made-confirm-actions">
+          <button type="button" class="cancel-btn" data-audit-resubmit="cancel">Cancel</button>
+          <button type="button" class="submit-btn" data-audit-resubmit="submit">
+            <i class="fas fa-paper-plane"></i> Resubmit
+          </button>
+        </div>
+      </div>
+    `;
+    const close = (value) => {
+      modal.remove();
+      resolve(value);
+    };
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) {
+        close(null);
+        return;
+      }
+      const button = event.target.closest('[data-audit-resubmit]');
+      if (!button) return;
+      if (button.dataset.auditResubmit === 'cancel') {
+        close(null);
+        return;
+      }
+      const commentEl = modal.querySelector('#auditPaymentResubmitComment');
+      const fileEl = modal.querySelector('#auditPaymentResubmitFile');
+      const comment = String(commentEl?.value || '').trim();
+      const file = fileEl?.files?.[0] || null;
+      commentEl?.classList.toggle('invalid', !comment);
+      fileEl?.classList.toggle('invalid', !file);
+      if (!comment || !file) return;
+      close({ comment, file });
+    });
+    document.body.appendChild(modal);
+    setTimeout(() => modal.querySelector('#auditPaymentResubmitComment')?.focus(), 0);
+  });
+}
+
+function showAuditDissolveConfirmation(submission = {}) {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal active payment-made-confirm-modal';
+    modal.innerHTML = `
+      <div class="modal-content payment-made-confirm-card dissolve-confirm-card">
+        <div class="payment-made-confirm-icon dissolve">
+          <i class="fas fa-rotate-left"></i>
+        </div>
+        <h2>Dissolve Payment Request</h2>
+        <p>This will return <strong>${escapeHtml(submission.customerName || 'this application')}</strong> back to Sent to PFA.</p>
+        <div class="payment-made-confirm-actions">
+          <button type="button" class="cancel-btn" data-audit-dissolve="no">Cancel</button>
+          <button type="button" class="submit-btn danger" data-audit-dissolve="yes">
+            <i class="fas fa-check"></i> Dissolve
+          </button>
+        </div>
+      </div>
+    `;
+    const close = (value) => {
+      modal.remove();
+      resolve(value);
+    };
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) close(false);
+      const button = event.target.closest('[data-audit-dissolve]');
+      if (!button) return;
+      close(button.dataset.auditDissolve === 'yes');
+    });
+    document.body.appendChild(modal);
+  });
 }
 
 window.markUploaderPaymentMade = async (submissionId) => {
@@ -5138,7 +5405,7 @@ window.markUploaderPaymentMade = async (submissionId) => {
   }
 
   const pfaName = getSubmissionPfaName(sub);
-  const confirmed = window.confirm(`Confirm payment made by ${pfaName} for ${sub.customerName || 'this customer'}?`);
+  const confirmed = await showPaymentMadeConfirmation(sub);
   if (!confirmed) return;
 
   try {
@@ -5162,15 +5429,152 @@ window.markUploaderPaymentMade = async (submissionId) => {
       timestamp: serverTimestamp()
     }).catch(() => {});
 
+    await notifyAdminPushEvent({
+      currentUser,
+      eventType: 'commission_payment_reported',
+      title: 'Payment Request Submitted',
+      body: `${sub.customerName || 'An application'} was submitted for payment approval.`,
+      clickUrl: '/reports-monitoring-dashboard.html',
+      meta: {
+        submissionId,
+        customerName: sub.customerName || '',
+        pfaName,
+        uploadedBy: sub.uploadedBy || '',
+        submittedBy: currentUser?.email || ''
+      }
+    }).catch(() => {});
+
     showNotification('Payment made report sent to Audit.', 'success');
+    switchUploaderApplicationTab('audit');
   } catch (error) {
     showNotification('Failed to report payment made.', 'error');
+  }
+};
+
+window.openAuditPaymentResubmitModal = async (submissionId) => {
+  if (!assertWritable('Payment request resubmit')) return;
+  const sub = allSubmissions.find((item) => item.id === submissionId);
+  if (!sub) {
+    showNotification('Application not found', 'error');
+    return;
+  }
+  if (!isAuditCommissionRejected(sub)) {
+    showNotification('Only rejected Audit payment requests can be resubmitted.', 'warning');
+    return;
+  }
+
+  const result = await showAuditPaymentResubmitDialog(sub);
+  if (!result) return;
+
+  try {
+    const storage = new BackblazeStorage();
+    showNotification('Uploading correction document...', 'info');
+    const uploadResult = await storage.uploadFile(result.file, sub.customerName || 'application', 'audit_payment_correction');
+    const uploadedAt = await getTrustedNowIso();
+    const correctionDocument = {
+      name: result.file.name,
+      fileName: uploadResult.fileName || result.file.name,
+      fileId: uploadResult.fileId || '',
+      fileUrl: uploadResult.fileUrl || '',
+      documentType: 'audit_payment_correction',
+      comment: result.comment,
+      uploadedAt,
+      uploadedBy: currentUser?.email || ''
+    };
+    const nextCount = Number(sub.auditCommissionResubmitCount || 0) + 1;
+
+    await updateDoc(doc(db, 'submissions', submissionId), {
+      paymentMadeByUploader: true,
+      paymentMadeAt: serverTimestamp(),
+      paymentMadeBy: currentUser?.email || '',
+      auditCommissionStatus: 'pending',
+      auditCommissionRejectionReason: '',
+      auditCommissionSubmittedAt: serverTimestamp(),
+      auditCommissionSubmittedBy: currentUser?.email || '',
+      auditCommissionResubmittedAt: serverTimestamp(),
+      auditCommissionResubmittedBy: currentUser?.email || '',
+      auditCommissionResubmitComment: result.comment,
+      auditCommissionResubmitCount: nextCount,
+      auditCommissionCorrectionDocuments: arrayUnion(correctionDocument),
+      updatedAt: serverTimestamp()
+    });
+
+    await addDoc(collection(db, 'audit'), {
+      action: 'uploader_payment_request_resubmitted',
+      submissionId,
+      customerName: sub.customerName || '',
+      comment: result.comment,
+      correctionDocumentName: result.file.name,
+      performedBy: currentUser?.email || '',
+      timestamp: serverTimestamp()
+    }).catch(() => {});
+
+    await notifyAdminPushEvent({
+      currentUser,
+      eventType: 'commission_payment_reported',
+      title: 'Payment Request Resubmitted',
+      body: `${sub.customerName || 'An application'} was resubmitted for Audit payment approval.`,
+      clickUrl: '/reports-monitoring-dashboard.html',
+      meta: {
+        submissionId,
+        customerName: sub.customerName || '',
+        uploadedBy: sub.uploadedBy || '',
+        submittedBy: currentUser?.email || '',
+        correctionDocumentName: result.file.name
+      }
+    }).catch(() => {});
+
+    showNotification('Payment request resubmitted to Audit.', 'success');
+    switchUploaderApplicationTab('audit');
+  } catch (error) {
+    showNotification(`Failed to resubmit payment request: ${error.message || error}`, 'error');
+  }
+};
+
+window.dissolveAuditPaymentRequest = async (submissionId) => {
+  if (!assertWritable('Dissolve payment request')) return;
+  const sub = allSubmissions.find((item) => item.id === submissionId);
+  if (!sub) {
+    showNotification('Application not found', 'error');
+    return;
+  }
+  if (!isAuditCommissionRejected(sub)) {
+    showNotification('Only rejected Audit payment requests can be dissolved.', 'warning');
+    return;
+  }
+
+  const confirmed = await showAuditDissolveConfirmation(sub);
+  if (!confirmed) return;
+
+  try {
+    await updateDoc(doc(db, 'submissions', submissionId), {
+      paymentMadeByUploader: false,
+      auditCommissionStatus: 'dissolved',
+      auditCommissionRejectionReason: '',
+      auditCommissionDissolvedAt: serverTimestamp(),
+      auditCommissionDissolvedBy: currentUser?.email || '',
+      updatedAt: serverTimestamp()
+    });
+
+    await addDoc(collection(db, 'audit'), {
+      action: 'uploader_payment_request_dissolved',
+      submissionId,
+      customerName: sub.customerName || '',
+      performedBy: currentUser?.email || '',
+      timestamp: serverTimestamp()
+    }).catch(() => {});
+
+    showNotification('Payment request returned to Sent to PFA.', 'success');
+    switchUploaderApplicationTab('sent_to_pfa');
+  } catch (error) {
+    showNotification('Failed to dissolve payment request.', 'error');
   }
 };
 
 async function renderPendingTable() {
   if (!pendingTableBody) { return; }
   const pending = allSubmissions
+    .filter(isOwnUploaderSubmission)
     .filter(s => s.status === 'pending')
     .slice()
     .sort((a, b) => getStageTimestampMillis(getSubmissionReviewEntryAt(b)) - getStageTimestampMillis(getSubmissionReviewEntryAt(a)));
@@ -5189,6 +5593,7 @@ async function renderPendingTable() {
 async function renderApprovedTable() {
   if (!approvedTableBody) { return; }
   const approved = allSubmissions
+    .filter(isOwnUploaderSubmission)
     .filter((s) => isUploaderApprovedLifecycleStatus(s))
     .slice()
     .sort((a, b) => getStageTimestampMillis(getSubmissionApprovalEntryAt(b)) - getStageTimestampMillis(getSubmissionApprovalEntryAt(a)));
@@ -5210,6 +5615,7 @@ async function renderApprovedTable() {
 async function renderRejectedTable() {
   if (!rejectedTableBody) { return; }
   const rejected = allSubmissions
+    .filter(isOwnUploaderSubmission)
     .filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase()))
     .slice()
     .sort((a, b) => getStageTimestampMillis(getSubmissionRejectionEntryAt(b)) - getStageTimestampMillis(getSubmissionRejectionEntryAt(a)));

@@ -1,10 +1,10 @@
-import { EMAIL_API_BASE_URL } from './email-api-config.js';
+import { ACCOUNT_LOOKUP_API_BASE_URL, EMAIL_API_BASE_URL } from './email-api-config.js';
 import { auth, db } from './firebase-config.js';
 import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 
 function getEmailApiBaseUrl() {
-  const runtime = String(window.__EMAIL_API_BASE_URL__ || '').trim();
-  const configured = runtime || String(EMAIL_API_BASE_URL || '').trim();
+  const runtime = String(window.__EMAIL_API_BASE_URL__ || window.__ACCOUNT_LOOKUP_API_BASE_URL__ || '').trim();
+  const configured = runtime || String(EMAIL_API_BASE_URL || '').trim() || String(ACCOUNT_LOOKUP_API_BASE_URL || '').trim();
   if (!configured || configured.includes('YOUR-RENDER-URL')) return '';
   return configured.replace(/\/+$/, '');
 }

@@ -50,20 +50,6 @@
                     <span>Sent to PFA</span>
                     <span class="badge" id="paymentPendingCount">0</span>
                 </a>
-                <a href="#" class="nav-item" data-tab="paid-customers">
-                    <i class="fas fa-circle-check"></i>
-                    <span>Paid</span>
-                    <span class="badge" id="paidCustomerCount">0</span>
-                </a>
-                <a href="#" class="nav-item" data-tab="cleared-customers">
-                    <i class="fas fa-check-double"></i>
-                    <span>Cleared</span>
-                    <span class="badge" id="clearedCustomerCount">0</span>
-                </a>
-                <a href="#" class="nav-item" data-tab="report">
-                    <i class="fas fa-file-export"></i>
-                    <span>Report</span>
-                </a>
                 <a href="#" class="nav-item" data-tab="leave">
                     <i class="fas fa-person-walking-luggage"></i>
                     <span>Leave</span>
@@ -94,37 +80,6 @@
                             <i class="fas fa-paper-plane stat-icon"></i>
                         </div>
                     </div>
-                    <div class="stat-card approved">
-                        <div class="stat-content">
-                            <div>
-                                <div class="stat-label">Paid</div>
-                                <div class="stat-value" id="dashboardPaidCount">0</div>
-                            </div>
-                            <i class="fas fa-circle-check stat-icon"></i>
-                        </div>
-                    </div>
-                    <div class="stat-card approved">
-                        <div class="stat-content">
-                            <div>
-                                <div class="stat-label">Cleared</div>
-                                <div class="stat-value" id="dashboardClearedCount">0</div>
-                            </div>
-                            <i class="fas fa-check-double stat-icon"></i>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-content">
-                            <div>
-                                <div class="stat-label">Total Commission</div>
-                                <div class="stat-value" id="dashboardTotalCommission">NGN 0</div>
-                            </div>
-                            <i class="fas fa-money-bill-wave stat-icon"></i>
-                        </div>
-                    </div>
-                </div>
-                <div class="table-section">
-                    <h2>Workflow Overview</h2>
-                    <p style="color:#64748b;margin:0 0 14px;">Use the tabs to move from `Sent to PFA` to `Paid` and then `Cleared`. This dashboard gives the payment team a quick overview of the current workload.</p>
                 </div>
             </div>
 
@@ -177,14 +132,6 @@
                 <div class="table-section">
                     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
                         <h2 style="margin:0;">Paid Applications</h2>
-                        <div style="display:flex;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid #dbe2ea;border-radius:16px;background:linear-gradient(180deg,#f8fbff 0%,#eef6ff 100%);box-shadow:0 10px 24px rgba(15,59,103,0.08);">
-                            <button type="button" class="action-btn" id="generatePaidReportBtn" style="background:linear-gradient(135deg,#0f3b67 0%,#1d4ed8 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(29,78,216,0.28);">
-                                <i class="fas fa-file-export"></i> Generate Report
-                            </button>
-                            <button class="action-btn" style="background:linear-gradient(135deg,#0f766e 0%,#16a34a 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(22,163,74,0.24);" onclick="window.clearPaidSubmissions()">
-                                <i class="fas fa-check-double"></i> Clear All Paid
-                            </button>
-                        </div>
                     </div>
                     <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;">
                         <label for="paymentPaidSortFilter" style="font-size:13px;font-weight:600;color:#334155;">Sort / Filter</label>
@@ -267,11 +214,6 @@
                 <div class="table-section">
                     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 12px;">
                         <h2 style="margin:0;">Cleared</h2>
-                        <div style="display:flex;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid #dbe2ea;border-radius:16px;background:linear-gradient(180deg,#f8fbff 0%,#eef6ff 100%);box-shadow:0 10px 24px rgba(15,59,103,0.08);">
-                            <button type="button" class="action-btn" id="generateClearedReportBtn" style="background:linear-gradient(135deg,#0f3b67 0%,#1d4ed8 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(29,78,216,0.28);">
-                                <i class="fas fa-file-export"></i> Generate Report
-                            </button>
-                        </div>
                     </div>
                     <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;">
                         <label for="paymentClearedSortFilter" style="font-size:13px;font-weight:600;color:#334155;">Sort / Filter</label>
@@ -380,21 +322,6 @@
                         <p>Process only verified records in <strong>Sent to PFA</strong> and confirm status is ready for payout confirmation.</p>
                         <p>Check customer, PFA, agent, and amount fields before any payment action.</p>
                     </div>
-                    <div class="sop-topic">
-                        <h4>2. Mark Paid</h4>
-                        <p>Click <strong>Mark Paid</strong> only after payment evidence is confirmed by operations.</p>
-                        <p>This updates customer status and makes records available for post-payment settlement tracking.</p>
-                    </div>
-                    <div class="sop-topic">
-                        <h4>3. Paid Customers</h4>
-                        <p>Use <strong>Paid Agents</strong> tab to audit each paid agent batch and identify items pending settlement.</p>
-                        <p>Use filters/search to support reconciliation with external payment reports.</p>
-                    </div>
-                    <div class="sop-topic">
-                        <h4>4. Settle Commission</h4>
-                        <p>Use <strong>Settle Commission</strong> after commission disbursement is complete to mark records cleared.</p>
-                        <p><strong>Paid</strong> means customer payment confirmed; <strong>Cleared</strong> means commission fully settled.</p>
-                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -458,15 +385,11 @@
                 <div id="paymentReconciliationMatchedWrap" style="display:none;margin-bottom:18px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
                         <h4 style="margin:0;color:#0f3b67;font-size:15px;">Matched Records</h4>
-                        <button type="button" class="action-btn" id="paymentReconciliationMarkMatchedBtn" style="background:#16a34a;color:#fff;border:none;" disabled>
-                            <i class="fas fa-check-circle"></i> Bulk Mark Matched
-                        </button>
                     </div>
                     <div class="table-container">
                         <table class="customers-table">
                             <thead>
                                 <tr>
-                                    <th><input type="checkbox" id="paymentReconciliationSelectAll"></th>
                                     <th>Excel Row</th>
                                     <th>Customer</th>
                                     <th>Account Number</th>
@@ -475,7 +398,6 @@
                                     <th>Excel 25%</th>
                                     <th>Queue 25%</th>
                                     <th>Status</th>
-                                    <th>Action</th>
                                 </tr>
                             </thead>
                             <tbody id="paymentReconciliationMatchedBody"></tbody>
@@ -629,7 +551,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/payment-dashboard.js?v=20260630a"></script>
+    <script type="module" src="js/payment-dashboard.js?v=20260703a"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260625b"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260518a">
     <script type="module" src="js/app-chat.js?v=20260617a"></script>

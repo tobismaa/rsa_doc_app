@@ -1,12 +1,12 @@
 import { getMessaging, getToken, isSupported as isMessagingSupported } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging.js';
 import { arrayRemove, arrayUnion } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
 import { app, db, doc, updateDoc, serverTimestamp } from './firebase-config.js';
-import { EMAIL_API_BASE_URL, FCM_WEB_VAPID_KEY } from './email-api-config.js';
+import { ACCOUNT_LOOKUP_API_BASE_URL, EMAIL_API_BASE_URL, FCM_WEB_VAPID_KEY } from './email-api-config.js';
 import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 
 function getEmailApiBaseUrl() {
-  const runtime = String(window.__EMAIL_API_BASE_URL__ || '').trim();
-  const configured = runtime || String(EMAIL_API_BASE_URL || '').trim();
+  const runtime = String(window.__EMAIL_API_BASE_URL__ || window.__ACCOUNT_LOOKUP_API_BASE_URL__ || '').trim();
+  const configured = runtime || String(EMAIL_API_BASE_URL || '').trim() || String(ACCOUNT_LOOKUP_API_BASE_URL || '').trim();
   if (!configured || configured.includes('YOUR-RENDER-URL')) return '';
   return configured.replace(/\/+$/, '');
 }

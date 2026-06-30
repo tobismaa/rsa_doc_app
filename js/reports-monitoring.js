@@ -6,6 +6,7 @@ import {
     doc,
     onSnapshot,
     serverTimestamp,
+    arrayUnion,
     updateDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { formatAppDateTime } from './shared/app-time.js';
@@ -18,14 +19,22 @@ import {
     getSubmissionCommissionAmount,
     resolveSubmissionCommissionRate
 } from './shared/commission-config.js?v=20260507a';
+import { notifyUserPushEvent } from './push-alerts.js';
 
 let currentUser = null;
 let currentUserData = null;
 let allUsers = [];
 let allSubmissions = [];
 let currentTab = 'overview';
+let currentAuditPaidScope = 'mine';
+let currentPaymentReport = null;
+let pendingPaymentReportRequest = { kind: 'paid' };
+let currentPaymentPdfPreviewUrl = '';
+let currentPaymentPdfPreviewBlob = null;
+let currentPaymentPdfPreviewFileName = 'payment-report.pdf';
 let usersListenerStarted = false;
 let submissionsListenerStarted = false;
+const PAYMENT_RATE_CUTOFF_MS = new Date('2026-05-07T00:00:00+01:00').getTime();
 
 const pageTitle = document.getElementById('pageTitle');
 const monitorName = document.getElementById('monitorName');
@@ -38,8 +47,26 @@ const applicationsStatusFilter = document.getElementById('applicationsStatusFilt
 const applicationsStageFilter = document.getElementById('applicationsStageFilter');
 const applicationDetailsModal = document.getElementById('applicationDetailsModal');
 const auditSentToPfaTableBody = document.getElementById('auditSentToPfaTableBody');
+const auditOverviewPendingTableBody = document.getElementById('auditOverviewPendingTableBody');
 const auditPaidTableBody = document.getElementById('auditPaidTableBody');
 const auditClearedTableBody = document.getElementById('auditClearedTableBody');
+const exportAuditPendingReportBtn = document.getElementById('exportAuditPendingReportBtn');
+const exportAuditPaidReportBtn = document.getElementById('exportAuditPaidReportBtn');
+const exportAuditClearedReportBtn = document.getElementById('exportAuditClearedReportBtn');
+const paymentReportRangeModal = document.getElementById('paymentReportRangeModal');
+const paymentReportPreviewModal = document.getElementById('paymentReportPreviewModal');
+const paymentReportStartDate = document.getElementById('paymentReportStartDate');
+const paymentReportEndDate = document.getElementById('paymentReportEndDate');
+const paymentReportPreviewMeta = document.getElementById('paymentReportPreviewMeta');
+const paymentReportSummaryChips = document.getElementById('paymentReportSummaryChips');
+const paymentReportSummaryBody = document.getElementById('paymentReportSummaryBody');
+const paymentReportDetailsBody = document.getElementById('paymentReportDetailsBody');
+const generatePaymentReportBtn = document.getElementById('generatePaymentReportBtn');
+const exportPaymentReportExcelBtn = document.getElementById('exportPaymentReportExcelBtn');
+const exportPaymentReportPdfBtn = document.getElementById('exportPaymentReportPdfBtn');
+const paymentPdfPreviewModal = document.getElementById('paymentPdfPreviewModal');
+const paymentPdfPreviewFrame = document.getElementById('paymentPdfPreviewFrame');
+const downloadPaymentPdfPreviewBtn = document.getElementById('downloadPaymentPdfPreviewBtn');
 
 function escapeHtml(text) {
     if (!text) return '';
@@ -65,6 +92,34 @@ function normalizeEmail(value) {
 
 function formatDate(value) {
     return formatAppDateTime(value, '-');
+}
+
+function getTimestampMillis(value) {
+    return getStageTimestampMillis(value);
+}
+
+function formatDateOnly(value) {
+    const ms = getTimestampMillis(value);
+    if (!ms) return '-';
+    try {
+        return new Date(ms).toLocaleDateString('en-GB', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric'
+        });
+    } catch (_) {
+        return new Date(ms).toISOString().slice(0, 10);
+    }
+}
+
+function formatInputDateValue(value) {
+    const ms = getTimestampMillis(value);
+    if (!ms) return '';
+    const d = new Date(ms);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 }
 
 function formatCurrency(value) {
@@ -97,6 +152,38 @@ function getSubmissionFinancials(sub = {}) {
     return { rsaBalance, twentyFive, commission, commissionRate };
 }
 
+function getSubmissionPfaName(sub = {}) {
+    return String(sub?.customerDetails?.pfa || sub?.pfa || '').trim() || '-';
+}
+
+function getSubmissionRatePercent(sub = {}) {
+    const uploadedAtMs = getTimestampMillis(sub?.uploadedAt || sub?.createdAt || sub?.updatedAt);
+    if (uploadedAtMs && uploadedAtMs < PAYMENT_RATE_CUTOFF_MS) return 10;
+    return 7;
+}
+
+function getSubmissionRateLabel(sub = {}) {
+    return `${getSubmissionRatePercent(sub)}%`;
+}
+
+function getPaymentStatusLabel(sub = {}) {
+    const status = String(sub?.status || '').toLowerCase();
+    if (status === 'cleared') return 'Cleared';
+    if (status === 'paid') return 'Paid';
+    return 'Sent to PFA';
+}
+
+function isPaymentSubmissionAttended(sub = {}) {
+    const status = String(sub?.status || '').toLowerCase();
+    return status === 'paid' || status === 'cleared';
+}
+
+function getRangeBoundaryMs(dateValue, mode = 'start') {
+    if (!dateValue) return 0;
+    const suffix = mode === 'end' ? 'T23:59:59.999+01:00' : 'T00:00:00+01:00';
+    return new Date(`${dateValue}${suffix}`).getTime();
+}
+
 function getCustomerAccountNumber(sub = {}) {
     return String(
         sub?.customerDetails?.accountNo ||
@@ -105,6 +192,42 @@ function getCustomerAccountNumber(sub = {}) {
         sub?.accountNumber ||
         '-'
     ).trim() || '-';
+}
+
+function renderCopyableCustomerAccount(sub = {}) {
+    const accountNumber = getCustomerAccountNumber(sub);
+    if (!accountNumber || accountNumber === '-') return '-';
+    return `
+        <span class="copy-account-cell">
+            <span class="copy-account-value">${escapeHtml(accountNumber)}</span>
+            <button type="button" class="copy-account-btn" data-copy-account="${escapeHtml(accountNumber)}" title="Copy account number" aria-label="Copy account number">
+                <i class="fas fa-copy"></i>
+            </button>
+        </span>
+    `;
+}
+
+async function copyTextToClipboard(text = '') {
+    const value = String(text || '').trim();
+    if (!value) return false;
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+        await navigator.clipboard.writeText(value);
+        return true;
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = value;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    let copied = false;
+    try {
+        copied = document.execCommand('copy');
+    } finally {
+        textarea.remove();
+    }
+    return copied;
 }
 
 function getUserDisplayName(email = '') {
@@ -289,9 +412,20 @@ function getAuditSentToPfaRows() {
         .sort((a, b) => getStageTimestampMillis(b.auditCommissionSubmittedAt || b.paymentMadeAt || getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(a.auditCommissionSubmittedAt || a.paymentMadeAt || getSubmissionCurrentStageEntryAt(a)));
 }
 
-function getAuditPaidRows() {
+function getAuditApprovalEmail(sub = {}) {
+    return normalizeEmail(sub.auditCommissionAcceptedBy || sub.paidBy || sub.commissionPaidBy || '');
+}
+
+function getAuditPaidRows(scope = currentAuditPaidScope) {
+    const currentEmail = normalizeEmail(currentUser?.email);
     return allSubmissions
         .filter((sub) => String(sub.status || '').toLowerCase() === 'paid')
+        .filter((sub) => {
+            if (scope === 'all') return true;
+            const approvedBy = getAuditApprovalEmail(sub);
+            if (!currentEmail) return scope !== 'mine';
+            return scope === 'mine' ? approvedBy === currentEmail : approvedBy !== currentEmail;
+        })
         .sort((a, b) => getStageTimestampMillis(b.paidAt || getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(a.paidAt || getSubmissionCurrentStageEntryAt(a)));
 }
 
@@ -308,57 +442,19 @@ function setCountBadge(id, value) {
 
 function renderAuditWorkflowBadges() {
     setCountBadge('auditSentToPfaCountBadge', getAuditSentToPfaRows().length);
-    setCountBadge('auditPaidCountBadge', getAuditPaidRows().length);
+    setCountBadge('auditPaidCountBadge', getAuditPaidRows('all').length);
     setCountBadge('auditClearedCountBadge', getAuditClearedRows().length);
 }
 
 function renderOverview() {
-    const sentCount = allSubmissions.filter((sub) => ['sent_to_pfa', 'rsa_submitted'].includes(String(sub.status || '').toLowerCase()) || sub.finalSubmitted === true || sub.rsaSubmitted === true).length;
-    const paidClearedCount = allSubmissions.filter((sub) => ['paid', 'cleared'].includes(String(sub.status || '').toLowerCase())).length;
+    const awaitingAuditCount = getAuditSentToPfaRows().length;
+    const paidCount = getAuditPaidRows('all').length;
+    const clearedCount = getAuditClearedRows().length;
 
-    setCountBadge('overviewUsersCount', allUsers.length);
-    setCountBadge('overviewApplicationsCount', allSubmissions.length);
-    setCountBadge('overviewSentCount', sentCount);
-    setCountBadge('overviewPaidClearedCount', paidClearedCount);
-    setCountBadge('usersCountBadge', allUsers.length);
-    setCountBadge('applicationsCountBadge', allSubmissions.length);
+    setCountBadge('overviewUsersCount', awaitingAuditCount);
+    setCountBadge('overviewSentCount', paidCount);
+    setCountBadge('overviewPaidClearedCount', clearedCount);
     renderAuditWorkflowBadges();
-
-    const workflowBody = document.getElementById('overviewWorkflowBody');
-    if (workflowBody) {
-        const rows = getWorkflowSnapshotItems();
-        workflowBody.innerHTML = rows.map((item) => `
-            <tr>
-                <td>${escapeHtml(item.label)}</td>
-                <td><strong>${item.count}</strong></td>
-                <td>${escapeHtml(item.note)}</td>
-            </tr>
-        `).join('');
-    }
-
-    const recentBody = document.getElementById('recentApplicationsBody');
-    if (recentBody) {
-        const rows = allSubmissions
-            .slice()
-            .sort((a, b) => {
-                const aMs = getStageTimestampMillis(getSubmissionCurrentStageEntryAt(a));
-                const bMs = getStageTimestampMillis(getSubmissionCurrentStageEntryAt(b));
-                return bMs - aMs;
-            })
-            .slice(0, 10);
-
-        recentBody.innerHTML = rows.length ? rows.map((sub) => `
-            <tr>
-                <td>${escapeHtml(sub.customerName || 'Unknown')}</td>
-                <td>${escapeHtml(statusLabel(sub.status || '-'))}</td>
-                <td>${escapeHtml(getApplicationStage(sub))}</td>
-                <td>${escapeHtml(sub.uploadedBy || '-')}</td>
-                <td>${escapeHtml([sub.assignedTo || '-', sub.assignedToRSA || '-', sub.assignedToPayment || '-'].join(' / '))}</td>
-                <td>${escapeHtml(formatDate(getSubmissionCurrentStageEntryAt(sub)))}</td>
-                <td><button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button></td>
-            </tr>
-        `).join('') : '<tr><td colspan="7" class="no-data">No applications available</td></tr>';
-    }
 }
 
 function renderUsers() {
@@ -411,8 +507,9 @@ function renderApplications() {
 function renderAuditMoneyRows(body, rows, mode) {
     if (!body) return;
     if (!rows.length) {
-        const label = mode === 'sent' ? 'sent to PFA records awaiting Audit action' : `${mode} records`;
-        body.innerHTML = `<tr><td colspan="7" class="no-data">No ${escapeHtml(label)}</td></tr>`;
+        const label = mode === 'sent' ? 'pending payment requests' : `${mode} records`;
+        const colspan = mode === 'sent' ? 7 : 9;
+        body.innerHTML = `<tr><td colspan="${colspan}" class="no-data">No ${escapeHtml(label)}</td></tr>`;
         return;
     }
 
@@ -423,6 +520,14 @@ function renderAuditMoneyRows(body, rows, mode) {
             ? `<button class="action-btn" onclick="window.acceptAuditCommission('${sub.id}')"><i class="fas fa-check"></i> Accept</button>
                <button class="action-btn" style="background:#b91c1c;color:#fff;border:none;" onclick="window.rejectAuditCommission('${sub.id}')"><i class="fas fa-times"></i> Reject</button>`
             : `<button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>`;
+        const officerEmail = mode === 'paid'
+            ? (sub.auditCommissionAcceptedBy || sub.paidBy || sub.commissionPaidBy || '')
+            : mode === 'cleared'
+                ? (sub.clearedBy || '')
+                : '';
+        const officerCell = mode === 'paid' || mode === 'cleared'
+            ? `<td>${escapeHtml(getUserDisplayName(officerEmail))}</td>`
+            : '';
         const timeCell = mode === 'paid'
             ? `<td>${escapeHtml(formatDate(sub.paidAt))}</td>`
             : mode === 'cleared'
@@ -437,7 +542,7 @@ function renderAuditMoneyRows(body, rows, mode) {
                     <td>${formatCurrency(rsaBalance)}</td>
                     <td>${formatCurrency(twentyFive)}</td>
                     <td><strong>${formatCurrency(commission)}</strong></td>
-                    <td>${escapeHtml(getCustomerAccountNumber(sub))}</td>
+                    <td>${renderCopyableCustomerAccount(sub)}</td>
                     <td>${actionCell}</td>
                 </tr>
             `;
@@ -450,6 +555,8 @@ function renderAuditMoneyRows(body, rows, mode) {
                 <td>${formatCurrency(rsaBalance)}</td>
                 <td>${formatCurrency(twentyFive)}</td>
                 <td><strong>${formatCurrency(commission)}</strong></td>
+                <td>${renderCopyableCustomerAccount(sub)}</td>
+                ${officerCell}
                 ${timeCell}
                 <td>${actionCell}</td>
             </tr>
@@ -459,9 +566,349 @@ function renderAuditMoneyRows(body, rows, mode) {
 
 function renderAuditWorkflowTabs() {
     renderAuditWorkflowBadges();
+    document.querySelectorAll('[data-audit-paid-scope]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.auditPaidScope === currentAuditPaidScope);
+    });
+    renderAuditMoneyRows(auditOverviewPendingTableBody, getAuditSentToPfaRows(), 'sent');
     renderAuditMoneyRows(auditSentToPfaTableBody, getAuditSentToPfaRows(), 'sent');
-    renderAuditMoneyRows(auditPaidTableBody, getAuditPaidRows(), 'paid');
+    renderAuditMoneyRows(auditPaidTableBody, getAuditPaidRows(currentAuditPaidScope), 'paid');
     renderAuditMoneyRows(auditClearedTableBody, getAuditClearedRows(), 'cleared');
+}
+
+function buildPaymentStageReport(records = [], options = {}) {
+    const {
+        title = 'Payment Report',
+        exportKey = 'payment-report',
+        dateLabel = 'Date',
+        getDateMs = (sub) => getTimestampMillis(sub.paidAt || getSubmissionCurrentStageEntryAt(sub)),
+        statusResolver = (sub) => getPaymentStatusLabel(sub),
+        attendedResolver = (sub) => isPaymentSubmissionAttended(sub)
+    } = options;
+
+    const summaryMap = new Map();
+    const details = records
+        .map((sub) => {
+            const { twentyFive, commission } = getSubmissionFinancials(sub);
+            const dateMs = getDateMs(sub);
+            const attended = attendedResolver(sub);
+            const statusText = statusResolver(sub);
+            const detailRow = {
+                id: sub.id,
+                receivedAtMs: dateMs,
+                receivedDate: formatDateOnly(dateMs),
+                customerName: String(sub?.customerName || 'Unknown').trim() || 'Unknown',
+                agentName: String(sub?.agentName || '').trim() || 'No Agent',
+                uploaderName: getUserDisplayName(sub?.uploadedBy),
+                pfa: getSubmissionPfaName(sub),
+                twentyFive,
+                commission,
+                rateLabel: getSubmissionRateLabel(sub),
+                statusLabel: statusText,
+                attendedLabel: attended ? 'Yes' : 'No',
+                paidDate: formatDate(sub?.paidAt),
+                clearedDate: formatDate(sub?.clearedAt)
+            };
+
+            const summaryKey = formatInputDateValue(dateMs);
+            const existingSummary = summaryMap.get(summaryKey) || {
+                key: summaryKey,
+                dateLabel: formatDateOnly(dateMs),
+                received: 0,
+                attended: 0,
+                pending: 0
+            };
+            existingSummary.received += 1;
+            if (attended) existingSummary.attended += 1;
+            else existingSummary.pending += 1;
+            summaryMap.set(summaryKey, existingSummary);
+            return detailRow;
+        })
+        .sort((a, b) => b.receivedAtMs - a.receivedAtMs);
+
+    const summaryRows = Array.from(summaryMap.values()).sort((a, b) => String(a.key).localeCompare(String(b.key)));
+    const totals = summaryRows.reduce((acc, row) => ({
+        received: acc.received + row.received,
+        attended: acc.attended + row.attended,
+        pending: acc.pending + row.pending
+    }), { received: 0, attended: 0, pending: 0 });
+
+    return {
+        title,
+        exportKey,
+        rangeStart: options.rangeStart || '',
+        rangeEnd: options.rangeEnd || '',
+        metaText: `${title} generated from ${records.length} record(s). Summary grouped by ${dateLabel.toLowerCase()}.`,
+        summaryRows,
+        details,
+        totals,
+        dateCount: summaryRows.length
+    };
+}
+
+function createStageReportFromDateRange(request, startDate, endDate) {
+    const startMs = getRangeBoundaryMs(startDate, 'start');
+    const endMs = getRangeBoundaryMs(endDate, 'end');
+
+    if (request?.kind === 'sent-to-pfa') {
+        const records = getAuditSentToPfaRows().filter((sub) => {
+            const dateMs = getTimestampMillis(sub.auditCommissionSubmittedAt || sub.paymentMadeAt || getSubmissionCurrentStageEntryAt(sub));
+            return dateMs >= startMs && dateMs <= endMs;
+        });
+        return buildPaymentStageReport(records, {
+            title: 'Sent to PFA Report',
+            exportKey: `sent-to-pfa-report-${startDate}-to-${endDate}`,
+            rangeStart: startDate,
+            rangeEnd: endDate,
+            dateLabel: 'sent date',
+            getDateMs: (sub) => getTimestampMillis(sub.auditCommissionSubmittedAt || sub.paymentMadeAt || getSubmissionCurrentStageEntryAt(sub)),
+            statusResolver: () => 'Sent to PFA',
+            attendedResolver: () => false
+        });
+    }
+
+    if (request?.kind === 'cleared') {
+        const records = getAuditClearedRows().filter((sub) => {
+            const dateMs = getTimestampMillis(sub.clearedAt);
+            return dateMs >= startMs && dateMs <= endMs;
+        });
+        return buildPaymentStageReport(records, {
+            title: 'Cleared Report',
+            exportKey: `cleared-report-${startDate}-to-${endDate}`,
+            rangeStart: startDate,
+            rangeEnd: endDate,
+            dateLabel: 'cleared date',
+            getDateMs: (sub) => getTimestampMillis(sub.clearedAt),
+            statusResolver: () => 'Cleared',
+            attendedResolver: () => true
+        });
+    }
+
+    const records = getAuditPaidRows(currentAuditPaidScope).filter((sub) => {
+        const dateMs = getTimestampMillis(sub.paidAt);
+        return dateMs >= startMs && dateMs <= endMs;
+    });
+    return buildPaymentStageReport(records, {
+        title: 'Paid Report',
+        exportKey: `paid-report-${startDate}-to-${endDate}`,
+        rangeStart: startDate,
+        rangeEnd: endDate,
+        dateLabel: 'paid date',
+        getDateMs: (sub) => getTimestampMillis(sub.paidAt),
+        statusResolver: () => 'Paid',
+        attendedResolver: () => true
+    });
+}
+
+function renderPaymentReportPreview(report) {
+    currentPaymentReport = report;
+    if (paymentReportPreviewMeta) paymentReportPreviewMeta.textContent = report.metaText || 'Payment report preview.';
+    if (paymentReportSummaryChips) {
+        paymentReportSummaryChips.innerHTML = [
+            { label: 'Days Covered', value: report.dateCount, bg: '#dbeafe', color: '#1d4ed8' },
+            { label: 'Applications Received', value: report.totals.received, bg: '#e2e8f0', color: '#334155' },
+            { label: 'Attended', value: report.totals.attended, bg: '#dcfce7', color: '#166534' },
+            { label: 'Pending', value: report.totals.pending, bg: '#fee2e2', color: '#b91c1c' }
+        ].map((item) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:${item.bg};color:${item.color};font-size:12px;font-weight:700;"><span>${escapeHtml(item.label)}</span><span>${escapeHtml(String(item.value))}</span></span>`).join('');
+    }
+    if (paymentReportSummaryBody) {
+        paymentReportSummaryBody.innerHTML = report.summaryRows.length
+            ? report.summaryRows.map((row) => `<tr><td>${escapeHtml(row.dateLabel)}</td><td>${escapeHtml(String(row.received))}</td><td>${escapeHtml(String(row.attended))}</td><td>${escapeHtml(String(row.pending))}</td></tr>`).join('')
+            : '<tr><td colspan="4" class="no-data">No payment applications found for this date range</td></tr>';
+    }
+    if (paymentReportDetailsBody) {
+        paymentReportDetailsBody.innerHTML = report.details.length
+            ? report.details.map((row) => `
+                <tr>
+                    <td>${escapeHtml(row.receivedDate)}</td>
+                    <td><strong>${escapeHtml(row.customerName)}</strong></td>
+                    <td>${escapeHtml(row.agentName)}</td>
+                    <td>${escapeHtml(row.uploaderName || '-')}</td>
+                    <td>${escapeHtml(row.pfa)}</td>
+                    <td>${formatCurrency(row.twentyFive)}</td>
+                    <td>${escapeHtml(row.rateLabel)}</td>
+                    <td>${formatCurrency(row.commission)}</td>
+                    <td>${escapeHtml(row.statusLabel)}</td>
+                    <td>${escapeHtml(row.attendedLabel)}</td>
+                    <td>${escapeHtml(row.paidDate)}</td>
+                    <td>${escapeHtml(row.clearedDate)}</td>
+                </tr>
+            `).join('')
+            : '<tr><td colspan="12" class="no-data">No application breakdown available for this date range</td></tr>';
+    }
+}
+
+function saveBlob(fileName, blob) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName.replace(/[\\/:*?"<>|]/g, '_');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function openPaymentPdfPreview(blob, fileName = 'payment-report.pdf') {
+    if (!blob) return;
+    if (!paymentPdfPreviewModal || !paymentPdfPreviewFrame) {
+        saveBlob(fileName, blob);
+        return;
+    }
+    if (currentPaymentPdfPreviewUrl) URL.revokeObjectURL(currentPaymentPdfPreviewUrl);
+    currentPaymentPdfPreviewBlob = blob;
+    currentPaymentPdfPreviewFileName = fileName.replace(/[\\/:*?"<>|]/g, '_');
+    currentPaymentPdfPreviewUrl = URL.createObjectURL(blob);
+    paymentPdfPreviewFrame.src = currentPaymentPdfPreviewUrl;
+    paymentPdfPreviewModal.classList.add('active');
+}
+
+function closePaymentPdfPreviewModal() {
+    paymentPdfPreviewModal?.classList.remove('active');
+    if (paymentPdfPreviewFrame) paymentPdfPreviewFrame.src = '';
+    if (currentPaymentPdfPreviewUrl) URL.revokeObjectURL(currentPaymentPdfPreviewUrl);
+    currentPaymentPdfPreviewUrl = '';
+    currentPaymentPdfPreviewBlob = null;
+}
+
+async function exportPaymentReportExcel(report) {
+    if (!report) return;
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'CMBank RSA Payment Dashboard';
+    workbook.created = new Date();
+
+    const summarySheet = workbook.addWorksheet('Daily Summary');
+    summarySheet.columns = [
+        { header: 'Date', key: 'dateLabel', width: 18 },
+        { header: 'Applications Received', key: 'received', width: 22 },
+        { header: 'Attended', key: 'attended', width: 14 },
+        { header: 'Pending', key: 'pending', width: 14 }
+    ];
+    summarySheet.addRow({ dateLabel: 'Range', received: `${report.rangeStart} to ${report.rangeEnd}`, attended: '', pending: '' });
+    summarySheet.addRow({});
+    report.summaryRows.forEach((row) => summarySheet.addRow(row));
+    summarySheet.addRow({});
+    summarySheet.addRow({ dateLabel: 'Total', received: report.totals.received, attended: report.totals.attended, pending: report.totals.pending });
+    summarySheet.getRow(1).font = { bold: true };
+    summarySheet.getRow(3).font = { bold: true };
+
+    const detailsSheet = workbook.addWorksheet('Application Breakdown');
+    detailsSheet.columns = [
+        { header: 'Received Date', key: 'receivedDate', width: 18 },
+        { header: 'Customer', key: 'customerName', width: 28 },
+        { header: 'Agent', key: 'agentName', width: 24 },
+        { header: 'Uploader', key: 'uploaderName', width: 24 },
+        { header: 'PFA', key: 'pfa', width: 20 },
+        { header: '25% Balance', key: 'twentyFive', width: 18, style: { numFmt: '#,##0.00' } },
+        { header: 'Rate', key: 'rateLabel', width: 12 },
+        { header: 'Commission', key: 'commission', width: 18, style: { numFmt: '#,##0.00' } },
+        { header: 'Status', key: 'statusLabel', width: 16 },
+        { header: 'Attended', key: 'attendedLabel', width: 12 },
+        { header: 'Paid Date', key: 'paidDate', width: 22 },
+        { header: 'Cleared Date', key: 'clearedDate', width: 22 }
+    ];
+    report.details.forEach((row) => detailsSheet.addRow(row));
+    detailsSheet.getRow(1).font = { bold: true };
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveBlob(`${report.exportKey || 'payment-report'}.xlsx`, new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    }));
+}
+
+async function exportPaymentReportPdf(report) {
+    if (!report || !window.jspdf?.jsPDF) throw new Error('PDF library not available.');
+    const pdf = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    pdf.setFontSize(16);
+    pdf.text(report.title || 'Payment Report', 40, 36);
+    pdf.setFontSize(10);
+    pdf.text(report.metaText || '', 40, 54);
+    pdf.text(`Received: ${report.totals.received}   Attended: ${report.totals.attended}   Pending: ${report.totals.pending}`, 40, 70);
+    pdf.autoTable({
+        startY: 88,
+        head: [['Date', 'Received', 'Attended', 'Pending']],
+        body: report.summaryRows.map((row) => [row.dateLabel, row.received, row.attended, row.pending]),
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [15, 59, 103] }
+    });
+    pdf.autoTable({
+        startY: pdf.lastAutoTable.finalY + 18,
+        head: [['Received Date', 'Customer', 'Agent', 'Uploader', 'PFA', '25% Balance', 'Rate', 'Commission', 'Status', 'Attended']],
+        body: report.details.map((row) => [
+            row.receivedDate,
+            row.customerName,
+            row.agentName,
+            row.uploaderName,
+            row.pfa,
+            Number(row.twentyFive || 0).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            row.rateLabel,
+            Number(row.commission || 0).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            row.statusLabel,
+            row.attendedLabel
+        ]),
+        styles: { fontSize: 7, cellPadding: 2.5, overflow: 'linebreak', valign: 'middle' },
+        headStyles: { fillColor: [15, 118, 110] },
+        showHead: 'everyPage',
+        margin: { left: 18, right: 18 },
+        tableWidth: 'auto',
+        columnStyles: {
+            0: { cellWidth: 58 },
+            1: { cellWidth: 112 },
+            2: { cellWidth: 88 },
+            3: { cellWidth: 88 },
+            4: { cellWidth: 58 },
+            5: { cellWidth: 72, halign: 'right' },
+            6: { cellWidth: 36, halign: 'center' },
+            7: { cellWidth: 72, halign: 'right' },
+            8: { cellWidth: 54, halign: 'center' },
+            9: { cellWidth: 48, halign: 'center' }
+        }
+    });
+    openPaymentPdfPreview(pdf.output('blob'), `${report.exportKey || 'payment-report'}.pdf`);
+}
+
+function resetPaymentReportPreviewTabs() {
+    document.querySelectorAll('.payment-report-preview-tab').forEach((btn) => {
+        const isSummary = btn.dataset.paymentReportView === 'summary';
+        btn.classList.toggle('active', isSummary);
+        btn.style.background = isSummary ? '#0f3b67' : '';
+        btn.style.color = isSummary ? '#fff' : '';
+        btn.style.border = isSummary ? 'none' : '';
+    });
+    document.getElementById('paymentReportSummaryView')?.style.setProperty('display', '');
+    document.getElementById('paymentReportDetailsView')?.style.setProperty('display', 'none');
+}
+
+function showPaymentReportPreviewTab(viewName) {
+    document.querySelectorAll('.payment-report-preview-tab').forEach((btn) => {
+        const isActive = btn.dataset.paymentReportView === viewName;
+        btn.classList.toggle('active', isActive);
+        btn.style.background = isActive ? '#0f3b67' : '';
+        btn.style.color = isActive ? '#fff' : '';
+        btn.style.border = isActive ? 'none' : '';
+    });
+    document.getElementById('paymentReportSummaryView')?.style.setProperty('display', viewName === 'summary' ? '' : 'none');
+    document.getElementById('paymentReportDetailsView')?.style.setProperty('display', viewName === 'details' ? '' : 'none');
+}
+
+function openPaymentReportRangeModal() {
+    const today = new Date();
+    const sixDaysAgo = new Date(today.getTime() - (6 * 24 * 60 * 60 * 1000));
+    if (paymentReportStartDate && !paymentReportStartDate.value) paymentReportStartDate.value = formatInputDateValue(sixDaysAgo);
+    if (paymentReportEndDate && !paymentReportEndDate.value) paymentReportEndDate.value = formatInputDateValue(today);
+    paymentReportRangeModal?.classList.add('active');
+}
+
+function closePaymentReportRangeModal() {
+    paymentReportRangeModal?.classList.remove('active');
+}
+
+function openPaymentReportPreviewModal() {
+    resetPaymentReportPreviewTabs();
+    paymentReportPreviewModal?.classList.add('active');
+}
+
+function closePaymentReportPreviewModal() {
+    paymentReportPreviewModal?.classList.remove('active');
 }
 
 function renderReports() {
@@ -579,9 +1026,6 @@ function renderProfile() {
 function renderCurrentTab() {
     renderOverview();
     renderAuditWorkflowTabs();
-    renderUsers();
-    renderApplications();
-    renderReports();
 }
 
 function switchTab(tabId) {
@@ -593,13 +1037,10 @@ function switchTab(tabId) {
     document.getElementById(`${tabId}Tab`)?.classList.add('active');
 
     const titles = {
-        overview: 'Overview',
-        'sent-to-pfa': 'Sent to PFA',
+        overview: 'Audit Overview',
+        'sent-to-pfa': 'Pending Request',
         paid: 'Paid',
         cleared: 'Cleared',
-        users: 'Users',
-        applications: 'Applications',
-        reports: 'Reports',
         profile: 'My Profile',
         help: 'Help & SOP'
     };
@@ -607,8 +1048,8 @@ function switchTab(tabId) {
 }
 
 function ensureDataForTab(tabId) {
-    if (tabId === 'overview' || tabId === 'users' || tabId === 'reports' || tabId === 'sent-to-pfa' || tabId === 'paid' || tabId === 'cleared') loadUsers();
-    if (tabId === 'overview' || tabId === 'applications' || tabId === 'reports' || tabId === 'sent-to-pfa' || tabId === 'paid' || tabId === 'cleared') loadSubmissions();
+    if (tabId === 'overview' || tabId === 'sent-to-pfa' || tabId === 'paid' || tabId === 'cleared') loadUsers();
+    if (tabId === 'overview' || tabId === 'sent-to-pfa' || tabId === 'paid' || tabId === 'cleared') loadSubmissions();
 }
 
 function toggleSidebar(open) {
@@ -652,7 +1093,7 @@ function openApplicationDetailsModal(submissionId) {
         body.innerHTML = rows.map(([label, value]) => `
             <tr>
                 <th style="width:240px;background:#f8fafc;">${escapeHtml(label)}</th>
-                <td>${escapeHtml(value)}</td>
+                <td>${label === 'Customer Account Number' ? renderCopyableCustomerAccount(sub) : escapeHtml(value)}</td>
             </tr>
         `).join('');
     }
@@ -663,6 +1104,84 @@ function closeApplicationDetailsModal() {
     applicationDetailsModal?.classList.remove('active');
 }
 
+function getLatestAuditCorrectionDocument(submission = {}) {
+    const docs = Array.isArray(submission.auditCommissionCorrectionDocuments)
+        ? submission.auditCommissionCorrectionDocuments
+        : [];
+    return docs.length ? docs[docs.length - 1] : null;
+}
+
+function getAuditCorrectionSummaryHtml(submission = {}) {
+    const latestDoc = getLatestAuditCorrectionDocument(submission);
+    const comment = String(submission.auditCommissionResubmitComment || latestDoc?.comment || '').trim();
+    if (!latestDoc && !comment) return '';
+
+    const docLink = latestDoc?.fileUrl
+        ? `<a href="${escapeHtml(latestDoc.fileUrl)}" target="_blank" rel="noopener">${escapeHtml(latestDoc.name || latestDoc.fileName || 'Correction document')}</a>`
+        : escapeHtml(latestDoc?.name || latestDoc?.fileName || 'No document link');
+
+    return `
+        <div class="audit-correction-summary">
+            <strong>Correction Submitted</strong>
+            ${comment ? `<p>${escapeHtml(comment)}</p>` : ''}
+            ${latestDoc ? `<div><i class="fas fa-paperclip"></i> ${docLink}</div>` : ''}
+        </div>
+    `;
+}
+
+function showAuditActionModal({ mode = 'accept', submission = {} } = {}) {
+    return new Promise((resolve) => {
+        const isReject = mode === 'reject';
+        const modal = document.createElement('div');
+        modal.className = 'modal active audit-action-modal';
+        modal.innerHTML = `
+            <div class="modal-content audit-action-card ${isReject ? 'reject' : 'accept'}">
+                <div class="audit-action-icon">
+                    <i class="fas ${isReject ? 'fa-xmark' : 'fa-check'}"></i>
+                </div>
+                <h2>${isReject ? 'Reject Payment Request' : 'Approve Payment Request'}</h2>
+                <p>${isReject ? 'Enter a reason for rejecting' : 'Confirm that commission payment should be marked as paid for'} <strong>${escapeHtml(submission.customerName || 'this application')}</strong>.</p>
+                ${getAuditCorrectionSummaryHtml(submission)}
+                ${isReject ? '<textarea id="auditRejectReasonInput" rows="4" placeholder="Enter rejection reason"></textarea>' : ''}
+                <div class="audit-action-actions">
+                    <button type="button" class="cancel-btn" data-audit-action="cancel">Cancel</button>
+                    <button type="button" class="submit-btn ${isReject ? 'danger' : ''}" data-audit-action="confirm">
+                        <i class="fas ${isReject ? 'fa-paper-plane' : 'fa-check'}"></i> ${isReject ? 'Reject' : 'Approve'}
+                    </button>
+                </div>
+            </div>
+        `;
+        const close = (value) => {
+            modal.remove();
+            resolve(value);
+        };
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                close(isReject ? '' : false);
+                return;
+            }
+            const button = event.target.closest('[data-audit-action]');
+            if (!button) return;
+            if (button.dataset.auditAction === 'cancel') {
+                close(isReject ? '' : false);
+                return;
+            }
+            if (isReject) {
+                const reason = String(modal.querySelector('#auditRejectReasonInput')?.value || '').trim();
+                if (!reason) {
+                    modal.querySelector('#auditRejectReasonInput')?.classList.add('invalid');
+                    return;
+                }
+                close(reason);
+            } else {
+                close(true);
+            }
+        });
+        document.body.appendChild(modal);
+        if (isReject) setTimeout(() => modal.querySelector('#auditRejectReasonInput')?.focus(), 0);
+    });
+}
+
 window.openMonitoringApplicationDetails = openApplicationDetailsModal;
 window.acceptAuditCommission = async (submissionId) => {
     const sub = allSubmissions.find((item) => item.id === submissionId);
@@ -671,7 +1190,7 @@ window.acceptAuditCommission = async (submissionId) => {
         return;
     }
 
-    const confirmed = window.confirm(`Accept commission and mark ${sub.customerName || 'this application'} as paid?`);
+    const confirmed = await showAuditActionModal({ mode: 'accept', submission: sub });
     if (!confirmed) return;
 
     try {
@@ -702,6 +1221,21 @@ window.acceptAuditCommission = async (submissionId) => {
             timestamp: serverTimestamp()
         }).catch(() => {});
 
+        await notifyUserPushEvent({
+            currentUser,
+            recipientEmail: String(sub.auditCommissionSubmittedBy || sub.paymentMadeBy || sub.uploadedBy || '').trim(),
+            eventType: 'audit_commission_accepted',
+            title: 'Payment Request Approved',
+            body: `${sub.customerName || 'Your application'} has been marked as paid by Audit.`,
+            clickUrl: '/dashboard.html',
+            meta: {
+                submissionId,
+                customerName: sub.customerName || '',
+                approvedBy: currentUser?.email || '',
+                commissionAmount: commission
+            }
+        }).catch(() => {});
+
         showNotification('Commission accepted and marked paid.', 'success');
     } catch (error) {
         showNotification('Failed to accept commission.', 'error');
@@ -715,7 +1249,7 @@ window.rejectAuditCommission = async (submissionId) => {
         return;
     }
 
-    const reason = String(window.prompt(`Reason for rejecting commission for ${sub.customerName || 'this application'}?`) || '').trim();
+    const reason = String(await showAuditActionModal({ mode: 'reject', submission: sub }) || '').trim();
     if (!reason) {
         showNotification('Rejection reason is required.', 'warning');
         return;
@@ -728,6 +1262,11 @@ window.rejectAuditCommission = async (submissionId) => {
             auditCommissionRejectionReason: reason,
             auditCommissionRejectedAt: serverTimestamp(),
             auditCommissionRejectedBy: currentUser?.email || '',
+            auditCommissionRejections: arrayUnion({
+                reason,
+                rejectedBy: currentUser?.email || '',
+                rejectedAt: new Date().toISOString()
+            }),
             updatedAt: serverTimestamp()
         });
 
@@ -739,6 +1278,21 @@ window.rejectAuditCommission = async (submissionId) => {
             reason,
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
+        }).catch(() => {});
+
+        await notifyUserPushEvent({
+            currentUser,
+            recipientEmail: String(sub.auditCommissionSubmittedBy || sub.paymentMadeBy || sub.uploadedBy || '').trim(),
+            eventType: 'audit_commission_rejected',
+            title: 'Payment Request Rejected',
+            body: `${sub.customerName || 'Your application'} was rejected by Audit: ${reason}`,
+            clickUrl: '/dashboard.html',
+            meta: {
+                submissionId,
+                customerName: sub.customerName || '',
+                rejectedBy: currentUser?.email || '',
+                reason
+            }
         }).catch(() => {});
 
         showNotification('Commission rejected and returned to uploader.', 'success');
@@ -770,6 +1324,12 @@ function bindEvents() {
             switchTab(item.dataset.tab || 'overview');
         });
     });
+    document.querySelectorAll('[data-audit-paid-scope]').forEach((button) => {
+        button.addEventListener('click', () => {
+            currentAuditPaidScope = button.dataset.auditPaidScope === 'others' ? 'others' : 'mine';
+            renderAuditWorkflowTabs();
+        });
+    });
 
     [usersSearch, usersRoleFilter, usersStatusFilter, applicationsSearch, applicationsStatusFilter, applicationsStageFilter]
         .forEach((el) => el?.addEventListener('input', renderCurrentTab));
@@ -786,6 +1346,108 @@ function bindEvents() {
     document.getElementById('signOutBtnMobile')?.addEventListener('click', handleSignOut);
     document.getElementById('forceRefreshBtn')?.addEventListener('click', () => window.location.reload());
     document.getElementById('forceRefreshBtnMobile')?.addEventListener('click', () => window.location.reload());
+    exportAuditPendingReportBtn?.addEventListener('click', () => {
+        pendingPaymentReportRequest = { kind: 'sent-to-pfa' };
+        openPaymentReportRangeModal();
+    });
+    exportAuditPaidReportBtn?.addEventListener('click', () => {
+        pendingPaymentReportRequest = { kind: 'paid' };
+        openPaymentReportRangeModal();
+    });
+    exportAuditClearedReportBtn?.addEventListener('click', () => {
+        pendingPaymentReportRequest = { kind: 'cleared' };
+        openPaymentReportRangeModal();
+    });
+    document.getElementById('closePaymentReportRangeModalBtn')?.addEventListener('click', closePaymentReportRangeModal);
+    document.getElementById('cancelPaymentReportRangeBtn')?.addEventListener('click', closePaymentReportRangeModal);
+    document.getElementById('closePaymentReportPreviewModalBtn')?.addEventListener('click', closePaymentReportPreviewModal);
+    document.getElementById('closePaymentReportPreviewFooterBtn')?.addEventListener('click', closePaymentReportPreviewModal);
+    document.getElementById('closePaymentPdfPreviewModalBtn')?.addEventListener('click', closePaymentPdfPreviewModal);
+    document.getElementById('closePaymentPdfPreviewFooterBtn')?.addEventListener('click', closePaymentPdfPreviewModal);
+    downloadPaymentPdfPreviewBtn?.addEventListener('click', () => {
+        if (currentPaymentPdfPreviewBlob) saveBlob(currentPaymentPdfPreviewFileName || 'payment-report.pdf', currentPaymentPdfPreviewBlob);
+    });
+    document.querySelectorAll('.payment-report-preview-tab').forEach((btn) => {
+        btn.addEventListener('click', () => showPaymentReportPreviewTab(btn.dataset.paymentReportView || 'summary'));
+    });
+    generatePaymentReportBtn?.addEventListener('click', async () => {
+        const startDate = paymentReportStartDate?.value || '';
+        const endDate = paymentReportEndDate?.value || '';
+        if (!startDate || !endDate) {
+            showNotification('Please choose both start and end date.', 'warning');
+            return;
+        }
+        if (startDate > endDate) {
+            showNotification('Start date cannot be after end date.', 'warning');
+            return;
+        }
+        const originalHtml = generatePaymentReportBtn.innerHTML;
+        generatePaymentReportBtn.disabled = true;
+        generatePaymentReportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+        try {
+            const report = createStageReportFromDateRange(pendingPaymentReportRequest, startDate, endDate);
+            renderPaymentReportPreview(report);
+            closePaymentReportRangeModal();
+            openPaymentReportPreviewModal();
+        } catch (error) {
+            showNotification('Failed to generate payment report', 'error');
+        } finally {
+            generatePaymentReportBtn.disabled = false;
+            generatePaymentReportBtn.innerHTML = originalHtml;
+        }
+    });
+    exportPaymentReportExcelBtn?.addEventListener('click', async () => {
+        if (!currentPaymentReport) {
+            showNotification('Generate a report first.', 'warning');
+            return;
+        }
+        const originalHtml = exportPaymentReportExcelBtn.innerHTML;
+        exportPaymentReportExcelBtn.disabled = true;
+        exportPaymentReportExcelBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+        try {
+            await exportPaymentReportExcel(currentPaymentReport);
+        } catch (_) {
+            showNotification('Failed to export Excel report', 'error');
+        } finally {
+            exportPaymentReportExcelBtn.disabled = false;
+            exportPaymentReportExcelBtn.innerHTML = originalHtml;
+        }
+    });
+    exportPaymentReportPdfBtn?.addEventListener('click', async () => {
+        if (!currentPaymentReport) {
+            showNotification('Generate a report first.', 'warning');
+            return;
+        }
+        const originalHtml = exportPaymentReportPdfBtn.innerHTML;
+        exportPaymentReportPdfBtn.disabled = true;
+        exportPaymentReportPdfBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+        try {
+            await exportPaymentReportPdf(currentPaymentReport);
+        } catch (error) {
+            showNotification(error?.message || 'Failed to export PDF report', 'error');
+        } finally {
+            exportPaymentReportPdfBtn.disabled = false;
+            exportPaymentReportPdfBtn.innerHTML = originalHtml;
+        }
+    });
+
+    document.addEventListener('click', async (event) => {
+        const copyButton = event.target.closest('[data-copy-account]');
+        if (!copyButton) return;
+        const accountNumber = String(copyButton.dataset.copyAccount || '').trim();
+        try {
+            const copied = await copyTextToClipboard(accountNumber);
+            if (!copied) throw new Error('Copy failed');
+            const icon = copyButton.querySelector('i');
+            if (icon) {
+                icon.className = 'fas fa-check';
+                setTimeout(() => { icon.className = 'fas fa-copy'; }, 1200);
+            }
+            showNotification('Account number copied.', 'success');
+        } catch (_) {
+            showNotification('Could not copy account number.', 'error');
+        }
+    });
 
     document.getElementById('menuToggle')?.addEventListener('click', () => toggleSidebar(true));
     document.getElementById('sidebarClose')?.addEventListener('click', () => toggleSidebar(false));

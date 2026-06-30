@@ -1943,7 +1943,8 @@ app.post('/api/admin/push-event', authMiddleware, async (req, res) => {
 
         const allowedEventTypes = new Set([
             'new_user_registration',
-            'new_agent_registration'
+            'new_agent_registration',
+            'commission_payment_reported'
         ]);
         if (!allowedEventTypes.has(eventType)) {
             return res.status(400).json({ ok: false, error: 'Unsupported admin push event type' });
@@ -1957,7 +1958,10 @@ app.post('/api/admin/push-event', authMiddleware, async (req, res) => {
             const data = docSnap.data() || {};
             const role = normalizeRole(data.role);
             const status = String(data.status || '').toLowerCase();
-            if (!['admin', 'super_admin'].includes(role)) return;
+            const eligibleRoles = eventType === 'commission_payment_reported'
+                ? ['reports_monitoring', 'admin', 'super_admin']
+                : ['admin', 'super_admin'];
+            if (!eligibleRoles.includes(role)) return;
             if (status && status !== 'active') return;
             const email = safeLowerEmail(data.email);
             adminRecipients.push(email || docSnap.id);
@@ -2056,7 +2060,9 @@ app.post('/api/user/push-event', authMiddleware, async (req, res) => {
         }
 
         const allowedEventTypes = new Set([
-            'agent_registration_approved'
+            'agent_registration_approved',
+            'audit_commission_accepted',
+            'audit_commission_rejected'
         ]);
         if (!allowedEventTypes.has(eventType)) {
             return res.status(400).json({ ok: false, error: 'Unsupported user push event type' });

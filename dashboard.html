@@ -18,7 +18,7 @@
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <!-- External CSS -->
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260427b">
-    <link rel="stylesheet" href="css/uploader-dashboard.css?v=20260703a">
+    <link rel="stylesheet" href="css/uploader-dashboard.css?v=20260703c">
     <style>
         /* Additional modal styles to ensure visibility */
         .modal {
@@ -689,8 +689,11 @@
                         <button type="button" class="admin-subtab-btn" data-uploader-application-tab="sent_to_pfa">
                             Sent to PFA <span class="subtab-badge" id="appSentToPfaCount">0</span>
                         </button>
+                        <button type="button" class="admin-subtab-btn" data-uploader-application-tab="audit">
+                            Audit <span class="subtab-badge" id="appAuditCount">0</span>
+                        </button>
                         <button type="button" class="admin-subtab-btn" data-uploader-application-tab="paid">
-                            Paid <span class="subtab-badge" id="appPaidCount">0</span>
+                            Active Commission <span class="subtab-badge" id="appPaidCount">0</span>
                         </button>
                         <button type="button" class="admin-subtab-btn" data-uploader-application-tab="cleared">
                             Cleared <span class="subtab-badge" id="appClearedCount">0</span>
@@ -698,6 +701,14 @@
                     </div>
                     <div class="filters-bar">
                         <input type="text" id="applicationsSearch" placeholder="Search customer, agent, PFA, or status">
+                    </div>
+                    <div class="admin-subtab-strip active-commission-scope-strip" id="activeCommissionScopeStrip" style="display:none;">
+                        <button type="button" class="admin-subtab-btn active" data-active-commission-scope="mine">
+                            My Applications
+                        </button>
+                        <button type="button" class="admin-subtab-btn" data-active-commission-scope="others">
+                            Other Users Applications
+                        </button>
                     </div>
                     <div class="table-container">
                         <table class="customers-table">
@@ -1023,7 +1034,7 @@
                     </div>
                     <div class="sop-topic">
                         <h4>6. Applications</h4>
-                        <p>Use <strong>Applications</strong> to switch between Pending, Approved, Rejected, Sent to PFA, Paid, and Cleared records.</p>
+                        <p>Use <strong>Applications</strong> to switch between Pending, Approved, Rejected, Sent to PFA, Active Commission, and Cleared records.</p>
                         <p>In Sent to PFA, use <strong>Payment Made</strong> after the PFA has paid so Audit can verify the commission.</p>
                     </div>
                     <div class="sop-topic">
@@ -1497,7 +1508,7 @@
     <script type="module" src="js/backblaze-storage.js?v=20260416b"></script>
 
     <!-- 6. Document Uploader (main upload logic) -->
-<script type="module" src="js/document-uploader-v2.js?v=20260703h"></script>
+<script type="module" src="js/document-uploader-v2.js?v=20260703k"></script>
 
     <!-- 7. Dashboard (Track & Calculator only) -->
 <script type="module" src="js/uploader-dashboard.js?v=20260625b"></script>
