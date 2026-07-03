@@ -1246,70 +1246,23 @@
             <div class="modal-body">
                 <form id="agentRegistrationForm">
                     <div class="customer-input-grid">
-                        <div class="full-width">
-                            <label for="agentFullName">Full Name *</label>
-                            <input type="text" id="agentFullName" required>
-                        </div>
-                        <div>
-                            <label for="agentContactNumber">Contact Number *</label>
-                            <input type="tel" id="agentContactNumber" maxlength="11" inputmode="numeric" required>
-                        </div>
                         <div>
                             <label for="agentAccountNumber">Account Number *</label>
                             <input type="text" id="agentAccountNumber" maxlength="10" inputmode="numeric" required>
                         </div>
                         <div class="full-width">
                             <label for="agentAccountBank">Account Bank *</label>
-                            <select id="agentAccountBank" required>
-                                <option value="">Select Bank</option>
-                                <option>Access Bank</option>
-                                <option>ALAT by Wema</option>
-                                <option>Coronation Merchant Bank</option>
-                                <option>Citibank</option>
-                                <option>FairMoney MFB</option>
-                                <option>Ecobank</option>
-                                <option>Fidelity Bank</option>
-                                <option>First Bank of Nigeria</option>
-                                <option>First City Monument Bank (FCMB)</option>
-                                <option>FSDH Merchant Bank</option>
-                                <option>Globus Bank</option>
-                                <option>Guaranty Trust Bank (GTBank)</option>
-                                <option>Heritage Bank</option>
-                                <option>Jaiz Bank</option>
-                                <option>Keystone Bank</option>
-                                <option>Kuda MFB</option>
-                                <option>Lotus Bank</option>
-                                <option>Moniepoint MFB</option>
-                                <option>Optimus Bank</option>
-                                <option>Opay</option>
-                                <option>PalmPay</option>
-                                <option>Parallex Bank</option>
-                                <option>Polaris Bank</option>
-                                <option>PremiumTrust Bank</option>
-                                <option>Providus Bank</option>
-                                <option>Rand Merchant Bank</option>
-                                <option>Rubies MFB</option>
-                                <option>Safe Haven MFB</option>
-                                <option>Signature Bank</option>
-                                <option>Stanbic IBTC Bank</option>
-                                <option>Standard Chartered Bank</option>
-                                <option>Sterling Bank</option>
-                                <option>SunTrust Bank</option>
-                                <option>TajBank</option>
-                                <option>Titan Trust Bank</option>
-                                <option>Union Bank of Nigeria</option>
-                                <option>United Bank for Africa (UBA)</option>
-                                <option>Unity Bank</option>
-                                <option>VFD Microfinance Bank</option>
-                                <option>Wema Bank</option>
-                                <option>Woven Finance</option>
-                                <option>Zenith Bank</option>
-                            </select>
+                            <input type="text" id="agentAccountBank" list="agentAccountBankList" placeholder="Search bank name" autocomplete="off" required>
+                            <datalist id="agentAccountBankList"></datalist>
                         </div>
                         <div class="full-width">
                             <label for="agentAccountName">Account Name *</label>
                             <input type="text" id="agentAccountName" placeholder="Auto-filled after account verification" readonly required>
                             <div id="agentAccountLookupStatus" style="display:none;margin-top:6px;font-size:12px;font-weight:700;"></div>
+                        </div>
+                        <div>
+                            <label for="agentContactNumber">Contact Number *</label>
+                            <input type="tel" id="agentContactNumber" maxlength="11" inputmode="numeric" required>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -1544,7 +1497,7 @@
     <script type="module" src="js/backblaze-storage.js?v=20260416b"></script>
 
     <!-- 6. Document Uploader (main upload logic) -->
-<script type="module" src="js/document-uploader-v2.js?v=20260703d"></script>
+<script type="module" src="js/document-uploader-v2.js?v=20260703g"></script>
 
     <!-- 7. Dashboard (Track & Calculator only) -->
 <script type="module" src="js/uploader-dashboard.js?v=20260625b"></script>

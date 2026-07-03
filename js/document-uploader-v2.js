@@ -253,13 +253,23 @@ async function populateAgentBankOptions({ force = false } = {}) {
     bankOptions = [...FALLBACK_CUSTOMER_ACCOUNT_BANKS];
   }
   if (!bankOptions.length) bankOptions = [...FALLBACK_CUSTOMER_ACCOUNT_BANKS];
+  agentAccountBankOptions = [...bankOptions];
 
-  agentAccountBankSelect.innerHTML = '<option value="">Select Bank</option>' + bankOptions.map((bank) => (
-    `<option value="${escapeHtml(bank.code || bank.name)}" data-name="${escapeHtml(getCustomerAccountBankLabel(bank))}">${escapeHtml(getCustomerAccountBankLabel(bank))}</option>`
-  )).join('');
+  if (agentAccountBankSelect.tagName === 'SELECT') {
+    agentAccountBankSelect.innerHTML = '<option value="">Select Bank</option>' + bankOptions.map((bank) => (
+      `<option value="${escapeHtml(bank.code || bank.name)}" data-name="${escapeHtml(getCustomerAccountBankLabel(bank))}">${escapeHtml(getCustomerAccountBankLabel(bank))}</option>`
+    )).join('');
+  } else {
+    renderAgentBankDatalist(bankOptions);
+  }
 
-  if (currentValue && bankOptions.some((bank) => bank.code === currentValue || bank.name === currentValue)) {
-    agentAccountBankSelect.value = currentValue;
+  if (currentValue) {
+    const currentBank = findAgentAccountBankByValue(currentValue, bankOptions);
+    if (currentBank) {
+      agentAccountBankSelect.value = agentAccountBankSelect.tagName === 'SELECT'
+        ? (currentBank.code || currentBank.name)
+        : getCustomerAccountBankLabel(currentBank);
+    }
   }
 }
 
@@ -284,6 +294,14 @@ async function fetchResolvedAccountName(accountNumber, bankCode) {
     body: JSON.stringify({ accountNumber, bankCode })
   });
   return String(data.accountName || '').trim();
+}
+
+async function fetchSuggestedAccountBanks(accountNumber) {
+  const data = await backendFetchJson('/api/paystack/suggest-banks', {
+    method: 'POST',
+    body: JSON.stringify({ accountNumber })
+  });
+  return Array.isArray(data.suggestions) ? data.suggestions : [];
 }
 
 function setAccountLookupStatus(message = '', type = 'info') {
@@ -475,7 +493,28 @@ function clearVerifiedAgentAccountLookup() {
   if (agentAccountNameInput) agentAccountNameInput.value = '';
 }
 
+function findAgentAccountBankByValue(value = '', banks = null) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const normalized = raw.toLowerCase();
+  const options = Array.isArray(banks) && banks.length
+    ? banks
+    : (agentAccountBankOptions.length ? agentAccountBankOptions : [...accountLookupBanks, ...FALLBACK_CUSTOMER_ACCOUNT_BANKS]);
+  return options.find((bank) => {
+    const label = getCustomerAccountBankLabel(bank);
+    return [bank.code, bank.name, label].some((candidate) => String(candidate || '').trim().toLowerCase() === normalized);
+  }) || null;
+}
+
 function getSelectedAgentAccountBank() {
+  if (!agentAccountBankSelect) return { code: '', name: '' };
+  if (agentAccountBankSelect.tagName !== 'SELECT') {
+    const value = String(agentAccountBankSelect.value || '').trim();
+    const bank = findAgentAccountBankByValue(value);
+    return bank
+      ? { code: String(bank.code || '').trim(), name: getCustomerAccountBankLabel(bank) }
+      : { code: '', name: value };
+  }
   const code = String(agentAccountBankSelect?.value || '').trim();
   const option = agentAccountBankSelect?.selectedOptions?.[0] || null;
   const name = String(option?.dataset?.name || option?.textContent || '').trim();
@@ -522,6 +561,61 @@ function scheduleAgentAccountLookup() {
   agentAccountLookupDebounce = window.setTimeout(() => {
     void resolveAgentAccountName();
   }, 500);
+}
+
+function renderAgentBankDatalist(banks = []) {
+  const options = Array.isArray(banks) && banks.length ? banks : agentAccountBankOptions;
+  const list = document.getElementById('agentAccountBankList');
+  if (!list) return;
+  list.innerHTML = options.map((bank) => {
+    const label = getCustomerAccountBankLabel(bank);
+    const accountName = String(bank.accountName || '').trim();
+    return `<option value="${escapeHtml(label)}" label="${escapeHtml(accountName ? `${label} - ${accountName}` : label)}"></option>`;
+  }).join('');
+}
+
+async function suggestAgentAccountBanks() {
+  const accountNumber = String(agentAccountNumberInput?.value || '').replace(/\D/g, '');
+  if (accountNumber.length !== 10 || !agentAccountBankSelect || agentAccountBankSelect.tagName === 'SELECT') return;
+  const sequence = ++agentAccountLookupSequence;
+  setAgentAccountLookupStatus('Finding likely banks...', 'info');
+  try {
+    const suggestions = await fetchSuggestedAccountBanks(accountNumber);
+    if (sequence !== agentAccountLookupSequence) return;
+    if (!suggestions.length) {
+      renderAgentBankDatalist(agentAccountBankOptions);
+      setAgentAccountLookupStatus('No matching bank found automatically. Search and select the bank.', 'info');
+      return;
+    }
+    agentAccountBankOptions = [
+      ...suggestions,
+      ...agentAccountBankOptions.filter((bank) => !suggestions.some((item) => item.code === bank.code))
+    ];
+    renderAgentBankDatalist(suggestions);
+    if (suggestions.length === 1) {
+      agentAccountBankSelect.value = getCustomerAccountBankLabel(suggestions[0]);
+      verifiedAgentAccountLookup = {
+        accountNumber,
+        bankCode: String(suggestions[0].code || '').trim(),
+        accountName: String(suggestions[0].accountName || '').trim()
+      };
+      if (agentAccountNameInput) agentAccountNameInput.value = verifiedAgentAccountLookup.accountName;
+      setAgentAccountLookupStatus(`Suggested: ${getCustomerAccountBankLabel(suggestions[0])}`, 'success');
+      return;
+    }
+    setAgentAccountLookupStatus(`Found ${suggestions.length} likely banks. Select one to verify.`, 'success');
+  } catch (error) {
+    if (sequence !== agentAccountLookupSequence) return;
+    renderAgentBankDatalist(agentAccountBankOptions);
+    setAgentAccountLookupStatus(error.message || 'Could not suggest banks. Search and select the bank.', 'error');
+  }
+}
+
+function scheduleAgentBankSuggestions() {
+  if (agentAccountLookupDebounce) window.clearTimeout(agentAccountLookupDebounce);
+  agentAccountLookupDebounce = window.setTimeout(() => {
+    void suggestAgentAccountBanks();
+  }, 650);
 }
 
 function applyDocumentRequirements(documentRequirements = []) {
@@ -2116,6 +2210,7 @@ let penNoValidationSequence = 0;
 let accountLookupSequence = 0;
 let accountLookupDebounce = null;
 let accountLookupBanks = [];
+let agentAccountBankOptions = [];
 let verifiedAccountLookup = {
   accountNumber: '',
   bankCode: '',
@@ -2846,13 +2941,38 @@ function setupEventListeners() {
       agentAccountNumberInput.value = digits;
       clearVerifiedAgentAccountLookup();
       setAgentAccountLookupStatus('', 'info');
-      scheduleAgentAccountLookup();
+      if (digits.length === 10 && getSelectedAgentAccountBank().code) {
+        scheduleAgentAccountLookup();
+      } else if (digits.length === 10) {
+        scheduleAgentBankSuggestions();
+      }
     });
     agentAccountNumberInput.addEventListener('blur', () => {
-      void resolveAgentAccountName();
+      if (getSelectedAgentAccountBank().code) {
+        void resolveAgentAccountName();
+      } else {
+        void suggestAgentAccountBanks();
+      }
     });
   }
   if (agentAccountBankSelect) {
+    agentAccountBankSelect.addEventListener('input', () => {
+      clearVerifiedAgentAccountLookup();
+      setAgentAccountLookupStatus('', 'info');
+      const bank = getSelectedAgentAccountBank();
+      const accountNumber = String(agentAccountNumberInput?.value || '').replace(/\D/g, '');
+      if (bank.code && accountNumber.length === 10) {
+        const matchedBank = findAgentAccountBankByValue(agentAccountBankSelect.value);
+        const suggestedName = String(matchedBank?.accountName || '').trim();
+        if (suggestedName) {
+          verifiedAgentAccountLookup = { accountNumber, bankCode: bank.code, accountName: suggestedName };
+          if (agentAccountNameInput) agentAccountNameInput.value = suggestedName;
+          setAgentAccountLookupStatus(`Verified: ${suggestedName}`, 'success');
+        } else {
+          void resolveAgentAccountName();
+        }
+      }
+    });
     agentAccountBankSelect.addEventListener('change', () => {
       clearVerifiedAgentAccountLookup();
       setAgentAccountLookupStatus('', 'info');
@@ -5871,7 +5991,6 @@ function populateApprovedAgentSelect() {
 
 async function handleAgentRegistration(e) {
   e.preventDefault();
-  const fullName = String(document.getElementById('agentFullName')?.value || '').trim();
   const contactNumber = String(document.getElementById('agentContactNumber')?.value || '').trim();
   const accountNumber = String(agentAccountNumberInput?.value || '').replace(/\D/g, '');
   const selectedBank = getSelectedAgentAccountBank();
@@ -5879,8 +5998,12 @@ async function handleAgentRegistration(e) {
   const accountBankCode = selectedBank.code;
   const accountName = String(agentAccountNameInput?.value || verifiedAgentAccountLookup.accountName || '').trim();
 
-  if (!fullName || !contactNumber || !accountNumber || !accountBank || !accountBankCode) {
+  if (!contactNumber || !accountNumber || !accountBank) {
     showNotification('Please complete all agent fields', 'error');
+    return;
+  }
+  if (!accountBankCode) {
+    showNotification('Select a valid account bank from the list', 'error');
     return;
   }
   if (!/^\d{10,11}$/.test(contactNumber.replace(/\D/g, ''))) {
@@ -5902,6 +6025,12 @@ async function handleAgentRegistration(e) {
       return;
     }
   }
+  const finalAccountName = String(verifiedAgentAccountLookup.accountName || accountName).trim();
+  if (!finalAccountName) {
+    showNotification('Verify the agent account name before submitting.', 'error');
+    return;
+  }
+  const fullName = finalAccountName;
 
   try {
     if (submitAgentFormBtn) {
@@ -5916,7 +6045,7 @@ async function handleAgentRegistration(e) {
       accountNumber,
       accountBank,
       accountBankCode,
-      accountName: String(verifiedAgentAccountLookup.accountName || accountName).trim(),
+      accountName: finalAccountName,
       status: approvalRequired ? 'pending' : 'approved',
       createdBy: currentUser?.email || '',
       createdByUid: currentUser?.uid || '',
@@ -5937,7 +6066,7 @@ async function handleAgentRegistration(e) {
         accountNumber,
         accountBank,
         accountBankCode,
-        accountName: String(verifiedAgentAccountLookup.accountName || accountName).trim(),
+        accountName: finalAccountName,
         createdBy: currentUser?.email || '',
         approvalRequired
       }
