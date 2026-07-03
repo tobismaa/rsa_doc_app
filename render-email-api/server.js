@@ -569,40 +569,6 @@ app.get('/api/paystack/banks', authMiddleware, async (_req, res) => {
     }
 });
 
-app.post('/api/paystack/suggest-banks', authMiddleware, async (req, res) => {
-    try {
-        const accountNumber = String(req.body?.accountNumber || '').replace(/\D/g, '');
-        if (!/^\d{10}$/.test(accountNumber)) {
-            return res.status(400).json({ ok: false, error: 'Account number must be exactly 10 digits' });
-        }
-
-        const banks = await getCachedPaystackBanks();
-        const matches = [];
-        const batchSize = 6;
-        for (let i = 0; i < banks.length; i += batchSize) {
-            const batch = banks.slice(i, i + batchSize);
-            const results = await Promise.all(batch.map(async (bank) => {
-                try {
-                    const resolved = await resolvePaystackAccountName(accountNumber, bank.code);
-                    if (!resolved.accountName) return null;
-                    return { ...bank, accountName: resolved.accountName, bankId: resolved.bankId || null };
-                } catch (_) {
-                    return null;
-                }
-            }));
-            results.filter(Boolean).forEach((item) => matches.push(item));
-            if (matches.length >= 5) break;
-        }
-
-        return res.json({ ok: true, accountNumber, suggestions: matches.slice(0, 5) });
-    } catch (err) {
-        return res.status(err.statusCode || 500).json({
-            ok: false,
-            error: String(err?.message || 'Failed to suggest banks')
-        });
-    }
-});
-
 app.post('/api/paystack/resolve-account', authMiddleware, async (req, res) => {
     try {
         const accountNumber = String(req.body?.accountNumber || '').replace(/\D/g, '');

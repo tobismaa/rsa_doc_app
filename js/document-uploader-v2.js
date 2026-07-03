@@ -296,14 +296,6 @@ async function fetchResolvedAccountName(accountNumber, bankCode) {
   return String(data.accountName || '').trim();
 }
 
-async function fetchSuggestedAccountBanks(accountNumber) {
-  const data = await backendFetchJson('/api/paystack/suggest-banks', {
-    method: 'POST',
-    body: JSON.stringify({ accountNumber })
-  });
-  return Array.isArray(data.suggestions) ? data.suggestions : [];
-}
-
 function setAccountLookupStatus(message = '', type = 'info') {
   if (!accountLookupStatus) return;
   const text = String(message || '').trim();
@@ -572,50 +564,6 @@ function renderAgentBankDatalist(banks = []) {
     const accountName = String(bank.accountName || '').trim();
     return `<option value="${escapeHtml(label)}" label="${escapeHtml(accountName ? `${label} - ${accountName}` : label)}"></option>`;
   }).join('');
-}
-
-async function suggestAgentAccountBanks() {
-  const accountNumber = String(agentAccountNumberInput?.value || '').replace(/\D/g, '');
-  if (accountNumber.length !== 10 || !agentAccountBankSelect || agentAccountBankSelect.tagName === 'SELECT') return;
-  const sequence = ++agentAccountLookupSequence;
-  setAgentAccountLookupStatus('Finding likely banks...', 'info');
-  try {
-    const suggestions = await fetchSuggestedAccountBanks(accountNumber);
-    if (sequence !== agentAccountLookupSequence) return;
-    if (!suggestions.length) {
-      renderAgentBankDatalist(agentAccountBankOptions);
-      setAgentAccountLookupStatus('No matching bank found automatically. Search and select the bank.', 'info');
-      return;
-    }
-    agentAccountBankOptions = [
-      ...suggestions,
-      ...agentAccountBankOptions.filter((bank) => !suggestions.some((item) => item.code === bank.code))
-    ];
-    renderAgentBankDatalist(suggestions);
-    if (suggestions.length === 1) {
-      agentAccountBankSelect.value = getCustomerAccountBankLabel(suggestions[0]);
-      verifiedAgentAccountLookup = {
-        accountNumber,
-        bankCode: String(suggestions[0].code || '').trim(),
-        accountName: String(suggestions[0].accountName || '').trim()
-      };
-      if (agentAccountNameInput) agentAccountNameInput.value = verifiedAgentAccountLookup.accountName;
-      setAgentAccountLookupStatus(`Suggested: ${getCustomerAccountBankLabel(suggestions[0])}`, 'success');
-      return;
-    }
-    setAgentAccountLookupStatus(`Found ${suggestions.length} likely banks. Select one to verify.`, 'success');
-  } catch (error) {
-    if (sequence !== agentAccountLookupSequence) return;
-    renderAgentBankDatalist(agentAccountBankOptions);
-    setAgentAccountLookupStatus(error.message || 'Could not suggest banks. Search and select the bank.', 'error');
-  }
-}
-
-function scheduleAgentBankSuggestions() {
-  if (agentAccountLookupDebounce) window.clearTimeout(agentAccountLookupDebounce);
-  agentAccountLookupDebounce = window.setTimeout(() => {
-    void suggestAgentAccountBanks();
-  }, 650);
 }
 
 function applyDocumentRequirements(documentRequirements = []) {
@@ -2943,15 +2891,11 @@ function setupEventListeners() {
       setAgentAccountLookupStatus('', 'info');
       if (digits.length === 10 && getSelectedAgentAccountBank().code) {
         scheduleAgentAccountLookup();
-      } else if (digits.length === 10) {
-        scheduleAgentBankSuggestions();
       }
     });
     agentAccountNumberInput.addEventListener('blur', () => {
       if (getSelectedAgentAccountBank().code) {
         void resolveAgentAccountName();
-      } else {
-        void suggestAgentAccountBanks();
       }
     });
   }
