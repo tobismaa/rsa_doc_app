@@ -1,4 +1,4 @@
-import { auth, db } from './firebase-config.js?v=20260625b';
+import { auth, db } from './firebase-config.js?v=20260625c';
 import { EMAIL_API_BASE_URL } from './email-api-config.js';
 import { formatAppDateTime } from './shared/app-time.js';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
@@ -12,6 +12,7 @@ import {
     orderBy,
     limit,
     query,
+    deleteField,
     serverTimestamp,
     setDoc,
     updateDoc,
@@ -20,7 +21,9 @@ import {
 import {
     clearCommissionSettingsCache,
     formatCommissionRateLabel,
+    getCommissionSettings,
     getDefaultCommissionSettings,
+    resolveCommissionRateForTimestamp,
     resolveSubmissionCommissionRate
 } from './shared/commission-config.js?v=20260507a';
 import {
@@ -69,11 +72,23 @@ let scheduledReportConfirmResolver = null;
 let lastScheduledReportLogSnapshot = null;
 let currentScheduledReportSendTab = 'daily';
 let currentScheduledReportDownloadTab = 'daily';
+let currentApplicationControlSubTab = 'backdate';
 let usersListenerStarted = false;
 let submissionsListenerStarted = false;
 let auditsListenerStarted = false;
 let routingRulesListenerStarted = false;
 let agentsListenerStarted = false;
+let currentBackdateSubmissionId = '';
+let currentBackdateSubmission = null;
+let currentCustomerEditSubmissionId = '';
+let currentCustomerEditSubmission = null;
+let currentMarkPaidSubmissionId = '';
+let currentMarkPaidSubmission = null;
+let markPaidSaveInProgress = false;
+let currentStatusChangeSubmissionId = '';
+let currentStatusChangeSubmission = null;
+let currentStatusChangeSearchMatches = [];
+let statusChangeSaveInProgress = false;
 
 const OUTSTANDING_REPORT_OPTIONS = [
     { id: 'all', label: 'All Dashboards' },
@@ -1293,7 +1308,7 @@ function getRoleLabel(role) {
     const normalized = String(role || 'uploader').toLowerCase();
     if (normalized === 'super_admin') return 'Super Admin';
     if (normalized === 'admin') return 'Admin';
-    if (normalized === 'reports_monitoring') return 'Reports Monitoring';
+    if (normalized === 'reports_monitoring') return 'Audit';
     if (normalized === 'reviewer' || normalized === 'viewer') return 'Reviewer';
     if (normalized === 'rsa') return 'RSA';
     if (normalized === 'payment') return 'Payment';
@@ -1373,10 +1388,25 @@ function formatDate(ts) {
     return formatAppDateTime(ts, '-');
 }
 
+const ONLINE_STALE_MS = 3 * 60 * 1000;
+
+function timestampToMillis(value) {
+    if (!value) return 0;
+    if (typeof value.toMillis === 'function') return value.toMillis();
+    if (typeof value.toDate === 'function') return value.toDate().getTime();
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isRecentlyOnline(user = {}) {
+    const lastSeenMs = timestampToMillis(user.lastSeenAt || user.lastLoginAt);
+    return user.isOnline === true && lastSeenMs > 0 && Date.now() - lastSeenMs <= ONLINE_STALE_MS;
+}
+
 function formatUserLastLogin(u = {}) {
-    return u.isOnline === true
+    return isRecentlyOnline(u)
         ? '<span class="status-badge approved">Online</span>'
-        : escapeHtml(formatDate(u.lastLoginAt));
+        : escapeHtml(formatDate(u.lastLogoutAt || u.lastSeenAt || u.lastLoginAt));
 }
 
 const reportDateKeyFormatter = new Intl.DateTimeFormat('en-CA', {
@@ -1456,6 +1486,99 @@ function getUserDisplayNameByEmail(email = '') {
     const user = allUsers.find((entry) => normalizeEmail(entry.email) === normalized);
     return String(user?.fullName || normalized).trim();
 }
+
+const BACKDATE_STAGE_DEFINITIONS = [
+    {
+        key: 'upload',
+        label: 'Application Uploaded',
+        description: 'Uploader dashboard ownership',
+        timestampField: 'uploadedAt',
+        timestampGetter: getSubmissionReviewEntryAt,
+        personField: 'uploadedBy',
+        roles: ['uploader', 'reviewer', 'rsa', 'admin', 'super_admin']
+    },
+    {
+        key: 'reviewer',
+        label: 'Reviewer Stage',
+        description: 'Reviewer tab assignment',
+        timestampField: 'reviewedAt',
+        timestampGetter: getSubmissionApprovalEntryAt,
+        personField: 'assignedTo',
+        mirrorPersonFields: ['reviewedBy'],
+        roles: ['reviewer']
+    },
+    {
+        key: 'rsa',
+        label: 'RSA Stage',
+        description: 'RSA tab assignment',
+        timestampField: 'rsaAssignedAt',
+        timestampGetter: getSubmissionRsaEntryAt,
+        personField: 'assignedToRSA',
+        roles: ['rsa']
+    },
+    {
+        key: 'final_submission',
+        label: 'Processing to PFA',
+        description: 'RSA officer who submitted to PFA',
+        timestampField: 'finalSubmittedAt',
+        timestampGetter: getSubmissionFinalSubmissionEntryAt,
+        personField: 'assignedToRSA',
+        roles: ['rsa']
+    },
+    {
+        key: 'payment',
+        label: 'Payment Stage',
+        description: 'Payment tab assignment',
+        timestampField: 'paymentAssignedAt',
+        timestampGetter: getSubmissionPaymentEntryAt,
+        personField: 'assignedToPayment',
+        roles: ['payment']
+    },
+    {
+        key: 'paid',
+        label: 'Paid',
+        description: 'Payment officer for paid record',
+        timestampField: 'paidAt',
+        timestampGetter: getSubmissionPaidEntryAt,
+        personField: 'assignedToPayment',
+        roles: ['payment']
+    },
+    {
+        key: 'cleared',
+        label: 'Cleared',
+        description: 'Payment officer for cleared record',
+        timestampField: 'clearedAt',
+        timestampGetter: getSubmissionClearedEntryAt,
+        personField: 'assignedToPayment',
+        roles: ['payment']
+    }
+];
+
+const CUSTOMER_EDIT_FIELDS = [
+    { key: 'name', label: 'Customer Name', type: 'text' },
+    { key: 'dob', label: 'Date of Birth', type: 'date' },
+    { key: 'email', label: 'Email', type: 'email' },
+    { key: 'phone', label: 'Phone', type: 'text' },
+    { key: 'nin', label: 'NIN', type: 'text' },
+    { key: 'address', label: 'Address', type: 'text', wide: true },
+    { key: 'accountNo', label: 'Account Number', type: 'text' },
+    { key: 'accountBank', label: 'Account Bank', type: 'text' },
+    { key: 'accountName', label: 'Account Name', type: 'text' },
+    { key: 'employer', label: 'Employer', type: 'text' },
+    { key: 'originatingTP', label: 'Originating TP', type: 'text' },
+    { key: 'mortgageLoanApplicationFormDate', label: 'Mortgage Loan Application Form Date', type: 'date' },
+    { key: 'pfa', label: 'PFA', type: 'text' },
+    { key: 'penNo', label: 'PEN Number', type: 'text' },
+    { key: 'rsaStatementDate', label: 'RSA Statement Date', type: 'date' },
+    { key: 'rsaBalance', label: 'RSA Balance', type: 'number', step: '0.01' },
+    { key: 'rsa25', label: '25% RSA Balance', type: 'number', step: '0.01' },
+    { key: 'propertyType', label: 'Property Type', type: 'text' },
+    { key: 'propertyValue', label: 'Property Value', type: 'number', step: '0.01' },
+    { key: 'facilityFee', label: 'Facility Fee', type: 'number', step: '0.01' },
+    { key: 'loanAmount', label: 'Loan Amount', type: 'number', step: '0.01' },
+    { key: 'houseNumber', label: 'House Number', type: 'text' },
+    { key: 'tenor', label: 'Tenor', type: 'text' }
+];
 
 function getRejectionReason(sub = {}) {
     return String(sub?.latestRejectionReason || sub?.previousRejectionReason || sub?.comment || '').trim();
@@ -2100,6 +2223,8 @@ function switchTab(tabId) {
         admins: 'User Management',
         'routing-rules': 'Uploader Routing',
         agents: 'Agent',
+        'application-controls': 'Application Controls',
+        'backdate-report': 'Backdate Report',
         audit: 'Audit',
         security: 'Security',
         'round-robin': 'Round Robin',
@@ -2108,7 +2233,37 @@ function switchTab(tabId) {
     };
     if (pageTitle) pageTitle.textContent = titles[tabId] || 'Super Admin';
     renderCurrentTab();
+    if (tabId === 'backdate-report') renderBackdateReport();
 }
+
+function renderApplicationControlsSubTabState() {
+    const active = String(currentApplicationControlSubTab || 'backdate');
+    const configs = [
+        ['backdate', 'applicationControlsBackdateBtn', 'applicationControlBackdateSection'],
+        ['customer-edit', 'applicationControlsCustomerEditBtn', 'applicationControlCustomerEditSection'],
+        ['mark-paid', 'applicationControlsMarkPaidBtn', 'applicationControlMarkPaidSection'],
+        ['status-change', 'applicationControlsStatusChangeBtn', 'applicationControlStatusChangeSection']
+    ];
+    configs.forEach(([key, buttonId, sectionId]) => {
+        const isActive = key === active;
+        const button = document.getElementById(buttonId);
+        const section = document.getElementById(sectionId);
+        if (button) {
+            button.classList.toggle('active', isActive);
+            button.style.background = isActive ? '#003366' : '';
+            button.style.color = isActive ? '#fff' : '';
+            button.style.border = isActive ? 'none' : '';
+        }
+        if (section) section.style.display = isActive ? '' : 'none';
+    });
+}
+
+window.switchApplicationControlSubTab = (subTab) => {
+    const allowed = ['backdate', 'customer-edit', 'mark-paid', 'status-change'];
+    const requested = String(subTab || 'backdate');
+    currentApplicationControlSubTab = allowed.includes(requested) ? requested : 'backdate';
+    renderApplicationControlsSubTabState();
+};
 
 function renderAgentSubTabState() {
     const isApplication = currentAgentSubTab === 'application-agents';
@@ -2181,7 +2336,7 @@ function renderAdminManagement() {
         .filter((u) => {
             const role = String(u.role || 'uploader').toLowerCase();
             const status = String(u.status || 'active').toLowerCase();
-            const presence = u.isOnline === true ? 'online' : 'offline';
+            const presence = isRecentlyOnline(u) ? 'online' : 'offline';
             const whatsapp = getUserWhatsApp(u);
             const searchable = [
                 u.fullName || '',
@@ -2217,7 +2372,7 @@ function renderAdminManagement() {
                 <td>
                     <select id="sa-role-${u.id}" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
                         <option value="uploader" ${role === 'uploader' ? 'selected' : ''}>Uploader</option>
-                        <option value="reports_monitoring" ${role === 'reports_monitoring' ? 'selected' : ''}>Reports Monitoring</option>
+                        <option value="reports_monitoring" ${role === 'reports_monitoring' ? 'selected' : ''}>Audit</option>
                         <option value="reviewer" ${role === 'reviewer' ? 'selected' : ''}>Reviewer</option>
                         <option value="rsa" ${role === 'rsa' ? 'selected' : ''}>RSA</option>
                         <option value="payment" ${role === 'payment' ? 'selected' : ''}>Payment</option>
@@ -2334,6 +2489,1235 @@ function renderRedirectTable() {
             <td><button class="action-btn" style="background:#003366;color:#fff;border:none;" onclick="window.redirectSubmission('${s.id}')"><i class="fas fa-random"></i> Apply</button></td>
         </tr>
     `).join('');
+}
+
+function normalizePenNumber(value = '') {
+    return String(value || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function getSubmissionPenNumber(sub = {}) {
+    return String(
+        sub?.customerDetails?.penNo ||
+        sub?.customerDetails?.penNumber ||
+        sub?.penNo ||
+        sub?.penNumber ||
+        ''
+    ).trim();
+}
+
+function getPenNumberQueryVariants(value = '') {
+    const raw = String(value || '').trim();
+    const compact = raw.replace(/\s+/g, '');
+    return [...new Set([raw, compact, compact.toLowerCase(), compact.toUpperCase()].filter(Boolean))].slice(0, 10);
+}
+
+function normalizeCustomerName(value = '') {
+    return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function getSubmissionCustomerName(sub = {}) {
+    return String(sub?.customerName || sub?.customerDetails?.name || sub?.customerDetails?.customerName || '').trim();
+}
+
+async function ensureLookupDataLoaded() {
+    await ensureBackdateUsersLoaded();
+    if (allSubmissions.length) return;
+    const snap = await getDocs(query(collection(db, 'submissions'), orderBy('uploadedAt', 'desc')));
+    allSubmissions = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+function setBackdateSearchStatus(message = '', type = 'info') {
+    const status = document.getElementById('backdateSearchStatus');
+    if (!status) return;
+    if (!String(message || '').trim()) {
+        status.style.display = 'none';
+        status.textContent = '';
+        return;
+    }
+    const styles = {
+        info: ['#bfdbfe', '#eff6ff', '#1d4ed8'],
+        warning: ['#fcd34d', '#fffbeb', '#92400e'],
+        error: ['#fecaca', '#fef2f2', '#991b1b']
+    };
+    const [border, background, color] = styles[type] || styles.info;
+    status.style.display = 'block';
+    status.style.borderColor = border;
+    status.style.background = background;
+    status.style.color = color;
+    status.textContent = message;
+}
+
+function openBackdateSearchModal() {
+    const modal = document.getElementById('backdateSearchModal');
+    if (!modal) return;
+    setBackdateSearchStatus('');
+    const input = document.getElementById('backdatePenInput');
+    if (input) input.value = '';
+    modal.classList.add('active');
+    setTimeout(() => input?.focus(), 50);
+}
+
+function closeBackdateSearchModal() {
+    document.getElementById('backdateSearchModal')?.classList.remove('active');
+}
+
+function openBackdateEditorModal() {
+    document.getElementById('backdateEditorModal')?.classList.add('active');
+}
+
+function closeBackdateEditorModal() {
+    document.getElementById('backdateEditorModal')?.classList.remove('active');
+}
+
+async function ensureBackdateUsersLoaded() {
+    if (allUsers.length) return;
+    const snap = await getDocs(query(collection(db, 'users')));
+    allUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+async function findSubmissionByPenNumber(penNo = '') {
+    const normalized = normalizePenNumber(penNo);
+    if (!normalized) return null;
+    const variants = getPenNumberQueryVariants(penNo);
+    const submissionsRef = collection(db, 'submissions');
+    const queries = [
+        query(submissionsRef, where('customerDetails.penNoNormalized', '==', normalized)),
+        query(submissionsRef, where('penNoNormalized', '==', normalized))
+    ];
+    if (variants.length) {
+        queries.push(
+            query(submissionsRef, where('customerDetails.penNo', 'in', variants)),
+            query(submissionsRef, where('penNo', 'in', variants))
+        );
+    }
+
+    const snapshots = await Promise.all(queries.map((q) => getDocs(q).catch(() => null)));
+    const found = new Map();
+    snapshots.forEach((snap) => {
+        snap?.docs?.forEach((d) => found.set(d.id, { id: d.id, ...d.data() }));
+    });
+    allSubmissions.forEach((sub) => {
+        const subPen = normalizePenNumber(getSubmissionPenNumber(sub));
+        const subPenNormalized = normalizePenNumber(sub?.customerDetails?.penNoNormalized || sub?.penNoNormalized || '');
+        if (subPen === normalized || subPenNormalized === normalized) found.set(sub.id, sub);
+    });
+    return Array.from(found.values())[0] || null;
+}
+
+async function findSubmissionsByApplicationLookup(value = '') {
+    const raw = String(value || '').trim();
+    if (!raw) return [];
+    await ensureLookupDataLoaded();
+
+    const found = new Map();
+    const penMatch = await findSubmissionByPenNumber(raw);
+    if (penMatch?.id) found.set(penMatch.id, penMatch);
+
+    const normalizedName = normalizeCustomerName(raw);
+    const nameMatches = allSubmissions
+        .filter((sub) => {
+            const customerName = normalizeCustomerName(getSubmissionCustomerName(sub));
+            if (!customerName) return false;
+            return customerName === normalizedName
+                || customerName.startsWith(normalizedName)
+                || customerName.includes(normalizedName);
+        })
+        .sort((a, b) => getTimestampMillis(b.updatedAt || b.uploadedAt || b.createdAt) - getTimestampMillis(a.updatedAt || a.uploadedAt || a.createdAt));
+
+    nameMatches.forEach((sub) => found.set(sub.id, sub));
+    return Array.from(found.values());
+}
+
+function getFirstLookupMatch(matches = []) {
+    return Array.isArray(matches) && matches.length ? matches[0] : null;
+}
+
+function timestampToDateTimeLocal(value) {
+    const ms = getTimestampMillis(value);
+    if (!ms) return '';
+    const date = new Date(ms);
+    const pad = (num) => String(num).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function parseDateTimeLocalInput(value = '') {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function getBackdateUsersForStage(stage = {}, currentEmail = '') {
+    const users = getActiveUsersByRoles(stage.roles || []);
+    const normalizedCurrent = normalizeEmail(currentEmail);
+    if (normalizedCurrent && !users.some((user) => normalizeEmail(user.email) === normalizedCurrent)) {
+        const existing = allUsers.find((user) => normalizeEmail(user.email) === normalizedCurrent);
+        users.unshift(existing || { email: normalizedCurrent, fullName: normalizedCurrent, role: 'user' });
+    }
+    return users.sort((a, b) => String(a.fullName || a.email || '').localeCompare(String(b.fullName || b.email || '')));
+}
+
+function renderBackdateEditor(submission = {}) {
+    currentBackdateSubmissionId = submission.id || '';
+    currentBackdateSubmission = { ...submission };
+    const summary = document.getElementById('backdateEditorSummary');
+    if (summary) {
+        const items = [
+            ['Customer', submission.customerName || submission.customerDetails?.customerName || 'Unknown'],
+            ['PEN Number', getSubmissionPenNumber(submission) || '-'],
+            ['Application ID', submission.id || '-'],
+            ['Status', String(submission.status || '-').replaceAll('_', ' ')]
+        ];
+        summary.innerHTML = items.map(([label, value]) => `
+            <div class="backdate-summary-item">
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value)}</strong>
+            </div>
+        `).join('');
+    }
+
+    const body = document.getElementById('backdateStageTableBody');
+    if (!body) return;
+    body.innerHTML = BACKDATE_STAGE_DEFINITIONS.map((stage) => {
+        const timestampValue = stage.timestampGetter(submission);
+        const selectedPerson = normalizeEmail(submission?.[stage.personField] || submission?.[stage.mirrorPersonFields?.[0]] || '');
+        return `
+            <tr data-backdate-stage="${escapeHtml(stage.key)}">
+                <td>
+                    <div class="backdate-stage-title">
+                        <strong>${escapeHtml(stage.label)}</strong>
+                        <span>${escapeHtml(stage.description)}</span>
+                    </div>
+                </td>
+                <td>${escapeHtml(formatDate(timestampValue))}</td>
+                <td><input type="datetime-local" id="backdate-time-${escapeHtml(stage.key)}" value="${escapeHtml(timestampToDateTimeLocal(timestampValue))}"></td>
+                <td><select id="backdate-person-${escapeHtml(stage.key)}">${optionsForUsers(getBackdateUsersForStage(stage, selectedPerson), selectedPerson)}</select></td>
+            </tr>
+        `;
+    }).join('');
+    const reason = document.getElementById('backdateReasonInput');
+    if (reason) reason.value = '';
+}
+
+async function searchBackdatePenNumber() {
+    const input = document.getElementById('backdatePenInput');
+    const button = document.getElementById('searchBackdatePenBtn');
+    const searchValue = String(input?.value || '').trim();
+    if (!searchValue) {
+        setBackdateSearchStatus('Enter a customer PEN number or name.', 'warning');
+        return;
+    }
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Searching...';
+        }
+        setBackdateSearchStatus('Searching applications...', 'info');
+        const matches = await findSubmissionsByApplicationLookup(searchValue);
+        const submission = getFirstLookupMatch(matches);
+        if (!submission) {
+            setBackdateSearchStatus('No application found for that PEN number or customer name.', 'error');
+            return;
+        }
+        if (matches.length > 1) {
+            showNotification(`${matches.length} matches found. Opening the newest match: ${getSubmissionCustomerName(submission) || getSubmissionPenNumber(submission) || submission.id}.`, 'info');
+        }
+        renderBackdateEditor(submission);
+        closeBackdateSearchModal();
+        openBackdateEditorModal();
+    } catch (error) {
+        console.error('Backdate search failed:', error);
+        setBackdateSearchStatus('Failed to search for this PEN number or customer name.', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+}
+
+async function saveBackdateChanges() {
+    const submissionId = currentBackdateSubmissionId;
+    const submission = allSubmissions.find((sub) => sub.id === submissionId) || currentBackdateSubmission || {};
+    if (!submissionId) return showNotification('No application is open for backdating.', 'warning');
+    const reason = String(document.getElementById('backdateReasonInput')?.value || '').trim();
+    if (!reason) return showNotification('Reason is required for backdate changes.', 'warning');
+
+    const updates = {
+        backdatedAt: serverTimestamp(),
+        backdatedBy: currentUser?.email || '',
+        backdateReason: reason,
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUser?.email || ''
+    };
+    const changes = [];
+
+    BACKDATE_STAGE_DEFINITIONS.forEach((stage) => {
+        const timeInput = document.getElementById(`backdate-time-${stage.key}`);
+        const personInput = document.getElementById(`backdate-person-${stage.key}`);
+        const newDate = parseDateTimeLocalInput(timeInput?.value || '');
+        const oldTimeMs = getTimestampMillis(stage.timestampGetter(submission));
+        if (newDate && newDate.getTime() !== oldTimeMs) {
+            updates[stage.timestampField] = newDate;
+            changes.push({
+                stage: stage.key,
+                field: stage.timestampField,
+                oldValue: oldTimeMs ? new Date(oldTimeMs).toISOString() : '',
+                newValue: newDate.toISOString()
+            });
+        }
+
+        const newPerson = normalizeEmail(personInput?.value || '');
+        const oldPerson = normalizeEmail(submission?.[stage.personField] || '');
+        if (newPerson !== oldPerson) {
+            updates[stage.personField] = newPerson;
+            changes.push({
+                stage: stage.key,
+                field: stage.personField,
+                oldValue: oldPerson,
+                newValue: newPerson
+            });
+        }
+        (stage.mirrorPersonFields || []).forEach((field) => {
+            const oldMirror = normalizeEmail(submission?.[field] || '');
+            if (newPerson !== oldMirror) {
+                updates[field] = newPerson;
+                changes.push({
+                    stage: stage.key,
+                    field,
+                    oldValue: oldMirror,
+                    newValue: newPerson
+                });
+            }
+        });
+    });
+
+    const uploadDateInput = document.getElementById('backdate-time-upload');
+    const commissionBaseDate = parseDateTimeLocalInput(uploadDateInput?.value || '');
+    if (commissionBaseDate) {
+        const commissionSettings = await getCommissionSettings(db);
+        const nextRate = resolveCommissionRateForTimestamp(commissionBaseDate.getTime(), commissionSettings);
+        const oldRate = resolveSubmissionCommissionRate(submission, commissionSettings);
+        updates.commissionRate = nextRate;
+        updates.commissionRatePercent = Number((nextRate * 100).toFixed(4));
+        updates.commissionRateLabel = formatCommissionRateLabel(nextRate);
+        updates.commissionRateEffectiveFrom = commissionSettings.effectiveFromIso || getDefaultCommissionSettings().effectiveFromIso;
+        updates.commissionRateAssignedAtIso = new Date().toISOString();
+        if (nextRate !== oldRate) {
+            changes.push({
+                stage: 'commission',
+                field: 'commissionRate',
+                oldValue: formatCommissionRateLabel(oldRate),
+                newValue: formatCommissionRateLabel(nextRate)
+            });
+        }
+    }
+
+    if (!changes.length) {
+        showNotification('No backdate changes to save.', 'info');
+        return;
+    }
+
+    const button = document.getElementById('saveBackdateChangesBtn');
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        }
+        await updateDoc(doc(db, 'submissions', submissionId), updates);
+        await addDoc(collection(db, 'audit'), {
+            action: 'application_backdated',
+            submissionId,
+            customerName: submission.customerName || submission.customerDetails?.customerName || '',
+            penNo: getSubmissionPenNumber(submission),
+            reason,
+            changes,
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        });
+        showNotification('Backdate changes saved successfully', 'success');
+        closeBackdateEditorModal();
+        setTimeout(openBackdateSearchModal, 80);
+    } catch (error) {
+        console.error('Backdate save failed:', error);
+        showNotification('Failed to save backdate changes', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+}
+
+function setCustomerEditSearchStatus(message = '', type = 'info') {
+    const status = document.getElementById('customerEditSearchStatus');
+    if (!status) return;
+    if (!String(message || '').trim()) {
+        status.style.display = 'none';
+        status.textContent = '';
+        return;
+    }
+    const styles = {
+        info: ['#bfdbfe', '#eff6ff', '#1d4ed8'],
+        warning: ['#fcd34d', '#fffbeb', '#92400e'],
+        error: ['#fecaca', '#fef2f2', '#991b1b']
+    };
+    const [border, background, color] = styles[type] || styles.info;
+    status.style.display = 'block';
+    status.style.borderColor = border;
+    status.style.background = background;
+    status.style.color = color;
+    status.textContent = message;
+}
+
+function openCustomerEditSearchModal() {
+    const modal = document.getElementById('customerEditSearchModal');
+    if (!modal) return;
+    setCustomerEditSearchStatus('');
+    const input = document.getElementById('customerEditPenInput');
+    if (input) input.value = '';
+    modal.classList.add('active');
+    setTimeout(() => input?.focus(), 50);
+}
+
+function closeCustomerEditSearchModal() {
+    document.getElementById('customerEditSearchModal')?.classList.remove('active');
+}
+
+function openCustomerEditModal() {
+    document.getElementById('customerEditModal')?.classList.add('active');
+}
+
+function closeCustomerEditModal() {
+    document.getElementById('customerEditModal')?.classList.remove('active');
+}
+
+function formatCustomerEditInputValue(value, type = 'text') {
+    if (value === undefined || value === null) return '';
+    if (type === 'date') {
+        const raw = String(value || '').trim();
+        if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+        const ms = getTimestampMillis(value);
+        if (!ms) return '';
+        const date = new Date(ms);
+        const pad = (num) => String(num).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    }
+    return String(value || '').trim();
+}
+
+function getCustomerDetailValue(submission = {}, key = '') {
+    const details = submission?.customerDetails && typeof submission.customerDetails === 'object' ? submission.customerDetails : {};
+    const topLevelMap = {
+        name: submission.customerName,
+        penNo: submission.penNo,
+        rsaBalance: submission.rsaBalance,
+        rsa25: submission.rsa25Percent || submission.rsa25,
+        houseNumber: submission.houseNumber,
+        propertyType: submission.propertyType,
+        propertyValue: submission.propertyValue,
+        loanAmount: submission.loanAmount,
+        tenor: submission.tenor,
+        accountNo: submission.accountNo
+    };
+    return details[key] ?? topLevelMap[key] ?? '';
+}
+
+function renderCustomerEditModal(submission = {}) {
+    currentCustomerEditSubmissionId = submission.id || '';
+    currentCustomerEditSubmission = { ...submission };
+
+    const summary = document.getElementById('customerEditSummary');
+    if (summary) {
+        const items = [
+            ['Customer', submission.customerName || submission.customerDetails?.name || 'Unknown'],
+            ['PEN Number', getSubmissionPenNumber(submission) || '-'],
+            ['Application ID', submission.id || '-'],
+            ['Status', String(submission.status || '-').replaceAll('_', ' ')]
+        ];
+        summary.innerHTML = items.map(([label, value]) => `
+            <div class="customer-edit-summary-item">
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value)}</strong>
+            </div>
+        `).join('');
+    }
+
+    const grid = document.getElementById('customerEditFormGrid');
+    if (grid) {
+        grid.innerHTML = CUSTOMER_EDIT_FIELDS.map((field) => {
+            const value = formatCustomerEditInputValue(getCustomerDetailValue(submission, field.key), field.type);
+            const style = field.wide ? ' style="grid-column:1/-1;"' : '';
+            return `
+                <label${style}>${escapeHtml(field.label)}
+                    <input
+                        type="${escapeHtml(field.type || 'text')}"
+                        id="customer-edit-${escapeHtml(field.key)}"
+                        value="${escapeHtml(value)}"
+                        ${field.step ? `step="${escapeHtml(field.step)}"` : ''}
+                    >
+                </label>
+            `;
+        }).join('');
+    }
+
+    const reason = document.getElementById('customerEditReasonInput');
+    if (reason) reason.value = '';
+}
+
+async function searchCustomerEditPenNumber() {
+    const input = document.getElementById('customerEditPenInput');
+    const button = document.getElementById('searchCustomerEditPenBtn');
+    const searchValue = String(input?.value || '').trim();
+    if (!searchValue) {
+        setCustomerEditSearchStatus('Enter a customer PEN number or name.', 'warning');
+        return;
+    }
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Searching...';
+        }
+        setCustomerEditSearchStatus('Searching applications...', 'info');
+        const matches = await findSubmissionsByApplicationLookup(searchValue);
+        const submission = getFirstLookupMatch(matches);
+        if (!submission) {
+            setCustomerEditSearchStatus('No application found for that PEN number or customer name.', 'error');
+            return;
+        }
+        if (matches.length > 1) {
+            showNotification(`${matches.length} matches found. Opening the newest match: ${getSubmissionCustomerName(submission) || getSubmissionPenNumber(submission) || submission.id}.`, 'info');
+        }
+        renderCustomerEditModal(submission);
+        closeCustomerEditSearchModal();
+        openCustomerEditModal();
+    } catch (error) {
+        console.error('Customer edit search failed:', error);
+        setCustomerEditSearchStatus('Failed to search for this PEN number or customer name.', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+}
+
+function getCustomerEditFieldValue(key = '') {
+    return String(document.getElementById(`customer-edit-${key}`)?.value || '').trim();
+}
+
+async function saveCustomerEditDetails() {
+    const submissionId = currentCustomerEditSubmissionId;
+    const submission = allSubmissions.find((sub) => sub.id === submissionId) || currentCustomerEditSubmission || {};
+    if (!submissionId) return showNotification('No application is open for editing.', 'warning');
+
+    const oldDetails = submission?.customerDetails && typeof submission.customerDetails === 'object' ? submission.customerDetails : {};
+    const nextDetails = { ...oldDetails };
+    const changes = [];
+
+    CUSTOMER_EDIT_FIELDS.forEach((field) => {
+        const oldValue = String(getCustomerDetailValue(submission, field.key) || '').trim();
+        const newValue = getCustomerEditFieldValue(field.key);
+        nextDetails[field.key] = newValue;
+        if (newValue !== oldValue) {
+            changes.push({
+                field: field.key,
+                label: field.label,
+                oldValue,
+                newValue
+            });
+        }
+    });
+
+    const nextCustomerName = String(nextDetails.name || '').trim();
+    if (!nextCustomerName) {
+        showNotification('Customer name is required.', 'warning');
+        return;
+    }
+
+    const nextPen = String(nextDetails.penNo || '').trim();
+    const oldPenNormalized = normalizePenNumber(getSubmissionPenNumber(submission));
+    const nextPenNormalized = normalizePenNumber(nextPen);
+    if (nextPenNormalized && nextPenNormalized !== oldPenNormalized) {
+        const duplicate = await findSubmissionByPenNumber(nextPen);
+        if (duplicate?.id && duplicate.id !== submissionId) {
+            showNotification('Another application already uses this PEN number.', 'error');
+            return;
+        }
+    }
+
+    if (!String(nextDetails.rsa25 || '').trim()) {
+        const rsaBalance = parseMoneyValue(nextDetails.rsaBalance);
+        nextDetails.rsa25 = rsaBalance ? String(roundDownToThousand(rsaBalance * 0.25)) : '';
+    }
+    nextDetails.customerName = nextCustomerName;
+    nextDetails.rsa25Percent = String(nextDetails.rsa25 || '').trim();
+    nextDetails.penNoNormalized = nextPenNormalized;
+
+    const updates = {
+        customerName: nextCustomerName,
+        customerDetails: nextDetails,
+        customerEmail: String(nextDetails.email || '').trim(),
+        customerPhone: String(nextDetails.phone || '').trim(),
+        customerNIN: String(nextDetails.nin || '').trim(),
+        penNo: nextPen,
+        penNoNormalized: nextPenNormalized,
+        houseNumber: String(nextDetails.houseNumber || '').trim(),
+        rsaBalance: String(nextDetails.rsaBalance || '').trim(),
+        rsa25Percent: String(nextDetails.rsa25 || '').trim(),
+        propertyType: String(nextDetails.propertyType || '').trim(),
+        propertyValue: String(nextDetails.propertyValue || '').trim(),
+        loanAmount: String(nextDetails.loanAmount || '').trim(),
+        tenor: String(nextDetails.tenor || '').trim(),
+        accountNo: String(nextDetails.accountNo || '').trim(),
+        customerDetailsEditedAt: serverTimestamp(),
+        customerDetailsEditedBy: currentUser?.email || '',
+        customerDetailsEditReason: String(document.getElementById('customerEditReasonInput')?.value || '').trim(),
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUser?.email || ''
+    };
+
+    if (!changes.length) {
+        showNotification('No customer detail changes to save.', 'info');
+        return;
+    }
+
+    const button = document.getElementById('saveCustomerEditBtn');
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        }
+        await updateDoc(doc(db, 'submissions', submissionId), updates);
+        await addDoc(collection(db, 'audit'), {
+            action: 'customer_details_updated',
+            submissionId,
+            customerName: nextCustomerName,
+            oldCustomerName: submission.customerName || oldDetails.name || '',
+            penNo: nextPen,
+            oldPenNo: getSubmissionPenNumber(submission),
+            reason: updates.customerDetailsEditReason,
+            changes,
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        });
+        showNotification('Customer details updated successfully', 'success');
+        closeCustomerEditModal();
+        setTimeout(openCustomerEditSearchModal, 80);
+    } catch (error) {
+        console.error('Customer detail save failed:', error);
+        showNotification('Failed to save customer details', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+}
+
+function setMarkPaidSearchStatus(message = '', type = 'info') {
+    const status = document.getElementById('markPaidSearchStatus');
+    if (!status) return;
+    if (!String(message || '').trim()) {
+        status.style.display = 'none';
+        status.textContent = '';
+        return;
+    }
+    const styles = {
+        info: ['#bfdbfe', '#eff6ff', '#1d4ed8'],
+        warning: ['#fcd34d', '#fffbeb', '#92400e'],
+        error: ['#fecaca', '#fef2f2', '#991b1b']
+    };
+    const [border, background, color] = styles[type] || styles.info;
+    status.style.display = 'block';
+    status.style.borderColor = border;
+    status.style.background = background;
+    status.style.color = color;
+    status.textContent = message;
+}
+
+function openMarkPaidSearchModal() {
+    const modal = document.getElementById('markPaidSearchModal');
+    if (!modal) return;
+    setMarkPaidSearchStatus('');
+    const input = document.getElementById('markPaidPenInput');
+    if (input) input.value = '';
+    modal.classList.add('active');
+    setTimeout(() => input?.focus(), 50);
+}
+
+function closeMarkPaidSearchModal() {
+    document.getElementById('markPaidSearchModal')?.classList.remove('active');
+}
+
+function openMarkPaidModal() {
+    document.getElementById('markPaidModal')?.classList.add('active');
+}
+
+function closeMarkPaidModal() {
+    document.getElementById('markPaidModal')?.classList.remove('active');
+}
+
+function getMarkPaidPaymentUsers(currentEmail = '') {
+    const normalizedCurrent = normalizeEmail(currentEmail);
+    const users = getUsersByRole('payment');
+    if (normalizedCurrent && !users.some((user) => normalizeEmail(user.email) === normalizedCurrent)) {
+        const existing = allUsers.find((user) => normalizeEmail(user.email) === normalizedCurrent);
+        users.unshift(existing || { email: normalizedCurrent, fullName: normalizedCurrent, role: 'payment' });
+    }
+    return users.sort((a, b) => String(a.fullName || a.email || '').localeCompare(String(b.fullName || b.email || '')));
+}
+
+function renderMarkPaidModal(submission = {}) {
+    currentMarkPaidSubmissionId = submission.id || '';
+    currentMarkPaidSubmission = { ...submission };
+    const selectedPaymentUser = normalizeEmail(submission.paidBy || submission.assignedToPayment || '');
+
+    const summary = document.getElementById('markPaidSummary');
+    if (summary) {
+        const items = [
+            ['Customer', submission.customerName || submission.customerDetails?.name || submission.customerDetails?.customerName || 'Unknown'],
+            ['PEN Number', getSubmissionPenNumber(submission) || '-'],
+            ['Status', String(submission.status || '-').replaceAll('_', ' ')],
+            ['Current Payment User', getUserDisplayNameByEmail(submission.assignedToPayment || '') || '-'],
+            ['Paid By', getUserDisplayNameByEmail(submission.paidBy || '') || '-'],
+            ['Paid Date', formatDate(submission.paidAt)]
+        ];
+        summary.innerHTML = items.map(([label, value]) => `
+            <div class="mark-paid-summary-item">
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value)}</strong>
+            </div>
+        `).join('');
+    }
+
+    const paymentSelect = document.getElementById('markPaidPaymentUserSelect');
+    if (paymentSelect) {
+        const paymentUsers = getMarkPaidPaymentUsers(selectedPaymentUser);
+        paymentSelect.innerHTML = optionsForUsers(paymentUsers, selectedPaymentUser);
+        if (!paymentUsers.length) {
+            paymentSelect.innerHTML = '<option value="">No active payment users found</option>';
+        }
+    }
+
+    const reason = document.getElementById('markPaidReasonInput');
+    if (reason) reason.value = '';
+}
+
+async function searchMarkPaidPenNumber() {
+    const input = document.getElementById('markPaidPenInput');
+    const button = document.getElementById('searchMarkPaidPenBtn');
+    const searchValue = String(input?.value || '').trim();
+    if (!searchValue) {
+        setMarkPaidSearchStatus('Enter a customer PEN number or name.', 'warning');
+        return;
+    }
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Searching...';
+        }
+        setMarkPaidSearchStatus('Searching applications...', 'info');
+        const matches = await findSubmissionsByApplicationLookup(searchValue);
+        const submission = getFirstLookupMatch(matches);
+        if (!submission) {
+            setMarkPaidSearchStatus('No application found for that PEN number or customer name.', 'error');
+            return;
+        }
+        if (matches.length > 1) {
+            showNotification(`${matches.length} matches found. Opening the newest match: ${getSubmissionCustomerName(submission) || getSubmissionPenNumber(submission) || submission.id}.`, 'info');
+        }
+        renderMarkPaidModal(submission);
+        closeMarkPaidSearchModal();
+        openMarkPaidModal();
+    } catch (error) {
+        console.error('Mark paid search failed:', error);
+        setMarkPaidSearchStatus('Failed to search for this PEN number or customer name.', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+}
+
+async function saveMarkPaidFromSuperAdmin() {
+    if (markPaidSaveInProgress) {
+        showNotification('Payment update is already saving. Please wait.', 'info');
+        return;
+    }
+    const submissionId = currentMarkPaidSubmissionId;
+    const submission = allSubmissions.find((sub) => sub.id === submissionId) || currentMarkPaidSubmission || {};
+    if (!submissionId) return showNotification('No application is open for payment update.', 'warning');
+
+    const selectedPaymentUser = normalizeEmail(document.getElementById('markPaidPaymentUserSelect')?.value || '');
+    if (!selectedPaymentUser) {
+        showNotification('Select the payment user who should reflect on this paid record.', 'warning');
+        return;
+    }
+
+    const reason = String(document.getElementById('markPaidReasonInput')?.value || '').trim();
+    const updates = {
+        status: 'paid',
+        paidAt: serverTimestamp(),
+        paidBy: selectedPaymentUser,
+        assignedToPayment: selectedPaymentUser,
+        superAdminMarkedPaidAt: serverTimestamp(),
+        superAdminMarkedPaidBy: currentUser?.email || '',
+        superAdminMarkPaidReason: reason,
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUser?.email || ''
+    };
+    if (!getTimestampMillis(submission.paymentAssignedAt)) {
+        updates.paymentAssignedAt = serverTimestamp();
+    }
+
+    const button = document.getElementById('confirmMarkPaidBtn');
+    const originalHtml = button?.innerHTML || '';
+    try {
+        markPaidSaveInProgress = true;
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        }
+        await updateDoc(doc(db, 'submissions', submissionId), updates);
+        await addDoc(collection(db, 'audit'), {
+            action: 'super_admin_marked_paid',
+            submissionId,
+            customerName: submission.customerName || submission.customerDetails?.name || submission.customerDetails?.customerName || '',
+            penNo: getSubmissionPenNumber(submission),
+            previousStatus: submission.status || '',
+            previousPaidBy: normalizeEmail(submission.paidBy || ''),
+            newPaidBy: selectedPaymentUser,
+            previousPaymentOfficer: normalizeEmail(submission.assignedToPayment || ''),
+            newPaymentOfficer: selectedPaymentUser,
+            reason,
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        });
+        showNotification('Customer marked as paid successfully', 'success');
+        closeMarkPaidModal();
+        setTimeout(openMarkPaidSearchModal, 80);
+    } catch (error) {
+        console.error('Super admin mark paid failed:', error);
+        showNotification('Failed to mark customer as paid', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+        markPaidSaveInProgress = false;
+    }
+}
+
+function setStatusChangeSearchStatus(message = '', type = 'info') {
+    const status = document.getElementById('statusChangeSearchStatus');
+    if (!status) return;
+    if (!String(message || '').trim()) {
+        status.style.display = 'none';
+        status.textContent = '';
+        return;
+    }
+    const styles = {
+        info: ['#bfdbfe', '#eff6ff', '#1d4ed8'],
+        warning: ['#fcd34d', '#fffbeb', '#92400e'],
+        error: ['#fecaca', '#fef2f2', '#991b1b']
+    };
+    const [border, background, color] = styles[type] || styles.info;
+    status.style.display = 'block';
+    status.style.borderColor = border;
+    status.style.background = background;
+    status.style.color = color;
+    status.textContent = message;
+}
+
+function openStatusChangeSearchModal() {
+    const modal = document.getElementById('statusChangeSearchModal');
+    if (!modal) return;
+    setStatusChangeSearchStatus('');
+    renderStatusChangeSearchMatches([]);
+    const input = document.getElementById('statusChangePenInput');
+    if (input) input.value = '';
+    modal.classList.add('active');
+    setTimeout(() => input?.focus(), 50);
+}
+
+function closeStatusChangeSearchModal() {
+    document.getElementById('statusChangeSearchModal')?.classList.remove('active');
+    renderStatusChangeSearchMatches([]);
+}
+
+function openStatusChangeModal() {
+    document.getElementById('statusChangeModal')?.classList.add('active');
+}
+
+function closeStatusChangeModal() {
+    document.getElementById('statusChangeModal')?.classList.remove('active');
+}
+
+function getStatusChangeOptions(currentStatus = '') {
+    const normalized = String(currentStatus || '').trim().toLowerCase();
+    const options = [
+        ['pending', 'Pending / Reviewer Queue'],
+        ['approved', 'Approved / RSA Queue'],
+        ['processing_to_pfa', 'Processing to PFA / Reopen to RSA'],
+        ['rejected_by_rsa', 'Rejected by RSA'],
+        ['sent_to_pfa', 'Sent to PFA'],
+        ['paid', 'Paid'],
+        ['cleared', 'Cleared']
+    ];
+    if (normalized && !options.some(([value]) => value === normalized)) {
+        options.unshift([normalized, normalized.replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())]);
+    }
+    return options.map(([value, label]) => (
+        `<option value="${escapeHtml(value)}" ${value === normalized ? 'selected' : ''}>${escapeHtml(label)}</option>`
+    )).join('');
+}
+
+function isFinalSubmissionStatus(submission = {}) {
+    const status = String(submission.status || '').trim().toLowerCase();
+    return status === 'sent_to_pfa'
+        || status === 'rsa_submitted'
+        || submission.finalSubmitted === true
+        || submission.rsaSubmitted === true;
+}
+
+function renderStatusChangeModal(submission = {}) {
+    currentStatusChangeSubmissionId = submission.id || '';
+    currentStatusChangeSubmission = { ...submission };
+    const currentStatus = String(submission.status || '').trim().toLowerCase();
+    const summary = document.getElementById('statusChangeSummary');
+    if (summary) {
+        const items = [
+            ['Customer', submission.customerName || submission.customerDetails?.name || submission.customerDetails?.customerName || 'Unknown'],
+            ['PEN Number', getSubmissionPenNumber(submission) || '-'],
+            ['Current Status', currentStatus ? currentStatus.replaceAll('_', ' ') : '-'],
+            ['Assigned RSA', getUserDisplayNameByEmail(submission.assignedToRSA || '') || submission.assignedToRSA || '-'],
+            ['Sent to PFA At', formatDate(submission.finalSubmittedAt || submission.rsaSubmittedAt)],
+            ['Payment User', getUserDisplayNameByEmail(submission.assignedToPayment || '') || submission.assignedToPayment || '-']
+        ];
+        summary.innerHTML = items.map(([label, value]) => `
+            <div class="mark-paid-summary-item">
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value)}</strong>
+            </div>
+        `).join('');
+    }
+
+    const select = document.getElementById('statusChangeTargetStatus');
+    if (select) select.innerHTML = getStatusChangeOptions(currentStatus);
+    updateStatusChangeNotice();
+}
+
+function renderStatusChangeSearchMatches(matches = []) {
+    currentStatusChangeSearchMatches = Array.isArray(matches) ? matches : [];
+    const host = document.getElementById('statusChangeSearchResults');
+    if (!host) return;
+    if (!currentStatusChangeSearchMatches.length) {
+        host.innerHTML = '';
+        host.style.display = 'none';
+        return;
+    }
+    host.style.display = 'grid';
+    host.innerHTML = currentStatusChangeSearchMatches.map((submission, index) => {
+        const customerName = getSubmissionCustomerName(submission) || 'Unknown';
+        const penNo = getSubmissionPenNumber(submission) || '-';
+        const status = String(submission.status || '-').replaceAll('_', ' ');
+        const submittedAt = formatDate(submission.uploadedAt || submission.createdAt || submission.updatedAt);
+        return `
+            <button type="button" class="status-change-match-btn" data-status-change-match-index="${index}">
+                <strong>${escapeHtml(customerName)}</strong>
+                <span>PEN: ${escapeHtml(penNo)} | Status: ${escapeHtml(status)} | Date: ${escapeHtml(submittedAt)}</span>
+            </button>
+        `;
+    }).join('');
+    host.querySelectorAll('[data-status-change-match-index]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const index = Number(button.getAttribute('data-status-change-match-index'));
+            const submission = currentStatusChangeSearchMatches[index];
+            if (!submission) return;
+            renderStatusChangeModal(submission);
+            closeStatusChangeSearchModal();
+            openStatusChangeModal();
+        });
+    });
+}
+
+function updateStatusChangeNotice() {
+    const notice = document.getElementById('statusChangeNotice');
+    if (!notice) return;
+    const targetStatus = String(document.getElementById('statusChangeTargetStatus')?.value || '').trim().toLowerCase();
+    const willReopenFinal = isFinalSubmissionStatus(currentStatusChangeSubmission || {}) && ['approved', 'processing_to_pfa'].includes(targetStatus);
+    if (willReopenFinal) {
+        notice.style.display = 'block';
+        notice.textContent = 'This will reopen the application to RSA and clear the previous Sent to PFA timestamps so a new final submission can record fresh timestamps.';
+    } else {
+        notice.style.display = 'none';
+        notice.textContent = '';
+    }
+}
+
+async function searchStatusChangePenNumber() {
+    const input = document.getElementById('statusChangePenInput');
+    const button = document.getElementById('searchStatusChangePenBtn');
+    const searchValue = String(input?.value || '').trim();
+    if (!searchValue) {
+        setStatusChangeSearchStatus('Enter a customer PEN number or name.', 'warning');
+        return;
+    }
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Searching...';
+        }
+        renderStatusChangeSearchMatches([]);
+        setStatusChangeSearchStatus('Searching applications...', 'info');
+        const matches = await findSubmissionsByApplicationLookup(searchValue);
+        const submission = getFirstLookupMatch(matches);
+        if (!submission) {
+            setStatusChangeSearchStatus('No application found for that PEN number or customer name.', 'error');
+            return;
+        }
+        if (matches.length > 1) {
+            setStatusChangeSearchStatus(`${matches.length} matching applications found. Select the exact customer below.`, 'warning');
+            renderStatusChangeSearchMatches(matches);
+            return;
+        }
+        renderStatusChangeModal(submission);
+        closeStatusChangeSearchModal();
+        openStatusChangeModal();
+    } catch (error) {
+        console.error('Status change search failed:', error);
+        setStatusChangeSearchStatus('Failed to search for this PEN number or customer name.', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+}
+
+async function saveApplicationStatusChange() {
+    if (statusChangeSaveInProgress) {
+        showNotification('Status update is already saving. Please wait.', 'info');
+        return;
+    }
+    const submissionId = currentStatusChangeSubmissionId;
+    const submission = allSubmissions.find((sub) => sub.id === submissionId) || currentStatusChangeSubmission || {};
+    if (!submissionId) return showNotification('No application is open for status change.', 'warning');
+
+    const targetStatus = String(document.getElementById('statusChangeTargetStatus')?.value || '').trim().toLowerCase();
+    if (!targetStatus) return showNotification('Select the new application status.', 'warning');
+
+    const previousStatus = String(submission.status || '').trim().toLowerCase();
+    const reopeningFinalSubmission = isFinalSubmissionStatus(submission) && ['approved', 'processing_to_pfa'].includes(targetStatus);
+    const updates = {
+        status: targetStatus,
+        statusUpdatedAt: serverTimestamp(),
+        superAdminStatusChangedAt: serverTimestamp(),
+        superAdminStatusChangedBy: currentUser?.email || '',
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUser?.email || ''
+    };
+
+    if (reopeningFinalSubmission) {
+        updates.finalSubmitted = false;
+        updates.rsaSubmitted = false;
+        updates.finalSubmittedAt = deleteField();
+        updates.finalSubmittedBy = deleteField();
+        updates.rsaSubmittedAt = deleteField();
+        updates.rsaSubmittedBy = deleteField();
+        updates.paymentAssignedAt = deleteField();
+        updates.paymentAssignmentMethod = deleteField();
+        updates.assignedToPayment = deleteField();
+    }
+
+    if (targetStatus === 'sent_to_pfa' && !isFinalSubmissionStatus(submission)) {
+        updates.finalSubmitted = true;
+        updates.rsaSubmitted = true;
+        updates.finalSubmittedAt = serverTimestamp();
+        updates.finalSubmittedBy = currentUser?.email || '';
+        updates.rsaSubmittedAt = serverTimestamp();
+        updates.rsaSubmittedBy = currentUser?.email || '';
+    }
+
+    const button = document.getElementById('confirmStatusChangeBtn');
+    const originalHtml = button?.innerHTML || '';
+    try {
+        statusChangeSaveInProgress = true;
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        }
+        await updateDoc(doc(db, 'submissions', submissionId), updates);
+        await addDoc(collection(db, 'audit'), {
+            action: reopeningFinalSubmission ? 'super_admin_reopened_final_submission' : 'super_admin_application_status_changed',
+            submissionId,
+            customerName: submission.customerName || submission.customerDetails?.name || submission.customerDetails?.customerName || '',
+            penNo: getSubmissionPenNumber(submission),
+            previousStatus,
+            newStatus: targetStatus,
+            clearedFinalSubmissionTimestamps: reopeningFinalSubmission,
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        });
+        showNotification(reopeningFinalSubmission ? 'Application reopened to RSA successfully.' : 'Application status updated successfully.', 'success');
+        closeStatusChangeModal();
+        setTimeout(openStatusChangeSearchModal, 80);
+    } catch (error) {
+        console.error('Super admin status change failed:', error);
+        showNotification('Failed to update application status', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+        statusChangeSaveInProgress = false;
+    }
+}
+
+function getBackdatedSubmissionsForReport() {
+    const search = String(document.getElementById('backdateReportSearch')?.value || '').trim().toLowerCase();
+    const startDate = String(document.getElementById('backdateReportStartDate')?.value || '').trim();
+    const endDate = String(document.getElementById('backdateReportEndDate')?.value || '').trim();
+
+    return allSubmissions
+        .filter((sub) => sub?.backdatedAt || sub?.backdateReason || sub?.backdatedBy)
+        .filter((sub) => {
+            const backdatedDateKey = getDateKey(sub.backdatedAt);
+            if (startDate && (!backdatedDateKey || backdatedDateKey < startDate)) return false;
+            if (endDate && (!backdatedDateKey || backdatedDateKey > endDate)) return false;
+            if (!search) return true;
+            const searchable = [
+                getSubmissionCustomerName(sub),
+                getSubmissionPenNumber(sub),
+                sub.status || '',
+                sub.backdateReason || '',
+                sub.backdatedBy || '',
+                sub.uploadedBy || '',
+                sub.assignedTo || '',
+                sub.assignedToRSA || '',
+                sub.assignedToPayment || '',
+                getUserDisplayNameByEmail(sub.backdatedBy || ''),
+                getUserDisplayNameByEmail(sub.assignedTo || ''),
+                getUserDisplayNameByEmail(sub.assignedToRSA || ''),
+                getUserDisplayNameByEmail(sub.assignedToPayment || '')
+            ].join(' ').toLowerCase();
+            return searchable.includes(search);
+        })
+        .sort((a, b) => getTimestampMillis(b.backdatedAt || b.updatedAt) - getTimestampMillis(a.backdatedAt || a.updatedAt));
+}
+
+function buildBackdateReportRow(sub = {}) {
+    const commissionRate = Number(sub.commissionRate || 0);
+    return {
+        backdatedAt: formatDate(sub.backdatedAt),
+        customerName: getSubmissionCustomerName(sub) || 'Unknown',
+        penNo: getSubmissionPenNumber(sub) || '-',
+        status: String(sub.status || '-').replaceAll('_', ' '),
+        uploadedAt: formatDate(sub.uploadedAt || sub.createdAt),
+        backdatedBy: getUserDisplayNameByEmail(sub.backdatedBy || ''),
+        reason: String(sub.backdateReason || '').trim() || '-',
+        reviewer: getUserDisplayNameByEmail(sub.assignedTo || ''),
+        rsa: getUserDisplayNameByEmail(sub.assignedToRSA || ''),
+        payment: getUserDisplayNameByEmail(sub.assignedToPayment || ''),
+        commissionRate: commissionRate ? formatCommissionRateLabel(commissionRate) : String(sub.commissionRateLabel || '-')
+    };
+}
+
+function renderBackdateReport() {
+    const body = document.getElementById('backdateReportTableBody');
+    const summary = document.getElementById('backdateReportSummary');
+    if (!body) return;
+
+    const rows = getBackdatedSubmissionsForReport().map(buildBackdateReportRow);
+    if (summary) {
+        summary.textContent = `${rows.length} backdated application${rows.length === 1 ? '' : 's'} found`;
+    }
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="11" class="no-data">No backdated applications found</td></tr>';
+        return;
+    }
+
+    body.innerHTML = rows.map((row) => `
+        <tr>
+            <td>${escapeHtml(row.backdatedAt)}</td>
+            <td><strong>${escapeHtml(row.customerName)}</strong></td>
+            <td>${escapeHtml(row.penNo)}</td>
+            <td>${escapeHtml(row.status)}</td>
+            <td>${escapeHtml(row.uploadedAt)}</td>
+            <td>${escapeHtml(row.backdatedBy)}</td>
+            <td>${escapeHtml(row.reason)}</td>
+            <td>${escapeHtml(row.reviewer)}</td>
+            <td>${escapeHtml(row.rsa)}</td>
+            <td>${escapeHtml(row.payment)}</td>
+            <td>${escapeHtml(row.commissionRate)}</td>
+        </tr>
+    `).join('');
+}
+
+async function downloadBackdateReportWorkbook() {
+    const submissions = getBackdatedSubmissionsForReport();
+    if (!submissions.length) {
+        showNotification('No backdated applications to generate.', 'warning');
+        return;
+    }
+    if (!window.ExcelJS) {
+        showNotification('Excel export library is not available right now.', 'error');
+        return;
+    }
+
+    const workbook = new window.ExcelJS.Workbook();
+    workbook.creator = 'CMBank RSA Super Admin';
+    workbook.created = new Date();
+    const worksheet = workbook.addWorksheet('Backdate Report');
+    worksheet.columns = [
+        { header: 'Backdated At', key: 'backdatedAt', width: 24 },
+        { header: 'Customer Name', key: 'customerName', width: 28 },
+        { header: 'PEN', key: 'penNo', width: 22 },
+        { header: 'Status', key: 'status', width: 18 },
+        { header: 'Uploaded At', key: 'uploadedAt', width: 24 },
+        { header: 'Backdated By', key: 'backdatedBy', width: 28 },
+        { header: 'Reason', key: 'reason', width: 40 },
+        { header: 'Reviewer', key: 'reviewer', width: 28 },
+        { header: 'RSA', key: 'rsa', width: 28 },
+        { header: 'Payment', key: 'payment', width: 28 },
+        { header: 'Commission Rate', key: 'commissionRate', width: 18 }
+    ];
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF003366' } };
+    worksheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
+    submissions.map(buildBackdateReportRow).forEach((row) => worksheet.addRow(row));
+    worksheet.eachRow((row) => {
+        row.eachCell((cell) => {
+            cell.border = {
+                top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+                left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+                bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+                right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+            };
+            cell.alignment = { vertical: 'top', wrapText: true };
+        });
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const startDate = String(document.getElementById('backdateReportStartDate')?.value || '').trim();
+    const endDate = String(document.getElementById('backdateReportEndDate')?.value || '').trim();
+    const suffix = startDate || endDate ? `${startDate || 'start'}_to_${endDate || 'end'}` : getLagosDateKey(new Date());
+    link.href = url;
+    link.download = `cmbank_backdate_report_${suffix}.xlsx`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showNotification('Backdate report Excel generated.', 'success');
 }
 
 function renderRoutingRules() {
@@ -2726,6 +4110,8 @@ function renderCurrentTab() {
         if (currentAgentSubTab === 'agent-reroute') return renderApplicationAgentRerouteModule();
         return renderApplicationAgentModule();
     }
+    if (currentTab === 'application-controls') return renderApplicationControlsSubTabState();
+    if (currentTab === 'backdate-report') return renderBackdateReport();
     if (currentTab === 'audit') return renderAudit();
     if (currentTab === 'security') return renderSecurity();
     if (currentTab === 'round-robin') return renderRoundRobin();
@@ -4717,10 +6103,10 @@ function setupRealtimeData() {
 }
 
 function ensureRealtimeDataForTab(tabId) {
-    if (tabId === 'global' || tabId === 'admins' || tabId === 'settings' || tabId === 'security' || tabId === 'round-robin') {
+    if (tabId === 'global' || tabId === 'admins' || tabId === 'settings' || tabId === 'security' || tabId === 'round-robin' || tabId === 'application-controls' || tabId === 'backdate-report') {
         startUsersListener();
     }
-    if (tabId === 'global' || tabId === 'settings' || tabId === 'round-robin') {
+    if (tabId === 'global' || tabId === 'settings' || tabId === 'round-robin' || tabId === 'application-controls' || tabId === 'backdate-report') {
         startSubmissionsListener();
     }
     if (tabId === 'audit') startAuditsListener();
@@ -4786,6 +6172,65 @@ document.querySelectorAll('.nav-item[data-tab]').forEach((item) => {
         switchTab(item.dataset.tab);
     });
 });
+
+document.getElementById('openBackdateSearchModalBtn')?.addEventListener('click', openBackdateSearchModal);
+document.getElementById('closeBackdateSearchModalBtn')?.addEventListener('click', closeBackdateSearchModal);
+document.getElementById('cancelBackdateSearchModalBtn')?.addEventListener('click', closeBackdateSearchModal);
+document.getElementById('searchBackdatePenBtn')?.addEventListener('click', searchBackdatePenNumber);
+document.getElementById('backdatePenInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        searchBackdatePenNumber();
+    }
+});
+document.getElementById('closeBackdateEditorModalBtn')?.addEventListener('click', closeBackdateEditorModal);
+document.getElementById('cancelBackdateEditorModalBtn')?.addEventListener('click', closeBackdateEditorModal);
+document.getElementById('saveBackdateChangesBtn')?.addEventListener('click', saveBackdateChanges);
+document.getElementById('openCustomerEditSearchModalBtn')?.addEventListener('click', openCustomerEditSearchModal);
+document.getElementById('closeCustomerEditSearchModalBtn')?.addEventListener('click', closeCustomerEditSearchModal);
+document.getElementById('cancelCustomerEditSearchModalBtn')?.addEventListener('click', closeCustomerEditSearchModal);
+document.getElementById('searchCustomerEditPenBtn')?.addEventListener('click', searchCustomerEditPenNumber);
+document.getElementById('customerEditPenInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        searchCustomerEditPenNumber();
+    }
+});
+document.getElementById('closeCustomerEditModalBtn')?.addEventListener('click', closeCustomerEditModal);
+document.getElementById('cancelCustomerEditModalBtn')?.addEventListener('click', closeCustomerEditModal);
+document.getElementById('saveCustomerEditBtn')?.addEventListener('click', saveCustomerEditDetails);
+document.getElementById('openMarkPaidSearchModalBtn')?.addEventListener('click', openMarkPaidSearchModal);
+document.getElementById('closeMarkPaidSearchModalBtn')?.addEventListener('click', closeMarkPaidSearchModal);
+document.getElementById('cancelMarkPaidSearchModalBtn')?.addEventListener('click', closeMarkPaidSearchModal);
+document.getElementById('searchMarkPaidPenBtn')?.addEventListener('click', searchMarkPaidPenNumber);
+document.getElementById('markPaidPenInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        searchMarkPaidPenNumber();
+    }
+});
+document.getElementById('closeMarkPaidModalBtn')?.addEventListener('click', closeMarkPaidModal);
+document.getElementById('cancelMarkPaidModalBtn')?.addEventListener('click', closeMarkPaidModal);
+document.getElementById('confirmMarkPaidBtn')?.addEventListener('click', saveMarkPaidFromSuperAdmin);
+document.getElementById('openStatusChangeSearchModalBtn')?.addEventListener('click', openStatusChangeSearchModal);
+document.getElementById('closeStatusChangeSearchModalBtn')?.addEventListener('click', closeStatusChangeSearchModal);
+document.getElementById('cancelStatusChangeSearchModalBtn')?.addEventListener('click', closeStatusChangeSearchModal);
+document.getElementById('searchStatusChangePenBtn')?.addEventListener('click', searchStatusChangePenNumber);
+document.getElementById('statusChangePenInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        searchStatusChangePenNumber();
+    }
+});
+document.getElementById('statusChangeTargetStatus')?.addEventListener('change', updateStatusChangeNotice);
+document.getElementById('closeStatusChangeModalBtn')?.addEventListener('click', closeStatusChangeModal);
+document.getElementById('cancelStatusChangeModalBtn')?.addEventListener('click', closeStatusChangeModal);
+document.getElementById('confirmStatusChangeBtn')?.addEventListener('click', saveApplicationStatusChange);
+document.getElementById('viewBackdateReportBtn')?.addEventListener('click', renderBackdateReport);
+document.getElementById('downloadBackdateReportBtn')?.addEventListener('click', downloadBackdateReportWorkbook);
+document.getElementById('backdateReportSearch')?.addEventListener('input', renderBackdateReport);
+document.getElementById('backdateReportStartDate')?.addEventListener('change', renderBackdateReport);
+document.getElementById('backdateReportEndDate')?.addEventListener('change', renderBackdateReport);
 
 document.getElementById('superUserSearch')?.addEventListener('input', renderAdminManagement);
 document.getElementById('superUserRoleFilter')?.addEventListener('change', renderAdminManagement);

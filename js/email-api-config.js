@@ -1,5 +1,8 @@
 // Leave empty to use Firebase's built-in password reset email flow.
-export const EMAIL_API_BASE_URL = 'https://rsa-email-api.onrender.com';
+export const EMAIL_API_BASE_URL = '';
+
+// Backend used for Paystack account-name lookup and other non-reset utilities.
+export const ACCOUNT_LOOKUP_API_BASE_URL = 'https://rsa-email-api.onrender.com';
 
 // Firebase Cloud Messaging Web Push certificate key pair (public key)
 // Firebase Console -> Project Settings -> Cloud Messaging -> Web configuration
@@ -7,4 +10,5 @@ export const FCM_WEB_VAPID_KEY = 'BA9kVFOKrigx3S8-2i2ov8c0KOU0kS4YjkdNbWB8RZ_SDo
 
 // Optional runtime override:
 // window.__EMAIL_API_BASE_URL__ = 'https://your-service.onrender.com';
+// window.__ACCOUNT_LOOKUP_API_BASE_URL__ = 'https://your-service.onrender.com';
 // window.__FCM_VAPID_KEY__ = 'YOUR_FIREBASE_WEB_PUSH_CERTIFICATE_KEY';

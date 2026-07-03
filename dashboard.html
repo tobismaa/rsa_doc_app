@@ -533,29 +533,14 @@
                     <i class="fas fa-tachometer-alt"></i>
                     <span>Dashboard</span>
                 </a>
-                <a href="#" class="nav-item" data-tab="draft">
-                    <i class="fas fa-file-pen"></i>
-                    <span>Draft</span>
-                    <span class="badge" id="draftCount">0</span>
-                </a>
-                <a href="#" class="nav-item" data-tab="pending">
-                    <i class="fas fa-clock"></i>
-                    <span>Pending Review</span>
-                    <span class="badge" id="pendingCount">0</span>
-                </a>
-                <a href="#" class="nav-item" data-tab="approved">
-                    <i class="fas fa-check-circle"></i>
-                    <span>Approved</span>
-                    <span class="badge" id="approvedCount">0</span>
-                </a>
-                <a href="#" class="nav-item" data-tab="rejected">
-                    <i class="fas fa-times-circle"></i>
-                    <span>Rejected</span>
-                    <span class="badge" id="rejectedCount">0</span>
+                <a href="#" class="nav-item" data-tab="applications">
+                    <i class="fas fa-folder-open"></i>
+                    <span>Applications</span>
+                    <span class="badge" id="applicationsCount">0</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="paid">
                     <i class="fas fa-money-check-dollar"></i>
-                    <span>Agent Commission</span>
+                    <span>Commission</span>
                     <span class="badge" id="paidCount">0</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="register-agent">
@@ -685,6 +670,55 @@
                 </div>
             </div>
 
+            <!-- Applications Tab -->
+            <div id="applicationsTab" class="tab-content">
+                <div class="table-section">
+                    <div class="admin-subtab-strip" style="margin-bottom: 12px;">
+                        <button type="button" class="admin-subtab-btn active" data-uploader-application-tab="draft">
+                            Draft <span class="subtab-badge" id="appDraftCount">0</span>
+                        </button>
+                        <button type="button" class="admin-subtab-btn" data-uploader-application-tab="pending">
+                            Pending <span class="subtab-badge" id="appPendingCount">0</span>
+                        </button>
+                        <button type="button" class="admin-subtab-btn" data-uploader-application-tab="approved">
+                            Approved <span class="subtab-badge" id="appApprovedCount">0</span>
+                        </button>
+                        <button type="button" class="admin-subtab-btn" data-uploader-application-tab="rejected">
+                            Rejected <span class="subtab-badge" id="appRejectedCount">0</span>
+                        </button>
+                        <button type="button" class="admin-subtab-btn" data-uploader-application-tab="sent_to_pfa">
+                            Sent to PFA <span class="subtab-badge" id="appSentToPfaCount">0</span>
+                        </button>
+                        <button type="button" class="admin-subtab-btn" data-uploader-application-tab="paid">
+                            Paid <span class="subtab-badge" id="appPaidCount">0</span>
+                        </button>
+                        <button type="button" class="admin-subtab-btn" data-uploader-application-tab="cleared">
+                            Cleared <span class="subtab-badge" id="appClearedCount">0</span>
+                        </button>
+                    </div>
+                    <div class="filters-bar">
+                        <input type="text" id="applicationsSearch" placeholder="Search customer, agent, PFA, or status">
+                    </div>
+                    <div class="table-container">
+                        <table class="customers-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer Name</th>
+                                    <th>Agent</th>
+                                    <th>PFA</th>
+                                    <th>Time Entered</th>
+                                    <th>Current Officer</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="applicationsTableBody">
+                                <tr><td colspan="7" class="loading-row"><div class="loading-spinner"></div> Loading applications...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- Pending Tab -->
             <div id="pendingTab" class="tab-content">
                 <div class="table-section">
@@ -700,14 +734,13 @@
                                     <th>Contact (WhatsApp)</th>
                                     <th>Current Handler</th>
                                     <th>Current Stage Entry</th>
-                                    <th>Status</th>
                                     <th>Comment</th>
                                     <th>View</th>
                                     <th>Track</th>
                                 </tr>
                             </thead>
                             <tbody id="pendingTableBody">
-                                <tr><td colspan="9" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
+                                <tr><td colspan="8" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -729,7 +762,6 @@
                                     <th>Contact (WhatsApp)</th>
                                     <th>Assigned To</th>
                                     <th>Upload Date/Time</th>
-                                    <th>Status</th>
                                     <th>Approved By</th>
                                     <th>Approved Date/Time</th>
                                     <th>View</th>
@@ -737,7 +769,7 @@
                                 </tr>
                             </thead>
                             <tbody id="approvedTableBody">
-                                <tr><td colspan="10" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
+                                <tr><td colspan="9" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -760,17 +792,14 @@
                                     <th>Re-upload Count</th>
                                     <th>Assigned To</th>
                                     <th>Upload Date/Time</th>
-                                    <th>Status</th>
-                                    <th>Rejection Reason</th>
-                                    <th>Rejected By</th>
-                                    <th>Rejected Date/Time</th>
+                                    <th>Rejection Details</th>
                                     <th>Action</th>
                                     <th>View</th>
                                     <th>Track</th>
                                 </tr>
                             </thead>
                             <tbody id="rejectedTableBody">
-                                <tr><td colspan="13" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
+                                <tr><td colspan="10" class="loading-row"><div class="loading-spinner"></div> Loading submissions...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -796,7 +825,7 @@
             </div>
         </div>
 
-        <!-- Agent Commission Tab -->
+        <!-- Commission Tab -->
             <div id="paidTab" class="tab-content">
                 <div class="overview-cards">
                     <div class="stat-card approved" id="activeTotal25Card">
@@ -988,12 +1017,17 @@
                         <p>Agent stays pending until admin approval; only approved agents appear in submission dropdown.</p>
                     </div>
                     <div class="sop-topic">
-                        <h4>5. Agent Commission</h4>
-                        <p>Use the <strong>Agent Commission</strong> tab to review each registered agent and open their commission breakdown.</p>
+                        <h4>5. Commission</h4>
+                        <p>Use the <strong>Commission</strong> tab to review each registered agent and open their commission breakdown.</p>
                         <p>Inside the modal, check <strong>Sent to PFA</strong>, <strong>Active</strong>, and <strong>Cleared</strong> records to confirm commission stage and amount.</p>
                     </div>
                     <div class="sop-topic">
-                        <h4>6. Rejected Items</h4>
+                        <h4>6. Applications</h4>
+                        <p>Use <strong>Applications</strong> to switch between Pending, Approved, Rejected, Sent to PFA, Paid, and Cleared records.</p>
+                        <p>In Sent to PFA, use <strong>Payment Made</strong> after the PFA has paid so Audit can verify the commission.</p>
+                    </div>
+                    <div class="sop-topic">
+                        <h4>7. Rejected Items</h4>
                         <p>Open rejected records, read reviewer comments, correct files, and re-upload using the correction action.</p>
                         <p>After correction submission, recheck status from Pending and Track Application.</p>
                     </div>
@@ -1272,6 +1306,11 @@
                                 <option>Zenith Bank</option>
                             </select>
                         </div>
+                        <div class="full-width">
+                            <label for="agentAccountName">Account Name *</label>
+                            <input type="text" id="agentAccountName" placeholder="Auto-filled after account verification" readonly required>
+                            <div id="agentAccountLookupStatus" style="display:none;margin-top:6px;font-size:12px;font-weight:700;"></div>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="cancel-btn" id="resetAgentFormBtn">Reset</button>
@@ -1474,7 +1513,7 @@
 
     <!-- ========== SCRIPTS - ORDER IS CRITICAL ========== -->
     <!-- 1. Firebase Config (no dependencies) -->
-    <script type="module" src="js/firebase-config.js?v=20260625b"></script>
+    <script type="module" src="js/firebase-config.js?v=20260625c"></script>
 
     <!-- 2. jsPDF - MUST LOAD BEFORE MODULE SCRIPTS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -1505,7 +1544,7 @@
     <script type="module" src="js/backblaze-storage.js?v=20260416b"></script>
 
     <!-- 6. Document Uploader (main upload logic) -->
-<script type="module" src="js/document-uploader-v2.js?v=20260623a"></script>
+<script type="module" src="js/document-uploader-v2.js?v=20260703d"></script>
 
     <!-- 7. Dashboard (Track & Calculator only) -->
 <script type="module" src="js/uploader-dashboard.js?v=20260625b"></script>

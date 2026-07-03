@@ -9,7 +9,7 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=20260416f">
     <link rel="icon" type="image/png" href="favicon.png?v=20260416f">
     <link rel="apple-touch-icon" href="icons/icon-192.png?v=20260416f">
-    <title>Reports & Monitoring Dashboard - CMBank RSA</title>
+    <title>Audit Dashboard - CMBank RSA</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
     <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
@@ -24,8 +24,8 @@
                 <i class="fas fa-bars"></i>
             </button>
             <div class="mobile-logo">
-                <i class="fas fa-chart-line"></i>
-                <span>Reports & Monitoring</span>
+                <i class="fas fa-clipboard-check"></i>
+                <span>Audit</span>
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
                 <button class="sign-out-btn mobile" id="forceRefreshBtnMobile" title="Refresh">
@@ -41,15 +41,15 @@
 
         <aside class="sidebar admin-sidebar" id="sidebar">
             <div class="logo">
-                <i class="fas fa-chart-line"></i>
-                <span>Reports & Monitoring</span>
+                <i class="fas fa-clipboard-check"></i>
+                <span>Audit</span>
             </div>
 
             <div class="user-profile">
-                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='14'%3ERM%3C/text%3E%3C/svg%3E" alt="Reports Monitoring" id="monitorAvatar">
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%23003366'/%3E%3Ctext x='20' y='25' text-anchor='middle' fill='%23ffffff' font-size='14'%3EA%3C/text%3E%3C/svg%3E" alt="Audit" id="monitorAvatar">
                 <div class="user-info">
                     <span id="monitorName">Loading...</span>
-                    <small>Reports & Monitoring</small>
+                    <small>Audit</small>
                 </div>
                 <button class="sign-out-btn" id="signOutBtnSidebar" title="Sign Out">
                     <i class="fas fa-sign-out-alt"></i>
@@ -60,6 +60,21 @@
                 <a href="#" class="nav-item active" data-tab="overview">
                     <i class="fas fa-chart-pie"></i>
                     <span>Overview</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="sent-to-pfa">
+                    <i class="fas fa-paper-plane"></i>
+                    <span>Sent to PFA</span>
+                    <span class="badge" id="auditSentToPfaCountBadge">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="paid">
+                    <i class="fas fa-money-check-dollar"></i>
+                    <span>Paid</span>
+                    <span class="badge" id="auditPaidCountBadge">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="cleared">
+                    <i class="fas fa-circle-check"></i>
+                    <span>Cleared</span>
+                    <span class="badge" id="auditClearedCountBadge">0</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="users">
                     <i class="fas fa-users"></i>
@@ -132,7 +147,7 @@
 
                 <div class="table-section">
                     <h2>Workflow Snapshot</h2>
-                    <p style="color:#64748b;margin:0 0 14px;">Monitor the full pipeline from review through RSA and payment. This page is intended for centralized reporting and operational visibility.</p>
+                    <p style="color:#64748b;margin:0 0 14px;">Audit the full pipeline from review through RSA and payment. This page is intended for centralized reporting and operational visibility.</p>
                     <div class="table-container">
                         <table class="documents-table">
                             <thead>
@@ -168,6 +183,72 @@
                 </div>
             </div>
 
+            <div id="sent-to-pfaTab" class="tab-content">
+                <div class="table-section">
+                    <h2>Sent to PFA</h2>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Uploader</th>
+                                    <th>Customer</th>
+                                    <th>RSA Balance</th>
+                                    <th>25%</th>
+                                    <th>Commission</th>
+                                    <th>Customer Account Number</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditSentToPfaTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="paidTab" class="tab-content">
+                <div class="table-section">
+                    <h2>Paid</h2>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Uploader</th>
+                                    <th>Customer</th>
+                                    <th>RSA Balance</th>
+                                    <th>25%</th>
+                                    <th>Commission</th>
+                                    <th>Paid At</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditPaidTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="clearedTab" class="tab-content">
+                <div class="table-section">
+                    <h2>Cleared</h2>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Uploader</th>
+                                    <th>Customer</th>
+                                    <th>RSA Balance</th>
+                                    <th>25%</th>
+                                    <th>Commission</th>
+                                    <th>Cleared At</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditClearedTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <div id="usersTab" class="tab-content">
                 <div class="filters-bar">
                     <div class="search-box">
@@ -180,7 +261,7 @@
                         <option value="reviewer">Reviewer</option>
                         <option value="rsa">RSA</option>
                         <option value="payment">Payment</option>
-                        <option value="reports_monitoring">Reports Monitoring</option>
+                        <option value="reports_monitoring">Audit</option>
                         <option value="admin">Admin</option>
                         <option value="super_admin">Super Admin</option>
                     </select>
@@ -258,7 +339,7 @@
 
             <div id="reportsTab" class="tab-content">
                 <div class="table-section">
-                    <h2>RSA Report Monitor</h2>
+                    <h2>RSA Audit Report</h2>
                     <div class="table-container">
                         <table class="documents-table">
                             <thead>
@@ -274,7 +355,7 @@
                 </div>
 
                 <div class="table-section">
-                    <h2>Payment Report Monitor</h2>
+                    <h2>Payment Audit Report</h2>
                     <div class="table-container">
                         <table class="documents-table">
                             <thead>
@@ -308,7 +389,7 @@
                 </div>
 
                 <div class="table-section">
-                    <h2>Exceptions Monitor</h2>
+                    <h2>Workflow Exceptions</h2>
                     <div class="table-container">
                         <table class="documents-table">
                             <thead>
@@ -331,14 +412,14 @@
                     <div class="profile-card">
                         <div class="profile-card-head">
                             <h2>My Profile</h2>
-                            <p>Reports & monitoring access details</p>
+                            <p>Audit access details</p>
                         </div>
                         <div class="profile-grid">
                             <div class="profile-item"><span class="profile-label">Full Name</span><span id="profileName" class="profile-value">-</span></div>
                             <div class="profile-item"><span class="profile-label">Email</span><span id="profileEmail" class="profile-value">-</span></div>
                             <div class="profile-item"><span class="profile-label">WhatsApp</span><span id="profileWhatsapp" class="profile-value">-</span></div>
                             <div class="profile-item"><span class="profile-label">Location</span><span id="profileLocation" class="profile-value">-</span></div>
-                            <div class="profile-item"><span class="profile-label">Role</span><span id="profileRole" class="profile-value">Reports Monitoring</span></div>
+                            <div class="profile-item"><span class="profile-label">Role</span><span id="profileRole" class="profile-value">Audit</span></div>
                             <div class="profile-item"><span class="profile-label">Status</span><span id="profileStatus" class="profile-value">-</span></div>
                             <div class="profile-item profile-item-wide"><span class="profile-label">Date Registered</span><span id="profileRegisteredAt" class="profile-value">-</span></div>
                         </div>
@@ -356,7 +437,7 @@
                         </div>
                         <div>
                             <h4 style="margin:0 0 6px;color:#0f3b67;">2. Users</h4>
-                            <p style="margin:0;color:#64748b;">Use Users to monitor registered staff, their roles, and account status.</p>
+                            <p style="margin:0;color:#64748b;">Use Users to audit registered staff, their roles, and account status.</p>
                         </div>
                         <div>
                             <h4 style="margin:0 0 6px;color:#0f3b67;">3. Applications</h4>
@@ -364,7 +445,7 @@
                         </div>
                         <div>
                             <h4 style="margin:0 0 6px;color:#0f3b67;">4. Reports</h4>
-                            <p style="margin:0;color:#64748b;">Use Reports to monitor RSA flow, payment flow, workload balance, and workflow exceptions.</p>
+                            <p style="margin:0;color:#64748b;">Use Reports to audit RSA flow, payment flow, workload balance, and workflow exceptions.</p>
                         </div>
                     </div>
                 </div>
@@ -394,7 +475,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/reports-monitoring.js?v=20260625b"></script>
+    <script type="module" src="js/reports-monitoring.js?v=20260630b"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260625b"></script>
     <link rel="stylesheet" href="css/profile-card.css">
 </body>

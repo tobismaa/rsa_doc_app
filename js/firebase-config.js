@@ -36,6 +36,9 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 let analytics = null;
 const targetedLogoutWatchedDocIds = new Set();
+const PRESENCE_HEARTBEAT_MS = 60 * 1000;
+let presenceHeartbeatTimer = null;
+let presenceDocIds = [];
 
 const isLocalDevHost =
   window.location.hostname === "127.0.0.1" ||
@@ -108,12 +111,63 @@ function watchTargetedLogoutDoc(userDocId = '') {
   }, () => {});
 }
 
+async function writePresence(docIds = [], isOnline = true) {
+  const uniqueDocIds = Array.from(new Set(docIds.map((id) => String(id || '').trim()).filter(Boolean)));
+  if (uniqueDocIds.length === 0) return;
+
+  await Promise.all(uniqueDocIds.map((userDocId) => updateDoc(doc(db, 'users', userDocId), {
+    isOnline,
+    lastSeenAt: serverTimestamp(),
+    ...(isOnline ? {} : { lastLogoutAt: serverTimestamp() })
+  }).catch(() => {})));
+}
+
+function startPresenceHeartbeat(docIds = []) {
+  presenceDocIds = Array.from(new Set(docIds.map((id) => String(id || '').trim()).filter(Boolean)));
+  if (presenceDocIds.length === 0) return;
+
+  writePresence(presenceDocIds, true).catch(() => {});
+  if (presenceHeartbeatTimer) window.clearInterval(presenceHeartbeatTimer);
+  presenceHeartbeatTimer = window.setInterval(() => {
+    if (document.visibilityState === 'hidden') return;
+    writePresence(presenceDocIds, true).catch(() => {});
+  }, PRESENCE_HEARTBEAT_MS);
+}
+
+function bindPresenceEvents() {
+  if (window.__cmbankPresenceEventsBound) return;
+  window.__cmbankPresenceEventsBound = true;
+
+  window.addEventListener('focus', () => {
+    writePresence(presenceDocIds, true).catch(() => {});
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      writePresence(presenceDocIds, true).catch(() => {});
+    }
+  });
+
+  window.addEventListener('pagehide', () => {
+    writePresence(presenceDocIds, false).catch(() => {});
+  });
+}
+
 onAuthStateChanged(auth, async (user) => {
-  if (!user) return;
+  if (!user) {
+    if (presenceHeartbeatTimer) {
+      window.clearInterval(presenceHeartbeatTimer);
+      presenceHeartbeatTimer = null;
+    }
+    presenceDocIds = [];
+    return;
+  }
   const docs = await findTargetedLogoutDocs(user).catch(() => []);
   docs.forEach((docSnap) => {
     if (docSnap?.id) watchTargetedLogoutDoc(docSnap.id);
   });
+  startPresenceHeartbeat(docs.map((docSnap) => docSnap.id));
+  bindPresenceEvents();
 });
 
 export {

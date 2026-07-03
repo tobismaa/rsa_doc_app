@@ -1,7 +1,7 @@
 // js/auth.js - COMPLETE WORKING VERSION WITH DEPARTMENT FIELD
-import { auth, db } from './firebase-config.js?v=20260625b';
+import { auth, db } from './firebase-config.js?v=20260625c';
 import { notifyAdminPushEvent } from './push-alerts.js';
-import { EMAIL_API_BASE_URL } from './email-api-config.js';
+import { EMAIL_API_BASE_URL } from './email-api-config.js?v=20260630a';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 import { getMaintenanceSettings, isMaintenanceExemptRole } from './shared/maintenance-mode.js?v=20260507a';

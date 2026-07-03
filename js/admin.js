@@ -1,5 +1,5 @@
 // js/admin.js - COMPLETE UPDATED VERSION WITH FIXED DOWNLOAD ALL
-import { auth, db } from './firebase-config.js?v=20260625b';
+import { auth, db } from './firebase-config.js?v=20260625c';
 import { ADMIN_API_BASE_URL } from './admin-api-config.js?v=20260618a';
 import { notifyUserPushEvent } from './push-alerts.js';
 import { formatAppDateTime, getTrustedDateKey } from './shared/app-time.js';
@@ -77,6 +77,7 @@ let selectedUserId = null;
 let selectedSubmissionId = null;
 let allUsers = [];
 let allAudits = [];
+let auditRangeModalEntries = [];
 let allSubmissions = [];
 let allPendingAgents = [];
 let allApprovedAgents = [];
@@ -376,7 +377,7 @@ function normalizeUserRole(role) {
 function getRoleLabel(role) {
     const normalized = normalizeUserRole(role);
     if (normalized === 'super_admin') return 'Super Admin';
-    if (normalized === 'reports_monitoring') return 'Reports Monitoring';
+    if (normalized === 'reports_monitoring') return 'Audit';
     if (normalized === 'rsa') return 'RSA';
     if (normalized === 'payment') return 'Payment';
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
@@ -521,6 +522,26 @@ const generatedDocumentsPreviewList = document.getElementById('generatedDocument
 const saveAllGeneratedDocumentsBtn = document.getElementById('saveAllGeneratedDocumentsBtn');
 const saveAllGeneratedDocxBtn = document.getElementById('saveAllGeneratedDocxBtn');
 const auditTableBody = document.getElementById('auditTableBody');
+const auditRangeModal = document.getElementById('auditRangeModal');
+const auditRangeModalMeta = document.getElementById('auditRangeModalMeta');
+const auditRangeModalCount = document.getElementById('auditRangeModalCount');
+const auditRangeModalBody = document.getElementById('auditRangeModalBody');
+const auditModalStartDate = document.getElementById('auditModalStartDate');
+const auditModalEndDate = document.getElementById('auditModalEndDate');
+const auditModalAction = document.getElementById('auditModalAction');
+const auditDetailModal = document.getElementById('auditDetailModal');
+const auditDetailModalTitle = document.getElementById('auditDetailModalTitle');
+const auditDetailSummary = document.getElementById('auditDetailSummary');
+const auditDetailBody = document.getElementById('auditDetailBody');
+const applicationReportModal = document.getElementById('applicationReportModal');
+const applicationReportHeading = document.getElementById('applicationReportHeading');
+const applicationReportMeta = document.getElementById('applicationReportMeta');
+const applicationReportCount = document.getElementById('applicationReportCount');
+const applicationReportStage = document.getElementById('applicationReportStage');
+const applicationReportStartDate = document.getElementById('applicationReportStartDate');
+const applicationReportEndDate = document.getElementById('applicationReportEndDate');
+const applicationReportTableBody = document.getElementById('applicationReportTableBody');
+const applicationReportPresetButtons = document.querySelectorAll('[data-application-report-range]');
 const notification = document.getElementById('notification');
 let notificationTimer = null;
 const viewerModal = document.getElementById('viewerModal');
@@ -544,6 +565,11 @@ const trackApplicationMeta = document.getElementById('trackApplicationMeta');
 const trackApplicationStatusBadges = document.getElementById('trackApplicationStatusBadges');
 const trackApplicationSummary = document.getElementById('trackApplicationSummary');
 const trackApplicationTimeline = document.getElementById('trackApplicationTimeline');
+const trackCustomerDetailsModal = document.getElementById('trackCustomerDetailsModal');
+const trackCustomerDetailsName = document.getElementById('trackCustomerDetailsName');
+const trackCustomerDetailsMeta = document.getElementById('trackCustomerDetailsMeta');
+const trackCustomerDetailsStatus = document.getElementById('trackCustomerDetailsStatus');
+const trackCustomerDetailsGrid = document.getElementById('trackCustomerDetailsGrid');
 const profileNameEl = document.getElementById('profileName');
 const profileRegisteredAtEl = document.getElementById('profileRegisteredAt');
 const profileEmailEl = document.getElementById('profileEmail');
@@ -553,6 +579,7 @@ const profileRoleEl = document.getElementById('profileRole');
 const profileStatusEl = document.getElementById('profileStatus');
 let currentAgentCommissionGroup = null;
 let currentAgentCommissionView = 'sent_to_pfa';
+let applicationReportHasViewed = false;
 // Admin password reset removed (per request).
 
 function renderProfileTab() {
@@ -1058,6 +1085,13 @@ async function loadAdminNames() {
         adminNames[email] = data.fullName || email.split('@')[0];
         userEmailNameCache.set(email, adminNames[email]);
     });
+    if (Array.isArray(allAudits) && allAudits.length > 0) {
+        allAudits = allAudits.map((entry) => ({
+            ...entry,
+            adminName: getAuditActorName(entry.actorEmail || getAuditActorEmail(entry))
+        }));
+        renderAuditTable(getFilteredAuditsForControls());
+    }
 }
 
 // ==================== LOAD UPLOADER NAMES ====================
@@ -1074,6 +1108,13 @@ async function loadUploaderNames() {
         userEmailNameCache.set(email, uploaderNames[email]);
         userIdNameCache.set(doc.id, uploaderNames[email]);
     });
+    if (Array.isArray(allAudits) && allAudits.length > 0) {
+        allAudits = allAudits.map((entry) => ({
+            ...entry,
+            adminName: getAuditActorName(entry.actorEmail || getAuditActorEmail(entry))
+        }));
+        renderAuditTable(getFilteredAuditsForControls());
+    }
 }
 
 // ==================== MOBILE SIDEBAR TOGGLE ====================
@@ -1186,6 +1227,8 @@ function setupEventListeners() {
     document.getElementById('closeAgentCommissionModalFooterBtn')?.addEventListener('click', closeAgentCommissionModalFn);
     document.getElementById('closeTrackApplicationModal')?.addEventListener('click', closeTrackApplicationModalFn);
     document.getElementById('closeTrackApplicationModalFooterBtn')?.addEventListener('click', closeTrackApplicationModalFn);
+    document.getElementById('closeTrackCustomerDetailsModal')?.addEventListener('click', closeTrackCustomerDetailsModalFn);
+    document.getElementById('closeTrackCustomerDetailsFooterBtn')?.addEventListener('click', closeTrackCustomerDetailsModalFn);
     document.getElementById('closeDocumentGenerationModal')?.addEventListener('click', closeDocumentGenerationModalFn);
     document.getElementById('closeDocumentGenerationFooterBtn')?.addEventListener('click', closeDocumentGenerationModalFn);
     document.getElementById('selectAllDocumentsBtn')?.addEventListener('click', toggleAllDocumentSelections);
@@ -1203,8 +1246,29 @@ function setupEventListeners() {
     agentCommissionActiveTabBtn?.addEventListener('click', () => switchAgentCommissionBreakdownTab('active'));
     agentCommissionClearedTabBtn?.addEventListener('click', () => switchAgentCommissionBreakdownTab('cleared'));
 
-    document.getElementById('auditDate')?.addEventListener('change', filterAudit);
+    document.getElementById('auditStartDate')?.addEventListener('change', filterAudit);
+    document.getElementById('auditEndDate')?.addEventListener('change', filterAudit);
     document.getElementById('auditAction')?.addEventListener('change', filterAudit);
+    document.getElementById('viewAuditRangeBtn')?.addEventListener('click', openAuditRangeModal);
+    document.getElementById('closeAuditRangeModal')?.addEventListener('click', closeAuditRangeModal);
+    document.getElementById('closeAuditRangeModalFooterBtn')?.addEventListener('click', closeAuditRangeModal);
+    document.getElementById('auditModalApplyBtn')?.addEventListener('click', refreshAuditRangeModal);
+    auditRangeModalBody?.addEventListener('click', (event) => {
+        const row = event.target?.closest?.('[data-audit-id]');
+        if (!row) return;
+        openAuditDetailModal(decodeURIComponent(row.getAttribute('data-audit-id') || ''));
+    });
+    document.getElementById('closeAuditDetailModal')?.addEventListener('click', closeAuditDetailModal);
+    document.getElementById('closeAuditDetailModalFooterBtn')?.addEventListener('click', closeAuditDetailModal);
+    document.getElementById('openApplicationReportModalBtn')?.addEventListener('click', openApplicationReportModal);
+    document.getElementById('closeApplicationReportModal')?.addEventListener('click', closeApplicationReportModal);
+    document.getElementById('closeApplicationReportModalFooterBtn')?.addEventListener('click', closeApplicationReportModal);
+    document.getElementById('applicationReportRunBtn')?.addEventListener('click', handleApplicationReportView);
+    applicationReportPresetButtons.forEach((button) => {
+        button.addEventListener('click', () => applyApplicationReportPreset(button.dataset.applicationReportRange || 'today'));
+    });
+    applicationReportStartDate?.addEventListener('change', () => setApplicationReportPresetActive(''));
+    applicationReportEndDate?.addEventListener('change', () => setApplicationReportPresetActive(''));
 
     document.getElementById('trackUserSearch')?.addEventListener('input', () => { trackAppsPage = 1; renderTrackApplications(); });
     document.getElementById('trackStartDate')?.addEventListener('change', () => { trackAppsPage = 1; renderTrackApplications(); });
@@ -1251,6 +1315,7 @@ function setupEventListeners() {
         if (e.target === adminRejectionReasonModal) closeAdminRejectionReasonModalFn();
         if (e.target === agentCommissionModal) closeAgentCommissionModalFn();
         if (e.target === trackApplicationModal) closeTrackApplicationModalFn();
+        if (e.target === trackCustomerDetailsModal) closeTrackCustomerDetailsModalFn();
         if (e.target === documentGenerationModal) closeDocumentGenerationModalFn();
         if (e.target === generatedDocumentsPreviewModal) closeGeneratedDocumentsPreviewModalFn();
         if (e.target === trackReportInputModal) closeTrackReportInputModalFn();
@@ -1301,6 +1366,14 @@ function closeTrackApplicationModalFn() {
     if (trackApplicationStatusBadges) trackApplicationStatusBadges.innerHTML = '';
     if (trackApplicationSummary) trackApplicationSummary.innerHTML = '';
     if (trackApplicationTimeline) trackApplicationTimeline.innerHTML = '';
+}
+
+function closeTrackCustomerDetailsModalFn() {
+    if (trackCustomerDetailsModal) trackCustomerDetailsModal.classList.remove('active');
+    if (trackCustomerDetailsName) trackCustomerDetailsName.textContent = '-';
+    if (trackCustomerDetailsMeta) trackCustomerDetailsMeta.textContent = '-';
+    if (trackCustomerDetailsStatus) trackCustomerDetailsStatus.innerHTML = '';
+    if (trackCustomerDetailsGrid) trackCustomerDetailsGrid.innerHTML = '';
 }
 
 function closeDocumentGenerationModalFn() {
@@ -1378,8 +1451,9 @@ function ensureAdminDataForTab(tabId) {
         loadUploaderNames();
     }
     if (tabId === 'audit') {
-        loadAuditLog();
+        loadUploaderNames();
         loadAdminNames();
+        loadAuditLog();
     }
 }
 
@@ -1412,6 +1486,12 @@ function runTabEffects(tabId) {
         loadPaymentRoundRobinMonitor();
         window.switchRoundRobinMonitor('reviewer');
     }
+    if (tabId === 'audit') {
+        openAuditRangeModal();
+    }
+    if (tabId === 'report') {
+        openApplicationReportModal();
+    }
 }
 
 function switchLeafTab(tabId) {
@@ -1435,6 +1515,7 @@ function switchLeafTab(tabId) {
         payments: 'Application Management - Payment',
         'agent-commissions': 'Application Management - Agent Commissions',
         audit: 'Audit Log',
+        report: 'Report',
         profile: 'My Profile',
         'round-robin': 'Round Robin Monitor',
         help: 'Help & SOP'
@@ -1469,6 +1550,7 @@ function switchTab(tabId) {
     const titles = {
         payments: 'Application Management - Payment',
         audit: 'Audit Log',
+        report: 'Report',
         profile: 'My Profile',
         'round-robin': 'Round Robin Monitor',
         help: 'Help & SOP'
@@ -1738,8 +1820,23 @@ function renderPendingUsersGrid(pendingUsers) {
 }
 
 // ==================== RENDER USERS TABLE ====================
+const ONLINE_STALE_MS = 3 * 60 * 1000;
+
+function timestampToMillis(value) {
+    if (!value) return 0;
+    if (typeof value.toMillis === 'function') return value.toMillis();
+    if (typeof value.toDate === 'function') return value.toDate().getTime();
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isRecentlyOnline(user = {}) {
+    const lastSeenMs = timestampToMillis(user.lastSeenAt || user.lastLoginAt);
+    return user.isOnline === true && lastSeenMs > 0 && Date.now() - lastSeenMs <= ONLINE_STALE_MS;
+}
+
 function formatUserLastLoginCell(user = {}) {
-    if (user.isOnline === true) {
+    if (isRecentlyOnline(user)) {
         return '<span class="status-badge approved">Online</span>';
     }
     return formatDate(user.lastLogoutAt || user.lastSeenAt || user.lastLoginAt);
@@ -1827,6 +1924,9 @@ function loadSubmissions() {
         renderFinallySubmitted();
         renderPaymentQueue();
         renderAgentCommissions();
+        if (applicationReportModal?.classList.contains('active') && applicationReportHasViewed) {
+            renderApplicationReport();
+        }
         updatePendingDocCount(allSubmissions.filter(s => s.status === 'pending'));
         updateRejectedDocCount(allSubmissions.filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase())));
         updateFinallySubmittedCount();
@@ -1911,6 +2011,263 @@ function getTimestampMsSafe(value) {
     } catch (_) {
         return 0;
     }
+}
+
+function getDateInputBounds(startValue = '', endValue = '') {
+    const start = startValue ? new Date(`${startValue}T00:00:00`) : null;
+    const end = endValue ? new Date(`${endValue}T23:59:59.999`) : null;
+    return {
+        startMs: start && !Number.isNaN(start.getTime()) ? start.getTime() : 0,
+        endMs: end && !Number.isNaN(end.getTime()) ? end.getTime() : Number.POSITIVE_INFINITY
+    };
+}
+
+function formatDateForInput(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function getApplicationReportPresetRange(range = '') {
+    const today = new Date();
+    const start = new Date(today);
+    const normalized = String(range || '').trim().toLowerCase();
+
+    if (normalized === 'week') {
+        const day = start.getDay();
+        const diffToMonday = day === 0 ? 6 : day - 1;
+        start.setDate(start.getDate() - diffToMonday);
+    } else if (normalized === 'month') {
+        start.setDate(1);
+    }
+
+    return {
+        startDate: formatDateForInput(start),
+        endDate: formatDateForInput(today)
+    };
+}
+
+function setApplicationReportPresetActive(range = '') {
+    applicationReportPresetButtons.forEach((button) => {
+        button.classList.toggle('active', button.dataset.applicationReportRange === range);
+    });
+}
+
+function applyApplicationReportPreset(range = '') {
+    const { startDate, endDate } = getApplicationReportPresetRange(range);
+    if (applicationReportStartDate) applicationReportStartDate.value = startDate;
+    if (applicationReportEndDate) applicationReportEndDate.value = endDate;
+    setApplicationReportPresetActive(range);
+    handleApplicationReportView();
+}
+
+function getApplicationReportConfig(stageValue = '') {
+    const stage = String(stageValue || 'approved').trim().toLowerCase();
+    const configs = {
+        approved: {
+            label: 'Approved Applications',
+            emptyText: 'No approved applications found for this date range.',
+            badgeClass: 'status-approved',
+            includes(sub = {}) {
+                const status = String(sub.status || '').toLowerCase();
+                return status === 'processing_to_pfa' || status === 'approved';
+            },
+            dateOf(sub = {}) {
+                return getSubmissionApprovalEntryAt(sub) || sub.reviewedAt || sub.uploadedAt || null;
+            }
+        },
+        pending: {
+            label: 'Pending Applications',
+            emptyText: 'No pending applications found for this date range.',
+            badgeClass: 'status-pending',
+            includes(sub = {}) {
+                const status = String(sub.status || '').toLowerCase();
+                return status === 'pending' || status === 'submitted' || status === 'resubmitted';
+            },
+            dateOf(sub = {}) {
+                return getSubmissionReviewEntryAt(sub) || sub.reuploadedAt || sub.uploadedAt || null;
+            }
+        },
+        rejected: {
+            label: 'Rejected Applications',
+            emptyText: 'No rejected applications found for this date range.',
+            badgeClass: 'status-rejected',
+            includes(sub = {}) {
+                const status = String(sub.status || '').toLowerCase();
+                return status === 'rejected' || status === 'rejected_by_reviewer' || status === 'rejected_by_rsa';
+            },
+            dateOf(sub = {}) {
+                return getSubmissionRejectionEntryAt(sub) || sub.rejectedAt || sub.rsaRejectedAt || sub.uploadedAt || null;
+            }
+        },
+        final_submission: {
+            label: 'Final Submission Applications',
+            emptyText: 'No final submission applications found for this date range.',
+            badgeClass: 'status-approved',
+            includes(sub = {}) {
+                const status = String(sub.status || '').toLowerCase();
+                return sub.finalSubmitted === true || sub.rsaSubmitted === true || status === 'sent_to_pfa' || status === 'rsa_submitted';
+            },
+            dateOf(sub = {}) {
+                return getSubmissionFinalSubmissionEntryAt(sub) || sub.finalSubmittedAt || sub.rsaSubmittedAt || null;
+            }
+        },
+        payment: {
+            label: 'Payment Applications',
+            emptyText: 'No payment applications found for this date range.',
+            badgeClass: 'status-approved',
+            includes(sub = {}) {
+                const status = String(sub.status || '').toLowerCase();
+                return status === 'sent_to_pfa'
+                    || status === 'rsa_submitted'
+                    || status === 'paid'
+                    || status === 'cleared'
+                    || sub.finalSubmitted === true
+                    || sub.rsaSubmitted === true;
+            },
+            dateOf(sub = {}) {
+                return getSubmissionPaymentEntryAt(sub)
+                    || getSubmissionPaidEntryAt(sub)
+                    || getSubmissionClearedEntryAt(sub)
+                    || getSubmissionFinalSubmissionEntryAt(sub)
+                    || sub.paymentAssignedAt
+                    || sub.paidAt
+                    || sub.clearedAt
+                    || null;
+            }
+        }
+    };
+    return configs[stage] || configs.approved;
+}
+
+function getApplicationReportRows() {
+    const config = getApplicationReportConfig(applicationReportStage?.value || 'approved');
+    const startDate = applicationReportStartDate?.value || '';
+    const endDate = applicationReportEndDate?.value || '';
+    const { startMs, endMs } = getDateInputBounds(startDate, endDate);
+
+    const rows = allSubmissions
+        .filter((sub) => config.includes(sub))
+        .map((sub) => {
+            const stageDate = config.dateOf(sub);
+            return { sub, stageDate, stageMs: getStageTimestampMillis(stageDate) || getTimestampMsSafe(stageDate) };
+        })
+        .filter((item) => item.stageMs && item.stageMs >= startMs && item.stageMs <= endMs)
+        .sort((a, b) => b.stageMs - a.stageMs);
+
+    return { config, rows, startDate, endDate };
+}
+
+function resetApplicationReportModal() {
+    applicationReportHasViewed = false;
+    const config = getApplicationReportConfig(applicationReportStage?.value || 'approved');
+    if (applicationReportHeading) applicationReportHeading.textContent = config.label;
+    if (applicationReportMeta) applicationReportMeta.textContent = 'Pick a report type and date range, then click View.';
+    if (applicationReportCount) applicationReportCount.textContent = '0';
+    if (applicationReportTableBody) applicationReportTableBody.innerHTML = '';
+}
+
+async function ensureApplicationReportDataLoaded() {
+    if (submissionsListenerStarted || allSubmissions.length > 0) return;
+
+    const snapshot = await getDocs(query(collection(db, 'submissions'), orderBy('uploadedAt', 'desc')));
+    allSubmissions = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+}
+
+async function handleApplicationReportView() {
+    if (!applicationReportTableBody) return;
+    const startDate = applicationReportStartDate?.value || '';
+    const endDate = applicationReportEndDate?.value || '';
+
+    if (startDate && endDate && startDate > endDate) {
+        applicationReportHasViewed = true;
+        if (applicationReportCount) applicationReportCount.textContent = '0';
+        if (applicationReportMeta) applicationReportMeta.textContent = 'Start date cannot be after end date.';
+        applicationReportTableBody.innerHTML = '<tr><td colspan="8" class="no-data">Start date cannot be after end date.</td></tr>';
+        return;
+    }
+
+    const viewBtn = document.getElementById('applicationReportRunBtn');
+    const originalHtml = viewBtn?.innerHTML || '';
+    if (viewBtn) {
+        viewBtn.disabled = true;
+        viewBtn.classList.add('loading');
+        viewBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Loading';
+    }
+
+    try {
+        await ensureApplicationReportDataLoaded();
+        applicationReportHasViewed = true;
+        renderApplicationReport();
+    } catch (error) {
+        applicationReportHasViewed = true;
+        if (applicationReportCount) applicationReportCount.textContent = '0';
+        if (applicationReportMeta) applicationReportMeta.textContent = 'Unable to load report applications.';
+        applicationReportTableBody.innerHTML = '<tr><td colspan="8" class="no-data">Unable to load report applications. Please try again.</td></tr>';
+        showNotification('Unable to load report applications.', 'error');
+    } finally {
+        if (viewBtn) {
+            viewBtn.disabled = false;
+            viewBtn.classList.remove('loading');
+            viewBtn.innerHTML = originalHtml || '<i class="fas fa-eye"></i> View';
+        }
+    }
+}
+
+function renderApplicationReport() {
+    if (!applicationReportTableBody) return;
+    const { config, rows, startDate, endDate } = getApplicationReportRows();
+
+    if (applicationReportHeading) applicationReportHeading.textContent = config.label;
+    if (applicationReportCount) applicationReportCount.textContent = String(rows.length);
+    if (applicationReportMeta) {
+        const rangeLabel = startDate || endDate
+            ? `${startDate || 'Beginning'} to ${endDate || 'Today'}`
+            : 'All available dates';
+        applicationReportMeta.textContent = `${rows.length} application(s) for ${rangeLabel}.`;
+    }
+
+    if (startDate && endDate && startDate > endDate) {
+        applicationReportTableBody.innerHTML = '<tr><td colspan="8" class="no-data">Start date cannot be after end date.</td></tr>';
+        if (applicationReportCount) applicationReportCount.textContent = '0';
+        return;
+    }
+
+    if (!rows.length) {
+        applicationReportTableBody.innerHTML = `<tr><td colspan="8" class="no-data">${escapeHtml(config.emptyText)}</td></tr>`;
+        return;
+    }
+
+    applicationReportTableBody.innerHTML = rows.map(({ sub, stageDate }) => {
+        const { pfa, twentyFive } = getSubmissionFinancials(sub);
+        const uploaderEmail = String(sub.uploadedBy || '').trim();
+        const paymentEmail = String(sub.assignedToPayment || '').trim();
+        const status = String(sub.status || '').trim() || '-';
+
+        return `
+            <tr>
+                <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
+                <td>${escapeHtml(uploaderEmail ? getDisplayNameByEmail(uploaderEmail) : '-')}</td>
+                <td>${escapeHtml(getSubmissionAgentLabel(sub) || '-')}</td>
+                <td><span class="status-badge ${config.badgeClass}">${escapeHtml(formatStatusLabel(status))}</span></td>
+                <td>${escapeHtml(formatDate(stageDate))}</td>
+                <td>${escapeHtml(pfa || '-')}</td>
+                <td>${formatCurrency(twentyFive)}</td>
+                <td>${escapeHtml(paymentEmail ? getDisplayNameByEmail(paymentEmail) : '-')}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function openApplicationReportModal() {
+    if (!applicationReportModal) return;
+    resetApplicationReportModal();
+    applicationReportModal.classList.add('active');
+}
+
+function closeApplicationReportModal() {
+    applicationReportModal?.classList.remove('active');
 }
 
 function buildViewerDocumentUrl(fileUrl, submission = null, docIndex = 0) {
@@ -3057,6 +3414,12 @@ window.approveAgentRegistration = async (agentId, btnEl = null) => {
                 agentId,
                 agentName: selected.fullName || '',
                 performedBy: currentAdmin?.email || '',
+                approvedBy: currentAdmin?.email || '',
+                approvedAt: serverTimestamp(),
+                submittedBy: selected.createdBy || '',
+                submittedAt: selected.createdAt || '',
+                createdBy: selected.createdBy || '',
+                createdByUid: selected.createdByUid || '',
                 timestamp: serverTimestamp()
             });
             await notifyUserPushEvent({
@@ -3116,6 +3479,38 @@ window.rejectAgentRegistration = async (agentId, btnEl = null) => {
 };
 
 // ==================== LOAD AUDIT LOG ====================
+function getAuditActorEmail(audit = {}) {
+    return String(
+        audit.performedBy ||
+        audit.rejectedBy ||
+        audit.approvedBy ||
+        audit.createdBy ||
+        audit.updatedBy ||
+        audit.deactivatedBy ||
+        audit.activatedBy ||
+        audit.passwordResetBy ||
+        audit.leaveStartedBy ||
+        audit.leaveEndedBy ||
+        ''
+    ).trim().toLowerCase();
+}
+
+function getAuditActorName(email = '') {
+    const normalized = String(email || '').trim().toLowerCase();
+    if (!normalized) return 'System';
+    return userEmailNameCache.get(normalized) || adminNames[normalized] || uploaderNames[normalized] || normalized.split('@')[0] || normalized;
+}
+
+function decorateAuditEntry(docId, data = {}) {
+    const actorEmail = getAuditActorEmail(data);
+    return {
+        id: docId,
+        ...data,
+        actorEmail,
+        adminName: getAuditActorName(actorEmail)
+    };
+}
+
 function loadAuditLog() {
     if (auditListenerStarted) return;
     auditListenerStarted = true;
@@ -3125,15 +3520,11 @@ function loadAuditLog() {
         const audits = [];
         for (const docSnap of snapshot.docs) {
             const data = docSnap.data();
-            let adminName = data.performedBy || 'System';
-            if (data.performedBy && adminNames[data.performedBy]) {
-                adminName = adminNames[data.performedBy];
-            }
             if (SUPER_ADMIN_ONLY_ACTIONS.has(String(data.action || '').trim())) continue;
-            audits.push({ id: docSnap.id, ...data, adminName });
+            audits.push(decorateAuditEntry(docSnap.id, data));
         }
-        renderAuditTable(audits);
         allAudits = audits;
+        renderAuditTable(getFilteredAuditsForControls());
     }, (error) => {
         // Silent fail
     });
@@ -3153,10 +3544,294 @@ function renderAuditTable(audits) {
             <td>${formatDate(audit.timestamp)}</td>
             <td><span class="audit-action-badge">${formatAuditAction(audit.action)}</span></td>
             <td>${formatAuditDescription(audit)}</td>
-            <td>${audit.performedBy || 'System'}</td>
+            <td>${audit.actorEmail || audit.performedBy || audit.rejectedBy || 'System'}</td>
             <td><strong>${audit.adminName || 'N/A'}</strong></td>
         </tr>
     `).join('');
+}
+
+function getFilteredAuditsForControls() {
+    const startDate = document.getElementById('auditStartDate')?.value || '';
+    const endDate = document.getElementById('auditEndDate')?.value || '';
+    const actionFilter = document.getElementById('auditAction')?.value || 'all';
+    const { startMs, endMs } = getDateInputBounds(startDate, endDate);
+
+    return (allAudits || []).filter((audit) => {
+        const auditMs = getTimestampMsSafe(audit.timestamp);
+        const matchesDate = auditMs && auditMs >= startMs && auditMs <= endMs;
+        const matchesAction = actionFilter === 'all' || audit.action === actionFilter;
+        return matchesDate && matchesAction;
+    });
+}
+
+function renderAuditModalTable(audits = []) {
+    if (!auditRangeModalBody) return;
+    if (!audits.length) {
+        auditRangeModalBody.innerHTML = '<tr><td colspan="6" class="no-data">No audit records found for this range</td></tr>';
+        return;
+    }
+    auditRangeModalBody.innerHTML = audits.map((audit) => `
+        <tr class="audit-log-row" data-audit-id="${encodeURIComponent(audit.id || '')}">
+            <td>${formatDate(audit.timestamp)}</td>
+            <td><span class="audit-action-badge">${formatAuditAction(audit.action)}</span></td>
+            <td>${formatAuditDescription(audit)}</td>
+            <td>${audit.actorEmail || audit.performedBy || audit.rejectedBy || 'System'}</td>
+            <td><strong>${audit.adminName || 'N/A'}</strong></td>
+            <td class="audit-open-cell"><i class="fas fa-up-right-from-square"></i> Detail</td>
+        </tr>
+    `).join('');
+}
+
+function getAuditModalFilters() {
+    return {
+        startDate: auditModalStartDate?.value || '',
+        endDate: auditModalEndDate?.value || '',
+        actionFilter: auditModalAction?.value || 'all'
+    };
+}
+
+function syncAuditModalControlsFromPage() {
+    if (auditModalStartDate) auditModalStartDate.value = document.getElementById('auditStartDate')?.value || '';
+    if (auditModalEndDate) auditModalEndDate.value = document.getElementById('auditEndDate')?.value || '';
+    if (auditModalAction) auditModalAction.value = document.getElementById('auditAction')?.value || 'all';
+}
+
+async function loadAuditRangeEntries(startDate = '', endDate = '') {
+    const constraints = [orderBy('timestamp', 'desc'), limit(500)];
+    if (startDate) constraints.unshift(where('timestamp', '>=', new Date(`${startDate}T00:00:00`)));
+    if (endDate) constraints.unshift(where('timestamp', '<=', new Date(`${endDate}T23:59:59.999`)));
+    const snapshot = await getDocs(query(collection(db, 'audit'), ...constraints));
+    return snapshot.docs
+        .map((docSnap) => decorateAuditEntry(docSnap.id, docSnap.data() || {}))
+        .filter((entry) => !SUPER_ADMIN_ONLY_ACTIONS.has(String(entry.action || '').trim()));
+}
+
+async function refreshAuditRangeModal() {
+    const { startDate, endDate, actionFilter } = getAuditModalFilters();
+    if (startDate && endDate && startDate > endDate) {
+        showNotification('Audit start date cannot be after end date.', 'warning');
+        return;
+    }
+    let filtered = [];
+    if (auditRangeModalMeta) auditRangeModalMeta.textContent = 'Loading audit records...';
+    if (auditRangeModalCount) auditRangeModalCount.textContent = '...';
+    renderAuditModalTable([]);
+
+    try {
+        const sourceAudits = await loadAuditRangeEntries(startDate, endDate);
+        filtered = sourceAudits.filter((audit) => actionFilter === 'all' || audit.action === actionFilter);
+        auditRangeModalEntries = filtered;
+    } catch (error) {
+        showNotification('Failed to load audit records for this range.', 'error');
+        filtered = [];
+        auditRangeModalEntries = [];
+    }
+
+    if (auditRangeModalMeta) {
+        const rangeLabel = startDate || endDate
+            ? `${startDate || 'Beginning'} to ${endDate || 'Today'}`
+            : 'Latest loaded audit records';
+        const actionLabel = actionFilter === 'all' ? 'all actions' : formatAuditAction(actionFilter);
+        auditRangeModalMeta.textContent = `${filtered.length} audit record(s) for ${rangeLabel}, ${actionLabel}.`;
+    }
+    if (auditRangeModalCount) auditRangeModalCount.textContent = String(filtered.length);
+    renderAuditModalTable(filtered);
+}
+
+async function openAuditRangeModal() {
+    syncAuditModalControlsFromPage();
+    auditRangeModal?.classList.add('active');
+    await refreshAuditRangeModal();
+}
+
+function closeAuditRangeModal() {
+    auditRangeModal?.classList.remove('active');
+}
+
+function formatAuditDetailValue(value) {
+    if (value === null || value === undefined || value === '') return '-';
+    if (typeof value?.toDate === 'function') return formatDate(value);
+    if (value instanceof Date) return formatDate(value);
+    if (Array.isArray(value)) return value.filter(Boolean).join(', ') || '-';
+    if (typeof value === 'object') return '-';
+    return String(value);
+}
+
+function getAuditMainSubject(audit = {}) {
+    return audit.customerName || audit.userFullName || audit.agentName || audit.userEmail || audit.submissionId || audit.userId || '-';
+}
+
+function isAgentApprovalAudit(audit = {}) {
+    return String(audit.action || '').trim() === 'agent_registration_approved';
+}
+
+function getAuditActorDisplay(email = '') {
+    const normalized = String(email || '').trim();
+    if (!normalized) return '';
+    return getDisplayNameByEmail(normalized);
+}
+
+function isCommissionAudit(audit = {}) {
+    const action = String(audit.action || '').trim();
+    return action.includes('commission') || action.includes('payment_reconciliation') || action.includes('cleared_without_agent');
+}
+
+function getSubmissionSnapshotForAudit(audit = {}) {
+    const submissionId = String(audit.submissionId || '').trim();
+    if (submissionId) {
+        const sub = allSubmissions.find((item) => item.id === submissionId);
+        if (sub) return sub;
+    }
+    const customerName = String(audit.customerName || '').trim().toLowerCase();
+    if (!customerName) return {};
+    return allSubmissions.find((item) => String(item.customerName || '').trim().toLowerCase() === customerName) || {};
+}
+
+function getSimpleAuditSubject(audit = {}) {
+    const action = String(audit.action || '').trim();
+    const subjects = {
+        agent_registration_approved: 'Agent Registration Approved',
+        agent_registration_rejected: 'Agent Registration Rejected',
+        application_rejected_by_rsa: 'Application Rejected By RSA',
+        document_approved: 'Document Approved',
+        document_rejected: 'Document Rejected',
+        document_uploaded: 'Document Uploaded',
+        user_created: 'User Created',
+        user_approved: 'User Approved',
+        user_rejected: 'User Rejected',
+        user_updated: 'User Updated',
+        user_deactivated: 'User Deactivated',
+        user_activated: 'User Activated',
+        user_force_logout: 'Force Logout',
+        user_leave_activated: 'Leave Activated',
+        user_leave_resumed: 'Leave Resumed',
+        user_deleted: 'User Deleted'
+    };
+    return subjects[action] || formatAuditAction(action || 'Log Detail');
+}
+
+async function getAgentAuditSnapshot(audit = {}) {
+    const agentId = String(audit.agentId || '').trim();
+    if (!agentId) return {};
+    const localAgent = [...allPendingAgents, ...allApprovedAgents].find((agent) => agent.id === agentId);
+    if (localAgent) return localAgent;
+    try {
+        const snap = await getDoc(doc(db, 'agents', agentId));
+        return snap.exists() ? { id: snap.id, ...(snap.data() || {}) } : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+async function getAgentApprovalDetailRows(audit = {}) {
+    const agent = await getAgentAuditSnapshot(audit);
+    const submittedByEmail = audit.submittedBy || audit.createdBy || agent.createdBy || '';
+    const approvedByEmail = audit.approvedBy || audit.performedBy || audit.actorEmail || '';
+    return [
+        { label: 'Subject', value: 'Agent Registration Approved' },
+        { label: 'Time', value: audit.timestamp },
+        { label: 'Submitted By', value: getAuditActorDisplay(submittedByEmail) },
+        { label: 'Approved By', value: getAuditActorDisplay(approvedByEmail) },
+        { label: 'Time Submitted', value: audit.submittedAt || agent.createdAt },
+        { label: 'Time Approved', value: audit.approvedAt || audit.timestamp }
+    ].filter((item) => formatAuditDetailValue(item.value) !== '-');
+}
+
+async function getAuditDetailRows(audit = {}) {
+    const action = String(audit.action || '').trim();
+    const actorEmail = audit.actorEmail || audit.performedBy || audit.rejectedBy || audit.approvedBy || '';
+    const submittedByEmail = audit.submittedBy || audit.createdBy || audit.userEmail || '';
+    const submissionSnapshot = getSubmissionSnapshotForAudit(audit);
+    const uploadedByEmail = audit.uploadedBy || submissionSnapshot.uploadedBy || '';
+    const customerName = audit.customerName || submissionSnapshot.customerName || '';
+    const customerOrUser = customerName || audit.userFullName || audit.agentName || audit.userEmail || '';
+
+    if (isAgentApprovalAudit(audit)) return getAgentApprovalDetailRows(audit);
+    if (isCommissionAudit(audit)) {
+        const agent = await getAgentAuditSnapshot(audit);
+        const agentOwnerEmail = audit.agentOwner || audit.agentOwnerEmail || audit.agentCreatedBy || agent.createdBy || '';
+        return [
+            { label: 'Subject', value: getSimpleAuditSubject(audit) },
+            { label: 'Time', value: audit.timestamp },
+            { label: 'Customer Name', value: customerName },
+            { label: 'Uploaded By', value: getAuditActorDisplay(uploadedByEmail) },
+            { label: 'Agent Owner', value: getAuditActorDisplay(agentOwnerEmail) },
+            { label: 'Performed By', value: getAuditActorDisplay(actorEmail) },
+            { label: 'Agent', value: audit.agentName },
+            { label: 'Details', value: audit.details || audit.reason || audit.comment || audit.newStatus || audit.status },
+            { label: 'Count', value: audit.count || audit.customerCount || audit.groupCount }
+        ].filter((item) => formatAuditDetailValue(item.value) !== '-');
+    }
+
+    const rows = [
+        { label: 'Subject', value: getSimpleAuditSubject(audit) },
+        { label: 'Time', value: audit.timestamp }
+    ];
+
+    if (['document_uploaded', 'user_created'].includes(action)) {
+        rows.push(
+            { label: 'Submitted By', value: getAuditActorDisplay(actorEmail || submittedByEmail) },
+            { label: 'Time Submitted', value: audit.createdAt || audit.timestamp }
+        );
+    } else if (action.includes('approved')) {
+        rows.push(
+            { label: 'Submitted By', value: getAuditActorDisplay(submittedByEmail) },
+            { label: 'Approved By', value: getAuditActorDisplay(audit.approvedBy || actorEmail) },
+            { label: 'Time Submitted', value: audit.submittedAt || audit.createdAt },
+            { label: 'Time Approved', value: audit.approvedAt || audit.timestamp }
+        );
+    } else if (action.includes('rejected')) {
+        rows.push(
+            { label: 'Submitted By', value: getAuditActorDisplay(submittedByEmail) },
+            { label: 'Rejected By', value: getAuditActorDisplay(audit.rejectedBy || actorEmail) },
+            { label: 'Time Submitted', value: audit.submittedAt || audit.createdAt },
+            { label: 'Time Rejected', value: audit.rejectedAt || audit.timestamp },
+            { label: 'Reason', value: audit.details || audit.reason || audit.comment }
+        );
+    } else {
+        rows.push(
+            { label: 'Performed By', value: getAuditActorDisplay(actorEmail) },
+            { label: customerName ? 'Customer Name' : 'User', value: customerOrUser },
+            { label: 'Details', value: audit.details || audit.reason || audit.comment || audit.newStatus || audit.status },
+            { label: 'Count', value: audit.count || audit.movedCount || audit.returnedCount || audit.finalizedCount }
+        );
+    }
+
+    if (customerOrUser && !rows.some((row) => row.label === 'Customer Name' || row.label === 'User') && !['Agent Registration Approved'].includes(getSimpleAuditSubject(audit))) {
+        rows.splice(2, 0, { label: customerName ? 'Customer Name' : 'User', value: customerOrUser });
+    }
+
+    return rows.filter((item) => formatAuditDetailValue(item.value) !== '-');
+}
+
+async function openAuditDetailModal(auditId = '') {
+    const audit = auditRangeModalEntries.find((entry) => entry.id === auditId)
+        || allAudits.find((entry) => entry.id === auditId);
+    if (!audit || !auditDetailModal) return;
+
+    if (auditDetailModalTitle) {
+        auditDetailModalTitle.innerHTML = '<i class="fas fa-circle-info"></i> Log Detail';
+    }
+    if (auditDetailSummary) auditDetailSummary.innerHTML = '';
+    if (auditDetailBody) {
+        auditDetailBody.innerHTML = '<div class="audit-detail-item"><span>Loading</span><strong>Loading log detail...</strong></div>';
+        const detailRows = await getAuditDetailRows(audit);
+        auditDetailBody.innerHTML = `
+            <div class="audit-detail-grid">
+                ${detailRows.map((item) => `
+                    <div class="audit-detail-item">
+                        <span>${escapeHtml(item.label)}</span>
+                        <strong>${escapeHtml(formatAuditDetailValue(item.value))}</strong>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+    auditDetailModal.classList.add('active');
+}
+
+function closeAuditDetailModal() {
+    auditDetailModal?.classList.remove('active');
 }
 
 // ==================== DOCUMENT VIEWER ====================
@@ -3235,7 +3910,7 @@ window.viewUser = async (userId) => {
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">Last Login:</span>
-                        <span class="detail-value">${user.isOnline === true ? 'Online' : formatDate(user.lastLogoutAt || user.lastSeenAt || user.lastLoginAt)}</span>
+                        <span class="detail-value">${isRecentlyOnline(user) ? 'Online' : formatDate(user.lastLogoutAt || user.lastSeenAt || user.lastLoginAt)}</span>
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">Submissions:</span>
@@ -3380,6 +4055,55 @@ function renderTrackSummaryCard(label, value) {
             <span class="label">${escapeHtml(label)}</span>
             <div class="value">${escapeHtml(value || '-')}</div>
         </div>
+    `;
+}
+
+function getTrackCustomerDetailRawValue(submission = {}, keys = []) {
+    const details = submission?.customerDetails || {};
+    for (const key of keys) {
+        const value = details?.[key] ?? submission?.[key];
+        if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+    }
+    return '';
+}
+
+function formatTrackCustomerDetailValue(submission = {}, field = {}) {
+    if (field.type === 'person') {
+        const email = String(getTrackCustomerDetailRawValue(submission, field.keys) || '').trim();
+        return email ? getDisplayNameByEmail(email) : '-';
+    }
+    if (field.type === 'agent') return getSubmissionAgentLabel(submission) || '-';
+
+    const raw = getTrackCustomerDetailRawValue(submission, field.keys);
+    if (raw === undefined || raw === null || String(raw).trim() === '') return '-';
+    if (field.type === 'money') return formatCurrency(parseMoney(raw));
+    if (field.type === 'date') {
+        const date = tsToDate(raw);
+        if (date) return formatDate(raw);
+        return String(raw).trim();
+    }
+    return String(raw).trim();
+}
+
+function renderTrackCustomerDetailField(submission = {}, field = {}) {
+    const value = formatTrackCustomerDetailValue(submission, field);
+    const wideClass = field.wide ? ' wide' : '';
+    return `
+        <div class="track-customer-detail-item${wideClass}">
+            <span>${escapeHtml(field.label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+        </div>
+    `;
+}
+
+function renderTrackCustomerDetailsSection(title = '', fields = [], submission = {}) {
+    return `
+        <section class="track-customer-details-section">
+            <h4>${escapeHtml(title)}</h4>
+            <div class="track-customer-details-section-grid">
+                ${fields.map((field) => renderTrackCustomerDetailField(submission, field)).join('')}
+            </div>
+        </section>
     `;
 }
 
@@ -6143,6 +6867,88 @@ function downloadTrackReportWorkbook() {
     downloadWorkbookFromRows('customer-tracking-report.xlsx', trackReportPreviewRows);
 }
 
+window.openTrackCustomerDetailsModal = (submissionId) => {
+    const submission = allSubmissions.find((item) => item.id === submissionId);
+    if (!submission || !trackCustomerDetailsModal) return;
+
+    const currentStage = getApplicationCurrentStage(submission);
+    const statusLabel = formatStatusLabel(submission.status || '-');
+    const statusClass = getTrackStatusBadgeClass(submission.status);
+    const customerName = submission.customerName
+        || getTrackCustomerDetailRawValue(submission, ['name', 'customerName'])
+        || 'Unknown Customer';
+    const penNo = getTrackCustomerDetailRawValue(submission, ['penNo', 'penNumber', 'rsaPin', 'pin']);
+
+    if (trackCustomerDetailsName) trackCustomerDetailsName.textContent = customerName;
+    if (trackCustomerDetailsMeta) {
+        trackCustomerDetailsMeta.textContent = `Application ID: ${submission.id || '-'} | PEN: ${penNo || '-'}`;
+    }
+    if (trackCustomerDetailsStatus) {
+        trackCustomerDetailsStatus.innerHTML = `
+            <span class="status-badge ${statusClass}">${escapeHtml(statusLabel)}</span>
+            <span class="track-stage-pill current">${escapeHtml(currentStage.label)}</span>
+        `;
+    }
+    if (trackCustomerDetailsGrid) {
+        const sections = [
+            {
+                title: 'Customer Information',
+                fields: [
+                    { label: 'Customer Name', keys: ['name', 'customerName'] },
+                    { label: 'Date of Birth', keys: ['dob', 'dateOfBirth'], type: 'date' },
+                    { label: 'Email', keys: ['email', 'customerEmail'] },
+                    { label: 'Phone', keys: ['phone', 'customerPhone'] },
+                    { label: 'NIN', keys: ['nin', 'customerNIN'] },
+                    { label: 'Address', keys: ['address', 'customerAddress'], wide: true }
+                ]
+            },
+            {
+                title: 'RSA / PFA Information',
+                fields: [
+                    { label: 'PFA', keys: ['pfa'] },
+                    { label: 'PEN Number', keys: ['penNo', 'penNumber', 'rsaPin', 'pin'] },
+                    { label: 'RSA Statement Date', keys: ['rsaStatementDate', 'statementDate'], type: 'date' },
+                    { label: 'RSA Balance', keys: ['rsaBalance'], type: 'money' },
+                    { label: '25% RSA Balance', keys: ['rsa25Percent', 'rsa25'], type: 'money' },
+                    { label: 'Employer', keys: ['employer'] }
+                ]
+            },
+            {
+                title: 'Property / Loan Information',
+                fields: [
+                    { label: 'Property Type', keys: ['propertyType', 'houseType'] },
+                    { label: 'House Number', keys: ['houseNumber'] },
+                    { label: 'Property Value', keys: ['propertyValue'], type: 'money' },
+                    { label: 'Loan Amount', keys: ['loanAmount'], type: 'money' },
+                    { label: 'Facility Fee', keys: ['facilityFee'], type: 'money' },
+                    { label: 'Tenor', keys: ['tenor'] },
+                    { label: 'Mortgage Form Date', keys: ['mortgageLoanApplicationFormDate', 'mortgageFormDate'], type: 'date' },
+                    { label: 'Originating TP', keys: ['originatingTP'] }
+                ]
+            },
+            {
+                title: 'Account / Assignment',
+                fields: [
+                    { label: 'Account Number', keys: ['accountNo', 'accountNumber'] },
+                    { label: 'Account Bank', keys: ['accountBank', 'bankName'] },
+                    { label: 'Account Name', keys: ['accountName'] },
+                    { label: 'Agent', type: 'agent' },
+                    { label: 'Uploaded By', keys: ['uploadedBy'], type: 'person' },
+                    { label: 'Reviewer', keys: ['assignedTo', 'reviewedBy'], type: 'person' },
+                    { label: 'RSA Officer', keys: ['assignedToRSA'], type: 'person' },
+                    { label: 'Payment Officer', keys: ['assignedToPayment', 'paidBy'], type: 'person' }
+                ]
+            }
+        ];
+
+        trackCustomerDetailsGrid.innerHTML = sections
+            .map((section) => renderTrackCustomerDetailsSection(section.title, section.fields, submission))
+            .join('');
+    }
+
+    trackCustomerDetailsModal.classList.add('active');
+};
+
 window.openTrackApplicationModal = (submissionId) => {
     const submission = allSubmissions.find((item) => item.id === submissionId);
     if (!submission || !trackApplicationModal) return;
@@ -6281,9 +7087,14 @@ function renderTrackApplications() {
                 <td>${escapeHtml(currentStage.label)}</td>
                 <td>${escapeHtml(lastStageTime)}</td>
                 <td>
-                    <button class="action-btn view-btn-small" onclick="window.openTrackApplicationModal('${s.id}')">
-                        <i class="fas fa-route"></i> Track
-                    </button>
+                    <div class="track-row-actions">
+                        <button class="action-btn view-btn-small" onclick="window.openTrackApplicationModal('${s.id}')">
+                            <i class="fas fa-route"></i> Track
+                        </button>
+                        <button class="action-btn view-btn-small track-details-btn" onclick="window.openTrackCustomerDetailsModal('${s.id}')">
+                            <i class="fas fa-address-card"></i> Customer Details
+                        </button>
+                    </div>
                 </td>
             </tr>
         `;
@@ -6874,7 +7685,7 @@ function filterUsers() {
     const filtered = allUsers.filter(user => {
         const fullName = user.fullName || user.email?.split('@')[0] || '';
         const normalizedRole = normalizeUserRole(user.role);
-        const presence = user.isOnline === true ? 'online' : 'offline';
+        const presence = isRecentlyOnline(user) ? 'online' : 'offline';
         const matchesSearch = searchTerm === '' ||
             fullName.toLowerCase().includes(searchTerm) ||
             user.email?.toLowerCase().includes(searchTerm);
@@ -7120,22 +7931,14 @@ function filterRejectedDocs() {
 }
 
 function filterAudit() {
-    const dateFilter = document.getElementById('auditDate')?.value;
-    const actionFilter = document.getElementById('auditAction')?.value || 'all';
-
     if (!allAudits) return;
-
-    const filtered = allAudits.filter(audit => {
-        let matchesDate = true;
-        if (dateFilter && audit.timestamp) {
-            const auditDate = new Date(audit.timestamp.seconds * 1000).toISOString().split('T')[0];
-            matchesDate = auditDate === dateFilter;
-        }
-        const matchesAction = actionFilter === 'all' || audit.action === actionFilter;
-
-        return matchesDate && matchesAction;
-    });
-
+    const startDate = document.getElementById('auditStartDate')?.value || '';
+    const endDate = document.getElementById('auditEndDate')?.value || '';
+    if (startDate && endDate && startDate > endDate) {
+        renderAuditTable([]);
+        return;
+    }
+    const filtered = getFilteredAuditsForControls();
     renderAuditTable(filtered);
 }
 
@@ -7983,6 +8786,8 @@ function formatAuditDescription(audit) {
         case 'document_uploaded': return `Document uploaded`;
         case 'document_approved': return `Document approved`;
         case 'document_rejected': return `Document rejected`;
+        case 'agent_registration_approved': return `Agent registration approved`;
+        case 'application_rejected_by_rsa': return `Application rejected by RSA: ${audit.customerName || audit.submissionId || 'Unknown customer'}`;
         default: return audit.action || 'Action performed';
     }
 }

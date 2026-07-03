@@ -1897,11 +1897,21 @@ select:focus {
 }
 
 .uploader-agent-commission-overview .commission-overview-card strong {
-  display: block;
-  font-size: 40px;
-  line-height: 1;
-  letter-spacing: -0.04em;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 25px;
+  line-height: 1.12;
+  letter-spacing: 0;
   font-weight: 800;
+}
+
+.uploader-agent-commission-overview .commission-overview-card strong small {
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: #64748b;
 }
 
 .uploader-agent-commission-overview .commission-overview-card.sent {

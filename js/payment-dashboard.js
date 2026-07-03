@@ -1,4 +1,4 @@
-import { auth, db } from './firebase-config.js?v=20260625b';
+import { auth, db } from './firebase-config.js?v=20260625c';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
 import {
     collection,
@@ -46,6 +46,10 @@ let activePaymentTab = 'dashboard';
 let currentPaymentReport = null;
 let currentPaymentStageReport = null;
 let pendingPaymentReportRequest = { kind: 'range' };
+const paymentActionLocks = new Set();
+let currentPaymentPdfPreviewUrl = '';
+let currentPaymentPdfPreviewBlob = null;
+let currentPaymentPdfPreviewFileName = 'payment-report.pdf';
 const PAYMENT_RATE_CUTOFF_MS = new Date('2026-05-07T00:00:00+01:00').getTime();
 
 const pageTitle = document.getElementById('pageTitle');
@@ -97,6 +101,9 @@ const paymentReportDetailsBody = document.getElementById('paymentReportDetailsBo
 const generatePaymentReportBtn = document.getElementById('generatePaymentReportBtn');
 const exportPaymentReportExcelBtn = document.getElementById('exportPaymentReportExcelBtn');
 const exportPaymentReportPdfBtn = document.getElementById('exportPaymentReportPdfBtn');
+const paymentPdfPreviewModal = document.getElementById('paymentPdfPreviewModal');
+const paymentPdfPreviewFrame = document.getElementById('paymentPdfPreviewFrame');
+const downloadPaymentPdfPreviewBtn = document.getElementById('downloadPaymentPdfPreviewBtn');
 const paymentQueueSortFilter = document.getElementById('paymentQueueSortFilter');
 const paymentPaidSortFilter = document.getElementById('paymentPaidSortFilter');
 const paymentClearedSortFilter = document.getElementById('paymentClearedSortFilter');
@@ -123,6 +130,19 @@ function assertWritable(actionLabel) {
     return typeof window.assertAppWritable === 'function'
         ? window.assertAppWritable(actionLabel)
         : true;
+}
+
+function beginPaymentAction(key, label = 'This action') {
+    if (paymentActionLocks.has(key)) {
+        showNotification(`${label} is already running. Please wait.`, 'info');
+        return false;
+    }
+    paymentActionLocks.add(key);
+    return true;
+}
+
+function endPaymentAction(key) {
+    paymentActionLocks.delete(key);
 }
 
 function escapeHtml(text) {
@@ -251,6 +271,10 @@ function normalizeCustomerName(value) {
     return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
 }
 
+function normalizeAccountNumber(value) {
+    return String(value || '').replace(/\D/g, '');
+}
+
 function normalizeMatchAmount(value) {
     return roundDownToNearestThousand(parseMoney(value));
 }
@@ -259,8 +283,24 @@ function buildReconciliationKey(name, amount) {
     return `${normalizeCustomerName(name)}::${normalizeMatchAmount(amount)}`;
 }
 
+function buildAccountReconciliationKey(accountNumber, amount) {
+    return `${normalizeAccountNumber(accountNumber)}::${normalizeMatchAmount(amount)}`;
+}
+
 function buildNameOnlyKey(name) {
     return normalizeCustomerName(name);
+}
+
+function getSubmissionCustomerAccountNumber(sub) {
+    const details = sub?.customerDetails || {};
+    return normalizeAccountNumber(
+        details.accountNo ||
+        details.accountNumber ||
+        sub?.accountNo ||
+        sub?.accountNumber ||
+        sub?.bankAccountNumber ||
+        ''
+    );
 }
 
 function getSelectedPaymentReconciliationFile() {
@@ -370,6 +410,17 @@ function getAgentPaymentKey(sub) {
     return `fallback:${uploaderEmail}::${agentName || 'no-agent'}`;
 }
 
+function getSubmissionAgentOwnerEmail(sub) {
+    return normalizeEmail(
+        sub?.agentOwner ||
+        sub?.agentOwnerEmail ||
+        sub?.agentCreatedBy ||
+        sub?.agentCreatedByEmail ||
+        sub?.agentRegisteredBy ||
+        ''
+    );
+}
+
 function buildAgentPaymentGroups(records = []) {
     const groups = new Map();
     records.forEach((sub) => {
@@ -380,6 +431,7 @@ function buildAgentPaymentGroups(records = []) {
             agentName: String(sub?.agentName || '').trim() || 'No Agent',
             uploaderEmail: normalizeEmail(sub?.uploadedBy),
             uploaderName: getUploaderDisplayName(sub?.uploadedBy),
+            agentOwnerEmail: getSubmissionAgentOwnerEmail(sub),
             agentAccountNumber: String(sub?.agentAccountNumber || '').trim() || '-',
             agentAccountBank: String(sub?.agentAccountBank || '').trim() || '-',
             submissions: [],
@@ -401,6 +453,7 @@ function buildAgentPaymentGroups(records = []) {
         if (pfa && pfa !== '-') existing.pfas.add(pfa);
         existing.total25 += twentyFive;
         existing.totalCommission += commission2;
+        if (!existing.agentOwnerEmail) existing.agentOwnerEmail = getSubmissionAgentOwnerEmail(sub);
 
         const paidAtMs = sub?.paidAt?.toMillis ? sub.paidAt.toMillis() : new Date(sub?.paidAt || 0).getTime();
         const clearedAtMs = sub?.clearedAt?.toMillis ? sub.clearedAt.toMillis() : new Date(sub?.clearedAt || 0).getTime();
@@ -977,6 +1030,32 @@ function saveBlob(fileName, blob) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function openPaymentPdfPreview(blob, fileName = 'payment-report.pdf') {
+    if (!blob) return;
+    if (!paymentPdfPreviewModal || !paymentPdfPreviewFrame) {
+        saveBlob(fileName, blob);
+        return;
+    }
+    if (currentPaymentPdfPreviewUrl) {
+        URL.revokeObjectURL(currentPaymentPdfPreviewUrl);
+    }
+    currentPaymentPdfPreviewBlob = blob;
+    currentPaymentPdfPreviewFileName = fileName.replace(/[\\/:*?"<>|]/g, '_');
+    currentPaymentPdfPreviewUrl = URL.createObjectURL(blob);
+    paymentPdfPreviewFrame.src = currentPaymentPdfPreviewUrl;
+    paymentPdfPreviewModal.classList.add('active');
+}
+
+function closePaymentPdfPreviewModal() {
+    paymentPdfPreviewModal?.classList.remove('active');
+    if (paymentPdfPreviewFrame) paymentPdfPreviewFrame.src = '';
+    if (currentPaymentPdfPreviewUrl) {
+        URL.revokeObjectURL(currentPaymentPdfPreviewUrl);
+    }
+    currentPaymentPdfPreviewUrl = '';
+    currentPaymentPdfPreviewBlob = null;
+}
+
 async function exportPaymentReportExcel(report) {
     if (!report) return;
     const workbook = new ExcelJS.Workbook();
@@ -1092,7 +1171,7 @@ async function exportPaymentReportPdf(report) {
         }
     });
 
-    pdf.save(`${report.exportKey || 'payment-report'}.pdf`);
+    openPaymentPdfPreview(pdf.output('blob'), `${report.exportKey || 'payment-report'}.pdf`);
 }
 
 function resetPaymentReportPreviewTabs() {
@@ -1289,6 +1368,7 @@ async function downloadPaymentReconciliationTemplate() {
         const sheet = workbook.addWorksheet('Payment Reconciliation');
         sheet.columns = [
             { header: 'Customer Name', key: 'customerName', width: 34 },
+            { header: 'Account Number', key: 'accountNumber', width: 18 },
             { header: '25% Balance', key: 'balance', width: 18 }
         ];
         sheet.getRow(1).font = { bold: true };
@@ -1297,11 +1377,11 @@ async function downloadPaymentReconciliationTemplate() {
             pattern: 'solid',
             fgColor: { argb: 'DCEBFA' }
         };
-        sheet.addRow({ customerName: 'Sample Customer', balance: 250000 });
-        sheet.addRow({ customerName: '', balance: '' });
-        sheet.getCell('C1').value = 'Instruction';
-        sheet.getCell('C2').value = 'Fill only Customer Name and 25% Balance columns.';
-        sheet.getColumn(3).width = 55;
+        sheet.addRow({ customerName: 'Sample Customer', accountNumber: '0123456789', balance: 250000 });
+        sheet.addRow({ customerName: '', accountNumber: '', balance: '' });
+        sheet.getCell('D1').value = 'Instruction';
+        sheet.getCell('D2').value = 'Fill Customer Name, Account Number, and 25% Balance columns.';
+        sheet.getColumn(4).width = 65;
 
         const buffer = await workbook.xlsx.writeBuffer();
         const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -1344,6 +1424,7 @@ async function parsePaymentReconciliationFile(file) {
     });
 
     const nameColumn = resolveReconciliationHeaderKey(headerMap, ['customername', 'customer', 'name', 'customerfullname']);
+    const accountColumn = resolveReconciliationHeaderKey(headerMap, ['accountnumber', 'accountno', 'acctnumber', 'acctno', 'bankaccountnumber', 'customeraccountnumber', 'customeraccountno']);
     const balanceColumn = resolveReconciliationHeaderKey(headerMap, ['25balance', '25percentbalance', 'rsa25percent', '25percent', 'twentyfivebalance', 'twentyfivepercent', 'balance25', '25rsabalance', 'rsa25balance']);
     if (!nameColumn || !balanceColumn) {
         throw new Error('Excel must contain customer name and 25% balance columns.');
@@ -1353,13 +1434,16 @@ async function parsePaymentReconciliationFile(file) {
     for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
         const row = sheet.getRow(rowNumber);
         const customerName = getCellText(row.getCell(nameColumn).value);
+        const accountNumber = accountColumn ? getCellText(row.getCell(accountColumn).value) : '';
         const rawBalance = getCellText(row.getCell(balanceColumn).value);
-        if (!customerName && !rawBalance) continue;
+        if (!customerName && !accountNumber && !rawBalance) continue;
         rows.push({
             rowNumber,
             customerName,
+            accountNumber,
             rawBalance,
             normalizedName: normalizeCustomerName(customerName),
+            normalizedAccountNumber: normalizeAccountNumber(accountNumber),
             normalizedAmount: normalizeMatchAmount(rawBalance)
         });
     }
@@ -1371,18 +1455,24 @@ async function parsePaymentReconciliationFile(file) {
 function computePaymentReconciliationResult(rows = []) {
     const queue = getSentToPfaRecords();
     const queueBuckets = new Map();
+    const accountBuckets = new Map();
     const nameBuckets = new Map();
     queue.forEach((sub) => {
         const { twentyFive } = getSubmissionFinancials(sub);
+        const accountNumber = getSubmissionCustomerAccountNumber(sub);
         const entry = {
             submission: sub,
+            accountNumber,
             normalizedAmount: normalizeMatchAmount(twentyFive)
         };
         const key = buildReconciliationKey(sub?.customerName || '', twentyFive);
+        const accountKey = buildAccountReconciliationKey(accountNumber, twentyFive);
         const nameKey = buildNameOnlyKey(sub?.customerName || '');
         if (!queueBuckets.has(key)) queueBuckets.set(key, []);
+        if (accountNumber && !accountBuckets.has(accountKey)) accountBuckets.set(accountKey, []);
         if (!nameBuckets.has(nameKey)) nameBuckets.set(nameKey, []);
         queueBuckets.get(key).push(entry);
+        if (accountNumber) accountBuckets.get(accountKey).push(entry);
         nameBuckets.get(nameKey).push(entry);
     });
 
@@ -1390,33 +1480,58 @@ function computePaymentReconciliationResult(rows = []) {
     const unmatchedRows = [];
     const matchedIds = new Set();
     const matchedBySubmissionId = new Map();
+    const takeAvailableMatch = (bucket = []) => {
+        while (bucket.length) {
+            const candidate = bucket.shift();
+            if (candidate?.submission?.id && !matchedIds.has(candidate.submission.id)) return candidate;
+        }
+        return null;
+    };
+    const addMatchedRow = (row, match, matchMethod) => {
+        matchedRows.push({
+            ...row,
+            matchMethod,
+            submissionId: match.submission.id,
+            submission: match.submission,
+            queueAccountNumber: match.accountNumber,
+            queueAmount: match.normalizedAmount
+        });
+        matchedIds.add(match.submission.id);
+        matchedBySubmissionId.set(match.submission.id, {
+            rowNumber: row.rowNumber,
+            customerName: row.customerName,
+            accountNumber: row.accountNumber,
+            matchMethod,
+            normalizedAmount: row.normalizedAmount
+        });
+    };
 
     rows.forEach((row) => {
         const exactKey = buildReconciliationKey(row.customerName, row.rawBalance);
-        const exactMatches = queueBuckets.get(exactKey) || [];
-        if (exactMatches.length) {
-            const match = exactMatches.shift();
-            matchedRows.push({
-                ...row,
-                submissionId: match.submission.id,
-                submission: match.submission,
-                queueAmount: match.normalizedAmount
-            });
-            matchedIds.add(match.submission.id);
-            matchedBySubmissionId.set(match.submission.id, {
-                rowNumber: row.rowNumber,
-                customerName: row.customerName,
-                normalizedAmount: row.normalizedAmount
-            });
+        const exactMatch = takeAvailableMatch(queueBuckets.get(exactKey) || []);
+        if (exactMatch) {
+            addMatchedRow(row, exactMatch, 'name');
+            return;
+        }
+
+        const accountKey = buildAccountReconciliationKey(row.accountNumber, row.rawBalance);
+        const accountMatch = row.normalizedAccountNumber
+            ? takeAvailableMatch(accountBuckets.get(accountKey) || [])
+            : null;
+        if (accountMatch) {
+            addMatchedRow(row, accountMatch, 'accountNumber');
             return;
         }
 
         const nameMatches = nameBuckets.get(row.normalizedName) || [];
+        const hasAccountMatch = row.normalizedAccountNumber && queue.some((sub) => getSubmissionCustomerAccountNumber(sub) === row.normalizedAccountNumber);
         unmatchedRows.push({
             ...row,
             reason: nameMatches.length
                 ? 'Customer name exists, but the 25% balance does not match.'
-                : 'Customer not found in the current Sent to PFA table.'
+                : (hasAccountMatch
+                    ? 'Account number exists, but the 25% balance does not match.'
+                    : 'Customer/account number not found in the current Sent to PFA table.')
         });
     });
 
@@ -1510,16 +1625,19 @@ function renderPaymentReconciliation() {
                 const actionHtml = canMarkPaid
                     ? `<button class="action-btn" style="background:#16a34a;color:#fff;border:none;" onclick="window.markMatchedPaymentReconciliationRecord('${sub.id}')"><i class="fas fa-check-circle"></i> Mark Paid</button>`
                     : `<button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.markMatchedPaymentReconciliationRecord('${sub.id}')"><i class="fas fa-check-double"></i> Clear</button>`;
+                const matchLabel = item.matchMethod === 'accountNumber' ? 'Matched by Account No' : 'Matched by Name';
+                const accountNumber = item.queueAccountNumber || item.accountNumber || '-';
                 return `
                     <tr>
                         <td>${checkboxHtml}</td>
                         <td>${escapeHtml(String(item.rowNumber))}</td>
                         <td><strong>${escapeHtml(sub.customerName || item.customerName || '-')}</strong></td>
+                        <td>${escapeHtml(accountNumber || '-')}</td>
                         <td>${escapeHtml(String(sub.agentName || '').trim() || 'No Agent')}</td>
                         <td>${escapeHtml(pfa)}</td>
                         <td>${formatCurrency(item.normalizedAmount || 0)}</td>
                         <td>${formatCurrency(twentyFive || 0)}</td>
-                        <td><span class="status-badge status-approved">Matched</span></td>
+                        <td><span class="status-badge status-approved">${escapeHtml(matchLabel)}</span></td>
                         <td>${actionHtml}</td>
                     </tr>
                 `;
@@ -1533,6 +1651,7 @@ function renderPaymentReconciliation() {
                 <tr>
                     <td>${escapeHtml(String(row.rowNumber))}</td>
                     <td>${escapeHtml(row.customerName || '-')}</td>
+                    <td>${escapeHtml(row.accountNumber || '-')}</td>
                     <td>${escapeHtml(formatCurrency(row.normalizedAmount || 0))}</td>
                     <td>${escapeHtml(row.reason || 'Not found')}</td>
                 </tr>
@@ -1801,10 +1920,13 @@ window.markAgentPaid = async (groupKey) => {
         showNotification('Applications without agent cannot be marked paid for commission.', 'warning');
         return;
     }
-    const confirmed = confirm(`Mark ${group.agentName || 'this agent'} as PAID for ${group.customerCount} customer(s)?`);
-    if (!confirmed) return;
+    const lockKey = `mark-agent-paid:${groupKey}`;
+    if (!beginPaymentAction(lockKey, 'Payment approval')) return;
 
     try {
+        const confirmed = confirm(`Mark ${group.agentName || 'this agent'} as PAID for ${group.customerCount} customer(s)?`);
+        if (!confirmed) return;
+
         await Promise.all(agentItems.map((sub) => updateDoc(doc(db, 'submissions', sub.id), {
             status: 'paid',
             paidAt: serverTimestamp(),
@@ -1816,6 +1938,7 @@ window.markAgentPaid = async (groupKey) => {
             agentKey: group.key,
             agentId: group.agentId || '',
             agentName: group.agentName || '',
+            agentOwner: group.agentOwnerEmail || '',
             customerCount: group.customerCount,
             totalCommission: group.totalCommission,
             performedBy: currentUser?.email || '',
@@ -1833,6 +1956,8 @@ window.markAgentPaid = async (groupKey) => {
         showNotification(`Marked ${group.agentName || 'agent'} as paid`, 'success');
     } catch (error) {
         showNotification('Failed to mark as paid', 'error');
+    } finally {
+        endPaymentAction(lockKey);
     }
 };
 
@@ -1848,10 +1973,13 @@ window.markSubmissionPaid = async (submissionId) => {
         return;
     }
 
-    const confirmed = confirm(`Mark ${sub.customerName || 'this application'} as paid?`);
-    if (!confirmed) return;
+    const lockKey = `mark-submission-paid:${submissionId}`;
+    if (!beginPaymentAction(lockKey, 'Payment approval')) return;
 
     try {
+        const confirmed = confirm(`Mark ${sub.customerName || 'this application'} as paid?`);
+        if (!confirmed) return;
+
         await updateDoc(doc(db, 'submissions', submissionId), {
             status: 'paid',
             paidAt: serverTimestamp(),
@@ -1862,8 +1990,10 @@ window.markSubmissionPaid = async (submissionId) => {
             action: 'application_commission_paid',
             submissionId,
             customerName: sub.customerName || '',
+            uploadedBy: sub.uploadedBy || '',
             agentId: sub.agentId || '',
             agentName: sub.agentName || '',
+            agentOwner: getSubmissionAgentOwnerEmail(sub),
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         });
@@ -1881,6 +2011,8 @@ window.markSubmissionPaid = async (submissionId) => {
         showNotification(`Marked ${sub.customerName || 'application'} as paid`, 'success');
     } catch (error) {
         showNotification('Failed to mark application as paid', 'error');
+    } finally {
+        endPaymentAction(lockKey);
     }
 };
 
@@ -1899,10 +2031,13 @@ window.markMatchedPaymentReconciliationRecords = async () => {
         return;
     }
 
-    const confirmed = confirm(`Mark ${matchedItems.length} selected application(s) as paid?`);
-    if (!confirmed) return;
+    const lockKey = 'payment-reconciliation-bulk-paid';
+    if (!beginPaymentAction(lockKey, 'Payment reconciliation update')) return;
 
     try {
+        const confirmed = confirm(`Mark ${matchedItems.length} selected application(s) as paid?`);
+        if (!confirmed) return;
+
         await Promise.all(matchedItems.map((item) => updateDoc(doc(db, 'submissions', item.submissionId), {
             status: 'paid',
             paidAt: serverTimestamp(),
@@ -1926,6 +2061,8 @@ window.markMatchedPaymentReconciliationRecords = async () => {
         showNotification(`Marked ${matchedItems.length} matched record(s) as paid`, 'success');
     } catch (error) {
         showNotification('Failed to mark matched records as paid', 'error');
+    } finally {
+        endPaymentAction(lockKey);
     }
 };
 
@@ -1936,11 +2073,17 @@ window.markMatchedPaymentReconciliationRecord = async (submissionId) => {
         showNotification('Matched application no longer exists in your queue.', 'warning');
         return;
     }
-    if (hasCommissionEligibleAgent(sub)) {
-        await window.markSubmissionPaid(submissionId);
-        return;
+    const lockKey = `payment-reconciliation-single:${submissionId}`;
+    if (!beginPaymentAction(lockKey, 'Payment reconciliation update')) return;
+    try {
+        if (hasCommissionEligibleAgent(sub)) {
+            await window.markSubmissionPaid(submissionId);
+            return;
+        }
+        await window.clearSubmissionWithoutAgent(submissionId);
+    } finally {
+        endPaymentAction(lockKey);
     }
-    await window.clearSubmissionWithoutAgent(submissionId);
 };
 
 window.clearPaidAgent = async (groupKey) => {
@@ -1955,10 +2098,13 @@ window.clearPaidAgent = async (groupKey) => {
         showNotification('No-agent applications do not require commission settlement.', 'info');
         return;
     }
-    const confirmed = confirm(`Settle commission for ${group.agentName || 'this agent'} across ${group.customerCount} customer(s)?`);
-    if (!confirmed) return;
+    const lockKey = `clear-paid-agent:${groupKey}`;
+    if (!beginPaymentAction(lockKey, 'Payment clearance')) return;
 
     try {
+        const confirmed = confirm(`Settle commission for ${group.agentName || 'this agent'} across ${group.customerCount} customer(s)?`);
+        if (!confirmed) return;
+
         await Promise.all(
             paidItems.map((sub) => updateDoc(doc(db, 'submissions', sub.id), {
                 status: 'cleared',
@@ -1972,6 +2118,7 @@ window.clearPaidAgent = async (groupKey) => {
             agentKey: group.key,
             agentId: group.agentId || '',
             agentName: group.agentName || '',
+            agentOwner: group.agentOwnerEmail || '',
             count: paidItems.length,
             totalCommission: group.totalCommission,
             performedBy: currentUser?.email || '',
@@ -1993,6 +2140,8 @@ window.clearPaidAgent = async (groupKey) => {
         showNotification(`Settled ${group.agentName || 'agent'} commission`, 'success');
     } catch (error) {
         showNotification('Failed to clear paid records', 'error');
+    } finally {
+        endPaymentAction(lockKey);
     }
 };
 
@@ -2008,9 +2157,12 @@ window.clearPaidSubmissions = async () => {
         showNotification('No paid commission batches to settle', 'info');
         return;
     }
-    const confirmed = confirm(`Settle commission for ${groups.length} paid agent group(s)?`);
-    if (!confirmed) return;
+    const lockKey = 'clear-paid-submissions';
+    if (!beginPaymentAction(lockKey, 'Payment clearance')) return;
     try {
+        const confirmed = confirm(`Settle commission for ${groups.length} paid agent group(s)?`);
+        if (!confirmed) return;
+
         for (const group of groups) {
             const groupItems = paidItems.filter((sub) => getAgentPaymentKey(sub) === group.key);
             await Promise.all(groupItems.map((sub) => updateDoc(doc(db, 'submissions', sub.id), {
@@ -2029,6 +2181,8 @@ window.clearPaidSubmissions = async () => {
         showNotification(`Settled ${groups.length} paid agent group(s)`, 'success');
     } catch (error) {
         showNotification('Failed to clear paid records', 'error');
+    } finally {
+        endPaymentAction(lockKey);
     }
 };
 
@@ -2040,10 +2194,13 @@ window.clearNoAgentApplications = async (groupKey) => {
         return;
     }
     const group = buildAgentPaymentGroups(items)[0];
-    const confirmed = confirm(`Clear ${group.customerCount} application(s) without agent commission?`);
-    if (!confirmed) return;
+    const lockKey = `clear-no-agent:${groupKey}`;
+    if (!beginPaymentAction(lockKey, 'Payment clearance')) return;
 
     try {
+        const confirmed = confirm(`Clear ${group.customerCount} application(s) without agent commission?`);
+        if (!confirmed) return;
+
         await Promise.all(items.map((sub) => updateDoc(doc(db, 'submissions', sub.id), {
             status: 'cleared',
             clearedAt: serverTimestamp(),
@@ -2060,6 +2217,8 @@ window.clearNoAgentApplications = async (groupKey) => {
         showNotification(`Cleared ${group.customerCount} no-agent application(s)`, 'success');
     } catch (error) {
         showNotification('Failed to clear no-agent applications', 'error');
+    } finally {
+        endPaymentAction(lockKey);
     }
 };
 
@@ -2071,10 +2230,13 @@ window.clearSubmissionWithoutAgent = async (submissionId) => {
         return;
     }
 
-    const confirmed = confirm(`Clear ${sub.customerName || 'this application'} without agent commission?`);
-    if (!confirmed) return;
+    const lockKey = `clear-submission-without-agent:${submissionId}`;
+    if (!beginPaymentAction(lockKey, 'Payment clearance')) return;
 
     try {
+        const confirmed = confirm(`Clear ${sub.customerName || 'this application'} without agent commission?`);
+        if (!confirmed) return;
+
         await updateDoc(doc(db, 'submissions', submissionId), {
             status: 'cleared',
             clearedAt: serverTimestamp(),
@@ -2086,6 +2248,7 @@ window.clearSubmissionWithoutAgent = async (submissionId) => {
             action: 'application_cleared_without_agent_commission',
             submissionId,
             customerName: sub.customerName || '',
+            uploadedBy: sub.uploadedBy || '',
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         });
@@ -2093,6 +2256,8 @@ window.clearSubmissionWithoutAgent = async (submissionId) => {
         showNotification(`Cleared ${sub.customerName || 'application'}`, 'success');
     } catch (error) {
         showNotification('Failed to clear application', 'error');
+    } finally {
+        endPaymentAction(lockKey);
     }
 };
 
@@ -2215,6 +2380,12 @@ document.getElementById('closePaymentReportRangeModalBtn')?.addEventListener('cl
 document.getElementById('cancelPaymentReportRangeBtn')?.addEventListener('click', closePaymentReportRangeModal);
 document.getElementById('closePaymentReportPreviewModalBtn')?.addEventListener('click', closePaymentReportPreviewModal);
 document.getElementById('closePaymentReportPreviewFooterBtn')?.addEventListener('click', closePaymentReportPreviewModal);
+document.getElementById('closePaymentPdfPreviewModalBtn')?.addEventListener('click', closePaymentPdfPreviewModal);
+document.getElementById('closePaymentPdfPreviewFooterBtn')?.addEventListener('click', closePaymentPdfPreviewModal);
+downloadPaymentPdfPreviewBtn?.addEventListener('click', () => {
+    if (!currentPaymentPdfPreviewBlob) return;
+    saveBlob(currentPaymentPdfPreviewFileName || 'payment-report.pdf', currentPaymentPdfPreviewBlob);
+});
 document.querySelectorAll('.payment-report-preview-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
         showPaymentReportPreviewTab(btn.dataset.paymentReportView || 'summary');
@@ -2238,7 +2409,6 @@ generatePaymentReportBtn?.addEventListener('click', async () => {
     try {
         const report = createStageReportFromDateRange(pendingPaymentReportRequest, startDate, endDate);
         renderPaymentReportPreview(report);
-        closePaymentReportRangeModal();
         openPaymentReportPreviewModal();
     } catch (error) {
         showNotification('Failed to generate payment report', 'error');
@@ -2339,21 +2509,6 @@ paymentPaidSortFilter?.addEventListener('change', () => {
 paymentClearedSortFilter?.addEventListener('change', () => {
     renderClearedCustomers();
 });
-window.addEventListener('click', (e) => {
-    if (e.target === document.getElementById('paymentLeaveApplicationsModal')) {
-        document.getElementById('paymentLeaveApplicationsModal')?.classList.remove('active');
-    }
-    if (e.target === paymentReconciliationModal) {
-        closePaymentReconciliationModal();
-    }
-    if (e.target === paymentReportRangeModal) {
-        closePaymentReportRangeModal();
-    }
-    if (e.target === paymentReportPreviewModal) {
-        closePaymentReportPreviewModal();
-    }
-});
-
 document.querySelectorAll('.nav-item[data-tab]').forEach((item) => {
     item.addEventListener('click', (e) => {
         e.preventDefault();

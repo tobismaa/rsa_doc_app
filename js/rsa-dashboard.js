@@ -1,4 +1,4 @@
-import { auth, db } from './firebase-config.js?v=20260625b';
+import { auth, db } from './firebase-config.js?v=20260625c';
 import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
 import {
@@ -2538,6 +2538,7 @@ async function submitRsaRejection() {
             customerName: sub.customerName || '',
             userEmail: sub.uploadedBy || '',
             rejectedBy: currentUser?.email || '',
+            performedBy: currentUser?.email || '',
             details: trimmedReason,
             timestamp: serverTimestamp()
         });
@@ -2550,7 +2551,7 @@ async function submitRsaRejection() {
             actionLabel: 'Application Rejected by RSA',
             message: `Application for ${sub.customerName || 'this customer'} was rejected by RSA for correction.`
         }).catch(() => {});
-        closeRsaRejectModal();
+        currentRejectSubmissionId = '';
         showNotification('Successfully rejected by RSA.', 'success');
     } catch (error) {
         showNotification('Failed to reject application: ' + (error?.message || 'Unknown error'), 'error');

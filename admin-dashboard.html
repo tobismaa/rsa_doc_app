@@ -13,7 +13,7 @@
     <title>Admin Dashboard - CMBank RSA</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
-    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260623a">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260629a">
     <!-- Security: DOMPurify for XSS protection -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 </head>
@@ -72,6 +72,10 @@
                     <i class="fas fa-folder-tree"></i>
                     <span>Application Management</span>
                     <span class="badge" id="applicationManagementCount">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="report">
+                    <i class="fas fa-chart-line"></i>
+                    <span>Report</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="round-robin">
                     <i class="fas fa-exchange-alt"></i>
@@ -620,12 +624,111 @@
                 </div>
             </div>
 
+            <!-- Report Tab -->
+            <div id="reportTab" class="tab-content">
+                <div class="table-section">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+                        <h2 style="margin:0;">Application Reports</h2>
+                        <button type="button" class="action-btn" id="openApplicationReportModalBtn">
+                            <i class="fas fa-chart-line"></i> Open Report
+                        </button>
+                    </div>
+                    <p style="color:#64748b;margin:0;">Choose a report type and date range to display matching applications.</p>
+                </div>
+            </div>
+
+            <div id="trackCustomerDetailsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="trackCustomerDetailsModalTitle">
+                <div class="modal-content large-modal track-customer-details-modal-content">
+                    <div class="modal-header">
+                        <h2 id="trackCustomerDetailsModalTitle">Customer Details</h2>
+                        <button class="close-btn" id="closeTrackCustomerDetailsModal" aria-label="Close modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="track-modal-hero">
+                            <div>
+                                <h3 id="trackCustomerDetailsName">-</h3>
+                                <p id="trackCustomerDetailsMeta">-</p>
+                            </div>
+                            <div id="trackCustomerDetailsStatus" class="track-modal-statuses"></div>
+                        </div>
+                        <div id="trackCustomerDetailsGrid" class="track-customer-details-grid"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="cancel-btn" id="closeTrackCustomerDetailsFooterBtn">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="applicationReportModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="applicationReportModalTitle">
+                <div class="modal-content large-modal application-report-modal-content">
+                    <div class="modal-header">
+                        <h2 id="applicationReportModalTitle"><i class="fas fa-chart-line"></i> Application Report</h2>
+                        <button class="close-btn" id="closeApplicationReportModal" aria-label="Close modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="application-report-hero">
+                            <div>
+                                <h3 id="applicationReportHeading">Approved Applications</h3>
+                                <p id="applicationReportMeta">Pick a report type and date range to display applications.</p>
+                            </div>
+                            <div class="application-report-count" id="applicationReportCount">0</div>
+                        </div>
+                        <div class="application-report-controls">
+                            <label>Report Type
+                                <select id="applicationReportStage">
+                                    <option value="approved">Approved</option>
+                                    <option value="pending">Pending</option>
+                                    <option value="rejected">Rejected</option>
+                                    <option value="final_submission">Final Submission</option>
+                                    <option value="payment">Payment</option>
+                                </select>
+                            </label>
+                            <label>Start Date
+                                <input type="date" id="applicationReportStartDate">
+                            </label>
+                            <label>End Date
+                                <input type="date" id="applicationReportEndDate">
+                            </label>
+                            <div class="application-report-presets" aria-label="Quick date ranges">
+                                <button type="button" class="application-report-preset-btn" data-application-report-range="today">Today</button>
+                                <button type="button" class="application-report-preset-btn" data-application-report-range="week">This Week</button>
+                                <button type="button" class="application-report-preset-btn" data-application-report-range="month">This Month</button>
+                            </div>
+                            <button type="button" class="action-btn application-report-run" id="applicationReportRunBtn">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                        </div>
+                        <div class="table-container application-report-table-wrap">
+                            <table class="customers-table application-report-table">
+                                <thead>
+                                    <tr>
+                                        <th>Customer</th>
+                                        <th>Uploaded By</th>
+                                        <th>Agent</th>
+                                        <th>Status</th>
+                                        <th>Stage Date</th>
+                                        <th>PFA</th>
+                                        <th>25% Balance</th>
+                                        <th>Payment Officer</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="applicationReportTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="cancel-btn" id="closeApplicationReportModalFooterBtn">Close</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Audit Log Tab -->
             <div id="auditTab" class="tab-content">
                 <div class="audit-log">
                     <h2>System Audit Log</h2>
                     <div class="filters-bar">
-                        <input type="date" id="auditDate" aria-label="Filter by date">
+                        <input type="date" id="auditStartDate" aria-label="Audit start date">
+                        <input type="date" id="auditEndDate" aria-label="Audit end date">
                         <select id="auditAction" aria-label="Filter by action">
                             <option value="all">All Actions</option>
                             <option value="user_created">User Created</option>
@@ -635,7 +738,12 @@
                             <option value="document_uploaded">Document Uploaded</option>
                             <option value="document_approved">Document Approved</option>
                             <option value="document_rejected">Document Rejected</option>
+                            <option value="agent_registration_approved">Agent Registration Approved</option>
+                            <option value="application_rejected_by_rsa">RSA Rejected Application</option>
                         </select>
+                        <button type="button" class="action-btn" id="viewAuditRangeBtn">
+                            <i class="fas fa-calendar-check"></i> View Logs
+                        </button>
                     </div>
                     <div class="table-container">
                         <table class="audit-table">
@@ -652,6 +760,83 @@
                                 <!-- Audit entries will be inserted here -->
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="auditRangeModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="auditRangeModalTitle">
+                <div class="modal-content large-modal audit-range-modal-content">
+                    <div class="modal-header">
+                        <h2 id="auditRangeModalTitle"><i class="fas fa-file-shield"></i> Audit Logs</h2>
+                        <button class="close-btn" id="closeAuditRangeModal" aria-label="Close modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="audit-modal-hero">
+                            <div>
+                                <h3>Activity Review</h3>
+                                <p id="auditRangeModalMeta">Choose a date range to preview audit records.</p>
+                            </div>
+                            <div class="audit-modal-count" id="auditRangeModalCount">0</div>
+                        </div>
+                        <div class="audit-modal-controls">
+                            <label>Start Date
+                                <input type="date" id="auditModalStartDate">
+                            </label>
+                            <label>End Date
+                                <input type="date" id="auditModalEndDate">
+                            </label>
+                            <label>Action
+                                <select id="auditModalAction">
+                                    <option value="all">All Actions</option>
+                                    <option value="user_created">User Created</option>
+                                    <option value="user_approved">User Approved</option>
+                                    <option value="user_rejected">User Rejected</option>
+                                    <option value="user_deactivated">User Deactivated</option>
+                                    <option value="document_uploaded">Document Uploaded</option>
+                                    <option value="document_approved">Document Approved</option>
+                                    <option value="document_rejected">Document Rejected</option>
+                                    <option value="agent_registration_approved">Agent Registration Approved</option>
+                                    <option value="application_rejected_by_rsa">RSA Rejected Application</option>
+                                </select>
+                            </label>
+                            <button type="button" class="action-btn audit-modal-apply" id="auditModalApplyBtn">
+                                <i class="fas fa-filter"></i> Apply
+                            </button>
+                        </div>
+                        <div class="table-container audit-modal-table-wrap">
+                            <table class="audit-table audit-modal-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date/Time</th>
+                                        <th>Action</th>
+                                        <th>Details</th>
+                                        <th>Performed By (Email)</th>
+                                        <th>Admin Name</th>
+                                        <th>Open</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="auditRangeModalBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="cancel-btn" id="closeAuditRangeModalFooterBtn">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="auditDetailModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="auditDetailModalTitle">
+                <div class="modal-content large-modal audit-detail-modal-content">
+                    <div class="modal-header">
+                        <h2 id="auditDetailModalTitle"><i class="fas fa-circle-info"></i> Audit Detail</h2>
+                        <button class="close-btn" id="closeAuditDetailModal" aria-label="Close modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="auditDetailSummary" class="audit-detail-summary"></div>
+                        <div id="auditDetailBody" class="audit-detail-body"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="cancel-btn" id="closeAuditDetailModalFooterBtn">Close</button>
                     </div>
                 </div>
             </div>
@@ -1198,7 +1383,7 @@
         </div>
     </div>
 
-    <script type="module" src="js/firebase-config.js?v=20260625b"></script>
+    <script type="module" src="js/firebase-config.js?v=20260625c"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pizzip@3.1.7/dist/pizzip.min.js"></script>
     <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
@@ -1206,7 +1391,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=20260625b"></script>
+    <script type="module" src="js/admin.js?v=20260630a"></script>
     <script src="js/table-enhancer.js?v=20260512b"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260625b"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260518a">

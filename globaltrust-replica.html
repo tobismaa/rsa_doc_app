@@ -1,0 +1,1550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cooperative Mortgage Bank - Layout Replica</title>
+  <link rel="preconnect" href="https://mygtmb.com">
+  <style>
+    :root {
+      --primary: #00843d;
+      --primary-dark: #005f2f;
+      --accent: #8cc63f;
+      --accent-hover: #75ad32;
+      --dark: #030712;
+      --text: #101828;
+      --muted: #6a7282;
+      --line: #e5e7eb;
+      --soft: #f6fbf7;
+      --white: #ffffff;
+      --container: min(1152px, calc(100vw - 40px));
+      --shadow: 0 24px 60px rgba(0, 132, 61, 0.14);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: var(--white);
+      overflow-x: hidden;
+      zoom: 0.9;
+    }
+
+    @supports not (zoom: 1) {
+      body {
+        width: 111.111%;
+        transform: scale(0.9);
+        transform-origin: top left;
+      }
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    img {
+      display: block;
+      max-width: 100%;
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .container {
+      width: var(--container);
+      margin: 0 auto;
+    }
+
+    .notice {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 80;
+      display: block;
+      padding: 8px 14px;
+      background: #e53e3e;
+      color: var(--white);
+      text-align: center;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    .notice span {
+      margin-left: 5px;
+      font-size: 11px;
+      text-decoration: underline;
+      opacity: 0.9;
+    }
+
+    .nav-shell {
+      position: fixed;
+      top: 40px;
+      left: 0;
+      right: 0;
+      z-index: 70;
+      padding: 16px 24px 0;
+      transition: transform 0.25s ease, padding 0.25s ease, top 0.25s ease;
+    }
+
+    .nav-shell.scrolled {
+      top: 32px;
+      padding-top: 6px;
+    }
+
+    .nav {
+      width: min(1152px, 100%);
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 14px 28px;
+      border-radius: 999px;
+      background: rgba(3, 7, 18, 0.96);
+      color: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 18px 44px rgba(3, 7, 18, 0.22);
+      backdrop-filter: blur(14px);
+      transition: padding 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
+    }
+
+    .nav-shell.scrolled .nav {
+      padding: 10px 24px;
+      box-shadow: 0 14px 34px rgba(3, 7, 18, 0.18);
+    }
+
+    .brand-logo {
+      display: inline-grid;
+      gap: 1px;
+      color: var(--white);
+      line-height: 1;
+      transition: transform 0.25s ease;
+    }
+
+    .brand-logo strong {
+      color: var(--accent);
+      font-size: 24px;
+      font-weight: 950;
+      letter-spacing: 0.02em;
+    }
+
+    .brand-logo span {
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 10px;
+      font-weight: 850;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .nav-shell.scrolled .brand-logo {
+      transform: scale(0.94);
+      transform-origin: left center;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 14px;
+    }
+
+    .nav-item {
+      position: relative;
+    }
+
+    .nav-item::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 100%;
+      height: 16px;
+    }
+
+    .nav-links a,
+    .nav-trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 8px 12px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+
+    .nav-links a:hover,
+    .nav-trigger:hover,
+    .nav-item:focus-within .nav-trigger,
+    .nav-item:hover .nav-trigger {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--white);
+    }
+
+    .dropdown-menu {
+      position: absolute;
+      left: 50%;
+      top: calc(100% + 14px);
+      width: 260px;
+      padding: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 24px;
+      background: rgba(3, 7, 18, 0.97);
+      color: var(--white);
+      box-shadow: 0 24px 54px rgba(3, 7, 18, 0.26);
+      backdrop-filter: blur(14px);
+      opacity: 0;
+      visibility: hidden;
+      transform: translate(-50%, 8px);
+      transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+    }
+
+    .dropdown-menu::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: -7px;
+      width: 14px;
+      height: 14px;
+      transform: translateX(-50%) rotate(45deg);
+      background: rgba(3, 7, 18, 0.97);
+      border-left: 1px solid rgba(255, 255, 255, 0.12);
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .nav-item:hover .dropdown-menu,
+    .nav-item:focus-within .dropdown-menu {
+      opacity: 1;
+      visibility: visible;
+      transform: translate(-50%, 0);
+    }
+
+    .dropdown-menu a {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 14px;
+      color: rgba(255, 255, 255, 0.82);
+      font-weight: 750;
+    }
+
+    .dropdown-menu a:hover {
+      background: rgba(140, 198, 63, 0.16);
+      color: var(--white);
+    }
+
+    .dropdown-menu a::after {
+      content: "\2192";
+      color: var(--accent);
+      opacity: 0;
+      transform: translateX(-4px);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+
+    .dropdown-menu a:hover::after {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    .chevron {
+      font-size: 12px;
+      opacity: 0.75;
+    }
+
+    .nav-cta,
+    .hero-cta,
+    .section-link,
+    .cta-button {
+      position: relative;
+      isolation: isolate;
+      overflow: hidden;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      border: 0;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #c8f06f 0%, var(--accent) 45%, #5daa35 100%);
+      color: #052b16;
+      font-weight: 900;
+      cursor: pointer;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.52),
+        0 14px 32px rgba(39, 134, 61, 0.28);
+      transition: transform 0.22s ease, box-shadow 0.22s ease, filter 0.22s ease;
+    }
+
+    .nav-cta::before,
+    .hero-cta::before,
+    .section-link::before,
+    .cta-button::before {
+      content: "";
+      position: absolute;
+      inset: -35% auto -35% -55%;
+      z-index: -1;
+      width: 48%;
+      transform: skewX(-22deg);
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.54), transparent);
+      transition: transform 0.5s ease;
+    }
+
+    .nav-cta span,
+    .hero-cta span,
+    .section-link span,
+    .cta-button span {
+      display: inline-grid;
+      place-items: center;
+      width: 25px;
+      height: 25px;
+      border-radius: 999px;
+      background: rgba(5, 43, 22, 0.12);
+      color: #052b16;
+      line-height: 1;
+    }
+
+    .nav-cta {
+      padding: 9px 12px 9px 20px;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .nav-cta:hover,
+    .hero-cta:hover,
+    .section-link:hover,
+    .cta-button:hover {
+      transform: translateY(-2px);
+      filter: saturate(1.08);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.62),
+        0 18px 38px rgba(39, 134, 61, 0.34);
+    }
+
+    .nav-cta:hover::before,
+    .hero-cta:hover::before,
+    .section-link:hover::before,
+    .cta-button:hover::before {
+      transform: translateX(420%) skewX(-22deg);
+    }
+
+    .mobile-toggle {
+      display: none;
+      width: 38px;
+      height: 38px;
+      border: 0;
+      background: transparent;
+      color: var(--white);
+      cursor: pointer;
+    }
+
+    .mobile-toggle span {
+      display: block;
+      width: 22px;
+      height: 2px;
+      margin: 5px auto;
+      border-radius: 999px;
+      background: currentColor;
+    }
+
+    .mobile-menu {
+      display: none;
+      width: min(1152px, calc(100vw - 48px));
+      margin: 10px auto 0;
+      padding: 14px;
+      border-radius: 24px;
+      background: var(--dark);
+      color: var(--white);
+      box-shadow: 0 22px 50px rgba(3, 7, 18, 0.2);
+    }
+
+    .mobile-menu a {
+      display: block;
+      padding: 12px 14px;
+      border-radius: 14px;
+      color: rgba(255, 255, 255, 0.88);
+    }
+
+    .mobile-menu a:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .mobile-menu details {
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .mobile-menu summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      border-radius: 14px;
+      color: rgba(255, 255, 255, 0.88);
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .mobile-menu summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .mobile-menu summary::after {
+      content: "\2304";
+      color: var(--accent);
+      font-size: 13px;
+    }
+
+    .mobile-menu details[open] summary {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--white);
+    }
+
+    .mobile-submenu {
+      display: grid;
+      gap: 4px;
+      padding: 2px 0 10px 14px;
+    }
+
+    .mobile-submenu a {
+      padding: 10px 14px;
+      color: rgba(255, 255, 255, 0.72);
+      font-size: 13px;
+    }
+
+    .mobile-menu.active {
+      display: block;
+    }
+
+    .hero-wrap {
+      margin: 86px 12px 0;
+      border-radius: 24px;
+      overflow: hidden;
+      background: var(--primary);
+    }
+
+    .hero {
+      position: relative;
+      min-height: 520px;
+      overflow: hidden;
+      background: var(--primary);
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image: url("https://mygtmb.com/bg_pattern.png");
+      background-size: 100% 100%;
+      background-position: center top;
+      opacity: 0.3;
+      pointer-events: none;
+    }
+
+    .hero-grid {
+      position: relative;
+      z-index: 1;
+      width: var(--container);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 58% 42%;
+      align-items: end;
+      min-height: 520px;
+      padding-top: 142px;
+    }
+
+    .hero-copy {
+      padding: 0 48px 42px 0;
+      color: var(--white);
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      margin-bottom: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.1);
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .hero h1 {
+      margin: 0 0 24px;
+      max-width: 690px;
+      font-size: clamp(2rem, 4.15vw, 3rem);
+      line-height: 1.15;
+      letter-spacing: -0.025em;
+      font-weight: 950;
+    }
+
+    .hero h1 span {
+      color: var(--accent);
+    }
+
+    .hero p {
+      max-width: 580px;
+      margin: 0 0 28px;
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 18px;
+      line-height: 1.7;
+      font-weight: 600;
+    }
+
+    .store-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .store-buttons img {
+      height: 48px;
+      width: auto;
+      object-fit: contain;
+    }
+
+    .hero-phone {
+      display: flex;
+      align-items: flex-end;
+      justify-content: flex-end;
+      min-height: 100%;
+    }
+
+    .hero-phone img {
+      height: clamp(300px, 43vh, 410px);
+      width: auto;
+      object-fit: contain;
+      filter: drop-shadow(0 25px 25px rgba(0, 0, 0, 0.22));
+    }
+
+    .trust-marquee {
+      width: 100%;
+      overflow: hidden;
+      padding: 42px 0;
+      background: var(--white);
+    }
+
+    .marquee-track {
+      display: flex;
+      width: max-content;
+      align-items: center;
+      animation: marquee 30s linear infinite;
+      white-space: nowrap;
+    }
+
+    .trust-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: #6a7282;
+      font-size: 18px;
+    }
+
+    .trust-item strong {
+      color: #364153;
+      font-weight: 800;
+    }
+
+    .trust-item img {
+      height: 28px;
+      width: auto;
+      object-fit: contain;
+    }
+
+    .dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      margin: 0 40px;
+      border-radius: 999px;
+      background: #d1d5dc;
+    }
+
+    @keyframes marquee {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
+
+    section {
+      padding: 72px 0;
+    }
+
+    .reveal {
+      opacity: 0;
+      transform: translateY(22px);
+      transition: opacity 0.55s ease, transform 0.55s ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .section-eyebrow {
+      margin: 0 0 10px;
+      color: var(--primary);
+      font-size: 14px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+    }
+
+    .section-title {
+      margin: 0 0 20px;
+      color: var(--text);
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.08;
+      letter-spacing: -0.025em;
+      font-weight: 950;
+    }
+
+    .section-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.75;
+      font-weight: 500;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 64px;
+      align-items: center;
+    }
+
+    .feature-list {
+      display: grid;
+      gap: 16px;
+      margin: 28px 0 34px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .feature-list li {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #364153;
+      font-weight: 750;
+    }
+
+    .feature-list li::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 0 6px rgba(140, 198, 63, 0.16);
+    }
+
+    .section-link,
+    .hero-cta {
+      padding: 12px 12px 12px 20px;
+      font-size: 14px;
+    }
+
+    .visual-stack {
+      position: relative;
+      min-height: 520px;
+    }
+
+    .visual-card {
+      position: absolute;
+      overflow: hidden;
+      border-radius: 40px;
+      background: #f0fdfa;
+      box-shadow: var(--shadow);
+    }
+
+    .visual-card img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .visual-card.large {
+      left: 0;
+      top: 20px;
+      width: 72%;
+      height: 390px;
+    }
+
+    .visual-card.small {
+      right: 0;
+      bottom: 12px;
+      width: 48%;
+      height: 260px;
+      border: 12px solid var(--white);
+    }
+
+    .mortgage-section {
+      padding-top: 70px;
+      padding-bottom: 40px;
+    }
+
+    .phone-split {
+      display: grid;
+      grid-template-columns: 40% 60%;
+      gap: 64px;
+      align-items: center;
+    }
+
+    .phone-art {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 500px;
+    }
+
+    .phone-art img {
+      width: min(360px, 90%);
+      filter: drop-shadow(0 30px 38px rgba(0, 132, 61, 0.22));
+    }
+
+    .security {
+      background: #f8fafc;
+    }
+
+    .security-card {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 48px;
+      align-items: center;
+      padding: 48px;
+      border-radius: 40px;
+      background: var(--white);
+      box-shadow: 0 20px 70px rgba(16, 24, 40, 0.08);
+    }
+
+    .check-list {
+      display: grid;
+      gap: 14px;
+      margin: 28px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .check-list li {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: #364153;
+      font-weight: 760;
+    }
+
+    .check-list li::before {
+      content: "✓";
+      display: inline-grid;
+      place-items: center;
+      width: 25px;
+      height: 25px;
+      border-radius: 999px;
+      background: rgba(0, 132, 61, 0.12);
+      color: var(--primary);
+      font-weight: 950;
+    }
+
+    .security-image {
+      display: flex;
+      justify-content: center;
+    }
+
+    .security-image img {
+      max-height: 420px;
+      width: auto;
+      filter: drop-shadow(0 22px 40px rgba(0, 132, 61, 0.18));
+    }
+
+    .clients-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      margin-top: 44px;
+    }
+
+    .client-card {
+      min-height: 210px;
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: var(--white);
+      box-shadow: 0 14px 40px rgba(16, 24, 40, 0.05);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .client-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 20px 55px rgba(0, 132, 61, 0.12);
+    }
+
+    .client-card h3 {
+      margin: 0 0 14px;
+      font-size: 20px;
+      font-weight: 900;
+      color: var(--text);
+    }
+
+    .client-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .advantage {
+      background: #f9fafb;
+    }
+
+    .comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-top: 42px;
+    }
+
+    .compare-card {
+      overflow: hidden;
+      border-radius: 30px;
+      background: var(--white);
+      border: 1px solid var(--line);
+      box-shadow: 0 16px 48px rgba(16, 24, 40, 0.06);
+    }
+
+    .compare-card h3 {
+      margin: 0;
+      padding: 22px 28px;
+      color: var(--white);
+      background: var(--dark);
+      font-size: 22px;
+      font-weight: 900;
+    }
+
+    .compare-card.global h3 {
+      background: var(--primary);
+    }
+
+    .compare-card ul {
+      margin: 0;
+      padding: 10px 28px 28px;
+      list-style: none;
+    }
+
+    .compare-card li {
+      padding: 18px 0;
+      border-bottom: 1px solid var(--line);
+      color: #364153;
+      font-size: 17px;
+      font-weight: 750;
+    }
+
+    .compare-card li:last-child {
+      border-bottom: 0;
+    }
+
+    .cta-band {
+      padding: 0;
+    }
+
+    .cta-panel {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 28px;
+      align-items: center;
+      padding: 54px;
+      border-radius: 42px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background:
+        radial-gradient(circle at 82% 18%, rgba(200, 240, 111, 0.42), transparent 28%),
+        radial-gradient(circle at 8% 90%, rgba(255, 255, 255, 0.2), transparent 30%),
+        linear-gradient(135deg, #005f2f 0%, #00843d 54%, #13a256 100%);
+      color: var(--white);
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 30px 80px rgba(0, 95, 47, 0.28);
+    }
+
+    .cta-panel::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image: url("https://mygtmb.com/bg_pattern.png");
+      background-size: cover;
+      opacity: 0.18;
+    }
+
+    .cta-panel::after {
+      content: "";
+      position: absolute;
+      right: -70px;
+      bottom: -130px;
+      width: 290px;
+      height: 290px;
+      border: 46px solid rgba(255, 255, 255, 0.12);
+      border-radius: 999px;
+    }
+
+    .cta-panel > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .cta-panel h2 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.1;
+      font-weight: 950;
+    }
+
+    .cta-panel p {
+      margin: 0;
+      color: rgba(255, 255, 255, 0.86);
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .cta-button {
+      min-height: 58px;
+      padding: 16px 14px 16px 26px;
+      background: linear-gradient(135deg, #ffffff 0%, #eaf8df 100%);
+      color: var(--primary-dark);
+      white-space: nowrap;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.9),
+        0 22px 42px rgba(3, 7, 18, 0.18);
+    }
+
+    .cta-button span {
+      width: 30px;
+      height: 30px;
+      background: var(--primary);
+      color: var(--white);
+    }
+
+    .cta-button:hover {
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.95),
+        0 28px 52px rgba(3, 7, 18, 0.22);
+    }
+
+    .testimonials {
+      padding-top: 86px;
+    }
+
+    .testimonial-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 18px;
+      margin-top: 36px;
+    }
+
+    .testimonial {
+      padding: 30px;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: var(--white);
+      box-shadow: 0 14px 42px rgba(16, 24, 40, 0.05);
+    }
+
+    .testimonial blockquote {
+      margin: 0 0 20px;
+      color: #1e2939;
+      font-size: 22px;
+      line-height: 1.55;
+      font-weight: 850;
+    }
+
+    .testimonial span {
+      color: var(--primary);
+      font-weight: 900;
+    }
+
+    .footer {
+      margin-top: 70px;
+      padding: 62px 0 26px;
+      color: var(--white);
+      background:
+        radial-gradient(circle at 92% 8%, rgba(140, 198, 63, 0.3), transparent 28%),
+        radial-gradient(circle at 6% 92%, rgba(255, 255, 255, 0.12), transparent 30%),
+        linear-gradient(135deg, #004f29 0%, #00843d 58%, #0f9b50 100%);
+      border-top-left-radius: 60px;
+      border-top-right-radius: 60px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 1.2fr repeat(3, 1fr);
+      gap: 36px;
+      padding-bottom: 42px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+    }
+
+    .footer-brand .brand-logo {
+      margin-bottom: 18px;
+    }
+
+    .footer-brand p,
+    .footer li {
+      color: rgba(255, 255, 255, 0.78);
+      line-height: 1.75;
+      font-size: 15px;
+    }
+
+    .footer h4 {
+      margin: 0 0 16px;
+      font-size: 16px;
+      font-weight: 900;
+    }
+
+    .footer ul {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 10px;
+    }
+
+    .footer-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding-top: 24px;
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 14px;
+    }
+
+    .socials {
+      display: flex;
+      gap: 10px;
+    }
+
+    .socials a {
+      display: inline-grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.16);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    }
+
+    .socials img {
+      width: 20px;
+      height: 20px;
+      object-fit: contain;
+    }
+
+    @media (max-width: 980px) {
+      .nav-shell {
+        top: 34px;
+        padding-top: 10px;
+      }
+
+      .nav-shell.scrolled {
+        top: 28px;
+        padding-top: 6px;
+      }
+
+      .nav {
+        padding: 12px 18px;
+        border-radius: 24px;
+      }
+
+      .nav-links,
+      .nav-cta {
+        display: none;
+      }
+
+      .mobile-toggle {
+        display: block;
+      }
+
+      .hero-wrap {
+        margin: 72px 12px 0;
+      }
+
+      .hero,
+      .hero-grid {
+        min-height: auto;
+      }
+
+      .hero-grid {
+        grid-template-columns: 1fr;
+        padding: 92px 0 0;
+      }
+
+      .hero-copy {
+        padding: 0 0 32px;
+      }
+
+      .hero-phone {
+        justify-content: center;
+      }
+
+      .hero-phone img {
+        width: min(260px, 56vw);
+        height: auto;
+      }
+
+      .split,
+      .phone-split,
+      .security-card,
+      .cta-panel,
+      .footer-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .visual-stack {
+        min-height: 420px;
+      }
+
+      .clients-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (min-width: 981px) {
+      .hero-wrap {
+        margin: 96px 24px 0;
+        border-radius: 64px;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .notice {
+        font-size: 11px;
+      }
+
+      .nav-shell {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+
+      .brand-logo strong {
+        font-size: 21px;
+      }
+
+      .brand-logo span {
+        font-size: 9px;
+      }
+
+      .hero-wrap {
+        border-radius: 24px;
+        margin-top: 64px;
+      }
+
+      .hero-grid {
+        width: min(100% - 32px, 540px);
+        padding-top: 84px;
+      }
+
+      .hero h1 {
+        font-size: 2.1rem;
+        margin-bottom: 14px;
+      }
+
+      .hero p {
+        margin-bottom: 20px;
+        font-size: 16px;
+        line-height: 1.6;
+      }
+
+      .store-buttons img {
+        height: 42px;
+      }
+
+      section {
+        padding: 54px 0;
+      }
+
+      .trust-marquee {
+        padding: 30px 0;
+      }
+
+      .trust-item {
+        font-size: 15px;
+      }
+
+      .dot {
+        margin: 0 24px;
+      }
+
+      .visual-card.large,
+      .visual-card.small {
+        position: relative;
+        width: 100%;
+        height: auto;
+        inset: auto;
+      }
+
+      .visual-stack {
+        display: grid;
+        gap: 18px;
+        min-height: 0;
+      }
+
+      .visual-card.small {
+        border-width: 0;
+      }
+
+      .security-card,
+      .cta-panel {
+        padding: 28px;
+        border-radius: 28px;
+      }
+
+      .clients-grid,
+      .comparison,
+      .testimonial-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .footer {
+        border-top-left-radius: 36px;
+        border-top-right-radius: 36px;
+      }
+
+      .footer-bottom {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="notice" href="#">Public Notice: Keep your banking details private and report suspicious activity <span>Contact us</span></a>
+
+  <header class="nav-shell" id="navShell">
+    <nav class="nav" aria-label="Primary navigation">
+      <a class="brand" href="#">
+        <span class="brand-logo" aria-label="Cooperative Mortgage Bank">
+          <strong>CMBANK</strong>
+          <span>Cooperative Mortgage Bank</span>
+        </span>
+      </a>
+      <div class="nav-links">
+        <a href="#">Home</a>
+        <div class="nav-item">
+          <button class="nav-trigger" type="button">Personal <span class="chevron">&#8964;</span></button>
+          <div class="dropdown-menu">
+            <a href="#">Savings</a>
+            <a href="#">Investment</a>
+            <a href="#">Mortgage</a>
+            <a href="#">Loan</a>
+            <a href="#">Coop One Stop</a>
+          </div>
+        </div>
+        <div class="nav-item">
+          <button class="nav-trigger" type="button">Business <span class="chevron">&#8964;</span></button>
+          <div class="dropdown-menu">
+            <a href="#">Group Scheme</a>
+            <a href="#">Financed Projects</a>
+            <a href="#">Employer Groups</a>
+            <a href="#">Real Estate Development</a>
+            <a href="#">Investor Relations</a>
+          </div>
+        </div>
+        <a href="#">About us</a>
+        <a href="#">Contact us</a>
+      </div>
+      <button class="nav-cta" type="button">Open Account <span>&rarr;</span></button>
+      <button class="mobile-toggle" id="mobileToggle" type="button" aria-label="Open menu">
+        <span></span><span></span><span></span>
+      </button>
+    </nav>
+    <div class="mobile-menu" id="mobileMenu">
+      <a href="#">Home</a>
+      <details>
+        <summary>Personal</summary>
+        <div class="mobile-submenu">
+          <a href="#">Savings</a>
+          <a href="#">Investment</a>
+          <a href="#">Mortgage</a>
+          <a href="#">Loan</a>
+          <a href="#">Coop One Stop</a>
+        </div>
+      </details>
+      <details>
+        <summary>Business</summary>
+        <div class="mobile-submenu">
+          <a href="#">Group Scheme</a>
+          <a href="#">Financed Projects</a>
+          <a href="#">Employer Groups</a>
+          <a href="#">Real Estate Development</a>
+          <a href="#">Investor Relations</a>
+        </div>
+      </details>
+      <a href="#">About us</a>
+      <a href="#">Contact us</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero-wrap">
+      <section class="hero">
+        <div class="hero-grid">
+          <div class="hero-copy reveal visible">
+            <div class="pill">Committed to giving you more</div>
+            <h1>Mortgage Banking That Makes <span>Home Ownership Easier.</span></h1>
+            <p>Cooperative Mortgage Bank provides savings, loans, investments, mortgage products, and group ownership schemes designed to help individuals, cooperatives, and employers access practical housing finance.</p>
+            <div class="store-buttons">
+              <a href="#"><img src="https://mygtmb.com/_next/image?url=%2Fappstore-cta.png&w=384&q=75" alt="Download on the App Store"></a>
+              <a href="#"><img src="https://mygtmb.com/_next/image?url=%2Fplaystore-cta.png&w=384&q=75" alt="Get it on Google Play"></a>
+            </div>
+          </div>
+          <div class="hero-phone reveal visible">
+            <img src="https://mygtmb.com/_next/image?url=%2Fheader.png&w=1080&q=75" alt="Cooperative Mortgage Bank mobile banking dashboard">
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="trust-marquee">
+      <div class="marquee-track">
+        <span class="trust-item">Licensed by the <strong>CBN</strong><img src="https://mygtmb.com/_next/image?url=%2Fcbn.png&w=96&q=75" alt="Central Bank of Nigeria"></span><span class="dot"></span>
+        <span class="trust-item">Insured by the <strong>NDIC</strong><img src="https://mygtmb.com/_next/image?url=%2Fndic.png&w=96&q=75" alt="Nigeria Deposit Insurance Corporation"></span><span class="dot"></span>
+        <span class="trust-item">Mortgage products</span><span class="dot"></span>
+        <span class="trust-item">Group ownership schemes</span><span class="dot"></span>
+        <span class="trust-item">Licensed by the <strong>CBN</strong><img src="https://mygtmb.com/_next/image?url=%2Fcbn.png&w=96&q=75" alt="Central Bank of Nigeria"></span><span class="dot"></span>
+        <span class="trust-item">Insured by the <strong>NDIC</strong><img src="https://mygtmb.com/_next/image?url=%2Fndic.png&w=96&q=75" alt="Nigeria Deposit Insurance Corporation"></span><span class="dot"></span>
+        <span class="trust-item">Mortgage products</span><span class="dot"></span>
+        <span class="trust-item">Group ownership schemes</span><span class="dot"></span>
+      </div>
+    </div>
+
+    <section>
+      <div class="container split">
+        <div class="reveal">
+          <p class="section-eyebrow">Innovative Products and Services</p>
+          <h2 class="section-title">Banking Products Built Around Housing Goals</h2>
+          <ul class="feature-list">
+            <li>Savings accounts for personal and home ownership goals</li>
+            <li>Individual, cooperators, group, and NHF mortgage options</li>
+            <li>Fixed deposit and real estate backed investment products</li>
+            <li>Loan support for real estate development</li>
+            <li>Coop One Stop services for cooperative members</li>
+          </ul>
+          <a class="section-link" href="#">Explore our products <span>&rarr;</span></a>
+        </div>
+        <div class="visual-stack reveal">
+          <div class="visual-card large">
+            <img src="https://mygtmb.com/_next/image?url=%2Fnew%2Fhome%2Fnew-stand-in-finance.png&w=1080&q=75" alt="Cooperative Mortgage Bank app dashboard">
+          </div>
+          <div class="visual-card small">
+            <img src="https://mygtmb.com/_next/image?url=%2Fsecure-phone.png&w=640&q=75" alt="Secure mortgage phone experience">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mortgage-section">
+      <div class="container phone-split">
+        <div class="phone-art reveal">
+          <img src="https://mygtmb.com/_next/image?url=%2Fnew%2Fhome%2Fhome-finance-reimagined.png&w=1080&q=75" alt="Home finance reimagined">
+        </div>
+        <div class="reveal">
+          <p class="section-eyebrow">Mortgage That Works</p>
+          <h2 class="section-title">Home Financing for Individuals, Groups, and Cooperatives</h2>
+          <p class="section-copy">At Cooperative Mortgage Bank, housing finance is shaped around practical ownership paths, from individual mortgage plans to group and employer-backed schemes.</p>
+          <h3 style="margin:30px 0 0;font-size:20px;font-weight:900;">Why Choose Cooperative Mortgage Bank</h3>
+          <ul class="feature-list">
+            <li>Individual mortgage solutions</li>
+            <li>Digital documents upload</li>
+            <li>Cooperators' mortgage and group mortgage options</li>
+            <li>National Housing Fund and diaspora banking products</li>
+          </ul>
+          <a class="section-link" href="#">Start Your Application <span>&rarr;</span></a>
+        </div>
+      </div>
+    </section>
+
+    <section class="security">
+      <div class="container security-card reveal">
+        <div>
+          <p class="section-eyebrow">Technology and Security</p>
+          <h2 class="section-title">Trusted Mortgage Banking. Practical Digital Access.</h2>
+          <p class="section-copy">Cooperative Mortgage Bank combines regulated mortgage banking services with digital channels for account access, enquiries, transfers, deposits, and support.</p>
+          <ul class="check-list">
+            <li>End-to-end encryption</li>
+            <li>Mobile app and online banking access</li>
+            <li>E-channel complaint support</li>
+            <li>Regulatory compliance</li>
+          </ul>
+        </div>
+        <div class="security-image">
+          <img src="https://mygtmb.com/_next/image?url=%2Fsecure-phone.png&w=1080&q=75" alt="Secure banking on your phone">
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <p class="section-eyebrow">Target Clients and Partners</p>
+        <h2 class="section-title reveal">Tailored Services and Solutions</h2>
+        <div class="clients-grid reveal">
+          <article class="client-card"><h3>Savers and Investors</h3><p>Savings and investment products designed around personal financial goals.</p></article>
+          <article class="client-card"><h3>Career & Business Professionals</h3><p>Mortgage solutions designed to suit steady income earners.</p></article>
+          <article class="client-card"><h3>Real Estate Investors</h3><p>Support investors with structured financing for property acquisition and portfolio expansion.</p></article>
+          <article class="client-card"><h3>Real Estate Development Companies</h3><p>Construction loans to help developers deliver residential projects efficiently.</p></article>
+          <article class="client-card"><h3>Cooperatives and Associations</h3><p>Customized group financing solutions for members and cooperative structures.</p></article>
+          <article class="client-card"><h3>Large Employer Groups</h3><p>Mortgage schemes for employees through structured repayment plans and employer-backed financing options.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="advantage">
+      <div class="container">
+        <p class="section-eyebrow">Why choose us?</p>
+        <h2 class="section-title reveal">The Cooperative Mortgage Bank Advantage</h2>
+        <div class="comparison reveal">
+          <div class="compare-card">
+            <h3>Traditional Banks</h3>
+            <ul>
+              <li>Paper-heavy</li>
+              <li>Slow approvals</li>
+              <li>Hidden fees</li>
+              <li>Limited hours</li>
+            </ul>
+          </div>
+          <div class="compare-card global">
+            <h3>Cooperative Mortgage Bank</h3>
+            <ul>
+              <li>Mortgage-focused products</li>
+              <li>Group ownership schemes</li>
+              <li>Cooperative-friendly services</li>
+              <li>Digital banking access</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta-band">
+      <div class="container">
+        <div class="cta-panel reveal">
+          <div>
+            <h2>Ready to Start With Cooperative Mortgage Bank?</h2>
+            <p>Open an account, explore mortgage products, or contact a branch.</p>
+          </div>
+          <a class="cta-button" href="#">Open Account <span>&rarr;</span></a>
+        </div>
+      </div>
+    </section>
+
+    <section class="testimonials">
+      <div class="container">
+        <p class="section-eyebrow">Testimonials</p>
+        <h2 class="section-title reveal">Customers are moving closer to ownership.</h2>
+        <div class="testimonial-grid reveal">
+          <div class="testimonial">
+            <blockquote>"Cooperative Mortgage Bank helped me understand the right path to home ownership."</blockquote>
+            <span>Charles T.</span>
+          </div>
+          <div class="testimonial">
+            <blockquote>"Their group mortgage options made planning with my cooperative much easier."</blockquote>
+            <span>Adeola C.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <span class="brand-logo" aria-label="Cooperative Mortgage Bank">
+            <strong>CMBANK</strong>
+            <span>Cooperative Mortgage Bank</span>
+          </span>
+          <p>Committed to giving people more through savings, loans, investments, mortgage products, and group ownership solutions.</p>
+        </div>
+        <div>
+          <h4>Resources</h4>
+          <ul>
+            <li>Blog</li>
+            <li>Careers</li>
+            <li>Products</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Legal</h4>
+          <ul>
+            <li>Terms of Service</li>
+            <li>Privacy Policy</li>
+            <li>FAQs</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Contact</h4>
+          <ul>
+            <li>info@cmbankng.com</li>
+            <li>cmbconnect@cmbankng.com</li>
+            <li>09154138207</li>
+            <li>11B, University Crescent, Secretariat - U.I. Road, Ibadan.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>&copy; 2026 Cooperative Mortgage Bank. All rights reserved.</span>
+        <div class="socials">
+          <a href="#"><img src="https://mygtmb.com/_next/image?url=%2Flinkedin.png&w=48&q=75" alt="LinkedIn"></a>
+          <a href="#"><img src="https://mygtmb.com/_next/image?url=%2Finstagram.png&w=48&q=75" alt="Instagram"></a>
+          <a href="#"><img src="https://mygtmb.com/_next/image?url=%2Ffacebook.png&w=48&q=75" alt="Facebook"></a>
+          <a href="#"><img src="https://mygtmb.com/_next/image?url=%2Fx.png&w=48&q=75" alt="X">
+          </a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const navShell = document.getElementById('navShell');
+    const mobileToggle = document.getElementById('mobileToggle');
+    const mobileMenu = document.getElementById('mobileMenu');
+
+    const updateNav = () => {
+      navShell.classList.toggle('scrolled', window.scrollY > 12);
+    };
+
+    updateNav();
+    window.addEventListener('scroll', updateNav, { passive: true });
+
+    mobileToggle.addEventListener('click', () => {
+      mobileMenu.classList.toggle('active');
+    });
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.14, rootMargin: '0px 0px -8% 0px' });
+
+    document.querySelectorAll('.reveal:not(.visible)').forEach((element) => {
+      observer.observe(element);
+    });
+  </script>
+</body>
+</html>

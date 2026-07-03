@@ -1,5 +1,5 @@
 // js/uploader-dashboard.js - LIGHTWEIGHT VERSION (Only Track + Calculator)
-import { auth, db } from './firebase-config.js?v=20260625b';
+import { auth, db } from './firebase-config.js?v=20260625c';
 import {
     getCurrentUserProfile as getCurrentUserProfileShared,
     getUserFullName as getUserFullNameShared

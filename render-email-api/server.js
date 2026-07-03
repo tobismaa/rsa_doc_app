@@ -15,7 +15,7 @@ const { createDailyReportWorkbookBuffer, createOutstandingReportWorkbookBuffer, 
 const execFileAsync = promisify(execFile);
 
 const app = express();
-const port = Number(process.env.PORT || 3000);
+const port = Number(process.env.PORT || 5000);
 const requireAuth = String(process.env.REQUIRE_FIREBASE_AUTH || 'true').toLowerCase() !== 'false';
 const maxPdfRenderPayloadSize = String(process.env.PDF_RENDER_BODY_LIMIT || '24mb').trim() || '24mb';
 const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
@@ -23,11 +23,26 @@ const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
     .map((v) => v.trim())
     .filter(Boolean);
 const localDevOrigins = new Set([
+    'http://localhost:5000',
+    'http://127.0.0.1:5000',
     'http://localhost:8000',
     'http://127.0.0.1:8000',
+    'http://localhost:5500',
+    'http://127.0.0.1:5500',
     'http://localhost:63342',
     'http://127.0.0.1:63342'
 ]);
+
+function isLocalDevOrigin(origin) {
+    if (!origin) return false;
+    if (localDevOrigins.has(origin)) return true;
+    try {
+        const parsed = new URL(origin);
+        return ['localhost', '127.0.0.1'].includes(parsed.hostname);
+    } catch (_) {
+        return false;
+    }
+}
 
 const allowedTypes = new Set([
     'submission_assigned_viewer',
@@ -413,7 +428,7 @@ function corsOptionsDelegate(req, callback) {
     }
 
     const reqOrigin = req.header('Origin');
-    const allowed = reqOrigin && (allowedOrigins.includes(reqOrigin) || localDevOrigins.has(reqOrigin));
+    const allowed = reqOrigin && (allowedOrigins.includes(reqOrigin) || isLocalDevOrigin(reqOrigin));
     callback(null, { origin: Boolean(allowed) });
 }
 
@@ -446,6 +461,7 @@ if (sendgridApiKey) {
 const defaultFromEmail = normalizeEmail(process.env.SENDGRID_FROM_EMAIL);
 
 app.use(cors(corsOptionsDelegate));
+app.options('*', cors(corsOptionsDelegate));
 app.use(express.json({ limit: maxPdfRenderPayloadSize }));
 app.use('/assets', express.static(path.join(__dirname, 'assets'), {
     maxAge: '30d',

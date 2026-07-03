@@ -13,7 +13,7 @@
     <script src="js/console-guard.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
-    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260508i">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260630b">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 </head>
 <body>
@@ -38,6 +38,8 @@
             <a href="#" class="nav-item" data-tab="admins"><i class="fas fa-users-cog"></i><span>User Management</span><span class="badge" id="adminsNavCount">0</span></a>
             <a href="#" class="nav-item" data-tab="routing-rules"><i class="fas fa-route"></i><span>Uploader Routing</span><span class="badge" id="routingRulesNavCount">0</span></a>
             <a href="#" class="nav-item" data-tab="agents"><i class="fas fa-user-tie"></i><span>Agent</span></a>
+            <a href="#" class="nav-item" data-tab="application-controls"><i class="fas fa-screwdriver-wrench"></i><span>Application Controls</span></a>
+            <a href="#" class="nav-item" data-tab="backdate-report"><i class="fas fa-file-lines"></i><span>Backdate Report</span></a>
             <a href="#" class="nav-item" data-tab="audit"><i class="fas fa-file-shield"></i><span>Audit</span><span class="badge" id="auditNavCount">0</span></a>
             <a href="#" class="nav-item" data-tab="security"><i class="fas fa-lock"></i><span>Security</span><span class="badge" id="securityNavCount">0</span></a>
             <a href="#" class="nav-item" data-tab="round-robin"><i class="fas fa-rotate"></i><span>Round Robin</span></a>
@@ -78,7 +80,7 @@
                     <select id="superUserRoleFilter" style="padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
                         <option value="">All Roles</option>
                         <option value="uploader">Uploader</option>
-                        <option value="reports_monitoring">Reports Monitoring</option>
+                        <option value="reports_monitoring">Audit</option>
                         <option value="reviewer">Reviewer</option>
                         <option value="rsa">RSA</option>
                         <option value="payment">Payment</option>
@@ -235,6 +237,128 @@
                             <tbody id="superAgentRerouteTableBody"></tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="application-controlsTab" class="tab-content">
+            <div class="table-section application-controls-section">
+                <div class="application-controls-header">
+                    <div>
+                        <h2>Application Controls</h2>
+                        <p style="color:#64748b;margin:0;">Backdate applications, edit customer details, change status, and mark customers as paid from one workspace.</p>
+                    </div>
+                </div>
+                <div class="application-controls-subtabs">
+                    <button id="applicationControlsBackdateBtn" class="action-btn" type="button" onclick="window.switchApplicationControlSubTab('backdate')">
+                        <i class="fas fa-clock-rotate-left"></i> Backdate
+                    </button>
+                    <button id="applicationControlsCustomerEditBtn" class="action-btn" type="button" onclick="window.switchApplicationControlSubTab('customer-edit')">
+                        <i class="fas fa-user-pen"></i> Customer Edit
+                    </button>
+                    <button id="applicationControlsMarkPaidBtn" class="action-btn" type="button" onclick="window.switchApplicationControlSubTab('mark-paid')">
+                        <i class="fas fa-money-check-dollar"></i> Mark Paid
+                    </button>
+                    <button id="applicationControlsStatusChangeBtn" class="action-btn" type="button" onclick="window.switchApplicationControlSubTab('status-change')">
+                        <i class="fas fa-arrows-rotate"></i> Status Change
+                    </button>
+                </div>
+
+                <div id="applicationControlBackdateSection" class="application-control-panel">
+                    <div class="backdate-launch-section">
+                        <div>
+                            <h3>Backdate</h3>
+                            <p style="color:#64748b;margin:0 0 12px;">Search an application by PEN number or customer name, then edit stage dates, times, and assigned handlers.</p>
+                        </div>
+                        <button id="openBackdateSearchModalBtn" class="action-btn" type="button" style="background:#003366;color:#fff;border:none;">
+                            <i class="fas fa-magnifying-glass"></i> Search Application
+                        </button>
+                    </div>
+                </div>
+
+                <div id="applicationControlCustomerEditSection" class="application-control-panel" style="display:none;">
+                    <div class="customer-edit-launch-section">
+                        <div>
+                            <h3>Customer Edit</h3>
+                            <p style="color:#64748b;margin:0 0 12px;">Search an application by PEN number or customer name and edit the customer details used across dashboards.</p>
+                        </div>
+                        <button id="openCustomerEditSearchModalBtn" class="action-btn" type="button" style="background:#003366;color:#fff;border:none;">
+                            <i class="fas fa-magnifying-glass"></i> Search Application
+                        </button>
+                    </div>
+                </div>
+
+                <div id="applicationControlMarkPaidSection" class="application-control-panel" style="display:none;">
+                    <div class="mark-paid-launch-section">
+                        <div>
+                            <h3>Mark Paid</h3>
+                            <p style="color:#64748b;margin:0 0 12px;">Search an application by PEN number or customer name and choose the payment user who should appear as the officer that marked it paid.</p>
+                        </div>
+                        <button id="openMarkPaidSearchModalBtn" class="action-btn" type="button" style="background:#003366;color:#fff;border:none;">
+                            <i class="fas fa-magnifying-glass"></i> Search Application
+                        </button>
+                    </div>
+                </div>
+
+                <div id="applicationControlStatusChangeSection" class="application-control-panel" style="display:none;">
+                    <div class="mark-paid-launch-section">
+                        <div>
+                            <h3>Status Change</h3>
+                            <p style="color:#64748b;margin:0 0 12px;">Search an application by PEN number or customer name and update its workflow status. Reopening a final submission to RSA clears the old Sent to PFA timestamps.</p>
+                        </div>
+                        <button id="openStatusChangeSearchModalBtn" class="action-btn" type="button" style="background:#003366;color:#fff;border:none;">
+                            <i class="fas fa-magnifying-glass"></i> Search Application
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="backdate-reportTab" class="tab-content">
+            <div class="table-section backdate-report-section">
+                <div class="backdate-report-header">
+                    <div>
+                        <h2>Backdated Applications Report</h2>
+                        <p style="color:#64748b;margin:0;">View and generate a list of applications changed through the backdate control.</p>
+                    </div>
+                    <button id="downloadBackdateReportBtn" class="action-btn" type="button" style="background:#0f766e;color:#fff;border:none;">
+                        <i class="fas fa-file-excel"></i> Generate Excel
+                    </button>
+                </div>
+                <div class="backdate-report-controls">
+                    <label>Search
+                        <input id="backdateReportSearch" type="text" placeholder="Customer, PEN, user, status...">
+                    </label>
+                    <label>Start Date
+                        <input id="backdateReportStartDate" type="date">
+                    </label>
+                    <label>End Date
+                        <input id="backdateReportEndDate" type="date">
+                    </label>
+                    <button id="viewBackdateReportBtn" class="action-btn" type="button" style="background:#003366;color:#fff;border:none;">
+                        <i class="fas fa-eye"></i> View
+                    </button>
+                </div>
+                <div class="backdate-report-summary" id="backdateReportSummary">0 backdated applications found</div>
+                <div class="table-container backdate-report-table-wrap">
+                    <table class="documents-table backdate-report-table">
+                        <thead>
+                            <tr>
+                                <th>Backdated At</th>
+                                <th>Customer</th>
+                                <th>PEN</th>
+                                <th>Status</th>
+                                <th>Uploaded At</th>
+                                <th>Backdated By</th>
+                                <th>Reason</th>
+                                <th>Reviewer</th>
+                                <th>RSA</th>
+                                <th>Payment</th>
+                                <th>Commission Rate</th>
+                            </tr>
+                        </thead>
+                        <tbody id="backdateReportTableBody"></tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -817,6 +941,193 @@
     </main>
 </div>
 
+<div id="backdateSearchModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="backdateSearchModalTitle">
+    <div class="modal-content small">
+        <div class="modal-header">
+            <h2 id="backdateSearchModalTitle"><i class="fas fa-clock-rotate-left"></i> Backdate Application</h2>
+            <button id="closeBackdateSearchModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <label class="backdate-search-field">Customer PEN Number or Name
+                <input id="backdatePenInput" type="text" placeholder="Enter customer PEN or customer name">
+            </label>
+            <div id="backdateSearchStatus" class="backdate-status" style="display:none;"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelBackdateSearchModalBtn" type="button" class="cancel-btn">Cancel</button>
+            <button id="searchBackdatePenBtn" type="button" class="confirm-btn">
+                <i class="fas fa-magnifying-glass"></i> Search
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="backdateEditorModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="backdateEditorModalTitle">
+    <div class="modal-content large-modal backdate-editor-modal-content">
+        <div class="modal-header">
+            <h2 id="backdateEditorModalTitle"><i class="fas fa-timeline"></i> Application Timeline</h2>
+            <button id="closeBackdateEditorModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="backdateEditorSummary" class="backdate-editor-summary"></div>
+            <div class="table-container backdate-stage-table-wrap">
+                <table class="documents-table backdate-stage-table">
+                    <thead>
+                        <tr>
+                            <th>Stage</th>
+                            <th>Current Date & Time</th>
+                            <th>Edit Date & Time</th>
+                            <th>Person Attended</th>
+                        </tr>
+                    </thead>
+                    <tbody id="backdateStageTableBody"></tbody>
+                </table>
+            </div>
+            <label class="backdate-reason-field">Reason for Backdate
+                <textarea id="backdateReasonInput" rows="3" placeholder="Enter reason for this change"></textarea>
+            </label>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelBackdateEditorModalBtn" type="button" class="cancel-btn">Cancel</button>
+            <button id="saveBackdateChangesBtn" type="button" class="confirm-btn">
+                <i class="fas fa-save"></i> Save Changes
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="customerEditSearchModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="customerEditSearchModalTitle">
+    <div class="modal-content small">
+        <div class="modal-header">
+            <h2 id="customerEditSearchModalTitle"><i class="fas fa-user-pen"></i> Edit Customer Details</h2>
+            <button id="closeCustomerEditSearchModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <label class="customer-edit-search-field">Customer PEN Number or Name
+                <input id="customerEditPenInput" type="text" placeholder="Enter customer PEN or customer name">
+            </label>
+            <div id="customerEditSearchStatus" class="customer-edit-status" style="display:none;"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelCustomerEditSearchModalBtn" type="button" class="cancel-btn">Cancel</button>
+            <button id="searchCustomerEditPenBtn" type="button" class="confirm-btn">
+                <i class="fas fa-magnifying-glass"></i> Search
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="customerEditModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="customerEditModalTitle">
+    <div class="modal-content large-modal customer-edit-modal-content">
+        <div class="modal-header">
+            <h2 id="customerEditModalTitle"><i class="fas fa-address-card"></i> Customer Details</h2>
+            <button id="closeCustomerEditModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="customerEditSummary" class="customer-edit-summary"></div>
+            <div id="customerEditFormGrid" class="customer-edit-form-grid"></div>
+            <label class="customer-edit-reason-field">Reason for Change
+                <textarea id="customerEditReasonInput" rows="3" placeholder="Optional note for audit"></textarea>
+            </label>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelCustomerEditModalBtn" type="button" class="cancel-btn">Cancel</button>
+            <button id="saveCustomerEditBtn" type="button" class="confirm-btn">
+                <i class="fas fa-save"></i> Save Details
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="markPaidSearchModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="markPaidSearchModalTitle">
+    <div class="modal-content small">
+        <div class="modal-header">
+            <h2 id="markPaidSearchModalTitle"><i class="fas fa-money-check-dollar"></i> Mark Customer Paid</h2>
+            <button id="closeMarkPaidSearchModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <label class="mark-paid-search-field">Customer PEN Number or Name
+                <input id="markPaidPenInput" type="text" placeholder="Enter customer PEN or customer name">
+            </label>
+            <div id="markPaidSearchStatus" class="mark-paid-status" style="display:none;"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelMarkPaidSearchModalBtn" type="button" class="cancel-btn">Cancel</button>
+            <button id="searchMarkPaidPenBtn" type="button" class="confirm-btn">
+                <i class="fas fa-magnifying-glass"></i> Search
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="markPaidModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="markPaidModalTitle">
+    <div class="modal-content mark-paid-modal-content">
+        <div class="modal-header">
+            <h2 id="markPaidModalTitle"><i class="fas fa-receipt"></i> Payment Confirmation</h2>
+            <button id="closeMarkPaidModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="markPaidSummary" class="mark-paid-summary"></div>
+            <label class="mark-paid-field">Payment User to Reflect
+                <select id="markPaidPaymentUserSelect"></select>
+            </label>
+            <label class="mark-paid-field mark-paid-reason-field">Reason / Note
+                <textarea id="markPaidReasonInput" rows="3" placeholder="Optional note for audit"></textarea>
+            </label>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelMarkPaidModalBtn" type="button" class="cancel-btn">Cancel</button>
+            <button id="confirmMarkPaidBtn" type="button" class="confirm-btn">
+                <i class="fas fa-check"></i> Mark Paid
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="statusChangeSearchModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="statusChangeSearchModalTitle">
+    <div class="modal-content small">
+        <div class="modal-header">
+            <h2 id="statusChangeSearchModalTitle"><i class="fas fa-arrows-rotate"></i> Change Application Status</h2>
+            <button id="closeStatusChangeSearchModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <label class="mark-paid-search-field">Customer PEN Number or Name
+                <input id="statusChangePenInput" type="text" placeholder="Enter customer PEN or customer name">
+            </label>
+            <div id="statusChangeSearchStatus" class="mark-paid-status" style="display:none;"></div>
+            <div id="statusChangeSearchResults" class="status-change-search-results" style="display:none;"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelStatusChangeSearchModalBtn" type="button" class="cancel-btn">Cancel</button>
+            <button id="searchStatusChangePenBtn" type="button" class="confirm-btn">
+                <i class="fas fa-magnifying-glass"></i> Search
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="statusChangeModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="statusChangeModalTitle">
+    <div class="modal-content mark-paid-modal-content">
+        <div class="modal-header">
+            <h2 id="statusChangeModalTitle"><i class="fas fa-list-check"></i> Application Status</h2>
+            <button id="closeStatusChangeModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="statusChangeSummary" class="mark-paid-summary"></div>
+            <label class="mark-paid-field">New Status
+                <select id="statusChangeTargetStatus"></select>
+            </label>
+            <div id="statusChangeNotice" class="mark-paid-status" style="display:none;"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelStatusChangeModalBtn" type="button" class="cancel-btn">Cancel</button>
+            <button id="confirmStatusChangeBtn" type="button" class="confirm-btn">
+                <i class="fas fa-save"></i> Save Status
+            </button>
+        </div>
+    </div>
+</div>
+
 <div id="clearCacheConfirmModal" class="modal" role="dialog" aria-modal="true">
     <div class="modal-content clear-cache-confirm-content">
         <div class="modal-header">
@@ -1208,7 +1519,7 @@
                 <label>Role
                     <select id="superModalRole">
                         <option value="uploader">Uploader</option>
-                        <option value="reports_monitoring">Reports Monitoring</option>
+                        <option value="reports_monitoring">Audit</option>
                         <option value="reviewer">Reviewer</option>
                         <option value="rsa">RSA</option>
                         <option value="payment">Payment</option>
@@ -1293,7 +1604,7 @@
 <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="js/table-enhancer.js?v=20260512b"></script>
-<script type="module" src="js/super-admin.js?v=20260625b"></script>
+<script type="module" src="js/super-admin.js?v=20260630d"></script>
 <script type="module" src="js/profile-completion-guard.js?v=20260625b"></script>
 <link rel="stylesheet" href="css/pwa-install.css">
     <script src="js/pwa-install.js?v=20260625b"></script>

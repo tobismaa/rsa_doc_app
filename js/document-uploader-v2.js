@@ -4,7 +4,7 @@ import { BackblazeStorage } from './backblaze-storage.js';
 import { queueViewerAssignmentEmail } from './email-alerts.js';
 import { notifyStatusChangePush } from './status-push.js';
 import { notifyAdminPushEvent } from './push-alerts.js';
-import { EMAIL_API_BASE_URL } from './email-api-config.js';
+import { ACCOUNT_LOOKUP_API_BASE_URL, EMAIL_API_BASE_URL } from './email-api-config.js?v=20260703a';
 import { formatAppDateTime, getTrustedDateKey, getTrustedNowIso } from './shared/app-time.js';
 import {
   getCurrentUserProfile as getCurrentUserProfileShared,
@@ -32,7 +32,10 @@ import {
   getSubmissionCurrentStageEntryAt,
   getSubmissionReviewEntryAt,
   getSubmissionApprovalEntryAt,
-  getSubmissionRejectionEntryAt
+  getSubmissionRejectionEntryAt,
+  getSubmissionPaymentEntryAt,
+  getSubmissionPaidEntryAt,
+  getSubmissionClearedEntryAt
 } from './shared/submission-stage.js?v=20260609a';
 import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import {
@@ -241,30 +244,46 @@ async function populateAgentBankOptions({ force = false } = {}) {
   if (!agentAccountBankSelect) return;
 
   const currentValue = String(agentAccountBankSelect.value || '').trim();
-  let bankOptions = [];
+  let bankOptions = !force && accountLookupBanks.length ? [...accountLookupBanks] : [];
   try {
-    const settings = await getSystemSettings(db, { force });
-    bankOptions = Array.isArray(settings.agentBankOptions)
-      ? settings.agentBankOptions.filter((bank) => bank?.active && String(bank?.name || '').trim())
-      : [];
+    if (!bankOptions.length) {
+      bankOptions = await fetchAccountLookupBanks();
+    }
   } catch (_) {
-    bankOptions = [];
+    bankOptions = [...FALLBACK_CUSTOMER_ACCOUNT_BANKS];
   }
+  if (!bankOptions.length) bankOptions = [...FALLBACK_CUSTOMER_ACCOUNT_BANKS];
 
   agentAccountBankSelect.innerHTML = '<option value="">Select Bank</option>' + bankOptions.map((bank) => (
-    `<option value="${escapeHtml(bank.name)}">${escapeHtml(bank.name)}</option>`
+    `<option value="${escapeHtml(bank.code || bank.name)}" data-name="${escapeHtml(getCustomerAccountBankLabel(bank))}">${escapeHtml(getCustomerAccountBankLabel(bank))}</option>`
   )).join('');
 
-  if (currentValue && bankOptions.some((bank) => bank.name === currentValue)) {
+  if (currentValue && bankOptions.some((bank) => bank.code === currentValue || bank.name === currentValue)) {
     agentAccountBankSelect.value = currentValue;
   }
 }
 
 function getBackendApiBaseUrl() {
-  const runtime = String(window.__EMAIL_API_BASE_URL__ || '').trim();
-  const configured = runtime || String(EMAIL_API_BASE_URL || '').trim();
+  const runtime = String(window.__ACCOUNT_LOOKUP_API_BASE_URL__ || '').trim();
+  const configured = runtime
+    || String(ACCOUNT_LOOKUP_API_BASE_URL || '').trim()
+    || String(window.__EMAIL_API_BASE_URL__ || '').trim()
+    || String(EMAIL_API_BASE_URL || '').trim();
   if (!configured || configured.includes('YOUR-RENDER-URL')) return '';
   return configured.replace(/\/+$/, '');
+}
+
+async function fetchAccountLookupBanks() {
+  const data = await backendFetchJson('/api/paystack/banks');
+  return Array.isArray(data.banks) ? data.banks : [];
+}
+
+async function fetchResolvedAccountName(accountNumber, bankCode) {
+  const data = await backendFetchJson('/api/paystack/resolve-account', {
+    method: 'POST',
+    body: JSON.stringify({ accountNumber, bankCode })
+  });
+  return String(data.accountName || '').trim();
 }
 
 function setAccountLookupStatus(message = '', type = 'info') {
@@ -366,8 +385,7 @@ async function populateCustomerAccountBankOptions() {
   }
   const currentCode = String(accountBankSelect.value || '').trim();
   try {
-    const data = await backendFetchJson('/api/paystack/banks');
-    accountLookupBanks = Array.isArray(data.banks) ? data.banks : [];
+    accountLookupBanks = await fetchAccountLookupBanks();
     if (!accountLookupBanks.length) {
       accountLookupBanks = [...FALLBACK_CUSTOMER_ACCOUNT_BANKS];
       setAccountLookupStatus('Using saved bank list. Account name verification still needs Paystack.', 'info');
@@ -407,12 +425,8 @@ async function resolveCustomerAccountName({ silent = false } = {}) {
 
   if (!silent) setAccountLookupStatus('Verifying account name...', 'info');
   try {
-    const data = await backendFetchJson('/api/paystack/resolve-account', {
-      method: 'POST',
-      body: JSON.stringify({ accountNumber, bankCode: bank.code })
-    });
+    const accountName = await fetchResolvedAccountName(accountNumber, bank.code);
     if (sequence !== accountLookupSequence) return true;
-    const accountName = String(data.accountName || '').trim();
     verifiedAccountLookup = { accountNumber, bankCode: bank.code, accountName };
     if (accountNameInput) accountNameInput.value = accountName;
     if (customerNameInput) {
@@ -432,6 +446,81 @@ function scheduleCustomerAccountLookup() {
   if (accountLookupDebounce) window.clearTimeout(accountLookupDebounce);
   accountLookupDebounce = window.setTimeout(() => {
     void resolveCustomerAccountName();
+  }, 500);
+}
+
+function setAgentAccountLookupStatus(message = '', type = 'info') {
+  if (!agentAccountLookupStatus) return;
+  const text = String(message || '').trim();
+  agentAccountLookupStatus.textContent = text;
+  agentAccountLookupStatus.style.display = text ? 'block' : 'none';
+  const colors = {
+    error: '#dc2626',
+    success: '#15803d',
+    info: '#64748b'
+  };
+  agentAccountLookupStatus.style.color = colors[type] || colors.info;
+  if (agentAccountNumberInput) {
+    agentAccountNumberInput.style.borderColor = type === 'error' ? '#dc2626' : '';
+    agentAccountNumberInput.style.boxShadow = type === 'error' ? '0 0 0 3px rgba(220, 38, 38, 0.12)' : '';
+  }
+  if (agentAccountBankSelect) {
+    agentAccountBankSelect.style.borderColor = type === 'error' ? '#dc2626' : '';
+    agentAccountBankSelect.style.boxShadow = type === 'error' ? '0 0 0 3px rgba(220, 38, 38, 0.12)' : '';
+  }
+}
+
+function clearVerifiedAgentAccountLookup() {
+  verifiedAgentAccountLookup = { accountNumber: '', bankCode: '', accountName: '' };
+  if (agentAccountNameInput) agentAccountNameInput.value = '';
+}
+
+function getSelectedAgentAccountBank() {
+  const code = String(agentAccountBankSelect?.value || '').trim();
+  const option = agentAccountBankSelect?.selectedOptions?.[0] || null;
+  const name = String(option?.dataset?.name || option?.textContent || '').trim();
+  return { code, name };
+}
+
+async function resolveAgentAccountName({ silent = false } = {}) {
+  const sequence = ++agentAccountLookupSequence;
+  const accountNumber = String(agentAccountNumberInput?.value || '').replace(/\D/g, '');
+  const bank = getSelectedAgentAccountBank();
+  clearVerifiedAgentAccountLookup();
+
+  if (!accountNumber && !bank.code) {
+    setAgentAccountLookupStatus('', 'info');
+    return true;
+  }
+  if (accountNumber && accountNumber.length !== 10) {
+    setAgentAccountLookupStatus('Enter a valid 10-digit account number.', 'error');
+    return false;
+  }
+  if (accountNumber.length === 10 && !bank.code) {
+    setAgentAccountLookupStatus('Select account bank to verify account name.', 'error');
+    return false;
+  }
+  if (accountNumber.length !== 10 || !bank.code) return true;
+
+  if (!silent) setAgentAccountLookupStatus('Verifying account name...', 'info');
+  try {
+    const accountName = await fetchResolvedAccountName(accountNumber, bank.code);
+    if (sequence !== agentAccountLookupSequence) return true;
+    verifiedAgentAccountLookup = { accountNumber, bankCode: bank.code, accountName };
+    if (agentAccountNameInput) agentAccountNameInput.value = accountName;
+    setAgentAccountLookupStatus(accountName ? `Verified: ${accountName}` : 'Account verified.', 'success');
+    return true;
+  } catch (error) {
+    if (sequence !== agentAccountLookupSequence) return true;
+    setAgentAccountLookupStatus(error.message || 'Could not verify account name.', 'error');
+    return false;
+  }
+}
+
+function scheduleAgentAccountLookup() {
+  if (agentAccountLookupDebounce) window.clearTimeout(agentAccountLookupDebounce);
+  agentAccountLookupDebounce = window.setTimeout(() => {
+    void resolveAgentAccountName();
   }, 500);
 }
 
@@ -988,6 +1077,9 @@ const draftTableBody = document.getElementById('draftTableBody');
 const pendingTableBody = document.getElementById('pendingTableBody');
 const approvedTableBody = document.getElementById('approvedTableBody');
 const rejectedTableBody = document.getElementById('rejectedTableBody');
+const applicationsTableBody = document.getElementById('applicationsTableBody');
+const applicationsTableHeadRow = applicationsTableBody?.closest('table')?.querySelector('thead tr');
+const applicationsSearch = document.getElementById('applicationsSearch');
 const uploaderRejectionReasonModal = document.getElementById('uploaderRejectionReasonModal');
 const closeUploaderRejectionReasonModal = document.getElementById('closeUploaderRejectionReasonModal');
 const closeUploaderRejectionReasonBtn = document.getElementById('closeUploaderRejectionReasonBtn');
@@ -1048,7 +1140,10 @@ const profileRoleEl = document.getElementById('profileRole');
 const profileStatusEl = document.getElementById('profileStatus');
 const registeredAgentsTableBody = document.getElementById('registeredAgentsTableBody');
 const customerAgentSelect = document.getElementById('customerAgent');
+const agentAccountNumberInput = document.getElementById('agentAccountNumber');
 const agentAccountBankSelect = document.getElementById('agentAccountBank');
+const agentAccountNameInput = document.getElementById('agentAccountName');
+const agentAccountLookupStatus = document.getElementById('agentAccountLookupStatus');
 const pfaInput = document.getElementById('pfa');
 const pfaOptionsList = document.getElementById('pfaOptionsList');
 const uploadModalHeading = uploadModal?.querySelector('.modal-header h2');
@@ -1060,7 +1155,11 @@ const resetAgentFormBtn = document.getElementById('resetAgentFormBtn');
 const submitAgentFormBtn = document.getElementById('submitAgentFormBtn');
 let __batchFilesBuffer = [];
 let currentCommissionTab = 'sent_to_pfa';
+let currentUploaderApplicationTab = 'draft';
 let registeredAgents = [];
+let agentAccountLookupSequence = 0;
+let agentAccountLookupDebounce = null;
+let verifiedAgentAccountLookup = { accountNumber: '', bankCode: '', accountName: '' };
 
 function renderProfileTab() {
   if (!profileNameEl && !profileEmailEl && !profileRoleEl && !profileStatusEl) return;
@@ -1594,7 +1693,7 @@ function applyDraftFormValues(sub) {
     { id: 'customerNIN', keys: ['nin', 'customerNIN'] },
     { id: 'customerAddress', keys: ['address', 'customerAddress'] },
     { id: 'accountNo', keys: ['accountNo'] },
-    { id: 'accountBank', keys: ['accountBankCode', 'bankCode'] },
+    { id: 'accountBank', keys: ['accountBankCode', 'bankCode'], fallback: DEFAULT_CUSTOMER_ACCOUNT_BANK_CODE },
     { id: 'employer', keys: ['employer'] },
     { id: 'originatingTP', keys: ['originatingTP'], fallback: String(currentUserProfile?.location || '').trim() },
     { id: 'mortgageLoanApplicationFormDate', keys: ['mortgageLoanApplicationFormDate'] },
@@ -1736,7 +1835,8 @@ function getRejectionHistoryEntries(submission) {
       if (!reason) return null;
       return {
         reason,
-        rejectedAt: entry?.rejectedAt || null
+        rejectedAt: entry?.rejectedAt || null,
+        rejectedBy: entry?.rejectedBy || entry?.performedBy || entry?.actorEmail || null
       };
     })
     .filter(Boolean);
@@ -1752,7 +1852,8 @@ function getRejectionHistoryEntries(submission) {
 
   return fallbackReason ? [{
     reason: fallbackReason,
-    rejectedAt: submission?.latestRejectedAt || submission?.previousRejectedAt || submission?.reviewedAt || null
+    rejectedAt: submission?.latestRejectedAt || submission?.previousRejectedAt || submission?.reviewedAt || null,
+    rejectedBy: submission?.latestRejectedBy || submission?.reviewedBy || null
   }] : [];
 }
 
@@ -1903,7 +2004,13 @@ function getCurrentUserRoleLevel() {
   return 1;
 }
 
+function isCurrentUserUploaderLevel2() {
+  const role = String(currentUserProfile?.role || '').trim().toLowerCase();
+  return role === 'uploader' && getCurrentUserRoleLevel() === 2;
+}
+
 function canCurrentUserSubmitWithoutDocuments() {
+  if (isCurrentUserUploaderLevel2()) return true;
   const role = String(currentUserProfile?.role || '').trim().toLowerCase();
   const level = getCurrentUserRoleLevel();
   if (!role) return false;
@@ -2359,9 +2466,10 @@ function calculateAndDisplayCustomerInfo() {
 // ==================== SAVE CUSTOMER DETAILS ====================
 async function saveCustomerDetails() {
   // Define requiredFields INSIDE the function
+  const allowOptionalCustomerFields = isCurrentUserUploaderLevel2();
   const requiredFields = [
     'customerName', 'customerDob', 'customerEmail', 'customerPhone',
-    'customerNIN', 'customerAddress', 'accountNo', 'accountBank', 'employer',
+    'customerNIN', 'customerAddress', 'accountNo', 'employer',
     'originatingTP', 'mortgageLoanApplicationFormDate', 'pfa', 'penNo', 'rsaStatementDate', 'rsaBalance'
   ];
 
@@ -2376,11 +2484,13 @@ async function saveCustomerDetails() {
 
   requiredFields.forEach(id => {
     const el = document.getElementById(id);
-    if (!el || !el.value.trim()) {
+    const value = String(el?.value || '').trim();
+    const isRequiredForUser = !allowOptionalCustomerFields || id === 'customerName';
+    if (!el || !value) {
+      if (!isRequiredForUser) return;
       missingFields.push(id);
       return;
     }
-    const value = el.value.trim();
     if (id === 'accountNo' && !/^\d{10}$/.test(value)) invalidFields.push('Account Number (must be exactly 10 digits)');
     if (id === 'customerPhone' && !/^\d{11}$/.test(value)) invalidFields.push('Phone (must be exactly 11 digits)');
     if (id === 'customerNIN' && !/^\d{11}$/.test(value)) invalidFields.push('NIN (must be exactly 11 digits)');
@@ -2398,7 +2508,7 @@ async function saveCustomerDetails() {
 
   const penNo = document.getElementById('penNo')?.value?.trim() || '';
   const duplicateExcludeId = currentEditId || currentDraftId || '';
-  if (!(await validatePenNumberAvailable(penNo, duplicateExcludeId, { inline: true, notify: false }))) {
+  if (penNo && !(await validatePenNumberAvailable(penNo, duplicateExcludeId, { inline: true, notify: false }))) {
     return false;
   }
 
@@ -2597,6 +2707,12 @@ function setupEventListeners() {
   document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
     item.addEventListener('click', (e) => { e.preventDefault(); switchTab(item.dataset.tab); });
   });
+  document.querySelectorAll('[data-uploader-application-tab]').forEach((button) => {
+    button.addEventListener('click', () => switchUploaderApplicationTab(button.dataset.uploaderApplicationTab || 'pending'));
+  });
+  if (applicationsSearch) {
+    applicationsSearch.addEventListener('input', renderUploaderApplicationsTable);
+  }
   if (rejectedTableBody) {
     rejectedTableBody.addEventListener('click', (e) => {
       const chatTrigger = e.target.closest('.app-chat-trigger');
@@ -2720,6 +2836,27 @@ function setupEventListeners() {
   if (resetAgentFormBtn) {
     resetAgentFormBtn.addEventListener('click', () => {
       agentRegistrationForm?.reset();
+      clearVerifiedAgentAccountLookup();
+      setAgentAccountLookupStatus('', 'info');
+    });
+  }
+  if (agentAccountNumberInput) {
+    agentAccountNumberInput.addEventListener('input', () => {
+      const digits = String(agentAccountNumberInput.value || '').replace(/\D/g, '').slice(0, 10);
+      agentAccountNumberInput.value = digits;
+      clearVerifiedAgentAccountLookup();
+      setAgentAccountLookupStatus('', 'info');
+      scheduleAgentAccountLookup();
+    });
+    agentAccountNumberInput.addEventListener('blur', () => {
+      void resolveAgentAccountName();
+    });
+  }
+  if (agentAccountBankSelect) {
+    agentAccountBankSelect.addEventListener('change', () => {
+      clearVerifiedAgentAccountLookup();
+      setAgentAccountLookupStatus('', 'info');
+      void resolveAgentAccountName();
     });
   }
 
@@ -2815,8 +2952,11 @@ window.switchTab = (tabId) => {
   document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
   document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
   document.getElementById(`${tabId}Tab`)?.classList.add('active');
-  const titles = { overview: 'Dashboard', draft: 'Draft Submissions', pending: 'Pending Documents', approved: 'Approved Documents', rejected: 'Rejected Documents', paid: 'Agent Commission', 'register-agent': 'Register Agent', profile: 'My Profile' };
+  const titles = { overview: 'Dashboard', draft: 'Draft Submissions', applications: 'Applications', pending: 'Pending Documents', approved: 'Approved Documents', rejected: 'Rejected Documents', paid: 'Commission', 'register-agent': 'Register Agent', profile: 'My Profile' };
   if (pageTitle) pageTitle.textContent = titles[tabId] || 'My Documents';
+  if (tabId === 'applications') {
+    renderUploaderApplicationsTable();
+  }
   if (tabId === 'paid') {
     renderPaidTable();
   }
@@ -3818,11 +3958,12 @@ function updateSubmitButton() {
 }
 
 function getMissingRequiredSubmissionFields() {
+  const allowOptionalCustomerFields = isCurrentUserUploaderLevel2();
   const requiredFields = [
     { id: 'customerName', label: 'Customer Name' }, { id: 'customerDob', label: 'Date of Birth' },
     { id: 'customerEmail', label: 'Email' }, { id: 'customerPhone', label: 'Phone' },
     { id: 'customerNIN', label: 'NIN' }, { id: 'customerAddress', label: 'Address' },
-    { id: 'accountNo', label: 'Account Number' }, { id: 'accountBank', label: 'Account Bank' }, { id: 'employer', label: 'Employer' },
+    { id: 'accountNo', label: 'Account Number' }, { id: 'employer', label: 'Employer' },
     { id: 'originatingTP', label: 'Originating Transfer Pin' }, { id: 'mortgageLoanApplicationFormDate', label: 'Mortgage Loan Application Form Date' }, { id: 'pfa', label: 'PFA' },
     { id: 'penNo', label: 'PEN Number' }, { id: 'rsaStatementDate', label: 'RSA Statement Date' },
     { id: 'rsaBalance', label: 'RSA Balance' }, { id: 'propertyType', label: 'Property Type' },
@@ -3833,7 +3974,11 @@ function getMissingRequiredSubmissionFields() {
     const el = document.getElementById(field.id);
     if (!el) return;
     const value = String(el.value || '').trim();
-    if (!value) { missingLabels.push(field.label); return; }
+    const isRequiredForUser = !allowOptionalCustomerFields || field.id === 'customerName';
+    if (!value) {
+      if (isRequiredForUser) missingLabels.push(field.label);
+      return;
+    }
     if (field.id === 'accountNo' && !/^\d{10}$/.test(value)) invalidLabels.push('Account Number (must be exactly 10 digits)');
     if (field.id === 'customerPhone' && !/^\d{11}$/.test(value)) invalidLabels.push('Phone (must be exactly 11 digits)');
     if (field.id === 'customerNIN' && !/^\d{11}$/.test(value)) invalidLabels.push('NIN (must be exactly 11 digits)');
@@ -3845,6 +3990,7 @@ async function submitCustomer() {
   if (!assertWritable('Submission')) return;
   const customerName = customerNameInput.value.trim();
   const allowWithoutDocuments = canCurrentUserSubmitWithoutDocuments();
+  const allowOptionalCustomerFields = isCurrentUserUploaderLevel2();
   if (!customerName) return;
   if (!customerDetailsSaved) { showNotification('Please save customer details before submitting', 'error'); return; }
   const rolePermissions = (await getSystemSettings(db, { force: true })).rolePermissions || {};
@@ -3869,7 +4015,7 @@ async function submitCustomer() {
     }
     const penNo = document.getElementById('penNo')?.value?.trim() || '';
     const duplicateExcludeId = currentEditId || currentDraftId || '';
-    if (!(await validatePenNumberAvailable(penNo, duplicateExcludeId, { inline: true, notify: false }))) {
+    if (penNo && !(await validatePenNumberAvailable(penNo, duplicateExcludeId, { inline: true, notify: false }))) {
       submitCustomerBtn.disabled = false;
       syncUploadRequirementUi();
       return;
@@ -3894,7 +4040,7 @@ async function submitCustomer() {
           houseNumberEl.value = customerDetails.houseNumber;
         }
       }
-      if (!customerDetails.houseNumber) {
+      if (!customerDetails.houseNumber && !allowOptionalCustomerFields) {
         submitCustomerBtn.disabled = false;
         syncUploadRequirementUi();
         return showNotification('Unable to generate house number for this property type.', 'error');
@@ -3989,15 +4135,15 @@ async function submitCustomer() {
       syncUploadRequirementUi();
       return;
     }
-    const allocatedHouseNumber = customerDetails.houseNumber || await reserveHouseNumber(customerDetails.propertyType);
-    if (!allocatedHouseNumber) {
+    const allocatedHouseNumber = customerDetails.houseNumber || (customerDetails.propertyType ? await reserveHouseNumber(customerDetails.propertyType) : '');
+    if (!allocatedHouseNumber && !allowOptionalCustomerFields) {
       submitCustomerBtn.disabled = false;
       syncUploadRequirementUi();
       return showNotification('Unable to generate house number for this property type.', 'error');
     }
-    customerDetails.houseNumber = allocatedHouseNumber;
+    customerDetails.houseNumber = allocatedHouseNumber || customerDetails.houseNumber || '';
     const houseNumberEl = document.getElementById('houseNumber');
-    if (houseNumberEl) {
+    if (houseNumberEl && allocatedHouseNumber) {
       houseNumberEl.value = allocatedHouseNumber;
     }
     const uploaderEmail = normalizeEmail(currentUser?.email);
@@ -4011,7 +4157,7 @@ async function submitCustomer() {
       comment: '',
       documents,
       documentTypes: getUploadedDocumentTypes(),
-      houseNumber: allocatedHouseNumber,
+      houseNumber: customerDetails.houseNumber || '',
       penNoNormalized: normalizePenNumber(customerDetails.penNo),
       agentId: agentPayload.agentId,
       agentName: agentPayload.agentName,
@@ -4255,9 +4401,7 @@ async function downloadBulkImportTemplate() {
     const workbook = new window.ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Submission Drafts');
     const systemSettings = await getSystemSettings(db, { force: true });
-    const headers = Array.isArray(systemSettings.bulkImportRules?.requiredColumns) && systemSettings.bulkImportRules.requiredColumns.length
-      ? systemSettings.bulkImportRules.requiredColumns
-      : getDefaultSystemSettings().bulkImportRules.requiredColumns;
+    const headers = getCustomerBulkImportHeaders(systemSettings);
     sheet.addRow(headers);
     sheet.addRow([
       'John Doe', '1986-05-18', '0123456789', 'john@example.com', '08012345678', 'Agent Example',
@@ -4298,6 +4442,13 @@ function normalizeImportHeader(header) {
   return String(header || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
+function getCustomerBulkImportHeaders(systemSettings = {}) {
+  const configuredHeaders = Array.isArray(systemSettings.bulkImportRules?.requiredColumns) && systemSettings.bulkImportRules.requiredColumns.length
+    ? systemSettings.bulkImportRules.requiredColumns
+    : getDefaultSystemSettings().bulkImportRules.requiredColumns;
+  return configuredHeaders.filter((header) => normalizeImportHeader(header) !== 'accountbank');
+}
+
 async function buildImportedDraftPayload(rowMap) {
   const rsaBalanceValue = getCellText(rowMap.rsabalance);
   const rsaBalance = parseMoney(rsaBalanceValue);
@@ -4310,6 +4461,8 @@ async function buildImportedDraftPayload(rowMap) {
     nin: getCellText(rowMap.nin),
     address: getCellText(rowMap.address),
     accountNo: getCellText(rowMap.accountno),
+    accountBank: DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME,
+    accountBankCode: DEFAULT_CUSTOMER_ACCOUNT_BANK_CODE,
     employer: getCellText(rowMap.employer),
     originatingTP: getCellText(rowMap.originatingtp) || String(currentUserProfile?.location || '').trim(),
     mortgageLoanApplicationFormDate: getCellText(rowMap.mortgageformdate),
@@ -4366,9 +4519,7 @@ async function handleBulkImportSelection(event) {
   try {
     window.showLoader?.('Reading Excel draft import...');
     const systemSettings = await getSystemSettings(db, { force: true });
-    const requiredHeaders = Array.isArray(systemSettings.bulkImportRules?.requiredColumns) && systemSettings.bulkImportRules.requiredColumns.length
-      ? systemSettings.bulkImportRules.requiredColumns
-      : getDefaultSystemSettings().bulkImportRules.requiredColumns;
+    const requiredHeaders = getCustomerBulkImportHeaders(systemSettings);
     const workbook = new window.ExcelJS.Workbook();
     const buffer = await file.arrayBuffer();
     await workbook.xlsx.load(buffer);
@@ -4462,6 +4613,7 @@ async function loadSubmissions() {
     await renderPendingTable();
     await renderApprovedTable();
     await renderRejectedTable();
+    renderUploaderApplicationsTable();
     renderPaidTable();
     updateDashboardCards();
   }, (error) => { showNotification('Error loading submissions', 'error'); });
@@ -4616,9 +4768,11 @@ window.deleteDraftSubmission = async (id) => {
 function updateDashboardCards() {
   const draft = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'draft').length;
   const pending = allSubmissions.filter(s => s.status === 'pending').length;
-  const approved = allSubmissions.filter((s) => isUploaderApprovedLifecycleStatus(s)).length;
+  const approved = allSubmissions.filter((s) => getUploaderApplicationBucket(s) === 'approved').length;
   const rejected = allSubmissions.filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase())).length;
   const paid = allSubmissions.filter(s => String(s.status || '').toLowerCase() === 'paid').length;
+  const applicationCounts = getUploaderApplicationCounts();
+  const applicationsTotal = Object.values(applicationCounts).reduce((sum, value) => sum + value, 0);
   document.getElementById('cardPendingCount').textContent = pending;
   document.getElementById('cardApprovedCount').textContent = approved;
   document.getElementById('cardRejectedCount').textContent = rejected;
@@ -4633,7 +4787,9 @@ function updateDashboardCards() {
   setBadge('pendingCount', pending);
   setBadge('approvedCount', approved);
   setBadge('rejectedCount', rejected);
+  setBadge('applicationsCount', applicationsTotal);
   setBadge('paidCount', paid);
+  renderUploaderApplicationBadges();
 }
 
 function isUploaderApprovedLifecycleStatus(submission = {}) {
@@ -4650,20 +4806,318 @@ function isUploaderApprovedLifecycleStatus(submission = {}) {
   );
 }
 
+function isUploaderSentToPfaStatus(submission = {}) {
+  const status = String(submission.status || '').toLowerCase();
+  return (
+    status === 'sent_to_pfa' ||
+    status === 'rsa_submitted' ||
+    (
+      (submission.finalSubmitted === true || submission.rsaSubmitted === true) &&
+      status !== 'paid' &&
+      status !== 'cleared'
+    )
+  );
+}
+
+function getUploaderApplicationBucket(submission = {}) {
+  const status = String(submission.status || '').toLowerCase();
+  if (status === 'draft') return 'draft';
+  if (status === 'pending') return 'pending';
+  if (status === 'rejected' || status === 'rejected_by_rsa') return 'rejected';
+  if (status === 'paid') return 'paid';
+  if (status === 'cleared') return 'cleared';
+  if (isUploaderSentToPfaStatus(submission)) return 'sent_to_pfa';
+  if (status === 'approved' || status === 'processing_to_pfa') return 'approved';
+  return '';
+}
+
+function getUploaderApplicationCounts() {
+  return allSubmissions.reduce((acc, sub) => {
+    const bucket = getUploaderApplicationBucket(sub);
+    if (bucket && Object.prototype.hasOwnProperty.call(acc, bucket)) acc[bucket] += 1;
+    return acc;
+  }, { draft: 0, pending: 0, approved: 0, rejected: 0, sent_to_pfa: 0, paid: 0, cleared: 0 });
+}
+
+function getSubmissionPfaName(submission = {}) {
+  return String(submission?.customerDetails?.pfa || submission?.pfa || '').trim() || '-';
+}
+
+function getUploaderAuditNote(submission = {}) {
+  const auditStatus = String(submission.auditCommissionStatus || '').toLowerCase();
+  if (auditStatus === 'pending') return 'Payment made submitted to Audit';
+  if (auditStatus === 'accepted') return 'Accepted by Audit';
+  if (auditStatus === 'rejected') {
+    return `Rejected by Audit: ${submission.auditCommissionRejectionReason || 'No reason provided'}`;
+  }
+  return '-';
+}
+
+function getUploaderPaymentStageEntryAt(submission = {}) {
+  const bucket = getUploaderApplicationBucket(submission);
+  if (bucket === 'paid') return getSubmissionPaidEntryAt(submission);
+  if (bucket === 'cleared') return getSubmissionClearedEntryAt(submission);
+  if (bucket === 'sent_to_pfa') return getSubmissionPaymentEntryAt(submission);
+  return getSubmissionCurrentStageEntryAt(submission);
+}
+
+async function getUploaderPaymentResidentOfficer(submission = {}) {
+  const bucket = getUploaderApplicationBucket(submission);
+  const auditStatus = String(submission.auditCommissionStatus || '').toLowerCase();
+
+  if (bucket === 'sent_to_pfa' && auditStatus === 'pending') return 'Audit';
+  if (bucket === 'sent_to_pfa' && submission.paymentMadeByUploader !== true) return 'Uploader';
+
+  const officerEmail =
+    bucket === 'cleared'
+      ? (submission.clearedBy || submission.assignedToPayment || submission.paidBy || '')
+      : bucket === 'paid'
+        ? (submission.paidBy || submission.assignedToPayment || '')
+        : (submission.assignedToPayment || submission.paidBy || submission.finalSubmittedBy || submission.rsaSubmittedBy || '');
+
+  const normalized = normalizeEmail(officerEmail);
+  if (!normalized) return bucket === 'cleared' ? 'Closed' : '-';
+  return getUserFullName(normalized);
+}
+
+function getUploaderApplicationRows(tab = currentUploaderApplicationTab) {
+  const search = String(applicationsSearch?.value || '').trim().toLowerCase();
+  return allSubmissions
+    .filter((sub) => getUploaderApplicationBucket(sub) === tab)
+    .filter((sub) => {
+      if (!search) return true;
+      return [
+        sub.customerName,
+        getSubmissionAgentDisplayName(sub),
+        getSubmissionPfaName(sub),
+        formatSubmissionStatusLabel(sub.status || ''),
+        getUploaderAuditNote(sub)
+      ].some((value) => String(value || '').toLowerCase().includes(search));
+    })
+    .sort((a, b) => getSubmissionSortMillis(b) - getSubmissionSortMillis(a));
+}
+
+function renderUploaderApplicationBadges() {
+  const counts = getUploaderApplicationCounts();
+  const badgeMap = {
+    appDraftCount: counts.draft,
+    appPendingCount: counts.pending,
+    appApprovedCount: counts.approved,
+    appRejectedCount: counts.rejected,
+    appSentToPfaCount: counts.sent_to_pfa,
+    appPaidCount: counts.paid,
+    appClearedCount: counts.cleared
+  };
+  Object.entries(badgeMap).forEach(([id, value]) => {
+    const badge = document.getElementById(id);
+    if (badge) badge.textContent = String(value);
+  });
+}
+
+function setUploaderApplicationsColumns(columns = []) {
+  if (!applicationsTableHeadRow) return;
+  applicationsTableHeadRow.innerHTML = columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('');
+}
+
+function getUploaderApplicationColumnCount() {
+  return applicationsTableHeadRow?.querySelectorAll('th')?.length || 7;
+}
+
+function renderUploaderApplicationsEmpty(label) {
+  if (!applicationsTableBody) return;
+  applicationsTableBody.innerHTML = `<tr><td colspan="${getUploaderApplicationColumnCount()}" class="no-data">No ${escapeHtml(label)} applications</td></tr>`;
+}
+
+async function renderUploaderApplicationsTable() {
+  renderUploaderApplicationBadges();
+  if (!applicationsTableBody) return;
+
+  const rows = getUploaderApplicationRows();
+
+  if (currentUploaderApplicationTab === 'draft') {
+    setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Documents', 'Last Saved', 'Action']);
+    if (!rows.length) {
+      renderUploaderApplicationsEmpty('draft');
+      return;
+    }
+    applicationsTableBody.innerHTML = rows.map((sub) => {
+      const docCount = Array.isArray(sub.documents) ? sub.documents.length : 0;
+      return `
+        <tr data-submission-id="${sub.id}">
+          <td><strong>${escapeHtml(sub.customerName || 'Untitled Draft')}</strong></td>
+          <td>${escapeHtml(getSubmissionAgentDisplayName(sub))}</td>
+          <td>${docCount}</td>
+          <td>${safeFormatDate(sub.draftSavedAt || sub.uploadedAt)}</td>
+          <td>
+            <button class="action-btn edit-btn" onclick="window.openDraftSubmission('${sub.id}')"><i class="fas fa-pen"></i> Resume</button>
+            <button class="action-btn" onclick="window.deleteDraftSubmission('${sub.id}')" style="background:#b91c1c;color:#fff;border:none;"><i class="fas fa-trash"></i> Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+    return;
+  }
+
+  if (currentUploaderApplicationTab === 'pending') {
+    setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Contact (WhatsApp)', 'Current Handler', 'Current Stage Entry', 'Comment', 'View', 'Track']);
+    if (!rows.length) {
+      renderUploaderApplicationsEmpty('pending');
+      return;
+    }
+    let html = '';
+    for (const sub of rows) {
+      const date = safeFormatDate(getSubmissionReviewEntryAt(sub));
+      const assignedName = await getCurrentHandlerName(sub);
+      const whatsapp = await renderStageContactLink(sub);
+      const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
+      html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${escapeHtml(sub.comment || '-')}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    }
+    applicationsTableBody.innerHTML = html;
+    return;
+  }
+
+  if (currentUploaderApplicationTab === 'approved') {
+    setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Contact (WhatsApp)', 'Assigned To', 'Upload Date/Time', 'Approved By', 'Approved Date/Time', 'View', 'Track']);
+    if (!rows.length) {
+      renderUploaderApplicationsEmpty('approved');
+      return;
+    }
+    let html = '';
+    for (const sub of rows) {
+      const uploadDate = safeFormatDate(sub.uploadedAt);
+      const approvedDate = safeFormatDate(getSubmissionApprovalEntryAt(sub));
+      const approvedByKey = normalizeEmail(sub.reviewedBy);
+      const approvedBy = (approvedByKey && userFullNames.get(approvedByKey)) ? userFullNames.get(approvedByKey) : (sub.reviewedBy || '-');
+      const assignedName = await getCurrentHandlerName(sub);
+      const whatsapp = await renderStageContactLink(sub);
+      const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
+      html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${uploadDate}</td><td>${escapeHtml(approvedBy || '-')}</td><td>${approvedDate}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDetails('${sub.id}')"><i class="fas fa-circle-info"></i> Details</button> <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> Docs</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    }
+    applicationsTableBody.innerHTML = html;
+    return;
+  }
+
+  if (currentUploaderApplicationTab === 'rejected') {
+    setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Chat', 'Re-upload Count', 'Assigned To', 'Upload Date/Time', 'Rejection Details', 'Action', 'View', 'Track']);
+    if (!rows.length) {
+      renderUploaderApplicationsEmpty('rejected');
+      return;
+    }
+    let html = '';
+    for (const sub of rows) {
+      const fixCount = Number(sub.fixCount || 0);
+      const date = safeFormatDate(getSubmissionReviewEntryAt(sub));
+      const assignedName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned';
+      const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
+      const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button>`;
+      const reasonBtn = hasRejectionHistory(sub)
+        ? `<button class="action-btn reason-btn" onclick="window.openUploaderRejectionReasonModal('${sub.id}')"><i class="fas fa-eye"></i> View Details</button>`
+        : 'No reason provided';
+      html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${reasonBtn}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-edit"></i> Re-upload</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    }
+    applicationsTableBody.innerHTML = html;
+    return;
+  }
+
+  setUploaderApplicationsColumns(['Customer Name', 'Agent', 'PFA', 'Time Entered', 'Current Officer', 'Action']);
+  if (!rows.length) {
+    const label = currentUploaderApplicationTab.replace(/_/g, ' ');
+    renderUploaderApplicationsEmpty(label);
+    return;
+  }
+
+  let html = '';
+  for (const sub of rows) {
+    const status = String(sub.status || '').toLowerCase();
+    const auditStatus = String(sub.auditCommissionStatus || '').toLowerCase();
+    const canReportPayment = currentUploaderApplicationTab === 'sent_to_pfa' && auditStatus !== 'pending';
+    const paymentButton = currentUploaderApplicationTab === 'sent_to_pfa'
+      ? `<button class="action-btn view-btn-small" ${canReportPayment ? '' : 'disabled'} onclick="window.markUploaderPaymentMade('${sub.id}')"><i class="fas fa-money-bill-wave"></i> ${auditStatus === 'pending' ? 'Reported' : 'Payment Made'}</button>`
+      : '';
+    const residentOfficer = await getUploaderPaymentResidentOfficer(sub);
+    html += `
+      <tr data-submission-id="${sub.id}">
+        <td><strong>${escapeHtml(sub.customerName || '-')}</strong></td>
+        <td>${escapeHtml(getSubmissionAgentDisplayName(sub))}</td>
+        <td>${escapeHtml(getSubmissionPfaName(sub))}</td>
+        <td>${safeFormatDate(getUploaderPaymentStageEntryAt(sub))}</td>
+        <td>${escapeHtml(residentOfficer)}</td>
+        <td>
+          ${paymentButton}
+          <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button>
+          <button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button>
+        </td>
+      </tr>
+    `;
+  }
+  applicationsTableBody.innerHTML = html;
+}
+
+function switchUploaderApplicationTab(tab = 'pending') {
+  currentUploaderApplicationTab = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'paid', 'cleared'].includes(tab) ? tab : 'draft';
+  document.querySelectorAll('[data-uploader-application-tab]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.uploaderApplicationTab === currentUploaderApplicationTab);
+  });
+  renderUploaderApplicationsTable();
+}
+
+window.markUploaderPaymentMade = async (submissionId) => {
+  if (!assertWritable('Payment made report')) return;
+  const sub = allSubmissions.find((item) => item.id === submissionId);
+  if (!sub) {
+    showNotification('Application not found', 'error');
+    return;
+  }
+  if (!isUploaderSentToPfaStatus(sub)) {
+    showNotification('Only Sent to PFA applications can be reported as payment made.', 'warning');
+    return;
+  }
+
+  const pfaName = getSubmissionPfaName(sub);
+  const confirmed = window.confirm(`Confirm payment made by ${pfaName} for ${sub.customerName || 'this customer'}?`);
+  if (!confirmed) return;
+
+  try {
+    await updateDoc(doc(db, 'submissions', submissionId), {
+      paymentMadeByUploader: true,
+      paymentMadeAt: serverTimestamp(),
+      paymentMadeBy: currentUser?.email || '',
+      auditCommissionStatus: 'pending',
+      auditCommissionRejectionReason: '',
+      auditCommissionSubmittedAt: serverTimestamp(),
+      auditCommissionSubmittedBy: currentUser?.email || '',
+      updatedAt: serverTimestamp()
+    });
+
+    await addDoc(collection(db, 'audit'), {
+      action: 'uploader_payment_made_reported',
+      submissionId,
+      customerName: sub.customerName || '',
+      pfaName,
+      performedBy: currentUser?.email || '',
+      timestamp: serverTimestamp()
+    }).catch(() => {});
+
+    showNotification('Payment made report sent to Audit.', 'success');
+  } catch (error) {
+    showNotification('Failed to report payment made.', 'error');
+  }
+};
+
 async function renderPendingTable() {
   if (!pendingTableBody) { return; }
   const pending = allSubmissions
     .filter(s => s.status === 'pending')
     .slice()
     .sort((a, b) => getStageTimestampMillis(getSubmissionReviewEntryAt(b)) - getStageTimestampMillis(getSubmissionReviewEntryAt(a)));
-  if (pending.length === 0) { pendingTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No pending documents</td></tr>'; return; }
+  if (pending.length === 0) { pendingTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No pending documents</td></tr>'; return; }
   let html = '';
   for (const sub of pending) {
     const date = safeFormatDate(getSubmissionReviewEntryAt(sub));
     const assignedName = await getCurrentHandlerName(sub);
     const whatsapp = await renderStageContactLink(sub);
     const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
-    html += `<tr><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td><span class="status-badge status-pending">Pending</span></td><td>${escapeHtml(sub.comment || '-')}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    html += `<tr><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${escapeHtml(sub.comment || '-')}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   pendingTableBody.innerHTML = html;
 }
@@ -4674,7 +5128,7 @@ async function renderApprovedTable() {
     .filter((s) => isUploaderApprovedLifecycleStatus(s))
     .slice()
     .sort((a, b) => getStageTimestampMillis(getSubmissionApprovalEntryAt(b)) - getStageTimestampMillis(getSubmissionApprovalEntryAt(a)));
-  if (approved.length === 0) { approvedTableBody.innerHTML = '<tr><td colspan="10" class="no-data">No approved documents</td></tr>'; return; }
+  if (approved.length === 0) { approvedTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No approved documents</td></tr>'; return; }
   let html = '';
   for (const sub of approved) {
     const uploadDate = safeFormatDate(sub.uploadedAt);
@@ -4684,13 +5138,7 @@ async function renderApprovedTable() {
     const assignedName = await getCurrentHandlerName(sub);
     const whatsapp = await renderStageContactLink(sub);
     const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
-    const lifecycleLabel = escapeHtml(formatSubmissionStatusLabel(sub.status || (sub.finalSubmitted ? 'sent_to_pfa' : 'approved')));
-    const lifecycleClass = String(sub.status || '').toLowerCase() === 'cleared'
-      ? 'status-cleared'
-      : String(sub.status || '').toLowerCase() === 'paid'
-        ? 'status-paid'
-        : 'status-approved';
-    html += `<tr><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${uploadDate}</td><td><span class="status-badge ${lifecycleClass}">${lifecycleLabel}</span></td><td>${escapeHtml(approvedBy || '-')}</td><td>${approvedDate}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDetails('${sub.id}')"><i class="fas fa-circle-info"></i> Details</button> <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> Docs</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    html += `<tr><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${uploadDate}</td><td>${escapeHtml(approvedBy || '-')}</td><td>${approvedDate}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDetails('${sub.id}')"><i class="fas fa-circle-info"></i> Details</button> <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> Docs</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   approvedTableBody.innerHTML = html;
 }
@@ -4701,23 +5149,18 @@ async function renderRejectedTable() {
     .filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase()))
     .slice()
     .sort((a, b) => getStageTimestampMillis(getSubmissionRejectionEntryAt(b)) - getStageTimestampMillis(getSubmissionRejectionEntryAt(a)));
-  if (rejected.length === 0) { rejectedTableBody.innerHTML = '<tr><td colspan="13" class="no-data">No rejected documents</td></tr>'; return; }
+  if (rejected.length === 0) { rejectedTableBody.innerHTML = '<tr><td colspan="10" class="no-data">No rejected documents</td></tr>'; return; }
   let html = '';
   for (const sub of rejected) {
     const fixCount = Number(sub.fixCount || 0);
     const date = safeFormatDate(getSubmissionReviewEntryAt(sub));
-    const rejectedDate = safeFormatDate(getSubmissionRejectionEntryAt(sub));
-    const rejectedActor = sub.latestRejectedBy || sub.reviewedBy || '-';
-    const rejectedByKey = normalizeEmail(rejectedActor);
-    const rejectedBy = (rejectedByKey && userFullNames.get(rejectedByKey)) ? userFullNames.get(rejectedByKey) : (rejectedActor || '-');
-    const rejectedStatusLabel = String(sub.status || '').toLowerCase() === 'rejected_by_rsa' ? 'Rejected by RSA' : 'Rejected';
     const assignedName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned';
     const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
     const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button>`;
     const reasonBtn = hasRejectionHistory(sub)
-      ? `<button class="action-btn reason-btn" onclick="window.openUploaderRejectionReasonModal('${sub.id}')"><i class="fas fa-eye"></i> View</button>`
+      ? `<button class="action-btn reason-btn" onclick="window.openUploaderRejectionReasonModal('${sub.id}')"><i class="fas fa-eye"></i> View Details</button>`
       : 'No reason provided';
-    html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td><span class="status-badge status-rejected">${escapeHtml(rejectedStatusLabel)}</span></td><td>${reasonBtn}</td><td>${escapeHtml(rejectedBy || '-')}</td><td>${rejectedDate}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-edit"></i> Re-upload</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${reasonBtn}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-edit"></i> Re-upload</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   rejectedTableBody.innerHTML = html;
 }
@@ -4741,7 +5184,11 @@ window.openUploaderRejectionReasonModal = (submissionId) => {
         <ol class="rejection-history-list">
           ${entries.map((entry, index) => {
             const timeText = entry.rejectedAt ? safeFormatDate(entry.rejectedAt) : 'Time not available';
-            return `<li><strong>Rejection ${index + 1}:</strong> ${escapeHtml(entry.reason)}<span class="rejection-history-time">${escapeHtml(timeText)}</span></li>`;
+            const rejectedByKey = normalizeEmail(entry.rejectedBy || '');
+            const rejectedBy = rejectedByKey && userFullNames.get(rejectedByKey)
+              ? userFullNames.get(rejectedByKey)
+              : (entry.rejectedBy || 'Not available');
+            return `<li><strong>Rejection ${index + 1}</strong><div><b>Reason:</b> ${escapeHtml(entry.reason)}</div><div><b>Rejected By:</b> ${escapeHtml(rejectedBy)}</div><span class="rejection-history-time"><b>Rejected Date/Time:</b> ${escapeHtml(timeText)}</span></li>`;
           }).join('')}
         </ol>
       `;
@@ -4781,15 +5228,15 @@ function ensureUploaderAgentCommissionUi() {
       <div class="agent-commission-summary uploader-agent-commission-overview" style="margin-bottom:16px;">
         <div class="agent-commission-summary-card commission-overview-card sent">
           <span class="agent-commission-summary-label">Total Sent to PFA</span>
-          <strong id="uploaderAgentCommissionTotalSent">0</strong>
+          <strong id="uploaderAgentCommissionTotalSent">${formatCurrency(0)}</strong>
         </div>
         <div class="agent-commission-summary-card commission-overview-card active">
           <span class="agent-commission-summary-label">Total Active</span>
-          <strong id="uploaderAgentCommissionTotalActive">0</strong>
+          <strong id="uploaderAgentCommissionTotalActive">${formatCurrency(0)}</strong>
         </div>
         <div class="agent-commission-summary-card commission-overview-card cleared">
           <span class="agent-commission-summary-label">Total Cleared</span>
-          <strong id="uploaderAgentCommissionTotalCleared">0</strong>
+          <strong id="uploaderAgentCommissionTotalCleared">${formatCurrency(0)}</strong>
         </div>
       </div>
       <div class="table-section" style="margin-top: 16px;">
@@ -4820,7 +5267,7 @@ function ensureUploaderAgentCommissionUi() {
     modal.innerHTML = `
       <div class="modal-content large-modal">
         <div class="modal-header">
-          <h2 id="uploaderAgentCommissionModalTitle">Agent Commission Breakdown</h2>
+          <h2 id="uploaderAgentCommissionModalTitle">Commission Breakdown</h2>
           <button class="close-btn" id="closeUploaderAgentCommissionModal">&times;</button>
         </div>
         <div class="modal-body">
@@ -5038,7 +5485,7 @@ window.openUploaderAgentCommissionModal = (groupKey) => {
     return;
   }
   window.__currentUploaderAgentCommissionGroup = group;
-  refs.modalTitle.textContent = `${group.agentName} - Agent Commission`;
+  refs.modalTitle.textContent = `${group.agentName} - Commission`;
   renderUploaderAgentCommissionSummary(group);
   switchCommissionTab('sent_to_pfa');
   refs.modal.classList.add('active');
@@ -5053,12 +5500,15 @@ function renderPaidTable() {
     acc.sent += group.sentToPfaSubmissions.length;
     acc.active += group.activeSubmissions.length;
     acc.cleared += group.clearedSubmissions.length;
+    acc.sentAmount += group.sentToPfaCommission;
+    acc.activeAmount += group.activeCommission;
+    acc.clearedAmount += group.clearedCommission;
     return acc;
-  }, { sent: 0, active: 0, cleared: 0 });
+  }, { sent: 0, active: 0, cleared: 0, sentAmount: 0, activeAmount: 0, clearedAmount: 0 });
 
-  if (refs.totalSentCard) refs.totalSentCard.textContent = String(submissionTotals.sent);
-  if (refs.totalActiveCard) refs.totalActiveCard.textContent = String(submissionTotals.active);
-  if (refs.totalClearedCard) refs.totalClearedCard.textContent = String(submissionTotals.cleared);
+  if (refs.totalSentCard) refs.totalSentCard.innerHTML = `${formatCurrency(submissionTotals.sentAmount)}<small>${submissionTotals.sent} app${submissionTotals.sent === 1 ? '' : 's'}</small>`;
+  if (refs.totalActiveCard) refs.totalActiveCard.innerHTML = `${formatCurrency(submissionTotals.activeAmount)}<small>${submissionTotals.active} app${submissionTotals.active === 1 ? '' : 's'}</small>`;
+  if (refs.totalClearedCard) refs.totalClearedCard.innerHTML = `${formatCurrency(submissionTotals.clearedAmount)}<small>${submissionTotals.cleared} app${submissionTotals.cleared === 1 ? '' : 's'}</small>`;
 
   if (paidCountBadge) {
     paidCountBadge.textContent = String(groups.length);
@@ -5066,7 +5516,7 @@ function renderPaidTable() {
   }
 
   if (!groups.length) {
-    refs.tableBody.innerHTML = '<tr><td colspan="5" class="no-data">No agent commission records</td></tr>';
+    refs.tableBody.innerHTML = '<tr><td colspan="5" class="no-data">No commission records</td></tr>';
     return;
   }
 
@@ -5128,12 +5578,15 @@ async function loadApprovedAgents() {
 async function openAgentRegistrationModal() {
   if (!agentRegistrationModal) return;
   await populateAgentBankOptions({ force: true });
+  clearVerifiedAgentAccountLookup();
+  setAgentAccountLookupStatus('', 'info');
   agentRegistrationModal.classList.add('active');
 }
 
 function closeAgentRegistrationModal() {
   if (!agentRegistrationModal) return;
   agentRegistrationModal.classList.remove('active');
+  setAgentAccountLookupStatus('', 'info');
 }
 
 function normalizeAgentDate(value) {
@@ -5420,10 +5873,13 @@ async function handleAgentRegistration(e) {
   e.preventDefault();
   const fullName = String(document.getElementById('agentFullName')?.value || '').trim();
   const contactNumber = String(document.getElementById('agentContactNumber')?.value || '').trim();
-  const accountNumber = String(document.getElementById('agentAccountNumber')?.value || '').trim();
-  const accountBank = String(document.getElementById('agentAccountBank')?.value || '').trim();
+  const accountNumber = String(agentAccountNumberInput?.value || '').replace(/\D/g, '');
+  const selectedBank = getSelectedAgentAccountBank();
+  const accountBank = selectedBank.name;
+  const accountBankCode = selectedBank.code;
+  const accountName = String(agentAccountNameInput?.value || verifiedAgentAccountLookup.accountName || '').trim();
 
-  if (!fullName || !contactNumber || !accountNumber || !accountBank) {
+  if (!fullName || !contactNumber || !accountNumber || !accountBank || !accountBankCode) {
     showNotification('Please complete all agent fields', 'error');
     return;
   }
@@ -5434,6 +5890,17 @@ async function handleAgentRegistration(e) {
   if (!/^\d{10}$/.test(accountNumber.replace(/\D/g, ''))) {
     showNotification('Agent account number must be exactly 10 digits', 'error');
     return;
+  }
+  if (
+    verifiedAgentAccountLookup.accountNumber !== accountNumber ||
+    verifiedAgentAccountLookup.bankCode !== accountBankCode ||
+    !accountName
+  ) {
+    const verified = await resolveAgentAccountName({ silent: false });
+    if (!verified || !String(verifiedAgentAccountLookup.accountName || '').trim()) {
+      showNotification('Verify the agent account name before submitting.', 'error');
+      return;
+    }
   }
 
   try {
@@ -5448,6 +5915,8 @@ async function handleAgentRegistration(e) {
       contactNumber,
       accountNumber,
       accountBank,
+      accountBankCode,
+      accountName: String(verifiedAgentAccountLookup.accountName || accountName).trim(),
       status: approvalRequired ? 'pending' : 'approved',
       createdBy: currentUser?.email || '',
       createdByUid: currentUser?.uid || '',
@@ -5467,12 +5936,16 @@ async function handleAgentRegistration(e) {
         contactNumber,
         accountNumber,
         accountBank,
+        accountBankCode,
+        accountName: String(verifiedAgentAccountLookup.accountName || accountName).trim(),
         createdBy: currentUser?.email || '',
         approvalRequired
       }
     });
     showNotification(approvalRequired ? 'Agent registration submitted for admin approval' : 'Agent registered successfully', 'success');
     agentRegistrationForm?.reset();
+    clearVerifiedAgentAccountLookup();
+    setAgentAccountLookupStatus('', 'info');
     closeAgentRegistrationModal();
     await loadRegisteredAgents();
   } catch (err) {

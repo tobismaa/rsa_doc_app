@@ -1,7 +1,8 @@
-import { auth, db } from './firebase-config.js?v=20260625b';
+import { auth, db } from './firebase-config.js?v=20260625c';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
 import {
     collection,
+    addDoc,
     doc,
     onSnapshot,
     serverTimestamp,
@@ -13,6 +14,10 @@ import {
     getTimestampMillis as getStageTimestampMillis,
     getSubmissionCurrentStageEntryAt
 } from './shared/submission-stage.js?v=20260609a';
+import {
+    getSubmissionCommissionAmount,
+    resolveSubmissionCommissionRate
+} from './shared/commission-config.js?v=20260507a';
 
 let currentUser = null;
 let currentUserData = null;
@@ -32,6 +37,9 @@ const applicationsSearch = document.getElementById('applicationsSearch');
 const applicationsStatusFilter = document.getElementById('applicationsStatusFilter');
 const applicationsStageFilter = document.getElementById('applicationsStageFilter');
 const applicationDetailsModal = document.getElementById('applicationDetailsModal');
+const auditSentToPfaTableBody = document.getElementById('auditSentToPfaTableBody');
+const auditPaidTableBody = document.getElementById('auditPaidTableBody');
+const auditClearedTableBody = document.getElementById('auditClearedTableBody');
 
 function escapeHtml(text) {
     if (!text) return '';
@@ -59,11 +67,58 @@ function formatDate(value) {
     return formatAppDateTime(value, '-');
 }
 
+function formatCurrency(value) {
+    const num = Number(value || 0);
+    try {
+        return num.toLocaleString('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 2 });
+    } catch (_) {
+        return `NGN ${num.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+    }
+}
+
+function parseMoney(value) {
+    const raw = String(value ?? '').replace(/[^0-9.\-]/g, '');
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : 0;
+}
+
+function roundDownToNearestThousand(value) {
+    const num = Number(value || 0);
+    return Math.max(0, Math.floor(num / 1000) * 1000);
+}
+
+function getSubmissionFinancials(sub = {}) {
+    const details = sub.customerDetails || {};
+    const rsaBalance = parseMoney(details.rsaBalance || sub.rsaBalance || 0);
+    const stored25 = parseMoney(details.rsa25Percent || sub.rsa25Percent || 0);
+    const twentyFive = stored25 || roundDownToNearestThousand(rsaBalance * 0.25);
+    const commission = getSubmissionCommissionAmount(sub, twentyFive);
+    const commissionRate = resolveSubmissionCommissionRate(sub);
+    return { rsaBalance, twentyFive, commission, commissionRate };
+}
+
+function getCustomerAccountNumber(sub = {}) {
+    return String(
+        sub?.customerDetails?.accountNo ||
+        sub?.customerDetails?.accountNumber ||
+        sub?.accountNo ||
+        sub?.accountNumber ||
+        '-'
+    ).trim() || '-';
+}
+
+function getUserDisplayName(email = '') {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return '-';
+    const user = allUsers.find((entry) => normalizeEmail(entry.email) === normalized);
+    return user?.fullName || email;
+}
+
 function roleLabel(role) {
     const normalized = String(role || '').trim().toLowerCase();
     if (normalized === 'super_admin') return 'Super Admin';
     if (normalized === 'admin') return 'Admin';
-    if (normalized === 'reports_monitoring') return 'Reports Monitoring';
+    if (normalized === 'reports_monitoring') return 'Audit';
     if (normalized === 'reviewer') return 'Reviewer';
     if (normalized === 'rsa') return 'RSA';
     if (normalized === 'payment') return 'Payment';
@@ -214,9 +269,47 @@ function filteredApplications() {
     });
 }
 
+function isSentToPfaLifecycle(sub = {}) {
+    const status = String(sub.status || '').toLowerCase();
+    return (
+        status === 'sent_to_pfa' ||
+        status === 'rsa_submitted' ||
+        (
+            (sub.finalSubmitted === true || sub.rsaSubmitted === true) &&
+            status !== 'paid' &&
+            status !== 'cleared'
+        )
+    );
+}
+
+function getAuditSentToPfaRows() {
+    return allSubmissions
+        .filter((sub) => isSentToPfaLifecycle(sub))
+        .filter((sub) => sub.paymentMadeByUploader === true && String(sub.auditCommissionStatus || '').toLowerCase() === 'pending')
+        .sort((a, b) => getStageTimestampMillis(b.auditCommissionSubmittedAt || b.paymentMadeAt || getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(a.auditCommissionSubmittedAt || a.paymentMadeAt || getSubmissionCurrentStageEntryAt(a)));
+}
+
+function getAuditPaidRows() {
+    return allSubmissions
+        .filter((sub) => String(sub.status || '').toLowerCase() === 'paid')
+        .sort((a, b) => getStageTimestampMillis(b.paidAt || getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(a.paidAt || getSubmissionCurrentStageEntryAt(a)));
+}
+
+function getAuditClearedRows() {
+    return allSubmissions
+        .filter((sub) => String(sub.status || '').toLowerCase() === 'cleared')
+        .sort((a, b) => getStageTimestampMillis(b.clearedAt || getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(a.clearedAt || getSubmissionCurrentStageEntryAt(a)));
+}
+
 function setCountBadge(id, value) {
     const el = document.getElementById(id);
     if (el) el.textContent = String(value);
+}
+
+function renderAuditWorkflowBadges() {
+    setCountBadge('auditSentToPfaCountBadge', getAuditSentToPfaRows().length);
+    setCountBadge('auditPaidCountBadge', getAuditPaidRows().length);
+    setCountBadge('auditClearedCountBadge', getAuditClearedRows().length);
 }
 
 function renderOverview() {
@@ -229,6 +322,7 @@ function renderOverview() {
     setCountBadge('overviewPaidClearedCount', paidClearedCount);
     setCountBadge('usersCountBadge', allUsers.length);
     setCountBadge('applicationsCountBadge', allSubmissions.length);
+    renderAuditWorkflowBadges();
 
     const workflowBody = document.getElementById('overviewWorkflowBody');
     if (workflowBody) {
@@ -312,6 +406,62 @@ function renderApplications() {
             <td><button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button></td>
         </tr>
     `).join('') : '<tr><td colspan="10" class="no-data">No applications found</td></tr>';
+}
+
+function renderAuditMoneyRows(body, rows, mode) {
+    if (!body) return;
+    if (!rows.length) {
+        const label = mode === 'sent' ? 'sent to PFA records awaiting Audit action' : `${mode} records`;
+        body.innerHTML = `<tr><td colspan="7" class="no-data">No ${escapeHtml(label)}</td></tr>`;
+        return;
+    }
+
+    body.innerHTML = rows.map((sub) => {
+        const { rsaBalance, twentyFive, commission } = getSubmissionFinancials(sub);
+        const uploaderName = getUserDisplayName(sub.uploadedBy || sub.auditCommissionSubmittedBy || '');
+        const actionCell = mode === 'sent'
+            ? `<button class="action-btn" onclick="window.acceptAuditCommission('${sub.id}')"><i class="fas fa-check"></i> Accept</button>
+               <button class="action-btn" style="background:#b91c1c;color:#fff;border:none;" onclick="window.rejectAuditCommission('${sub.id}')"><i class="fas fa-times"></i> Reject</button>`
+            : `<button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>`;
+        const timeCell = mode === 'paid'
+            ? `<td>${escapeHtml(formatDate(sub.paidAt))}</td>`
+            : mode === 'cleared'
+                ? `<td>${escapeHtml(formatDate(sub.clearedAt))}</td>`
+                : `<td>${actionCell}</td>`;
+
+        if (mode === 'sent') {
+            return `
+                <tr>
+                    <td>${escapeHtml(uploaderName)}</td>
+                    <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
+                    <td>${formatCurrency(rsaBalance)}</td>
+                    <td>${formatCurrency(twentyFive)}</td>
+                    <td><strong>${formatCurrency(commission)}</strong></td>
+                    <td>${escapeHtml(getCustomerAccountNumber(sub))}</td>
+                    <td>${actionCell}</td>
+                </tr>
+            `;
+        }
+
+        return `
+            <tr>
+                <td>${escapeHtml(uploaderName)}</td>
+                <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
+                <td>${formatCurrency(rsaBalance)}</td>
+                <td>${formatCurrency(twentyFive)}</td>
+                <td><strong>${formatCurrency(commission)}</strong></td>
+                ${timeCell}
+                <td>${actionCell}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderAuditWorkflowTabs() {
+    renderAuditWorkflowBadges();
+    renderAuditMoneyRows(auditSentToPfaTableBody, getAuditSentToPfaRows(), 'sent');
+    renderAuditMoneyRows(auditPaidTableBody, getAuditPaidRows(), 'paid');
+    renderAuditMoneyRows(auditClearedTableBody, getAuditClearedRows(), 'cleared');
 }
 
 function renderReports() {
@@ -428,6 +578,7 @@ function renderProfile() {
 
 function renderCurrentTab() {
     renderOverview();
+    renderAuditWorkflowTabs();
     renderUsers();
     renderApplications();
     renderReports();
@@ -443,18 +594,21 @@ function switchTab(tabId) {
 
     const titles = {
         overview: 'Overview',
+        'sent-to-pfa': 'Sent to PFA',
+        paid: 'Paid',
+        cleared: 'Cleared',
         users: 'Users',
         applications: 'Applications',
         reports: 'Reports',
         profile: 'My Profile',
         help: 'Help & SOP'
     };
-    if (pageTitle) pageTitle.textContent = titles[tabId] || 'Reports & Monitoring';
+    if (pageTitle) pageTitle.textContent = titles[tabId] || 'Audit';
 }
 
 function ensureDataForTab(tabId) {
-    if (tabId === 'overview' || tabId === 'users' || tabId === 'reports') loadUsers();
-    if (tabId === 'overview' || tabId === 'applications' || tabId === 'reports') loadSubmissions();
+    if (tabId === 'overview' || tabId === 'users' || tabId === 'reports' || tabId === 'sent-to-pfa' || tabId === 'paid' || tabId === 'cleared') loadUsers();
+    if (tabId === 'overview' || tabId === 'applications' || tabId === 'reports' || tabId === 'sent-to-pfa' || tabId === 'paid' || tabId === 'cleared') loadSubmissions();
 }
 
 function toggleSidebar(open) {
@@ -484,6 +638,9 @@ function openApplicationDetailsModal(submissionId) {
         ['Assigned Payment', sub.assignedToPayment || '-'],
         ['Agent Name', sub.agentName || '-'],
         ['PFA', sub?.customerDetails?.pfa || sub.pfa || '-'],
+        ['Customer Account Number', getCustomerAccountNumber(sub)],
+        ['Audit Commission Status', statusLabel(sub.auditCommissionStatus || '-')],
+        ['Audit Rejection Reason', sub.auditCommissionRejectionReason || '-'],
         ['Uploaded At', formatDate(sub.uploadedAt)],
         ['Updated At', formatDate(sub.updatedAt || sub.uploadedAt)]
     ];
@@ -507,6 +664,89 @@ function closeApplicationDetailsModal() {
 }
 
 window.openMonitoringApplicationDetails = openApplicationDetailsModal;
+window.acceptAuditCommission = async (submissionId) => {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub) {
+        showNotification('Application not found', 'warning');
+        return;
+    }
+
+    const confirmed = window.confirm(`Accept commission and mark ${sub.customerName || 'this application'} as paid?`);
+    if (!confirmed) return;
+
+    try {
+        const { commission, twentyFive, rsaBalance } = getSubmissionFinancials(sub);
+        await updateDoc(doc(db, 'submissions', submissionId), {
+            status: 'paid',
+            paidAt: serverTimestamp(),
+            paidBy: currentUser?.email || '',
+            commissionPaid: true,
+            commissionPaidAt: serverTimestamp(),
+            commissionPaidBy: currentUser?.email || '',
+            auditCommissionStatus: 'accepted',
+            auditCommissionAcceptedAt: serverTimestamp(),
+            auditCommissionAcceptedBy: currentUser?.email || '',
+            auditCommissionAmount: commission,
+            auditRsaBalance: rsaBalance,
+            auditRsaTwentyFivePercent: twentyFive,
+            updatedAt: serverTimestamp()
+        });
+
+        await addDoc(collection(db, 'audit'), {
+            action: 'audit_commission_accepted',
+            submissionId,
+            customerName: sub.customerName || '',
+            uploadedBy: sub.uploadedBy || '',
+            commissionAmount: commission,
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        }).catch(() => {});
+
+        showNotification('Commission accepted and marked paid.', 'success');
+    } catch (error) {
+        showNotification('Failed to accept commission.', 'error');
+    }
+};
+
+window.rejectAuditCommission = async (submissionId) => {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub) {
+        showNotification('Application not found', 'warning');
+        return;
+    }
+
+    const reason = String(window.prompt(`Reason for rejecting commission for ${sub.customerName || 'this application'}?`) || '').trim();
+    if (!reason) {
+        showNotification('Rejection reason is required.', 'warning');
+        return;
+    }
+
+    try {
+        await updateDoc(doc(db, 'submissions', submissionId), {
+            paymentMadeByUploader: false,
+            auditCommissionStatus: 'rejected',
+            auditCommissionRejectionReason: reason,
+            auditCommissionRejectedAt: serverTimestamp(),
+            auditCommissionRejectedBy: currentUser?.email || '',
+            updatedAt: serverTimestamp()
+        });
+
+        await addDoc(collection(db, 'audit'), {
+            action: 'audit_commission_rejected',
+            submissionId,
+            customerName: sub.customerName || '',
+            uploadedBy: sub.uploadedBy || '',
+            reason,
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        }).catch(() => {});
+
+        showNotification('Commission rejected and returned to uploader.', 'success');
+    } catch (error) {
+        showNotification('Failed to reject commission.', 'error');
+    }
+};
+
 window.signOutUser = async () => {
     await performAppLogout({
         auth,

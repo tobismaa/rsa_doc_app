@@ -182,6 +182,7 @@ service cloud.firestore {
         && request.resource.data.uploadedBy == myEmail();
       allow update: if signedIn() && globalWriteAllowed() && (
         isAdminLike() ||
+        isRole('reports_monitoring') ||
         resource.data.uploadedBy == myEmail() ||
         resource.data.assignedTo == myEmail() ||
         resource.data.assignedToRSA == myEmail() ||
@@ -202,7 +203,7 @@ service cloud.firestore {
 
     match /audit/{docId} {
       allow read: if canMonitorAll();
-      allow create: if signedIn() && globalWriteAllowed() && isAnyRole(['admin', 'super_admin', 'payment', 'rsa', 'reviewer']);
+      allow create: if signedIn() && globalWriteAllowed() && isAnyRole(['admin', 'super_admin', 'reports_monitoring', 'uploader', 'payment', 'rsa', 'reviewer']);
       allow update, delete: if false;
     }
 
