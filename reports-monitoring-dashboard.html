@@ -80,6 +80,11 @@
                     <span>Cleared</span>
                     <span class="badge" id="auditClearedCountBadge">0</span>
                 </a>
+                <a href="#" class="nav-item" data-tab="rejected">
+                    <i class="fas fa-times-circle"></i>
+                    <span>Rejected</span>
+                    <span class="badge" id="auditRejectedCountBadge">0</span>
+                </a>
             </nav>
 
             <button class="sidebar-close" id="sidebarClose" aria-label="Close menu">
@@ -238,6 +243,36 @@
                                 </tr>
                             </thead>
                             <tbody id="auditClearedTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="rejectedTab" class="tab-content">
+                <div class="table-section">
+                    <div class="audit-table-toolbar">
+                        <h2>Rejected</h2>
+                        <button type="button" class="action-btn audit-export-btn" id="exportAuditRejectedReportBtn">
+                            <i class="fas fa-file-export"></i> Generate Report
+                        </button>
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Uploader</th>
+                                    <th>Customer</th>
+                                    <th>RSA Balance</th>
+                                    <th>25%</th>
+                                    <th>Commission</th>
+                                    <th>Customer Account Number</th>
+                                    <th>Rejected By</th>
+                                    <th>Rejected At</th>
+                                    <th>Reason</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditRejectedTableBody"></tbody>
                         </table>
                     </div>
                 </div>

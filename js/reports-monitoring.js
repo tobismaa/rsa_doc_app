@@ -50,9 +50,11 @@ const auditSentToPfaTableBody = document.getElementById('auditSentToPfaTableBody
 const auditOverviewPendingTableBody = document.getElementById('auditOverviewPendingTableBody');
 const auditPaidTableBody = document.getElementById('auditPaidTableBody');
 const auditClearedTableBody = document.getElementById('auditClearedTableBody');
+const auditRejectedTableBody = document.getElementById('auditRejectedTableBody');
 const exportAuditPendingReportBtn = document.getElementById('exportAuditPendingReportBtn');
 const exportAuditPaidReportBtn = document.getElementById('exportAuditPaidReportBtn');
 const exportAuditClearedReportBtn = document.getElementById('exportAuditClearedReportBtn');
+const exportAuditRejectedReportBtn = document.getElementById('exportAuditRejectedReportBtn');
 const paymentReportRangeModal = document.getElementById('paymentReportRangeModal');
 const paymentReportPreviewModal = document.getElementById('paymentReportPreviewModal');
 const paymentReportStartDate = document.getElementById('paymentReportStartDate');
@@ -435,6 +437,14 @@ function getAuditClearedRows() {
         .sort((a, b) => getStageTimestampMillis(b.clearedAt || getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(a.clearedAt || getSubmissionCurrentStageEntryAt(a)));
 }
 
+function getAuditRejectedRows() {
+    const currentEmail = normalizeEmail(currentUser?.email);
+    return allSubmissions
+        .filter((sub) => String(sub.auditCommissionStatus || '').toLowerCase() === 'rejected')
+        .filter((sub) => normalizeEmail(sub.auditCommissionRejectedBy || '') === currentEmail)
+        .sort((a, b) => getStageTimestampMillis(b.auditCommissionRejectedAt) - getStageTimestampMillis(a.auditCommissionRejectedAt));
+}
+
 function setCountBadge(id, value) {
     const el = document.getElementById(id);
     if (el) el.textContent = String(value);
@@ -444,6 +454,7 @@ function renderAuditWorkflowBadges() {
     setCountBadge('auditSentToPfaCountBadge', getAuditSentToPfaRows().length);
     setCountBadge('auditPaidCountBadge', getAuditPaidRows('all').length);
     setCountBadge('auditClearedCountBadge', getAuditClearedRows().length);
+    setCountBadge('auditRejectedCountBadge', getAuditRejectedRows().length);
 }
 
 function renderOverview() {
@@ -564,6 +575,36 @@ function renderAuditMoneyRows(body, rows, mode) {
     }).join('');
 }
 
+function renderAuditRejectedRows(body, rows) {
+    if (!body) return;
+    if (!rows.length) {
+        body.innerHTML = `<tr><td colspan="10" class="no-data">No rejected commission requests</td></tr>`;
+        return;
+    }
+
+    body.innerHTML = rows.map((sub) => {
+        const { rsaBalance, twentyFive, commission } = getSubmissionFinancials(sub);
+        const uploaderName = getUserDisplayName(sub.uploadedBy || sub.auditCommissionSubmittedBy || '');
+        const rejectionReason = String(sub.auditCommissionRejectionReason || 'No reason provided').trim();
+        const actionCell = `<button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>`;
+
+        return `
+            <tr>
+                <td>${escapeHtml(uploaderName)}</td>
+                <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
+                <td>${formatCurrency(rsaBalance)}</td>
+                <td>${formatCurrency(twentyFive)}</td>
+                <td><strong>${formatCurrency(commission)}</strong></td>
+                <td>${renderCopyableCustomerAccount(sub)}</td>
+                <td>${escapeHtml(getUserDisplayName(sub.auditCommissionRejectedBy || ''))}</td>
+                <td>${escapeHtml(formatDate(sub.auditCommissionRejectedAt))}</td>
+                <td><strong>${escapeHtml(rejectionReason)}</strong></td>
+                <td>${actionCell}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
 function renderAuditWorkflowTabs() {
     renderAuditWorkflowBadges();
     document.querySelectorAll('[data-audit-paid-scope]').forEach((button) => {
@@ -573,6 +614,7 @@ function renderAuditWorkflowTabs() {
     renderAuditMoneyRows(auditSentToPfaTableBody, getAuditSentToPfaRows(), 'sent');
     renderAuditMoneyRows(auditPaidTableBody, getAuditPaidRows(currentAuditPaidScope), 'paid');
     renderAuditMoneyRows(auditClearedTableBody, getAuditClearedRows(), 'cleared');
+    renderAuditRejectedRows(auditRejectedTableBody, getAuditRejectedRows());
 }
 
 function buildPaymentStageReport(records = [], options = {}) {
@@ -680,6 +722,23 @@ function createStageReportFromDateRange(request, startDate, endDate) {
             getDateMs: (sub) => getTimestampMillis(sub.clearedAt),
             statusResolver: () => 'Cleared',
             attendedResolver: () => true
+        });
+    }
+
+    if (request?.kind === 'rejected') {
+        const records = getAuditRejectedRows().filter((sub) => {
+            const dateMs = getTimestampMillis(sub.auditCommissionRejectedAt);
+            return dateMs >= startMs && dateMs <= endMs;
+        });
+        return buildPaymentStageReport(records, {
+            title: 'Rejected Report',
+            exportKey: `rejected-report-${startDate}-to-${endDate}`,
+            rangeStart: startDate,
+            rangeEnd: endDate,
+            dateLabel: 'rejected date',
+            getDateMs: (sub) => getTimestampMillis(sub.auditCommissionRejectedAt),
+            statusResolver: () => 'Rejected',
+            attendedResolver: () => false
         });
     }
 
@@ -1041,6 +1100,7 @@ function switchTab(tabId) {
         'sent-to-pfa': 'Pending Request',
         paid: 'Paid',
         cleared: 'Cleared',
+        rejected: 'Rejected',
         profile: 'My Profile',
         help: 'Help & SOP'
     };
@@ -1356,6 +1416,10 @@ function bindEvents() {
     });
     exportAuditClearedReportBtn?.addEventListener('click', () => {
         pendingPaymentReportRequest = { kind: 'cleared' };
+        openPaymentReportRangeModal();
+    });
+    exportAuditRejectedReportBtn?.addEventListener('click', () => {
+        pendingPaymentReportRequest = { kind: 'rejected' };
         openPaymentReportRangeModal();
     });
     document.getElementById('closePaymentReportRangeModalBtn')?.addEventListener('click', closePaymentReportRangeModal);

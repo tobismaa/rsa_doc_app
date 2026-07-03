@@ -4017,6 +4017,7 @@ async function loadSettings() {
     const scheduledOutstandingDownloadInceptionEndDate = document.getElementById('scheduledOutstandingDownloadInceptionEndDate');
     const announcementEnabled = document.getElementById('settingAnnouncementEnabled');
     const announcementTone = document.getElementById('settingAnnouncementTone');
+    const announcementSpeed = document.getElementById('settingAnnouncementSpeed');
     const announcementMessage = document.getElementById('settingAnnouncementMessage');
     const globalReadOnlyMode = document.getElementById('settingGlobalReadOnlyMode');
     const globalReadOnlyMessage = document.getElementById('settingGlobalReadOnlyMessage');
@@ -4060,6 +4061,7 @@ async function loadSettings() {
     refreshScheduledReportRecipientPicker();
     if (announcementEnabled) announcementEnabled.value = String(systemSettings.dashboardAnnouncement.enabled ? 'true' : 'false');
     if (announcementTone) announcementTone.value = String(systemSettings.dashboardAnnouncement.tone || 'info');
+    if (announcementSpeed) announcementSpeed.value = String(systemSettings.dashboardAnnouncement.speed || 16);
     if (announcementMessage) announcementMessage.value = String(systemSettings.dashboardAnnouncement.message || '');
     if (globalReadOnlyMode) globalReadOnlyMode.value = String(systemSettings.globalReadOnlyMode ? 'true' : 'false');
     if (globalReadOnlyMessage) globalReadOnlyMessage.value = String(systemSettings.globalReadOnlyMessage || defaultSystemSettings.globalReadOnlyMessage || '');
