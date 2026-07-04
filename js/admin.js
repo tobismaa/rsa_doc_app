@@ -2706,7 +2706,7 @@ function renderAgentCommissionModalSummary(group) {
             <strong>${formatCurrency(group.sentToPfaCommission)}</strong>
         </div>
         <div class="agent-commission-summary-card">
-            <span class="agent-commission-summary-label">Active Commission</span>
+            <span class="agent-commission-summary-label">Commission Payable</span>
             <strong>${formatCurrency(group.activeCommission)}</strong>
         </div>
         <div class="agent-commission-summary-card">
@@ -2728,7 +2728,7 @@ function renderAgentCommissionBreakdown(view = 'active') {
         : view === 'active'
             ? currentAgentCommissionGroup.activeSubmissions
             : currentAgentCommissionGroup.sentToPfaSubmissions;
-    const emptyLabel = view === 'cleared' ? 'cleared' : view === 'active' ? 'active' : 'sent to PFA';
+    const emptyLabel = view === 'cleared' ? 'cleared' : view === 'active' ? 'commission payable' : 'sent to PFA';
     const rows = list
         .map((sub) => {
             const { twentyFive, commission2 } = getSubmissionFinancials(sub);

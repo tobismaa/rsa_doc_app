@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
     <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
-    <link rel="stylesheet" href="css/audit-dashboard.css?v=20260704a">
+    <link rel="stylesheet" href="css/audit-dashboard.css?v=20260704c">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -32,6 +32,9 @@
                 <span>Audit</span>
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
+                <a class="sign-out-btn mobile" href="dashboard.html?view=uploader" title="Switch to Uploader" aria-label="Switch to Uploader">
+                    <i class="fas fa-upload"></i>
+                </a>
                 <button class="sign-out-btn mobile" id="forceRefreshBtnMobile" title="Refresh">
                     <i class="fas fa-arrows-rotate"></i>
                 </button>
@@ -85,6 +88,14 @@
                     <span>Rejected</span>
                     <span class="badge" id="auditRejectedCountBadge">0</span>
                 </a>
+                <a href="#" class="nav-item" data-tab="reconciliation">
+                    <i class="fas fa-scale-balanced"></i>
+                    <span>Reconciliation</span>
+                </a>
+                <a href="dashboard.html?view=uploader" class="nav-item">
+                    <i class="fas fa-upload"></i>
+                    <span>Switch to Uploader</span>
+                </a>
             </nav>
 
             <button class="sidebar-close" id="sidebarClose" aria-label="Close menu">
@@ -95,9 +106,14 @@
         <main class="main-content">
             <header class="content-header desktop-only">
                 <h1 id="pageTitle">Audit Overview</h1>
-                <button id="forceRefreshBtn" class="action-btn" style="padding:10px 14px;font-size:13px;" title="Refresh">
-                    <i class="fas fa-arrows-rotate"></i> Refresh
-                </button>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <a href="dashboard.html?view=uploader" class="action-btn" style="padding:10px 14px;font-size:13px;text-decoration:none;" title="Switch to Uploader">
+                        <i class="fas fa-upload"></i> Switch to Uploader
+                    </a>
+                    <button id="forceRefreshBtn" class="action-btn" style="padding:10px 14px;font-size:13px;" title="Refresh">
+                        <i class="fas fa-arrows-rotate"></i> Refresh
+                    </button>
+                </div>
             </header>
 
             <div id="overviewTab" class="tab-content active">
@@ -129,7 +145,14 @@
                     </div>
                     <div class="stat-card">
                         <div>
-                            <div class="stat-label">Cleared</div>
+                            <div class="stat-label">Commission Payable</div>
+                            <div class="stat-value" id="overviewCommissionPayableAmount">NGN 0.00</div>
+                        </div>
+                        <i class="fas fa-coins stat-icon"></i>
+                    </div>
+                    <div class="stat-card">
+                        <div>
+                            <div class="stat-label">Cleared Applications</div>
                             <div class="stat-value" id="overviewPaidClearedCount">0</div>
                         </div>
                         <i class="fas fa-circle-check stat-icon"></i>
@@ -220,6 +243,22 @@
             </div>
 
             <div id="clearedTab" class="tab-content">
+                <div class="dashboard-grid">
+                    <div class="stat-card">
+                        <div>
+                            <div class="stat-label">Total Cleared Applications</div>
+                            <div class="stat-value" id="auditClearedTotalApplications">0</div>
+                        </div>
+                        <i class="fas fa-circle-check stat-icon"></i>
+                    </div>
+                    <div class="stat-card">
+                        <div>
+                            <div class="stat-label">Total Amount Cleared</div>
+                            <div class="stat-value" id="auditClearedTotalAmount">NGN 0.00</div>
+                        </div>
+                        <i class="fas fa-coins stat-icon"></i>
+                    </div>
+                </div>
                 <div class="table-section">
                     <div class="audit-table-toolbar">
                         <h2>Cleared</h2>
@@ -273,6 +312,80 @@
                                 </tr>
                             </thead>
                             <tbody id="auditRejectedTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="reconciliationTab" class="tab-content">
+                <section class="audit-reconciliation-panel">
+                    <div class="audit-reconciliation-copy">
+                        <h2>Reconciliation</h2>
+                        <div id="auditReconciliationFileMeta" class="audit-reconciliation-meta">No file selected.</div>
+                    </div>
+                    <input type="file" id="auditReconciliationFileInput" accept=".xlsx,.csv" hidden>
+                    <div class="audit-reconciliation-actions">
+                        <button type="button" class="action-btn" id="auditReconciliationTemplateBtn">
+                            <i class="fas fa-file-arrow-down"></i> Template
+                        </button>
+                        <button type="button" class="action-btn" id="auditReconciliationSelectBtn">
+                            <i class="fas fa-file-upload"></i> Upload File
+                        </button>
+                        <button type="button" class="action-btn audit-export-btn" id="auditReconciliationRunBtn" disabled>
+                            <i class="fas fa-magnifying-glass"></i> Run Check
+                        </button>
+                        <button type="button" class="action-btn" id="auditReconciliationExportBtn" disabled>
+                            <i class="fas fa-file-excel"></i> Export Result
+                        </button>
+                        <button type="button" class="cancel-btn" id="auditReconciliationClearBtn" disabled>
+                            Clear
+                        </button>
+                    </div>
+                </section>
+
+                <div id="auditReconciliationSummary" class="audit-reconciliation-summary" style="display:none;"></div>
+
+                <div class="table-section" id="auditReconciliationMatchedWrap" style="display:none;">
+                    <div class="audit-table-toolbar">
+                        <h2>Found Records</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Upload Row</th>
+                                    <th>Uploaded Name</th>
+                                    <th>Uploaded Account</th>
+                                    <th>Uploaded RSA Balance</th>
+                                    <th>System Name</th>
+                                    <th>Uploader</th>
+                                    <th>System Account</th>
+                                    <th>System RSA Balance</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditReconciliationMatchedBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="table-section" id="auditReconciliationUnmatchedWrap" style="display:none;">
+                    <div class="audit-table-toolbar">
+                        <h2>Not Found</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Upload Row</th>
+                                    <th>Name</th>
+                                    <th>Account Number</th>
+                                    <th>RSA Balance</th>
+                                    <th>Result</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditReconciliationUnmatchedBody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -402,7 +515,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/reports-monitoring.js?v=20260704a"></script>
-    <script type="module" src="js/profile-completion-guard.js?v=20260704f"></script>
+    <script type="module" src="js/reports-monitoring.js?v=20260704j"></script>
+    <script type="module" src="js/profile-completion-guard.js?v=20260704h"></script>
 </body>
 </html>

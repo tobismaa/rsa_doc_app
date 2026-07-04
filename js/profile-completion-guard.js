@@ -2,7 +2,7 @@ import { auth, db } from './firebase-config.js?v=20260625c';
 import { onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js';
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
 import { getMaintenanceSettings, isMaintenanceExemptRole, showMaintenanceOverlay } from './shared/maintenance-mode.js?v=20260507a';
-import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260704c';
+import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260704e';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
 import { registerPushTokenForCurrentUser } from './push-alerts.js';
 
@@ -27,7 +27,7 @@ const DASHBOARD_PAGE_TARGETS = {
   'reviewer-dashboard.html': 'reviewer',
   'rsa-dashboard.html': 'rsa',
   'payment-dashboard.html': 'payment',
-  'reports-monitoring-dashboard.html': 'reports_monitoring',
+  'reports-monitoring-dashboard.html': 'audit',
   'super-admin-dashboard.html': 'super_admin'
 };
 const ANNOUNCEMENT_FONT_FAMILIES = {
@@ -61,6 +61,12 @@ let forceLogoutLockState = {
 };
 let forceLogoutActionBlockersBound = false;
 const targetedLogoutWatchedDocIds = new Set();
+
+function normalizeAnnouncementTarget(value = '') {
+  const text = String(value || '').trim().toLowerCase();
+  if (['reports_monitoring', 'reports-monitoring', 'reporting_monitoring', 'reporting-monitoring'].includes(text)) return 'audit';
+  return text;
+}
 
 const WHATSAPP_COUNTRY_CODES = [
   { code: '+234', label: 'Nigeria', flag: '🇳🇬' },
@@ -689,10 +695,10 @@ function showDashboardAnnouncement(announcement = {}) {
   const enabled = announcement?.enabled === true;
   const message = String(announcement?.message || '').trim();
   const targetDashboards = Array.isArray(announcement?.targetDashboards)
-    ? announcement.targetDashboards.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+    ? announcement.targetDashboards.map(normalizeAnnouncementTarget).filter(Boolean)
     : [];
   const pageName = String(window.location.pathname || '').split('/').pop().toLowerCase() || 'dashboard.html';
-  const currentDashboard = DASHBOARD_PAGE_TARGETS[pageName] || String(currentSecurityUserData?.role || '').trim().toLowerCase();
+  const currentDashboard = normalizeAnnouncementTarget(DASHBOARD_PAGE_TARGETS[pageName] || currentSecurityUserData?.role || '');
   if (!enabled || !message || (targetDashboards.length && !targetDashboards.includes(currentDashboard))) {
     existing?.remove();
     return;
@@ -783,9 +789,13 @@ function showDashboardAnnouncement(announcement = {}) {
       }
       @media (max-width: 768px) {
         #systemAnnouncementBanner {
-          position: relative !important;
-          top: auto !important;
-          z-index: 10 !important;
+          position: fixed !important;
+          top: 60px !important;
+          left: 0 !important;
+          right: 0 !important;
+          width: 100% !important;
+          box-sizing: border-box !important;
+          z-index: 998 !important;
           padding: 8px 12px !important;
           box-shadow: 0 4px 12px rgba(15,23,42,0.08) !important;
         }

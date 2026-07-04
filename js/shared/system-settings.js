@@ -191,6 +191,20 @@ function parseStringArray(value, fallback = []) {
   return items;
 }
 
+function normalizeAnnouncementTarget(value = '') {
+  const text = String(value || '').trim().toLowerCase();
+  if (['reports_monitoring', 'reports-monitoring', 'reporting_monitoring', 'reporting-monitoring'].includes(text)) return 'audit';
+  return text;
+}
+
+function parseAnnouncementTargets(value, fallback = []) {
+  return Array.from(new Set(
+    parseStringArray(value, fallback)
+      .map(normalizeAnnouncementTarget)
+      .filter(Boolean)
+  ));
+}
+
 function parseObject(value, fallback = {}) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
 }
@@ -467,7 +481,7 @@ function normalizeSystemSettings(data = {}) {
       fontFamily: ['system', 'arial', 'trebuchet', 'georgia', 'courier', 'verdana', 'tahoma'].includes(String(data?.dashboardAnnouncement?.fontFamily || '').trim().toLowerCase())
         ? String(data.dashboardAnnouncement.fontFamily).trim().toLowerCase()
         : defaults.dashboardAnnouncement.fontFamily,
-      targetDashboards: parseStringArray(data?.dashboardAnnouncement?.targetDashboards, defaults.dashboardAnnouncement.targetDashboards)
+      targetDashboards: parseAnnouncementTargets(data?.dashboardAnnouncement?.targetDashboards, defaults.dashboardAnnouncement.targetDashboards)
     },
     globalReadOnlyMode: parseBoolean(data.globalReadOnlyMode, defaults.globalReadOnlyMode),
     globalReadOnlyMessage: parseText(data.globalReadOnlyMessage, defaults.globalReadOnlyMessage),

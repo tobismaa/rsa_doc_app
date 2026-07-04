@@ -35,7 +35,7 @@ import {
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt
 } from './shared/submission-stage.js?v=20260610b';
-import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260704d';
+import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260704e';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 
 let currentUser = null;
@@ -128,6 +128,12 @@ const ANNOUNCEMENT_TEXT_COLORS = {
     warning: '#9a3412',
     success: '#065f46'
 };
+
+function normalizeAnnouncementTarget(value = '') {
+    const text = String(value || '').trim().toLowerCase();
+    if (['reports_monitoring', 'reports-monitoring', 'reporting_monitoring', 'reporting-monitoring'].includes(text)) return 'audit';
+    return text;
+}
 const REPORT_INCEPTION_START_DATE = '1900-01-01';
 const REPORT_INCEPTION_LABEL = 'From Inception';
 
@@ -4113,11 +4119,12 @@ async function loadSettings() {
     if (announcementFontFamily) announcementFontFamily.value = String(systemSettings.dashboardAnnouncement.fontFamily || getDefaultSystemSettings().dashboardAnnouncement.fontFamily || 'system');
     if (announcementMessage) announcementMessage.value = String(systemSettings.dashboardAnnouncement.message || '');
     const selectedAnnouncementTargets = Array.isArray(systemSettings.dashboardAnnouncement.targetDashboards)
-        ? systemSettings.dashboardAnnouncement.targetDashboards.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+        ? systemSettings.dashboardAnnouncement.targetDashboards.map(normalizeAnnouncementTarget).filter(Boolean)
         : [];
     document.querySelectorAll('.settingAnnouncementTarget').forEach((checkbox) => {
+        const checkboxTarget = normalizeAnnouncementTarget(checkbox.value);
         checkbox.checked = selectedAnnouncementTargets.length
-            ? selectedAnnouncementTargets.includes(String(checkbox.value || '').trim().toLowerCase())
+            ? selectedAnnouncementTargets.includes(checkboxTarget)
             : true;
     });
     if (globalReadOnlyMode) globalReadOnlyMode.value = String(systemSettings.globalReadOnlyMode ? 'true' : 'false');
@@ -5686,7 +5693,7 @@ window.saveSuperSettings = async (triggerButton = null) => {
     const announcementFontStyle = String(document.getElementById('settingAnnouncementFontStyle')?.value || getDefaultSystemSettings().dashboardAnnouncement.fontStyle || 'bold').trim().toLowerCase();
     const announcementFontFamily = String(document.getElementById('settingAnnouncementFontFamily')?.value || getDefaultSystemSettings().dashboardAnnouncement.fontFamily || 'system').trim().toLowerCase();
     const announcementTargetDashboards = Array.from(document.querySelectorAll('.settingAnnouncementTarget:checked'))
-        .map((checkbox) => String(checkbox.value || '').trim().toLowerCase())
+        .map((checkbox) => normalizeAnnouncementTarget(checkbox.value))
         .filter(Boolean);
     const announcementMessage = String(document.getElementById('settingAnnouncementMessage')?.value || '').trim();
     const globalReadOnlyMode = String(document.getElementById('settingGlobalReadOnlyMode')?.value || 'false') === 'true';

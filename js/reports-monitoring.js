@@ -26,7 +26,7 @@ let currentUserData = null;
 let allUsers = [];
 let allSubmissions = [];
 let currentTab = 'overview';
-const AUDIT_DASHBOARD_TABS = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'profile', 'help'];
+const AUDIT_DASHBOARD_TABS = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'reconciliation', 'profile', 'help'];
 
 function getInitialAuditTab() {
     const hashTab = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();
@@ -50,6 +50,9 @@ let pendingPaymentReportRequest = { kind: 'paid' };
 let currentPaymentPdfPreviewUrl = '';
 let currentPaymentPdfPreviewBlob = null;
 let currentPaymentPdfPreviewFileName = 'payment-report.pdf';
+let auditReconciliationSourceRows = [];
+let auditReconciliationResult = null;
+let auditReconciliationFileName = '';
 let usersListenerStarted = false;
 let submissionsListenerStarted = false;
 const PAYMENT_RATE_CUTOFF_MS = new Date('2026-05-07T00:00:00+01:00').getTime();
@@ -73,6 +76,18 @@ const exportAuditPendingReportBtn = document.getElementById('exportAuditPendingR
 const exportAuditPaidReportBtn = document.getElementById('exportAuditPaidReportBtn');
 const exportAuditClearedReportBtn = document.getElementById('exportAuditClearedReportBtn');
 const exportAuditRejectedReportBtn = document.getElementById('exportAuditRejectedReportBtn');
+const auditReconciliationFileInput = document.getElementById('auditReconciliationFileInput');
+const auditReconciliationTemplateBtn = document.getElementById('auditReconciliationTemplateBtn');
+const auditReconciliationSelectBtn = document.getElementById('auditReconciliationSelectBtn');
+const auditReconciliationRunBtn = document.getElementById('auditReconciliationRunBtn');
+const auditReconciliationExportBtn = document.getElementById('auditReconciliationExportBtn');
+const auditReconciliationClearBtn = document.getElementById('auditReconciliationClearBtn');
+const auditReconciliationFileMeta = document.getElementById('auditReconciliationFileMeta');
+const auditReconciliationSummary = document.getElementById('auditReconciliationSummary');
+const auditReconciliationMatchedWrap = document.getElementById('auditReconciliationMatchedWrap');
+const auditReconciliationMatchedBody = document.getElementById('auditReconciliationMatchedBody');
+const auditReconciliationUnmatchedWrap = document.getElementById('auditReconciliationUnmatchedWrap');
+const auditReconciliationUnmatchedBody = document.getElementById('auditReconciliationUnmatchedBody');
 const paymentReportRangeModal = document.getElementById('paymentReportRangeModal');
 const paymentReportPreviewModal = document.getElementById('paymentReportPreviewModal');
 const paymentReportStartDate = document.getElementById('paymentReportStartDate');
@@ -98,11 +113,15 @@ function escapeHtml(text) {
 function showNotification(message, type = 'info') {
     if (!notification) return;
     notification.textContent = message;
-    notification.className = `notification ${type}`;
-    notification.style.display = 'block';
+    notification.className = `notification ${type} show`;
+    notification.style.display = 'flex';
     clearTimeout(showNotification._timer);
+    clearTimeout(showNotification._hideTimer);
     showNotification._timer = setTimeout(() => {
-        notification.style.display = 'none';
+        notification.classList.remove('show');
+        showNotification._hideTimer = setTimeout(() => {
+            notification.style.display = 'none';
+        }, 360);
     }, 3000);
 }
 
@@ -155,6 +174,44 @@ function parseMoney(value) {
     const raw = String(value ?? '').replace(/[^0-9.\-]/g, '');
     const num = Number(raw);
     return Number.isFinite(num) ? num : 0;
+}
+
+function getCellText(value) {
+    if (value === undefined || value === null) return '';
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+    if (typeof value === 'object') {
+        if (value.text) return String(value.text).trim();
+        if (value.result !== undefined && value.result !== null) return String(value.result).trim();
+    }
+    return String(value).trim();
+}
+
+function normalizeImportHeader(header) {
+    return String(header || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function normalizeCustomerName(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
+function normalizeAccountNumber(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    return digits.length > 0 && digits.length < 10 ? digits.padStart(10, '0') : digits;
+}
+
+function normalizeRsaAmount(value) {
+    const amount = parseMoney(value);
+    return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : 0;
+}
+
+function hasRsaAmount(value) {
+    return normalizeRsaAmount(value) > 0;
+}
+
+function rsaAmountsMatch(left, right) {
+    const a = normalizeRsaAmount(left);
+    const b = normalizeRsaAmount(right);
+    return a > 0 && b > 0 && Math.abs(a - b) < 1;
 }
 
 function roundDownToNearestThousand(value) {
@@ -212,6 +269,239 @@ function getCustomerAccountNumber(sub = {}) {
         sub?.accountNumber ||
         '-'
     ).trim() || '-';
+}
+
+function getSelectedAuditReconciliationFile() {
+    return auditReconciliationFileInput?.files?.[0] || null;
+}
+
+function resolveImportColumn(headerMap, acceptedKeys = []) {
+    for (const key of acceptedKeys) {
+        for (const [colNumber, headerKey] of headerMap.entries()) {
+            if (headerKey === key) return colNumber;
+        }
+    }
+    return 0;
+}
+
+function getAuditReconciliationColumns(headerMap) {
+    return {
+        nameColumn: resolveImportColumn(headerMap, ['customername', 'customer', 'name', 'fullname', 'customerfullname', 'accountname', 'membername', 'clientname']),
+        accountColumn: resolveImportColumn(headerMap, ['accountnumber', 'accountno', 'acctnumber', 'acctno', 'bankaccountnumber', 'customeraccountnumber', 'customeraccountno']),
+        rsaColumn: resolveImportColumn(headerMap, ['rsabalance', 'rsabal', 'retirementsavingsaccountbalance', 'balance', 'amount', 'rsavalue', 'pensionbalance'])
+    };
+}
+
+function normalizeAuditReconciliationRow(row = {}) {
+    const customerName = String(row.customerName || '').trim();
+    const accountNumber = String(row.accountNumber || '').trim();
+    const rawRsaBalance = String(row.rawRsaBalance || '').trim();
+    return {
+        ...row,
+        customerName,
+        accountNumber,
+        rawRsaBalance,
+        normalizedName: normalizeCustomerName(customerName),
+        normalizedAccountNumber: normalizeAccountNumber(accountNumber),
+        normalizedRsaBalance: normalizeRsaAmount(rawRsaBalance),
+        hasRsaBalance: hasRsaAmount(rawRsaBalance)
+    };
+}
+
+function parseCsvRows(text = '') {
+    const rows = [];
+    let row = [];
+    let cell = '';
+    let inQuotes = false;
+    const source = String(text || '');
+    for (let i = 0; i < source.length; i += 1) {
+        const char = source[i];
+        const next = source[i + 1];
+        if (char === '"' && inQuotes && next === '"') {
+            cell += '"';
+            i += 1;
+            continue;
+        }
+        if (char === '"') {
+            inQuotes = !inQuotes;
+            continue;
+        }
+        if (char === ',' && !inQuotes) {
+            row.push(cell.trim());
+            cell = '';
+            continue;
+        }
+        if ((char === '\n' || char === '\r') && !inQuotes) {
+            if (char === '\r' && next === '\n') i += 1;
+            row.push(cell.trim());
+            if (row.some((value) => String(value || '').trim())) rows.push(row);
+            row = [];
+            cell = '';
+            continue;
+        }
+        cell += char;
+    }
+    row.push(cell.trim());
+    if (row.some((value) => String(value || '').trim())) rows.push(row);
+    return rows;
+}
+
+function parseAuditReconciliationCsv(text = '') {
+    const rows = parseCsvRows(text);
+    if (!rows.length) throw new Error('CSV file is empty.');
+    const headerMap = new Map();
+    rows[0].forEach((header, index) => {
+        const normalized = normalizeImportHeader(header);
+        if (normalized) headerMap.set(index + 1, normalized);
+    });
+    const { nameColumn, accountColumn, rsaColumn } = getAuditReconciliationColumns(headerMap);
+    if (!nameColumn && !accountColumn) throw new Error('File must contain a name or account number column.');
+
+    const parsedRows = rows.slice(1).map((row, index) => normalizeAuditReconciliationRow({
+        rowNumber: index + 2,
+        customerName: nameColumn ? getCellText(row[nameColumn - 1]) : '',
+        accountNumber: accountColumn ? getCellText(row[accountColumn - 1]) : '',
+        rawRsaBalance: rsaColumn ? getCellText(row[rsaColumn - 1]) : ''
+    })).filter((row) => row.customerName || row.accountNumber || row.rawRsaBalance);
+
+    if (!parsedRows.length) throw new Error('The CSV file does not contain any usable rows.');
+    return parsedRows;
+}
+
+async function parseAuditReconciliationExcel(file) {
+    if (!window.ExcelJS) throw new Error('Excel library is not available right now.');
+    const workbook = new window.ExcelJS.Workbook();
+    await workbook.xlsx.load(await file.arrayBuffer());
+    const sheet = workbook.worksheets[0];
+    if (!sheet) throw new Error('No worksheet found in this Excel file.');
+
+    const headerMap = new Map();
+    sheet.getRow(1).eachCell((cell, colNumber) => {
+        const normalized = normalizeImportHeader(getCellText(cell.value));
+        if (normalized) headerMap.set(colNumber, normalized);
+    });
+    const { nameColumn, accountColumn, rsaColumn } = getAuditReconciliationColumns(headerMap);
+    if (!nameColumn && !accountColumn) throw new Error('File must contain a name or account number column.');
+
+    const rows = [];
+    for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
+        const row = sheet.getRow(rowNumber);
+        const parsed = normalizeAuditReconciliationRow({
+            rowNumber,
+            customerName: nameColumn ? getCellText(row.getCell(nameColumn).value) : '',
+            accountNumber: accountColumn ? getCellText(row.getCell(accountColumn).value) : '',
+            rawRsaBalance: rsaColumn ? getCellText(row.getCell(rsaColumn).value) : ''
+        });
+        if (parsed.customerName || parsed.accountNumber || parsed.rawRsaBalance) rows.push(parsed);
+    }
+
+    if (!rows.length) throw new Error('The Excel file does not contain any usable rows.');
+    return rows;
+}
+
+async function parseAuditReconciliationFile(file) {
+    if (!file) throw new Error('Select a file first.');
+    const name = String(file.name || '').toLowerCase();
+    if (name.endsWith('.csv')) return parseAuditReconciliationCsv(await file.text());
+    if (!name.endsWith('.xlsx')) throw new Error('Upload an .xlsx or .csv file.');
+    return parseAuditReconciliationExcel(file);
+}
+
+function getAuditReconciliationCandidates() {
+    return allSubmissions.map((sub) => {
+        const financials = getSubmissionFinancials(sub);
+        const accountNumber = getCustomerAccountNumber(sub);
+        const customerName = String(sub.customerName || sub?.customerDetails?.name || '').trim();
+        return {
+            submission: sub,
+            customerName,
+            normalizedName: normalizeCustomerName(customerName),
+            accountNumber,
+            normalizedAccountNumber: normalizeAccountNumber(accountNumber),
+            rsaBalance: financials.rsaBalance,
+            normalizedRsaBalance: normalizeRsaAmount(financials.rsaBalance)
+        };
+    });
+}
+
+function getLatestSubmissionMillis(sub = {}) {
+    return getTimestampMillis(sub.updatedAt || sub.paidAt || sub.clearedAt || sub.uploadedAt || getSubmissionCurrentStageEntryAt(sub));
+}
+
+function chooseAuditReconciliationMatch(row, candidates = []) {
+    const accountMatches = row.normalizedAccountNumber
+        ? candidates.filter((candidate) => candidate.normalizedAccountNumber === row.normalizedAccountNumber)
+        : [];
+    const nameMatches = row.normalizedName
+        ? candidates.filter((candidate) => candidate.normalizedName === row.normalizedName)
+        : [];
+    const pickLatest = (items = []) => items.slice().sort((a, b) => getLatestSubmissionMillis(b.submission) - getLatestSubmissionMillis(a.submission))[0] || null;
+
+    if (row.hasRsaBalance) {
+        const accountBalanceMatch = pickLatest(accountMatches.filter((candidate) => rsaAmountsMatch(row.normalizedRsaBalance, candidate.normalizedRsaBalance)));
+        if (accountBalanceMatch) return { candidate: accountBalanceMatch, method: 'Account + RSA balance', balanceMatches: true };
+    }
+
+    const accountMatch = pickLatest(accountMatches);
+    if (accountMatch) return { candidate: accountMatch, method: 'Account number', balanceMatches: row.hasRsaBalance ? rsaAmountsMatch(row.normalizedRsaBalance, accountMatch.normalizedRsaBalance) : true };
+
+    if (row.hasRsaBalance) {
+        const nameBalanceMatch = pickLatest(nameMatches.filter((candidate) => rsaAmountsMatch(row.normalizedRsaBalance, candidate.normalizedRsaBalance)));
+        if (nameBalanceMatch) return { candidate: nameBalanceMatch, method: 'Name + RSA balance', balanceMatches: true };
+    }
+
+    const nameMatch = pickLatest(nameMatches);
+    if (nameMatch) return { candidate: nameMatch, method: 'Name', balanceMatches: row.hasRsaBalance ? rsaAmountsMatch(row.normalizedRsaBalance, nameMatch.normalizedRsaBalance) : true };
+
+    return null;
+}
+
+function computeAuditReconciliationResult(rows = []) {
+    const candidates = getAuditReconciliationCandidates();
+    const matchedRows = [];
+    const unmatchedRows = [];
+
+    rows.forEach((row) => {
+        const match = chooseAuditReconciliationMatch(row, candidates);
+        if (!match) {
+            unmatchedRows.push({
+                ...row,
+                reason: 'Name/account number was not found in system records.'
+            });
+            return;
+        }
+
+        const { candidate, method, balanceMatches } = match;
+        matchedRows.push({
+            ...row,
+            matchMethod: method,
+            balanceMatches,
+            submission: candidate.submission,
+            submissionId: candidate.submission.id,
+            systemName: candidate.customerName || candidate.submission.customerName || '-',
+            uploaderName: getUserDisplayName(candidate.submission.uploadedBy || candidate.submission.auditCommissionSubmittedBy || ''),
+            systemAccountNumber: candidate.accountNumber,
+            systemRsaBalance: candidate.rsaBalance,
+            systemStatus: statusLabel(candidate.submission.status || '-')
+        });
+    });
+
+    return {
+        totalRows: rows.length,
+        matchedRows,
+        unmatchedRows,
+        exactCount: matchedRows.filter((row) => row.balanceMatches).length,
+        balanceDifferenceCount: matchedRows.filter((row) => !row.balanceMatches).length,
+        systemCount: candidates.length
+    };
+}
+
+function resetAuditReconciliationState() {
+    auditReconciliationSourceRows = [];
+    auditReconciliationResult = null;
+    auditReconciliationFileName = '';
+    if (auditReconciliationFileInput) auditReconciliationFileInput.value = '';
+    renderAuditReconciliation();
 }
 
 function renderCopyableCustomerAccount(sub = {}) {
@@ -475,14 +765,182 @@ function renderAuditWorkflowBadges() {
     setCountBadge('auditRejectedCountBadge', getAuditRejectedRows().length);
 }
 
+function renderAuditReconciliation() {
+    const selectedFile = getSelectedAuditReconciliationFile();
+    if (auditReconciliationFileMeta) {
+        auditReconciliationFileMeta.textContent = auditReconciliationFileName
+            ? `Selected file: ${auditReconciliationFileName}`
+            : (selectedFile ? `Selected file: ${selectedFile.name}` : 'No file selected.');
+    }
+    if (auditReconciliationRunBtn) auditReconciliationRunBtn.disabled = !selectedFile;
+    if (auditReconciliationClearBtn) auditReconciliationClearBtn.disabled = !selectedFile && !auditReconciliationResult;
+    if (auditReconciliationExportBtn) auditReconciliationExportBtn.disabled = !auditReconciliationResult;
+
+    if (!auditReconciliationResult) {
+        if (auditReconciliationSummary) {
+            auditReconciliationSummary.style.display = 'none';
+            auditReconciliationSummary.innerHTML = '';
+        }
+        if (auditReconciliationMatchedWrap) auditReconciliationMatchedWrap.style.display = 'none';
+        if (auditReconciliationMatchedBody) auditReconciliationMatchedBody.innerHTML = '';
+        if (auditReconciliationUnmatchedWrap) auditReconciliationUnmatchedWrap.style.display = 'none';
+        if (auditReconciliationUnmatchedBody) auditReconciliationUnmatchedBody.innerHTML = '';
+        return;
+    }
+
+    const matchedCount = auditReconciliationResult.matchedRows.length;
+    const unmatchedCount = auditReconciliationResult.unmatchedRows.length;
+    if (auditReconciliationSummary) {
+        auditReconciliationSummary.style.display = 'grid';
+        auditReconciliationSummary.innerHTML = [
+            { label: 'Uploaded Rows', value: auditReconciliationResult.totalRows },
+            { label: 'Found', value: matchedCount },
+            { label: 'Exact Balance', value: auditReconciliationResult.exactCount },
+            { label: 'Balance Differs', value: auditReconciliationResult.balanceDifferenceCount },
+            { label: 'Not Found', value: unmatchedCount },
+            { label: 'System Records', value: auditReconciliationResult.systemCount }
+        ].map((chip) => `
+            <div class="audit-reconciliation-chip">
+                <span>${escapeHtml(chip.label)}</span>
+                <strong>${String(chip.value)}</strong>
+            </div>
+        `).join('');
+    }
+
+    if (auditReconciliationMatchedWrap) auditReconciliationMatchedWrap.style.display = matchedCount ? 'block' : 'none';
+    if (auditReconciliationMatchedBody) {
+        auditReconciliationMatchedBody.innerHTML = matchedCount
+            ? auditReconciliationResult.matchedRows.map((row) => {
+                const statusClass = row.balanceMatches ? 'audit-recon-status exact' : 'audit-recon-status partial';
+                const statusText = row.balanceMatches ? `Found (${row.matchMethod})` : `Found, balance differs (${row.matchMethod})`;
+                return `
+                    <tr>
+                        <td>${escapeHtml(row.rowNumber)}</td>
+                        <td>${escapeHtml(row.customerName || '-')}</td>
+                        <td>${escapeHtml(row.accountNumber || '-')}</td>
+                        <td>${row.hasRsaBalance ? formatCurrency(row.normalizedRsaBalance) : '-'}</td>
+                        <td><strong>${escapeHtml(row.systemName || '-')}</strong></td>
+                        <td>${escapeHtml(row.uploaderName || '-')}</td>
+                        <td>${escapeHtml(row.systemAccountNumber || '-')}</td>
+                        <td>${formatCurrency(row.systemRsaBalance)}</td>
+                        <td><span class="${statusClass}">${escapeHtml(statusText)}</span></td>
+                        <td><button type="button" class="action-btn" onclick="window.openMonitoringApplicationDetails('${row.submissionId}')"><i class="fas fa-eye"></i> View</button></td>
+                    </tr>
+                `;
+            }).join('')
+            : '<tr><td colspan="10" class="no-data">No found records</td></tr>';
+    }
+
+    if (auditReconciliationUnmatchedWrap) auditReconciliationUnmatchedWrap.style.display = unmatchedCount ? 'block' : 'none';
+    if (auditReconciliationUnmatchedBody) {
+        auditReconciliationUnmatchedBody.innerHTML = unmatchedCount
+            ? auditReconciliationResult.unmatchedRows.map((row) => `
+                <tr>
+                    <td>${escapeHtml(row.rowNumber)}</td>
+                    <td>${escapeHtml(row.customerName || '-')}</td>
+                    <td>${escapeHtml(row.accountNumber || '-')}</td>
+                    <td>${row.hasRsaBalance ? formatCurrency(row.normalizedRsaBalance) : '-'}</td>
+                    <td>${escapeHtml(row.reason || 'Not found')}</td>
+                </tr>
+            `).join('')
+            : '<tr><td colspan="5" class="no-data">No missing records</td></tr>';
+    }
+}
+
+async function downloadAuditReconciliationTemplate() {
+    if (!window.ExcelJS) throw new Error('Excel library is not available right now.');
+    const workbook = new window.ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Audit Reconciliation');
+    sheet.columns = [
+        { header: 'Customer Name', key: 'customerName', width: 34 },
+        { header: 'Account Number', key: 'accountNumber', width: 18 },
+        { header: 'RSA Balance', key: 'rsaBalance', width: 18 }
+    ];
+    sheet.getRow(1).font = { bold: true };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'DCEBFA' } };
+    sheet.getColumn(2).numFmt = '@';
+    sheet.addRow({ customerName: 'Sample Customer', accountNumber: '0123456789', rsaBalance: 1000000 });
+    sheet.addRow({ customerName: '', accountNumber: '', rsaBalance: '' });
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveBlob('audit-reconciliation-template.xlsx', new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    }));
+}
+
+async function exportAuditReconciliationResult() {
+    if (!auditReconciliationResult) throw new Error('Run reconciliation first.');
+    if (!window.ExcelJS) throw new Error('Excel library is not available right now.');
+    const workbook = new window.ExcelJS.Workbook();
+    workbook.creator = 'CMBank RSA Audit Dashboard';
+    workbook.created = new Date();
+
+    const foundSheet = workbook.addWorksheet('Found Records');
+    foundSheet.columns = [
+        { header: 'Upload Row', key: 'rowNumber', width: 12 },
+        { header: 'Uploaded Name', key: 'customerName', width: 30 },
+        { header: 'Uploaded Account', key: 'accountNumber', width: 18 },
+        { header: 'Uploaded RSA Balance', key: 'uploadedRsaBalance', width: 20 },
+        { header: 'System Name', key: 'systemName', width: 30 },
+        { header: 'Uploader', key: 'uploaderName', width: 28 },
+        { header: 'System Account', key: 'systemAccountNumber', width: 18 },
+        { header: 'System RSA Balance', key: 'systemRsaBalance', width: 20 },
+        { header: 'System Status', key: 'systemStatus', width: 16 },
+        { header: 'Match Status', key: 'matchStatus', width: 26 },
+        { header: 'Application ID', key: 'submissionId', width: 28 }
+    ];
+    auditReconciliationResult.matchedRows.forEach((row) => foundSheet.addRow({
+        rowNumber: row.rowNumber,
+        customerName: row.customerName,
+        accountNumber: row.accountNumber,
+        uploadedRsaBalance: row.hasRsaBalance ? row.normalizedRsaBalance : '',
+        systemName: row.systemName,
+        uploaderName: row.uploaderName,
+        systemAccountNumber: row.systemAccountNumber,
+        systemRsaBalance: row.systemRsaBalance,
+        systemStatus: row.systemStatus,
+        matchStatus: row.balanceMatches ? `Found (${row.matchMethod})` : `Found, balance differs (${row.matchMethod})`,
+        submissionId: row.submissionId
+    }));
+    foundSheet.getRow(1).font = { bold: true };
+
+    const notFoundSheet = workbook.addWorksheet('Not Found');
+    notFoundSheet.columns = [
+        { header: 'Upload Row', key: 'rowNumber', width: 12 },
+        { header: 'Name', key: 'customerName', width: 30 },
+        { header: 'Account Number', key: 'accountNumber', width: 18 },
+        { header: 'RSA Balance', key: 'rsaBalance', width: 20 },
+        { header: 'Result', key: 'reason', width: 48 }
+    ];
+    auditReconciliationResult.unmatchedRows.forEach((row) => notFoundSheet.addRow({
+        rowNumber: row.rowNumber,
+        customerName: row.customerName,
+        accountNumber: row.accountNumber,
+        rsaBalance: row.hasRsaBalance ? row.normalizedRsaBalance : '',
+        reason: row.reason || 'Not found'
+    }));
+    notFoundSheet.getRow(1).font = { bold: true };
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveBlob(`audit-reconciliation-result-${Date.now()}.xlsx`, new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    }));
+}
+
 function renderOverview() {
     const awaitingAuditCount = getAuditSentToPfaRows().length;
-    const paidCount = getAuditPaidRows('all').length;
-    const clearedCount = getAuditClearedRows().length;
+    const paidRows = getAuditPaidRows('all');
+    const paidCount = paidRows.length;
+    const clearedRows = getAuditClearedRows();
+    const clearedCount = clearedRows.length;
+    const commissionPayableAmount = paidRows.reduce((sum, sub) => sum + getSubmissionFinancials(sub).commission, 0);
+    const clearedAmount = clearedRows.reduce((sum, sub) => sum + getSubmissionFinancials(sub).commission, 0);
 
     setCountBadge('overviewUsersCount', awaitingAuditCount);
     setCountBadge('overviewSentCount', paidCount);
+    setCountBadge('overviewCommissionPayableAmount', formatCurrency(commissionPayableAmount));
     setCountBadge('overviewPaidClearedCount', clearedCount);
+    setCountBadge('auditClearedTotalApplications', clearedCount);
+    setCountBadge('auditClearedTotalAmount', formatCurrency(clearedAmount));
     renderAuditWorkflowBadges();
 }
 
@@ -548,7 +1006,10 @@ function renderAuditMoneyRows(body, rows, mode) {
         const actionCell = mode === 'sent'
             ? `<button class="action-btn" onclick="window.acceptAuditCommission('${sub.id}')"><i class="fas fa-check"></i> Accept</button>
                <button class="action-btn" style="background:#b91c1c;color:#fff;border:none;" onclick="window.rejectAuditCommission('${sub.id}')"><i class="fas fa-times"></i> Reject</button>`
-            : `<button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>`;
+            : mode === 'paid'
+                ? `<button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>
+                   <button class="action-btn audit-clear-btn" onclick="window.clearAuditPayment('${sub.id}')"><i class="fas fa-circle-check"></i> Clear</button>`
+                : `<button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>`;
         const officerEmail = mode === 'paid'
             ? (sub.auditCommissionAcceptedBy || sub.paidBy || sub.commissionPaidBy || '')
             : mode === 'cleared'
@@ -1103,6 +1564,7 @@ function renderProfile() {
 function renderCurrentTab() {
     renderOverview();
     renderAuditWorkflowTabs();
+    renderAuditReconciliation();
 }
 
 function switchTab(tabId) {
@@ -1121,6 +1583,7 @@ function switchTab(tabId) {
         paid: 'Paid',
         cleared: 'Cleared',
         rejected: 'Rejected',
+        reconciliation: 'Reconciliation',
         profile: 'My Profile',
         help: 'Help & SOP'
     };
@@ -1128,8 +1591,8 @@ function switchTab(tabId) {
 }
 
 function ensureDataForTab(tabId) {
-    if (tabId === 'overview' || tabId === 'sent-to-pfa' || tabId === 'paid' || tabId === 'cleared') loadUsers();
-    if (tabId === 'overview' || tabId === 'sent-to-pfa' || tabId === 'paid' || tabId === 'cleared') loadSubmissions();
+    if (tabId === 'overview' || tabId === 'sent-to-pfa' || tabId === 'paid' || tabId === 'cleared' || tabId === 'reconciliation') loadUsers();
+    if (tabId === 'overview' || tabId === 'sent-to-pfa' || tabId === 'paid' || tabId === 'cleared' || tabId === 'reconciliation') loadSubmissions();
 }
 
 function toggleSidebar(open) {
@@ -1212,21 +1675,28 @@ function getAuditCorrectionSummaryHtml(submission = {}) {
 function showAuditActionModal({ mode = 'accept', submission = {} } = {}) {
     return new Promise((resolve) => {
         const isReject = mode === 'reject';
+        const isClear = mode === 'clear';
+        const title = isReject ? 'Reject Payment Request' : isClear ? 'Clear Payment' : 'Approve Payment Request';
+        const message = isReject
+            ? 'Enter a reason for rejecting'
+            : isClear
+                ? 'Confirm that payment should be cleared for'
+                : 'Confirm that commission payment should be marked as paid for';
         const modal = document.createElement('div');
         modal.className = 'modal active audit-action-modal';
         modal.innerHTML = `
             <div class="modal-content audit-action-card ${isReject ? 'reject' : 'accept'}">
                 <div class="audit-action-icon">
-                    <i class="fas ${isReject ? 'fa-xmark' : 'fa-check'}"></i>
+                    <i class="fas ${isReject ? 'fa-xmark' : isClear ? 'fa-circle-check' : 'fa-check'}"></i>
                 </div>
-                <h2>${isReject ? 'Reject Payment Request' : 'Approve Payment Request'}</h2>
-                <p>${isReject ? 'Enter a reason for rejecting' : 'Confirm that commission payment should be marked as paid for'} <strong>${escapeHtml(submission.customerName || 'this application')}</strong>.</p>
+                <h2>${title}</h2>
+                <p>${message} <strong>${escapeHtml(submission.customerName || 'this application')}</strong>.</p>
                 ${getAuditCorrectionSummaryHtml(submission)}
                 ${isReject ? '<textarea id="auditRejectReasonInput" rows="4" placeholder="Enter rejection reason"></textarea>' : ''}
                 <div class="audit-action-actions">
                     <button type="button" class="cancel-btn" data-audit-action="cancel">Cancel</button>
                     <button type="button" class="submit-btn ${isReject ? 'danger' : ''}" data-audit-action="confirm">
-                        <i class="fas ${isReject ? 'fa-paper-plane' : 'fa-check'}"></i> ${isReject ? 'Reject' : 'Approve'}
+                        <i class="fas ${isReject ? 'fa-paper-plane' : isClear ? 'fa-circle-check' : 'fa-check'}"></i> ${isReject ? 'Reject' : isClear ? 'Clear' : 'Approve'}
                     </button>
                 </div>
             </div>
@@ -1263,6 +1733,66 @@ function showAuditActionModal({ mode = 'accept', submission = {} } = {}) {
 }
 
 window.openMonitoringApplicationDetails = openApplicationDetailsModal;
+
+window.clearAuditPayment = async (submissionId) => {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub) {
+        showNotification('Application not found', 'warning');
+        return;
+    }
+    if (String(sub.status || '').toLowerCase() !== 'paid') {
+        showNotification('Only paid applications can be cleared.', 'warning');
+        return;
+    }
+
+    const confirmed = await showAuditActionModal({ mode: 'clear', submission: sub });
+    if (!confirmed) return;
+
+    try {
+        const { commission, twentyFive, rsaBalance } = getSubmissionFinancials(sub);
+        await updateDoc(doc(db, 'submissions', submissionId), {
+            status: 'cleared',
+            clearedAt: serverTimestamp(),
+            clearedBy: currentUser?.email || '',
+            auditClearedAt: serverTimestamp(),
+            auditClearedBy: currentUser?.email || '',
+            auditCommissionAmount: commission,
+            auditRsaBalance: rsaBalance,
+            auditRsaTwentyFivePercent: twentyFive,
+            updatedAt: serverTimestamp()
+        });
+
+        await addDoc(collection(db, 'audit'), {
+            action: 'audit_payment_cleared',
+            submissionId,
+            customerName: sub.customerName || '',
+            uploadedBy: sub.uploadedBy || '',
+            commissionAmount: commission,
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        }).catch(() => {});
+
+        await notifyUserPushEvent({
+            currentUser,
+            recipientEmail: String(sub.auditCommissionSubmittedBy || sub.paymentMadeBy || sub.uploadedBy || '').trim(),
+            eventType: 'audit_payment_cleared',
+            title: 'Payment Cleared',
+            body: `${sub.customerName || 'Your application'} has been cleared by Audit.`,
+            clickUrl: '/dashboard.html',
+            meta: {
+                submissionId,
+                customerName: sub.customerName || '',
+                clearedBy: currentUser?.email || '',
+                commissionAmount: commission
+            }
+        }).catch(() => {});
+
+        showNotification('Payment cleared successfully.', 'success');
+    } catch (error) {
+        showNotification('Failed to clear payment.', 'error');
+    }
+};
+
 window.acceptAuditCommission = async (submissionId) => {
     const sub = allSubmissions.find((item) => item.id === submissionId);
     if (!sub) {
@@ -1448,6 +1978,75 @@ function bindEvents() {
         pendingPaymentReportRequest = { kind: 'rejected' };
         openPaymentReportRangeModal();
     });
+    auditReconciliationTemplateBtn?.addEventListener('click', async () => {
+        const originalHtml = auditReconciliationTemplateBtn.innerHTML;
+        auditReconciliationTemplateBtn.disabled = true;
+        auditReconciliationTemplateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Template';
+        try {
+            await downloadAuditReconciliationTemplate();
+            showNotification('Template downloaded successfully.', 'success');
+        } catch (error) {
+            showNotification(error?.message || 'Failed to download template', 'error');
+        } finally {
+            auditReconciliationTemplateBtn.disabled = false;
+            auditReconciliationTemplateBtn.innerHTML = originalHtml;
+        }
+    });
+    auditReconciliationSelectBtn?.addEventListener('click', () => {
+        if (auditReconciliationFileInput) auditReconciliationFileInput.value = '';
+        auditReconciliationFileInput?.click();
+    });
+    auditReconciliationFileInput?.addEventListener('change', () => {
+        const selectedFile = getSelectedAuditReconciliationFile();
+        auditReconciliationFileName = selectedFile?.name || '';
+        auditReconciliationSourceRows = [];
+        auditReconciliationResult = null;
+        renderAuditReconciliation();
+        if (selectedFile) setTimeout(() => showNotification('File uploaded. Click Run Check to start reconciliation.', 'success'), 0);
+    });
+    auditReconciliationRunBtn?.addEventListener('click', async () => {
+        const file = getSelectedAuditReconciliationFile();
+        if (!file) {
+            showNotification('Select a file first.', 'warning');
+            return;
+        }
+        const originalHtml = auditReconciliationRunBtn.innerHTML;
+        auditReconciliationRunBtn.disabled = true;
+        auditReconciliationRunBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
+        try {
+            auditReconciliationFileName = file.name;
+            auditReconciliationSourceRows = await parseAuditReconciliationFile(file);
+            auditReconciliationResult = computeAuditReconciliationResult(auditReconciliationSourceRows);
+            renderAuditReconciliation();
+            showNotification(`Reconciliation complete. ${auditReconciliationResult.matchedRows.length} row(s) found.`, 'success');
+        } catch (error) {
+            auditReconciliationSourceRows = [];
+            auditReconciliationResult = null;
+            renderAuditReconciliation();
+            showNotification(error?.message || 'Failed to run reconciliation', 'error');
+        } finally {
+            auditReconciliationRunBtn.disabled = !getSelectedAuditReconciliationFile();
+            auditReconciliationRunBtn.innerHTML = originalHtml;
+        }
+    });
+    auditReconciliationExportBtn?.addEventListener('click', async () => {
+        const originalHtml = auditReconciliationExportBtn.innerHTML;
+        auditReconciliationExportBtn.disabled = true;
+        auditReconciliationExportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+        try {
+            await exportAuditReconciliationResult();
+            showNotification('Reconciliation result exported.', 'success');
+        } catch (error) {
+            showNotification(error?.message || 'Failed to export result', 'error');
+        } finally {
+            auditReconciliationExportBtn.disabled = !auditReconciliationResult;
+            auditReconciliationExportBtn.innerHTML = originalHtml;
+        }
+    });
+    auditReconciliationClearBtn?.addEventListener('click', () => {
+        resetAuditReconciliationState();
+        showNotification('Reconciliation cleared.', 'info');
+    });
     document.getElementById('closePaymentReportRangeModalBtn')?.addEventListener('click', closePaymentReportRangeModal);
     document.getElementById('cancelPaymentReportRangeBtn')?.addEventListener('click', closePaymentReportRangeModal);
     document.getElementById('closePaymentReportPreviewModalBtn')?.addEventListener('click', closePaymentReportPreviewModal);
@@ -1568,6 +2167,9 @@ function loadSubmissions() {
     submissionsListenerStarted = true;
     onSnapshot(collection(db, 'submissions'), (snapshot) => {
         allSubmissions = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
+        if (auditReconciliationSourceRows.length && auditReconciliationResult) {
+            auditReconciliationResult = computeAuditReconciliationResult(auditReconciliationSourceRows);
+        }
         renderCurrentTab();
     }, () => {
         showNotification('Failed to load applications', 'error');
@@ -1591,7 +2193,7 @@ auth.onAuthStateChanged(async (user) => {
         }
 
         const role = String(userData.role || '').toLowerCase();
-        if (role !== 'reports_monitoring') {
+        if (role !== 'reports_monitoring' && role !== 'audit') {
             if (role === 'super_admin') window.location.href = 'super-admin-dashboard.html';
             else if (role === 'admin') window.location.href = 'admin-dashboard.html';
             else if (role === 'reviewer') window.location.href = 'reviewer-dashboard.html';

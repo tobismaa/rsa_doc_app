@@ -1961,7 +1961,9 @@ function updateRoleSwitchBackLink() {
   const role = String(currentUserProfile?.role || '').trim().toLowerCase();
   const roleTargets = {
     reviewer: { href: 'reviewer-dashboard.html', label: 'Switch to Reviewer' },
-    rsa: { href: 'rsa-dashboard.html', label: 'Switch to RSA' }
+    rsa: { href: 'rsa-dashboard.html', label: 'Switch to RSA' },
+    reports_monitoring: { href: 'reports-monitoring-dashboard.html', label: 'Switch to Audit' },
+    audit: { href: 'reports-monitoring-dashboard.html', label: 'Switch to Audit' }
   };
   const target = roleTargets[role];
   if (!target) {
@@ -2065,7 +2067,7 @@ function getDefaultDashboardForRole(role) {
   if (normalized === 'rsa') return 'rsa-dashboard.html';
   if (normalized === 'payment') return 'payment-dashboard.html';
   if (normalized === 'admin') return 'admin-dashboard.html';
-  if (normalized === 'reports_monitoring') return 'reports-monitoring-dashboard.html';
+  if (normalized === 'reports_monitoring' || normalized === 'audit') return 'reports-monitoring-dashboard.html';
   if (normalized === 'super_admin') return 'super-admin-dashboard.html';
   return '';
 }
@@ -5735,7 +5737,7 @@ function ensureUploaderAgentCommissionUi() {
           <strong id="uploaderAgentCommissionTotalSent">${formatCurrency(0)}</strong>
         </div>
         <div class="agent-commission-summary-card commission-overview-card active">
-          <span class="agent-commission-summary-label">Total Active</span>
+          <span class="agent-commission-summary-label">Total Commission Payable</span>
           <strong id="uploaderAgentCommissionTotalActive">${formatCurrency(0)}</strong>
         </div>
         <div class="agent-commission-summary-card commission-overview-card cleared">
@@ -5778,7 +5780,7 @@ function ensureUploaderAgentCommissionUi() {
           <div id="uploaderAgentCommissionModalSummary" class="agent-commission-summary"></div>
           <div class="subtab-strip agent-commission-subtabs">
             <button type="button" class="subtab-btn active" id="uploaderAgentCommissionSentTabBtn">Sent to PFA</button>
-            <button type="button" class="subtab-btn" id="uploaderAgentCommissionActiveTabBtn">Active</button>
+            <button type="button" class="subtab-btn" id="uploaderAgentCommissionActiveTabBtn">Commission Payable</button>
             <button type="button" class="subtab-btn" id="uploaderAgentCommissionClearedTabBtn">Cleared</button>
           </div>
           <div class="table-container">
@@ -5931,7 +5933,7 @@ function renderUploaderAgentCommissionSummary(group) {
       <strong style="color:#2563eb;">${formatCurrency(group.sentToPfaCommission)}</strong>
     </div>
     <div class="agent-commission-summary-card">
-      <span class="agent-commission-summary-label">Active</span>
+      <span class="agent-commission-summary-label">Commission Payable</span>
       <strong style="color:#16a34a;">${formatCurrency(group.activeCommission)}</strong>
     </div>
     <div class="agent-commission-summary-card">
@@ -5978,7 +5980,8 @@ function renderUploaderAgentCommissionBreakdown(view = 'sent_to_pfa') {
         </tr>
       `;
     }).join('');
-  body.innerHTML = rows || `<tr><td colspan="4" class="no-data">No ${bucket === 'sent_to_pfa' ? 'sent to PFA' : bucket} records for this agent</td></tr>`;
+  const emptyLabel = bucket === 'sent_to_pfa' ? 'sent to PFA' : bucket === 'active' ? 'commission payable' : bucket;
+  body.innerHTML = rows || `<tr><td colspan="4" class="no-data">No ${emptyLabel} records for this agent</td></tr>`;
 }
 
 window.openUploaderAgentCommissionModal = (groupKey) => {

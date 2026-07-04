@@ -91,9 +91,6 @@
                             <button type="button" class="action-btn" id="generateSentToPfaReportBtn" style="background:linear-gradient(135deg,#0f3b67 0%,#1d4ed8 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(29,78,216,0.28);">
                                 <i class="fas fa-file-export"></i> Generate Report
                             </button>
-                            <button type="button" class="action-btn" id="openPaymentReconciliationModalBtn" style="background:linear-gradient(135deg,#0f766e 0%,#16a34a 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(22,163,74,0.24);">
-                                <i class="fas fa-table-list"></i> Open Reconciliation
-                            </button>
                         </div>
                     </div>
                     <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;">
@@ -349,86 +346,6 @@
         </div>
     </div>
 
-    <div id="paymentReconciliationModal" class="modal">
-        <div class="modal-content large-modal" style="max-width:1200px;">
-            <div class="modal-header">
-                <h2><i class="fas fa-file-invoice-dollar"></i> Payment Reconciliation</h2>
-                <button class="close-btn" id="closePaymentReconciliationModalBtn">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px;padding:16px;border:1px solid #dbe2ea;border-radius:16px;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);">
-                    <div style="max-width:640px;">
-                        <h3 style="margin:0 0 8px;font-size:17px;color:#0f3b67;">Upload And Match Payment Report</h3>
-                        <p style="margin:0;color:#64748b;font-size:13px;line-height:1.6;">Download the template, upload a completed Excel report, and let the system match rows against the current <strong>Sent to PFA</strong> queue using customer name first, then account number, with 25% balance.</p>
-                    </div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                        <input type="file" id="paymentReconciliationFileInput" accept=".xlsx" hidden>
-                        <button type="button" class="action-btn" id="paymentReconciliationTemplateBtn">
-                            <i class="fas fa-download"></i> Download Template
-                        </button>
-                        <button type="button" class="action-btn" id="paymentReconciliationSelectBtn">
-                            <i class="fas fa-file-excel"></i> Choose Excel
-                        </button>
-                        <button type="button" class="action-btn" id="paymentReconciliationRunBtn" style="background:#0f766e;color:#fff;border:none;" disabled>
-                            <i class="fas fa-play"></i> Run Match
-                        </button>
-                        <button type="button" class="action-btn" id="paymentReconciliationClearBtn" disabled>
-                            <i class="fas fa-eraser"></i> Clear
-                        </button>
-                    </div>
-                </div>
-
-                <div id="paymentReconciliationFileMeta" style="font-size:13px;color:#475569;margin-bottom:10px;">No Excel file selected.</div>
-                <div id="paymentReconciliationSummary" style="display:none;gap:10px;flex-wrap:wrap;margin-bottom:12px;"></div>
-                <div id="paymentReconciliationNotes" style="display:none;font-size:13px;color:#475569;margin-bottom:18px;"></div>
-
-                <div id="paymentReconciliationMatchedWrap" style="display:none;margin-bottom:18px;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
-                        <h4 style="margin:0;color:#0f3b67;font-size:15px;">Matched Records</h4>
-                    </div>
-                    <div class="table-container">
-                        <table class="customers-table">
-                            <thead>
-                                <tr>
-                                    <th>Excel Row</th>
-                                    <th>Customer</th>
-                                    <th>Account Number</th>
-                                    <th>Agent</th>
-                                    <th>PFA</th>
-                                    <th>Excel 25%</th>
-                                    <th>Queue 25%</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="paymentReconciliationMatchedBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div id="paymentReconciliationUnmatchedWrap" style="display:none;">
-                    <h4 style="margin:0 0 8px;color:#0f3b67;font-size:15px;">Rows Not Matched</h4>
-                    <div class="table-container">
-                        <table class="customers-table">
-                            <thead>
-                                <tr>
-                                    <th>Excel Row</th>
-                                    <th>Customer Name</th>
-                                    <th>Account Number</th>
-                                    <th>25% Balance</th>
-                                    <th>Reason</th>
-                                </tr>
-                            </thead>
-                            <tbody id="paymentReconciliationUnmatchedBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="cancel-btn" id="closePaymentReconciliationModalFooterBtn">Close</button>
-            </div>
-        </div>
-    </div>
-
     <div id="paymentReportRangeModal" class="modal">
         <div class="modal-content" style="max-width:540px;">
             <div class="modal-header">
@@ -551,8 +468,8 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/payment-dashboard.js?v=20260704a"></script>
-    <script type="module" src="js/profile-completion-guard.js?v=20260704f"></script>
+    <script type="module" src="js/payment-dashboard.js?v=20260704b"></script>
+    <script type="module" src="js/profile-completion-guard.js?v=20260704h"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260518a">
     <script type="module" src="js/app-chat.js?v=20260617a"></script>
     <link rel="stylesheet" href="css/pwa-install.css">
