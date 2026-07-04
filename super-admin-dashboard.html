@@ -437,11 +437,62 @@
                                 </select>
                             </label>
                             <label>Announcement Speed (seconds)
-                                <input id="settingAnnouncementSpeed" type="number" min="5" max="60" step="1" value="16" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;" placeholder="5-60 seconds">
+                                <input id="settingAnnouncementSpeed" type="number" min="5" max="60" step="1" value="30" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;" placeholder="5-60 seconds">
+                            </label>
+                            <label>Announcement Text Color
+                                <input id="settingAnnouncementTextColor" type="color" value="#1d4ed8" style="width:100%;height:42px;padding:4px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;">
+                            </label>
+                            <label>Announcement Font Size (px)
+                                <input id="settingAnnouncementFontSize" type="number" min="12" max="28" step="1" value="15" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;" placeholder="12-28 px">
+                            </label>
+                            <label>Announcement Font Style
+                                <select id="settingAnnouncementFontStyle" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="normal">Normal</option>
+                                    <option value="bold">Bold</option>
+                                    <option value="italic">Italic</option>
+                                    <option value="bold_italic">Bold Italic</option>
+                                </select>
+                            </label>
+                            <label>Announcement Font Type
+                                <select id="settingAnnouncementFontFamily" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                    <option value="system">System</option>
+                                    <option value="arial">Arial</option>
+                                    <option value="trebuchet">Trebuchet MS</option>
+                                    <option value="georgia">Georgia</option>
+                                    <option value="courier">Courier New</option>
+                                    <option value="verdana">Verdana</option>
+                                    <option value="tahoma">Tahoma</option>
+                                </select>
                             </label>
                             <label style="grid-column:1/-1;">Dashboard Announcement
                                 <textarea id="settingAnnouncementMessage" rows="3" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;"></textarea>
                             </label>
+                            <div style="grid-column:1/-1;">
+                                <div style="font-weight:700;color:#0f172a;margin-bottom:8px;">Show On Dashboards</div>
+                                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;">
+                                    <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid #dbe6f2;border-radius:8px;background:#fff;">
+                                        <input type="checkbox" class="settingAnnouncementTarget" value="uploader" checked> Uploader
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid #dbe6f2;border-radius:8px;background:#fff;">
+                                        <input type="checkbox" class="settingAnnouncementTarget" value="admin" checked> Admin
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid #dbe6f2;border-radius:8px;background:#fff;">
+                                        <input type="checkbox" class="settingAnnouncementTarget" value="reviewer" checked> Reviewer
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid #dbe6f2;border-radius:8px;background:#fff;">
+                                        <input type="checkbox" class="settingAnnouncementTarget" value="rsa" checked> RSA
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid #dbe6f2;border-radius:8px;background:#fff;">
+                                        <input type="checkbox" class="settingAnnouncementTarget" value="payment" checked> Payment
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid #dbe6f2;border-radius:8px;background:#fff;">
+                                        <input type="checkbox" class="settingAnnouncementTarget" value="reports_monitoring" checked> Reports Monitoring
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid #dbe6f2;border-radius:8px;background:#fff;">
+                                        <input type="checkbox" class="settingAnnouncementTarget" value="super_admin" checked> Super Admin
+                                    </label>
+                                </div>
+                            </div>
                             <label>Global Read-Only Mode
                                 <select id="settingGlobalReadOnlyMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
                                     <option value="false">Off</option>
@@ -1607,8 +1658,8 @@
 <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="js/table-enhancer.js?v=20260512b"></script>
-<script type="module" src="js/super-admin.js?v=20260630d"></script>
-<script type="module" src="js/profile-completion-guard.js?v=20260625b"></script>
+<script type="module" src="js/super-admin.js?v=20260704g"></script>
+<script type="module" src="js/profile-completion-guard.js?v=20260704f"></script>
 <link rel="stylesheet" href="css/pwa-install.css">
     <script src="js/pwa-install.js?v=20260625b"></script>
 <link rel="stylesheet" href="css/sop-help.css">

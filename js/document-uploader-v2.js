@@ -1201,10 +1201,35 @@ let __batchFilesBuffer = [];
 let currentCommissionTab = 'sent_to_pfa';
 let currentUploaderApplicationTab = 'draft';
 let currentUploaderPaidScope = 'mine';
+const UPLOADER_DASHBOARD_TABS = ['overview', 'draft', 'applications', 'pending', 'approved', 'rejected', 'paid', 'register-agent', 'profile', 'help'];
+const UPLOADER_APPLICATION_TABS = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'audit', 'paid', 'cleared'];
 let registeredAgents = [];
 let agentAccountLookupSequence = 0;
 let agentAccountLookupDebounce = null;
 let verifiedAgentAccountLookup = { accountNumber: '', bankCode: '', accountName: '' };
+
+function getUploaderHashParts() {
+  const hash = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();
+  const [main = '', child = ''] = hash.split(':');
+  return { main, child };
+}
+
+function getInitialUploaderTab() {
+  const { main } = getUploaderHashParts();
+  return UPLOADER_DASHBOARD_TABS.includes(main) ? main : 'overview';
+}
+
+function getInitialUploaderApplicationTab() {
+  const { child } = getUploaderHashParts();
+  return UPLOADER_APPLICATION_TABS.includes(child) ? child : currentUploaderApplicationTab;
+}
+
+function rememberUploaderTab(tabId, childTab = '') {
+  if (!UPLOADER_DASHBOARD_TABS.includes(tabId)) return;
+  const next = tabId === 'applications' && childTab ? `${tabId}:${childTab}` : tabId;
+  if (window.location.hash === `#${next}`) return;
+  history.replaceState(null, '', `#${next}`);
+}
 
 function renderProfileTab() {
   if (!profileNameEl && !profileEmailEl && !profileRoleEl && !profileStatusEl) return;
@@ -2145,6 +2170,12 @@ document.addEventListener('DOMContentLoaded', () => {
       await loadRegisteredAgents();
       await loadApprovedAgents();
       await loadSubmissions();
+      const initialTab = getInitialUploaderTab();
+      const initialApplicationTab = getInitialUploaderApplicationTab();
+      window.switchTab(initialTab);
+      if (initialTab === 'applications') {
+        switchUploaderApplicationTab(initialApplicationTab);
+      }
     } else {
       window.location.href = 'index.html';
     }
@@ -3046,6 +3077,8 @@ function setupEventListeners() {
 
 // ==================== TAB SWITCHING ====================
 window.switchTab = (tabId) => {
+  tabId = UPLOADER_DASHBOARD_TABS.includes(tabId) ? tabId : 'overview';
+  rememberUploaderTab(tabId, tabId === 'applications' ? currentUploaderApplicationTab : '');
   document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
   document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
   document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
@@ -5260,7 +5293,8 @@ async function renderUploaderApplicationsTable() {
 }
 
 function switchUploaderApplicationTab(tab = 'pending') {
-  currentUploaderApplicationTab = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'audit', 'paid', 'cleared'].includes(tab) ? tab : 'draft';
+  currentUploaderApplicationTab = UPLOADER_APPLICATION_TABS.includes(tab) ? tab : 'draft';
+  rememberUploaderTab('applications', currentUploaderApplicationTab);
   if (currentUploaderApplicationTab !== 'paid') currentUploaderPaidScope = 'mine';
   document.querySelectorAll('[data-uploader-application-tab]').forEach((button) => {
     button.classList.toggle('active', button.dataset.uploaderApplicationTab === currentUploaderApplicationTab);

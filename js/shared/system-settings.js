@@ -164,6 +164,11 @@ function parseText(value, fallback = '') {
   return text || fallback;
 }
 
+function parseHexColor(value, fallback = '') {
+  const text = String(value || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(text) ? text : fallback;
+}
+
 function parseDurationSetting(value, fallback = '11m') {
   const text = String(value || '').trim().toLowerCase();
   if (/^\d+\s*[smh]$/.test(text)) return text.replace(/\s+/g, '');
@@ -359,7 +364,13 @@ export function getDefaultSystemSettings() {
     dashboardAnnouncement: {
       enabled: false,
       message: '',
-      tone: 'info'
+      tone: 'info',
+      speed: 30,
+      textColor: '',
+      fontSize: 15,
+      fontStyle: 'bold',
+      fontFamily: 'system',
+      targetDashboards: []
     },
     globalReadOnlyMode: false,
     globalReadOnlyMessage: 'Read-only mode is active. You can view records, but changes are temporarily disabled.',
@@ -446,7 +457,17 @@ function normalizeSystemSettings(data = {}) {
       ...defaults.dashboardAnnouncement,
       ...parseObject(data.dashboardAnnouncement, defaults.dashboardAnnouncement),
       message: parseText(data?.dashboardAnnouncement?.message, defaults.dashboardAnnouncement.message),
-      tone: parseText(data?.dashboardAnnouncement?.tone, defaults.dashboardAnnouncement.tone)
+      tone: parseText(data?.dashboardAnnouncement?.tone, defaults.dashboardAnnouncement.tone),
+      speed: Math.min(60, Math.max(5, parseNumber(data?.dashboardAnnouncement?.speed, defaults.dashboardAnnouncement.speed))),
+      textColor: parseHexColor(data?.dashboardAnnouncement?.textColor, defaults.dashboardAnnouncement.textColor),
+      fontSize: Math.min(28, Math.max(12, parseNumber(data?.dashboardAnnouncement?.fontSize, defaults.dashboardAnnouncement.fontSize))),
+      fontStyle: ['normal', 'bold', 'italic', 'bold_italic'].includes(String(data?.dashboardAnnouncement?.fontStyle || '').trim().toLowerCase())
+        ? String(data.dashboardAnnouncement.fontStyle).trim().toLowerCase()
+        : defaults.dashboardAnnouncement.fontStyle,
+      fontFamily: ['system', 'arial', 'trebuchet', 'georgia', 'courier', 'verdana', 'tahoma'].includes(String(data?.dashboardAnnouncement?.fontFamily || '').trim().toLowerCase())
+        ? String(data.dashboardAnnouncement.fontFamily).trim().toLowerCase()
+        : defaults.dashboardAnnouncement.fontFamily,
+      targetDashboards: parseStringArray(data?.dashboardAnnouncement?.targetDashboards, defaults.dashboardAnnouncement.targetDashboards)
     },
     globalReadOnlyMode: parseBoolean(data.globalReadOnlyMode, defaults.globalReadOnlyMode),
     globalReadOnlyMessage: parseText(data.globalReadOnlyMessage, defaults.globalReadOnlyMessage),

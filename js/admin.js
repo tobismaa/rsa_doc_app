@@ -311,6 +311,26 @@ const TAB_LABELS = {
     payments: 'Payment',
     'agent-commissions': 'Agent Commissions'
 };
+const ADMIN_DASHBOARD_TABS = [
+    ...Object.keys(TAB_GROUPS),
+    ...Object.values(TAB_GROUPS).flat(),
+    'audit',
+    'report',
+    'profile',
+    'round-robin',
+    'help'
+];
+
+function getInitialAdminTab() {
+    const hashTab = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();
+    return ADMIN_DASHBOARD_TABS.includes(hashTab) ? hashTab : 'user-management';
+}
+
+function rememberAdminTab(tabId) {
+    if (!ADMIN_DASHBOARD_TABS.includes(tabId)) return;
+    if (window.location.hash === `#${tabId}`) return;
+    history.replaceState(null, '', `#${tabId}`);
+}
 
 function setCountBadge(id, count) {
     const badge = document.getElementById(id);
@@ -1061,7 +1081,7 @@ async function checkAdminAuth() {
                 loadPendingUsers();
                 loadPendingAgents();
                 loadApprovedAgents();
-                switchTab('user-management');
+                switchTab(getInitialAdminTab());
             } else {
                 showNotification('Access denied. Admin privileges required.', 'error');
                 window.location.href = 'index.html';
@@ -1496,6 +1516,7 @@ function runTabEffects(tabId) {
 
 function switchLeafTab(tabId) {
     currentLeafTab = tabId;
+    rememberAdminTab(tabId);
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
     document.getElementById(`${tabId}Tab`)?.classList.add('active');
 
@@ -1527,6 +1548,7 @@ function switchLeafTab(tabId) {
 }
 
 function switchTab(tabId) {
+    tabId = ADMIN_DASHBOARD_TABS.includes(tabId) ? tabId : 'user-management';
     const directParent = TAB_GROUPS[tabId] ? tabId : null;
     const inferredParent = getParentTabForLeaf(tabId);
     const parentTab = directParent || inferredParent;
@@ -1543,6 +1565,7 @@ function switchTab(tabId) {
     }
 
     currentParentTab = '';
+    rememberAdminTab(tabId);
     document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
     document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));

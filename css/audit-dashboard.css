@@ -76,15 +76,14 @@
 }
 
 .audit-dashboard-page .dashboard-grid {
-  display: flex;
-  align-items: stretch;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 16px;
 }
 
 .audit-dashboard-page .stat-card {
   position: relative;
-  flex: 1 1 0;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -345,7 +344,30 @@
 
 @media (max-width: 768px) {
   .audit-dashboard-page .dashboard-grid {
-    flex-direction: column;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .audit-dashboard-page .stat-card {
+    min-height: 82px;
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .audit-dashboard-page .stat-label {
+    font-size: 10px;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  .audit-dashboard-page .stat-value {
+    font-size: 24px;
+  }
+
+  .audit-dashboard-page .stat-icon {
+    width: 42px;
+    height: 42px;
+    font-size: 17px;
   }
 
   .audit-hero {

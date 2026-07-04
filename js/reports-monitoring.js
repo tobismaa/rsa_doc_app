@@ -26,6 +26,24 @@ let currentUserData = null;
 let allUsers = [];
 let allSubmissions = [];
 let currentTab = 'overview';
+const AUDIT_DASHBOARD_TABS = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'profile', 'help'];
+
+function getInitialAuditTab() {
+    const hashTab = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();
+    return AUDIT_DASHBOARD_TABS.includes(hashTab) ? hashTab : 'overview';
+}
+
+function rememberAuditTab(tabId) {
+    if (!AUDIT_DASHBOARD_TABS.includes(tabId)) return;
+    if (window.location.hash === `#${tabId}`) return;
+    history.replaceState(null, '', `#${tabId}`);
+}
+
+function forceHardRefresh() {
+    const url = new URL(window.location.href);
+    url.searchParams.set('_', Date.now().toString());
+    window.location.replace(url.toString());
+}
 let currentAuditPaidScope = 'mine';
 let currentPaymentReport = null;
 let pendingPaymentReportRequest = { kind: 'paid' };
@@ -1088,7 +1106,9 @@ function renderCurrentTab() {
 }
 
 function switchTab(tabId) {
+    tabId = AUDIT_DASHBOARD_TABS.includes(tabId) ? tabId : 'overview';
     currentTab = tabId;
+    rememberAuditTab(tabId);
     ensureDataForTab(tabId);
     document.querySelectorAll('.nav-item').forEach((item) => item.classList.remove('active'));
     document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
@@ -1404,8 +1424,14 @@ function bindEvents() {
     };
     document.getElementById('signOutBtnSidebar')?.addEventListener('click', handleSignOut);
     document.getElementById('signOutBtnMobile')?.addEventListener('click', handleSignOut);
-    document.getElementById('forceRefreshBtn')?.addEventListener('click', () => window.location.reload());
-    document.getElementById('forceRefreshBtnMobile')?.addEventListener('click', () => window.location.reload());
+    document.getElementById('forceRefreshBtn')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        forceHardRefresh();
+    });
+    document.getElementById('forceRefreshBtnMobile')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        forceHardRefresh();
+    });
     exportAuditPendingReportBtn?.addEventListener('click', () => {
         pendingPaymentReportRequest = { kind: 'sent-to-pfa' };
         openPaymentReportRangeModal();
@@ -1578,7 +1604,7 @@ auth.onAuthStateChanged(async (user) => {
         currentUserData = userData;
         renderProfile();
         bindEvents();
-        switchTab('overview');
+        switchTab(getInitialAuditTab());
     } catch (_) {
         showNotification('Could not validate session', 'error');
         window.location.href = 'index.html';

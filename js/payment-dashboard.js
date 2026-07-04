@@ -51,6 +51,18 @@ let currentPaymentPdfPreviewUrl = '';
 let currentPaymentPdfPreviewBlob = null;
 let currentPaymentPdfPreviewFileName = 'payment-report.pdf';
 const PAYMENT_RATE_CUTOFF_MS = new Date('2026-05-07T00:00:00+01:00').getTime();
+const PAYMENT_DASHBOARD_TABS = ['dashboard', 'sent-to-pfa', 'leave', 'profile', 'help'];
+
+function getInitialPaymentTab() {
+    const hashTab = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();
+    return PAYMENT_DASHBOARD_TABS.includes(hashTab) ? hashTab : 'dashboard';
+}
+
+function rememberPaymentTab(tabId) {
+    if (!PAYMENT_DASHBOARD_TABS.includes(tabId)) return;
+    if (window.location.hash === `#${tabId}`) return;
+    history.replaceState(null, '', `#${tabId}`);
+}
 
 const pageTitle = document.getElementById('pageTitle');
 const paymentUserName = document.getElementById('paymentUserName');
@@ -582,9 +594,9 @@ function renderDashboardOverview() {
 }
 
 function switchTab(tabId) {
-    const allowedTabs = ['dashboard', 'sent-to-pfa', 'leave', 'profile'];
-    tabId = allowedTabs.includes(tabId) ? tabId : 'dashboard';
+    tabId = PAYMENT_DASHBOARD_TABS.includes(tabId) ? tabId : 'dashboard';
     activePaymentTab = tabId;
+    rememberPaymentTab(tabId);
     document.querySelectorAll('.nav-item').forEach((nav) => nav.classList.remove('active'));
     document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
     document.querySelectorAll('.tab-content').forEach((tab) => tab.classList.remove('active'));
@@ -2554,6 +2566,7 @@ auth.onAuthStateChanged(async (user) => {
         renderPaymentReconciliation();
         loadSubmissions();
         syncPaymentTableToolbars();
+        switchTab(getInitialPaymentTab());
     } catch (error) {
         showNotification('Could not validate session', 'error');
         window.location.href = 'index.html';

@@ -35,7 +35,7 @@ import {
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt
 } from './shared/submission-stage.js?v=20260610b';
-import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260617a';
+import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260704d';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 
 let currentUser = null;
@@ -63,6 +63,8 @@ let currentRoutingPolicies = {};
 let currentNotificationTemplates = {};
 let currentHouseNumberRules = [];
 let settingsCardsInitialized = false;
+let settingsFormLoaded = false;
+let settingsFormDirty = false;
 let activeSettingsModalPanelId = '';
 let currentAccessUserSearch = '';
 let activeSettingsDropdownTab = '';
@@ -89,6 +91,30 @@ let currentStatusChangeSubmissionId = '';
 let currentStatusChangeSubmission = null;
 let currentStatusChangeSearchMatches = [];
 let statusChangeSaveInProgress = false;
+const SUPER_ADMIN_DASHBOARD_TABS = [
+    'global',
+    'admins',
+    'routing-rules',
+    'agents',
+    'application-controls',
+    'backdate-report',
+    'audit',
+    'security',
+    'round-robin',
+    'settings',
+    'help'
+];
+
+function getInitialSuperAdminTab() {
+    const hashTab = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();
+    return SUPER_ADMIN_DASHBOARD_TABS.includes(hashTab) ? hashTab : 'global';
+}
+
+function rememberSuperAdminTab(tabId) {
+    if (!SUPER_ADMIN_DASHBOARD_TABS.includes(tabId)) return;
+    if (window.location.hash === `#${tabId}`) return;
+    history.replaceState(null, '', `#${tabId}`);
+}
 
 const OUTSTANDING_REPORT_OPTIONS = [
     { id: 'all', label: 'All Dashboards' },
@@ -97,6 +123,11 @@ const OUTSTANDING_REPORT_OPTIONS = [
     { id: 'rsa', label: 'RSA' },
     { id: 'payment', label: 'Payment' }
 ];
+const ANNOUNCEMENT_TEXT_COLORS = {
+    info: '#1d4ed8',
+    warning: '#9a3412',
+    success: '#065f46'
+};
 const REPORT_INCEPTION_START_DATE = '1900-01-01';
 const REPORT_INCEPTION_LABEL = 'From Inception';
 
@@ -2210,7 +2241,9 @@ function roleHome(role) {
 }
 
 function switchTab(tabId) {
+    tabId = SUPER_ADMIN_DASHBOARD_TABS.includes(tabId) ? tabId : 'global';
     currentTab = tabId;
+    rememberSuperAdminTab(tabId);
     if (tabId !== 'settings') closeSettingsSectionModal();
     ensureRealtimeDataForTab(tabId);
     document.querySelectorAll('.nav-item').forEach((n) => n.classList.remove('active'));
@@ -3988,6 +4021,11 @@ async function renderRoundRobin() {
 }
 
 async function loadSettings() {
+    if (settingsFormLoaded && settingsFormDirty) {
+        renderSettingsSubTabState();
+        return;
+    }
+
     const snap = await getDoc(doc(db, 'settings', 'system'));
     const data = snap.exists() ? (snap.data() || {}) : {};
     const defaultCommissionSettings = getDefaultCommissionSettings();
@@ -4018,6 +4056,10 @@ async function loadSettings() {
     const announcementEnabled = document.getElementById('settingAnnouncementEnabled');
     const announcementTone = document.getElementById('settingAnnouncementTone');
     const announcementSpeed = document.getElementById('settingAnnouncementSpeed');
+    const announcementTextColor = document.getElementById('settingAnnouncementTextColor');
+    const announcementFontSize = document.getElementById('settingAnnouncementFontSize');
+    const announcementFontStyle = document.getElementById('settingAnnouncementFontStyle');
+    const announcementFontFamily = document.getElementById('settingAnnouncementFontFamily');
     const announcementMessage = document.getElementById('settingAnnouncementMessage');
     const globalReadOnlyMode = document.getElementById('settingGlobalReadOnlyMode');
     const globalReadOnlyMessage = document.getElementById('settingGlobalReadOnlyMessage');
@@ -4061,8 +4103,23 @@ async function loadSettings() {
     refreshScheduledReportRecipientPicker();
     if (announcementEnabled) announcementEnabled.value = String(systemSettings.dashboardAnnouncement.enabled ? 'true' : 'false');
     if (announcementTone) announcementTone.value = String(systemSettings.dashboardAnnouncement.tone || 'info');
-    if (announcementSpeed) announcementSpeed.value = String(systemSettings.dashboardAnnouncement.speed || 16);
+    if (announcementSpeed) announcementSpeed.value = String(systemSettings.dashboardAnnouncement.speed || getDefaultSystemSettings().dashboardAnnouncement.speed || 30);
+    if (announcementTextColor) {
+        const tone = String(systemSettings.dashboardAnnouncement.tone || 'info').trim().toLowerCase();
+        announcementTextColor.value = String(systemSettings.dashboardAnnouncement.textColor || ANNOUNCEMENT_TEXT_COLORS[tone] || ANNOUNCEMENT_TEXT_COLORS.info);
+    }
+    if (announcementFontSize) announcementFontSize.value = String(systemSettings.dashboardAnnouncement.fontSize || getDefaultSystemSettings().dashboardAnnouncement.fontSize || 15);
+    if (announcementFontStyle) announcementFontStyle.value = String(systemSettings.dashboardAnnouncement.fontStyle || getDefaultSystemSettings().dashboardAnnouncement.fontStyle || 'bold');
+    if (announcementFontFamily) announcementFontFamily.value = String(systemSettings.dashboardAnnouncement.fontFamily || getDefaultSystemSettings().dashboardAnnouncement.fontFamily || 'system');
     if (announcementMessage) announcementMessage.value = String(systemSettings.dashboardAnnouncement.message || '');
+    const selectedAnnouncementTargets = Array.isArray(systemSettings.dashboardAnnouncement.targetDashboards)
+        ? systemSettings.dashboardAnnouncement.targetDashboards.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+        : [];
+    document.querySelectorAll('.settingAnnouncementTarget').forEach((checkbox) => {
+        checkbox.checked = selectedAnnouncementTargets.length
+            ? selectedAnnouncementTargets.includes(String(checkbox.value || '').trim().toLowerCase())
+            : true;
+    });
     if (globalReadOnlyMode) globalReadOnlyMode.value = String(systemSettings.globalReadOnlyMode ? 'true' : 'false');
     if (globalReadOnlyMessage) globalReadOnlyMessage.value = String(systemSettings.globalReadOnlyMessage || defaultSystemSettings.globalReadOnlyMessage || '');
     currentPfaOptions = Array.isArray(systemSettings.pfaOptions) ? [...systemSettings.pfaOptions] : [];
@@ -4100,6 +4157,7 @@ async function loadSettings() {
     renderSettingsDropdownNav();
     renderSettingsSubTabState();
     renderScheduledReportLogs(false).catch(() => {});
+    settingsFormLoaded = true;
 }
 
 function renderCurrentTab() {
@@ -5622,6 +5680,14 @@ window.saveSuperSettings = async (triggerButton = null) => {
     const scheduledReportBody = String(document.getElementById('settingScheduledReportBody')?.value || '').trim() || getDefaultSystemSettings().scheduledReportEmail.body;
     const announcementEnabled = String(document.getElementById('settingAnnouncementEnabled')?.value || 'false') === 'true';
     const announcementTone = String(document.getElementById('settingAnnouncementTone')?.value || 'info').trim() || 'info';
+    const announcementSpeed = Number(document.getElementById('settingAnnouncementSpeed')?.value || getDefaultSystemSettings().dashboardAnnouncement.speed || 30);
+    const announcementTextColor = String(document.getElementById('settingAnnouncementTextColor')?.value || '').trim();
+    const announcementFontSize = Number(document.getElementById('settingAnnouncementFontSize')?.value || getDefaultSystemSettings().dashboardAnnouncement.fontSize || 15);
+    const announcementFontStyle = String(document.getElementById('settingAnnouncementFontStyle')?.value || getDefaultSystemSettings().dashboardAnnouncement.fontStyle || 'bold').trim().toLowerCase();
+    const announcementFontFamily = String(document.getElementById('settingAnnouncementFontFamily')?.value || getDefaultSystemSettings().dashboardAnnouncement.fontFamily || 'system').trim().toLowerCase();
+    const announcementTargetDashboards = Array.from(document.querySelectorAll('.settingAnnouncementTarget:checked'))
+        .map((checkbox) => String(checkbox.value || '').trim().toLowerCase())
+        .filter(Boolean);
     const announcementMessage = String(document.getElementById('settingAnnouncementMessage')?.value || '').trim();
     const globalReadOnlyMode = String(document.getElementById('settingGlobalReadOnlyMode')?.value || 'false') === 'true';
     const globalReadOnlyMessage = String(document.getElementById('settingGlobalReadOnlyMessage')?.value || '').trim() || getDefaultSystemSettings().globalReadOnlyMessage;
@@ -5662,6 +5728,30 @@ window.saveSuperSettings = async (triggerButton = null) => {
     }
     if (scheduledReportEmailEnabled && !scheduledReportRecipients.length) {
         showNotification('Add at least one recipient email for the scheduled report', 'warning');
+        return false;
+    }
+    if (!Number.isFinite(announcementSpeed) || announcementSpeed < 5 || announcementSpeed > 60) {
+        showNotification('Announcement speed must be between 5 and 60 seconds', 'warning');
+        return false;
+    }
+    if (announcementTextColor && !/^#[0-9a-f]{6}$/i.test(announcementTextColor)) {
+        showNotification('Choose a valid announcement text color', 'warning');
+        return false;
+    }
+    if (!Number.isFinite(announcementFontSize) || announcementFontSize < 12 || announcementFontSize > 28) {
+        showNotification('Announcement font size must be between 12 and 28 pixels', 'warning');
+        return false;
+    }
+    if (!['normal', 'bold', 'italic', 'bold_italic'].includes(announcementFontStyle)) {
+        showNotification('Choose a valid announcement font style', 'warning');
+        return false;
+    }
+    if (!['system', 'arial', 'trebuchet', 'georgia', 'courier', 'verdana', 'tahoma'].includes(announcementFontFamily)) {
+        showNotification('Choose a valid announcement font type', 'warning');
+        return false;
+    }
+    if (announcementEnabled && !announcementTargetDashboards.length) {
+        showNotification('Select at least one dashboard for the announcement', 'warning');
         return false;
     }
     const commissionRate = commissionRatePercent / 100;
@@ -5764,6 +5854,12 @@ window.saveSuperSettings = async (triggerButton = null) => {
             dashboardAnnouncement: {
                 enabled: announcementEnabled,
                 tone: announcementTone,
+                speed: announcementSpeed,
+                textColor: announcementTextColor,
+                fontSize: announcementFontSize,
+                fontStyle: announcementFontStyle,
+                fontFamily: announcementFontFamily,
+                targetDashboards: announcementTargetDashboards,
                 message: announcementMessage
             },
             globalReadOnlyMode,
@@ -5866,6 +5962,11 @@ window.saveSuperSettings = async (triggerButton = null) => {
             scheduledReportSendTime,
             scheduledReportRecipientCount: scheduledReportRecipients.length,
             announcementEnabled,
+            announcementTextColor,
+            announcementFontSize,
+            announcementFontStyle,
+            announcementFontFamily,
+            announcementTargetDashboards,
             defaultRouteMode,
             agentRegistrationApprovalRequired,
             rejectionMinLength,
@@ -5879,6 +5980,8 @@ window.saveSuperSettings = async (triggerButton = null) => {
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         });
+        settingsFormDirty = false;
+        settingsFormLoaded = true;
         showNotification('System settings saved successfully.', 'success');
         return true;
     } catch (error) {
@@ -6173,6 +6276,13 @@ document.querySelectorAll('.nav-item[data-tab]').forEach((item) => {
         e.preventDefault();
         switchTab(item.dataset.tab);
     });
+});
+
+document.getElementById('settingsTab')?.addEventListener('input', () => {
+    if (settingsFormLoaded) settingsFormDirty = true;
+});
+document.getElementById('settingsTab')?.addEventListener('change', () => {
+    if (settingsFormLoaded) settingsFormDirty = true;
 });
 
 document.getElementById('openBackdateSearchModalBtn')?.addEventListener('click', openBackdateSearchModal);
@@ -6679,8 +6789,7 @@ document.getElementById('saveSettingsBtn')?.addEventListener('click', () => {
     window.saveSuperSettings?.();
 });
 document.getElementById('saveSettingsSectionModalBtn')?.addEventListener('click', async (event) => {
-    const ok = await window.saveSuperSettings?.(event.currentTarget);
-    if (ok) closeSettingsSectionModal();
+    await window.saveSuperSettings?.(event.currentTarget);
 });
 document.getElementById('closeSettingsSectionModalBtn')?.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -6831,7 +6940,7 @@ auth.onAuthStateChanged(async (user) => {
         }
 
         setupRealtimeData();
-        switchTab('global');
+        switchTab(getInitialSuperAdminTab());
     } catch (error) {
         showNotification('Failed to validate session', 'error');
         window.location.href = 'index.html';

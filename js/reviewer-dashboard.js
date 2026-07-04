@@ -66,6 +66,18 @@ let currentViewerIndex = 0;
 let downloadInProgress = false;
 let submissionsLoadVersion = 0;
 let currentReviewerStageReport = null;
+const REVIEWER_DASHBOARD_TABS = ['pending', 'approved', 'rejected', 'report', 'leave', 'profile', 'help'];
+
+function getInitialReviewerTab() {
+    const hashTab = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();
+    return REVIEWER_DASHBOARD_TABS.includes(hashTab) ? hashTab : 'pending';
+}
+
+function rememberReviewerTab(tabId) {
+    if (!REVIEWER_DASHBOARD_TABS.includes(tabId)) return;
+    if (window.location.hash === `#${tabId}`) return;
+    history.replaceState(null, '', `#${tabId}`);
+}
 
 function getTimestampMsSafe(value) {
     if (!value) return 0;
@@ -908,6 +920,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (role === 'reviewer') {
                 renderProfileTab();
                 loadSubmissions();
+                window.switchTab(getInitialReviewerTab());
             } else {
                 showNotification('Access denied. Reviewer privileges required.', 'error');
                 setTimeout(() => { window.location.href = 'index.html'; }, 2000);
@@ -2064,6 +2077,8 @@ window.clearAdditionalFiles = () => {
 };
     // Update select all checkbox
 window.switchTab = (tabId, triggerEl = null) => {
+    tabId = REVIEWER_DASHBOARD_TABS.includes(tabId) ? tabId : 'pending';
+    rememberReviewerTab(tabId);
     document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
     const activeItem = triggerEl || document.querySelector(`.nav-item[data-tab="${tabId}"]`);
     if (activeItem) activeItem.classList.add('active');

@@ -79,6 +79,18 @@ const userFullNameCache = new Map();
 let unsubscribeQueue = null;
 let queueLoadSeq = 0;
 let currentRsaStageReport = null;
+const RSA_DASHBOARD_TABS = ['approved', 'rejected', 'finally-submitted', 'report', 'leave', 'profile', 'help'];
+
+function getInitialRsaTab() {
+    const hashTab = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();
+    return RSA_DASHBOARD_TABS.includes(hashTab) ? hashTab : 'approved';
+}
+
+function rememberRsaTab(tabId) {
+    if (!RSA_DASHBOARD_TABS.includes(tabId)) return;
+    if (window.location.hash === `#${tabId}`) return;
+    history.replaceState(null, '', `#${tabId}`);
+}
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 let idleLastActivity = Date.now();
@@ -1558,7 +1570,9 @@ function updateApprovedCount() {
 }
 
 function switchTab(tabId) {
+    tabId = RSA_DASHBOARD_TABS.includes(tabId) ? tabId : 'approved';
     currentTab = tabId;
+    rememberRsaTab(tabId);
     document.querySelectorAll('.nav-item').forEach(nav=>nav.classList.remove('active'));
     document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
     document.querySelectorAll('.tab-content').forEach(tab=>tab.classList.remove('active'));
@@ -2127,6 +2141,7 @@ auth.onAuthStateChanged(user=>{
     loadCurrentRsaProfile(user).then((allowed) => {
         if (!allowed) return;
         loadQueue();
+        switchTab(getInitialRsaTab());
     });
 });
 

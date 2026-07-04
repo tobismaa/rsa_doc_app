@@ -2,7 +2,7 @@ import { auth, db } from './firebase-config.js?v=20260625c';
 import { onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js';
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
 import { getMaintenanceSettings, isMaintenanceExemptRole, showMaintenanceOverlay } from './shared/maintenance-mode.js?v=20260507a';
-import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260617a';
+import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260704c';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
 import { registerPushTokenForCurrentUser } from './push-alerts.js';
 
@@ -21,6 +21,24 @@ const FORCE_LOGOUT_DEADLINE_KEY = 'cmbank_force_logout_deadline_ms';
 const FORCE_LOGOUT_DISMISSED_TOKEN_KEY = 'cmbank_force_logout_dismissed_token';
 const TARGETED_LOGOUT_COMPLETED_PREFIX = 'cmbank_targeted_logout_completed_';
 const FORCE_LOGOUT_GRACE_MS = 5 * 60 * 1000;
+const DASHBOARD_PAGE_TARGETS = {
+  'dashboard.html': 'uploader',
+  'admin-dashboard.html': 'admin',
+  'reviewer-dashboard.html': 'reviewer',
+  'rsa-dashboard.html': 'rsa',
+  'payment-dashboard.html': 'payment',
+  'reports-monitoring-dashboard.html': 'reports_monitoring',
+  'super-admin-dashboard.html': 'super_admin'
+};
+const ANNOUNCEMENT_FONT_FAMILIES = {
+  system: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  arial: 'Arial, Helvetica, sans-serif',
+  trebuchet: '"Trebuchet MS", Arial, sans-serif',
+  georgia: 'Georgia, "Times New Roman", serif',
+  courier: '"Courier New", Courier, monospace',
+  verdana: 'Verdana, Geneva, sans-serif',
+  tahoma: 'Tahoma, Geneva, sans-serif'
+};
 let cacheClearInProgress = false;
 let securityWatchStarted = false;
 let sessionTimeoutTimer = null;
@@ -670,17 +688,35 @@ function showDashboardAnnouncement(announcement = {}) {
   const existing = document.getElementById('systemAnnouncementBanner');
   const enabled = announcement?.enabled === true;
   const message = String(announcement?.message || '').trim();
-  if (!enabled || !message) {
+  const targetDashboards = Array.isArray(announcement?.targetDashboards)
+    ? announcement.targetDashboards.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+  const pageName = String(window.location.pathname || '').split('/').pop().toLowerCase() || 'dashboard.html';
+  const currentDashboard = DASHBOARD_PAGE_TARGETS[pageName] || String(currentSecurityUserData?.role || '').trim().toLowerCase();
+  if (!enabled || !message || (targetDashboards.length && !targetDashboards.includes(currentDashboard))) {
     existing?.remove();
     return;
   }
 
   const tone = String(announcement?.tone || 'info').trim().toLowerCase();
+  const rawSpeed = Number(announcement?.speed ?? getDefaultSystemSettings().dashboardAnnouncement.speed ?? 30);
+  const speedSeconds = Number.isFinite(rawSpeed) ? Math.min(60, Math.max(5, rawSpeed)) : 30;
+  const rawFontSize = Number(announcement?.fontSize ?? getDefaultSystemSettings().dashboardAnnouncement.fontSize ?? 15);
+  const fontSize = Number.isFinite(rawFontSize) ? Math.min(28, Math.max(12, rawFontSize)) : 15;
+  const fontStyleSetting = String(announcement?.fontStyle || getDefaultSystemSettings().dashboardAnnouncement.fontStyle || 'bold').trim().toLowerCase();
+  const isItalic = fontStyleSetting === 'italic' || fontStyleSetting === 'bold_italic';
+  const isBold = fontStyleSetting === 'bold' || fontStyleSetting === 'bold_italic';
+  const fontFamilyKey = String(announcement?.fontFamily || getDefaultSystemSettings().dashboardAnnouncement.fontFamily || 'system').trim().toLowerCase();
+  const fontFamily = ANNOUNCEMENT_FONT_FAMILIES[fontFamilyKey] || ANNOUNCEMENT_FONT_FAMILIES.system;
   const palette = tone === 'warning'
     ? { bg: '#fff7ed', border: '#fdba74', text: '#9a3412' }
     : tone === 'success'
       ? { bg: '#ecfdf5', border: '#6ee7b7', text: '#065f46' }
       : { bg: '#eff6ff', border: '#93c5fd', text: '#1d4ed8' };
+  const customTextColor = /^#[0-9a-f]{6}$/i.test(String(announcement?.textColor || '').trim())
+    ? String(announcement.textColor).trim()
+    : '';
+  const textColor = customTextColor || palette.text;
   const escapedMessage = normalizeText(message);
   const bannerMarkup = `<div class="system-announcement-shell"><span class="system-announcement-badge">Update</span><div class="system-announcement-track"><span class="system-announcement-text">${escapedMessage}</span></div></div>`;
 
@@ -688,7 +724,12 @@ function showDashboardAnnouncement(announcement = {}) {
     existing.innerHTML = bannerMarkup;
     existing.style.background = palette.bg;
     existing.style.borderBottom = `1px solid ${palette.border}`;
-    existing.style.color = palette.text;
+    existing.style.color = textColor;
+    existing.style.setProperty('--system-announcement-duration', `${speedSeconds}s`);
+    existing.style.setProperty('--system-announcement-font-size', `${fontSize}px`);
+    existing.style.setProperty('--system-announcement-font-style', isItalic ? 'italic' : 'normal');
+    existing.style.setProperty('--system-announcement-font-weight', isBold ? '800' : '500');
+    existing.style.setProperty('--system-announcement-font-family', fontFamily);
     return;
   }
 
@@ -697,7 +738,7 @@ function showDashboardAnnouncement(announcement = {}) {
     style.id = 'systemAnnouncementBannerStyles';
     style.textContent = `
       @keyframes systemAnnouncementScroll {
-        0% { transform: translateX(100%); }
+        0% { transform: translateX(0); }
         100% { transform: translateX(-100%); }
       }
       .system-announcement-track {
@@ -711,9 +752,11 @@ function showDashboardAnnouncement(announcement = {}) {
         padding-left: 100%;
         white-space: nowrap;
         will-change: transform;
-        animation: systemAnnouncementScroll 16s linear infinite;
-        font-size: 15px;
-        font-weight: 800;
+        animation: systemAnnouncementScroll var(--system-announcement-duration, 30s) linear infinite;
+        font-size: var(--system-announcement-font-size, 15px);
+        font-style: var(--system-announcement-font-style, normal);
+        font-weight: var(--system-announcement-font-weight, 800);
+        font-family: var(--system-announcement-font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
         letter-spacing: 0.01em;
       }
       .system-announcement-shell {
@@ -735,6 +778,27 @@ function showDashboardAnnouncement(announcement = {}) {
         text-transform: uppercase;
         letter-spacing: 0.08em;
       }
+      #systemAnnouncementBanner {
+        pointer-events: none;
+      }
+      @media (max-width: 768px) {
+        #systemAnnouncementBanner {
+          position: relative !important;
+          top: auto !important;
+          z-index: 10 !important;
+          padding: 8px 12px !important;
+          box-shadow: 0 4px 12px rgba(15,23,42,0.08) !important;
+        }
+        .system-announcement-shell {
+          gap: 8px;
+        }
+        .system-announcement-badge {
+          display: none;
+        }
+        .system-announcement-text {
+          font-size: min(var(--system-announcement-font-size, 15px), 16px);
+        }
+      }
     `;
     document.head.appendChild(style);
   }
@@ -742,7 +806,12 @@ function showDashboardAnnouncement(announcement = {}) {
   const banner = document.createElement('div');
   banner.id = 'systemAnnouncementBanner';
   banner.innerHTML = bannerMarkup;
-  banner.style.cssText = `position:sticky;top:0;z-index:19999;padding:12px 18px;background:${palette.bg};border-bottom:1px solid ${palette.border};color:${palette.text};box-shadow:0 10px 24px rgba(15,23,42,0.08);`;
+  banner.style.cssText = `position:sticky;top:0;z-index:900;padding:12px 18px;background:${palette.bg};border-bottom:1px solid ${palette.border};color:${textColor};box-shadow:0 10px 24px rgba(15,23,42,0.08);pointer-events:none;`;
+  banner.style.setProperty('--system-announcement-duration', `${speedSeconds}s`);
+  banner.style.setProperty('--system-announcement-font-size', `${fontSize}px`);
+  banner.style.setProperty('--system-announcement-font-style', isItalic ? 'italic' : 'normal');
+  banner.style.setProperty('--system-announcement-font-weight', isBold ? '800' : '500');
+  banner.style.setProperty('--system-announcement-font-family', fontFamily);
   document.body.prepend(banner);
 }
 
