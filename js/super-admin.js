@@ -6284,6 +6284,12 @@ document.getElementById('settingsTab')?.addEventListener('input', () => {
 document.getElementById('settingsTab')?.addEventListener('change', () => {
     if (settingsFormLoaded) settingsFormDirty = true;
 });
+settingsSectionModal?.addEventListener('input', () => {
+    if (settingsFormLoaded) settingsFormDirty = true;
+});
+settingsSectionModal?.addEventListener('change', () => {
+    if (settingsFormLoaded) settingsFormDirty = true;
+});
 
 document.getElementById('openBackdateSearchModalBtn')?.addEventListener('click', openBackdateSearchModal);
 document.getElementById('closeBackdateSearchModalBtn')?.addEventListener('click', closeBackdateSearchModal);
