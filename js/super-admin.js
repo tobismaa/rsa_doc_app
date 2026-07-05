@@ -171,6 +171,14 @@ function applySelectedThemePresetToInputs() {
     if (secondaryInput) secondaryInput.value = colors.secondaryColor;
     if (accentInput) accentInput.value = colors.accentColor;
 }
+
+function resetThemeToDefaultInputs() {
+    const presetInput = document.getElementById('settingThemePreset');
+    if (presetInput) presetInput.value = 'default';
+    applySelectedThemePresetToInputs();
+    if (settingsFormLoaded) settingsFormDirty = true;
+    showNotification('Theme colors reset to CMBank default. Save settings to apply.', 'info');
+}
 const REPORT_INCEPTION_START_DATE = '1900-01-01';
 const REPORT_INCEPTION_LABEL = 'From Inception';
 
@@ -3720,14 +3728,22 @@ function closeStatusChangeModal() {
     document.getElementById('statusChangeModal')?.classList.remove('active');
 }
 
-function getStatusChangeOptions(currentStatus = '') {
+function isAuditCommissionPending(submission = {}) {
+    return submission.paymentMadeByUploader === true
+        && String(submission.auditCommissionStatus || '').trim().toLowerCase() === 'pending'
+        && isFinalSubmissionStatus(submission);
+}
+
+function getStatusChangeOptions(currentStatus = '', submission = {}) {
     const normalized = String(currentStatus || '').trim().toLowerCase();
+    const selected = isAuditCommissionPending(submission) ? 'audit_pending' : normalized;
     const options = [
         ['pending', 'Pending / Reviewer Queue'],
         ['approved', 'Approved / RSA Queue'],
         ['processing_to_pfa', 'Processing to PFA / Reopen to RSA'],
         ['rejected_by_rsa', 'Rejected by RSA'],
         ['sent_to_pfa', 'Sent to PFA'],
+        ['audit_pending', 'Audit Queue / Commission Payable'],
         ['paid', 'Paid'],
         ['cleared', 'Cleared']
     ];
@@ -3735,7 +3751,7 @@ function getStatusChangeOptions(currentStatus = '') {
         options.unshift([normalized, normalized.replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())]);
     }
     return options.map(([value, label]) => (
-        `<option value="${escapeHtml(value)}" ${value === normalized ? 'selected' : ''}>${escapeHtml(label)}</option>`
+        `<option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(label)}</option>`
     )).join('');
 }
 
@@ -3757,6 +3773,7 @@ function renderStatusChangeModal(submission = {}) {
             ['Customer', submission.customerName || submission.customerDetails?.name || submission.customerDetails?.customerName || 'Unknown'],
             ['PEN Number', getSubmissionPenNumber(submission) || '-'],
             ['Current Status', currentStatus ? currentStatus.replaceAll('_', ' ') : '-'],
+            ['Audit Status', isAuditCommissionPending(submission) ? 'Commission payable' : (submission.auditCommissionStatus ? String(submission.auditCommissionStatus).replaceAll('_', ' ') : '-')],
             ['Assigned RSA', getUserDisplayNameByEmail(submission.assignedToRSA || '') || submission.assignedToRSA || '-'],
             ['Sent to PFA At', formatDate(submission.finalSubmittedAt || submission.rsaSubmittedAt)],
             ['Payment User', getUserDisplayNameByEmail(submission.assignedToPayment || '') || submission.assignedToPayment || '-']
@@ -3770,7 +3787,7 @@ function renderStatusChangeModal(submission = {}) {
     }
 
     const select = document.getElementById('statusChangeTargetStatus');
-    if (select) select.innerHTML = getStatusChangeOptions(currentStatus);
+    if (select) select.innerHTML = getStatusChangeOptions(currentStatus, submission);
     updateStatusChangeNotice();
 }
 
@@ -3812,10 +3829,20 @@ function updateStatusChangeNotice() {
     const notice = document.getElementById('statusChangeNotice');
     if (!notice) return;
     const targetStatus = String(document.getElementById('statusChangeTargetStatus')?.value || '').trim().toLowerCase();
-    const willReopenFinal = isFinalSubmissionStatus(currentStatusChangeSubmission || {}) && ['approved', 'processing_to_pfa'].includes(targetStatus);
+    const statusForLifecycle = targetStatus === 'audit_pending' ? 'sent_to_pfa' : targetStatus;
+    const willReopenFinal = isFinalSubmissionStatus(currentStatusChangeSubmission || {}) && ['approved', 'processing_to_pfa'].includes(statusForLifecycle);
     if (willReopenFinal) {
         notice.style.display = 'block';
         notice.textContent = 'This will reopen the application to RSA and clear the previous Sent to PFA timestamps so a new final submission can record fresh timestamps.';
+    } else if (targetStatus === 'audit_pending') {
+        notice.style.display = 'block';
+        notice.textContent = 'This will move the application to Audit as commission payable and make it visible in the Audit dashboard queue.';
+    } else if (targetStatus === 'paid') {
+        notice.style.display = 'block';
+        notice.textContent = 'This will mark the application as paid and save the commission amount for Audit reports.';
+    } else if (targetStatus === 'cleared') {
+        notice.style.display = 'block';
+        notice.textContent = 'This will mark the application as cleared and include the cleared amount in Audit totals.';
     } else {
         notice.style.display = 'none';
         notice.textContent = '';
@@ -3872,10 +3899,12 @@ async function saveApplicationStatusChange() {
     const submission = allSubmissions.find((sub) => sub.id === submissionId) || currentStatusChangeSubmission || {};
     if (!submissionId) return showNotification('No application is open for status change.', 'warning');
 
-    const targetStatus = String(document.getElementById('statusChangeTargetStatus')?.value || '').trim().toLowerCase();
-    if (!targetStatus) return showNotification('Select the new application status.', 'warning');
+    const selectedStatus = String(document.getElementById('statusChangeTargetStatus')?.value || '').trim().toLowerCase();
+    if (!selectedStatus) return showNotification('Select the new application status.', 'warning');
 
     const previousStatus = String(submission.status || '').trim().toLowerCase();
+    const targetStatus = selectedStatus === 'audit_pending' ? 'sent_to_pfa' : selectedStatus;
+    const movingToAuditQueue = selectedStatus === 'audit_pending';
     const reopeningFinalSubmission = isFinalSubmissionStatus(submission) && ['approved', 'processing_to_pfa'].includes(targetStatus);
     const updates = {
         status: targetStatus,
@@ -3896,6 +3925,13 @@ async function saveApplicationStatusChange() {
         updates.paymentAssignedAt = deleteField();
         updates.paymentAssignmentMethod = deleteField();
         updates.assignedToPayment = deleteField();
+        updates.paymentMadeByUploader = false;
+        updates.paymentMadeAt = deleteField();
+        updates.paymentMadeBy = deleteField();
+        updates.auditCommissionStatus = deleteField();
+        updates.auditCommissionRejectionReason = deleteField();
+        updates.auditCommissionSubmittedAt = deleteField();
+        updates.auditCommissionSubmittedBy = deleteField();
     }
 
     if (targetStatus === 'sent_to_pfa' && !isFinalSubmissionStatus(submission)) {
@@ -3905,6 +3941,48 @@ async function saveApplicationStatusChange() {
         updates.finalSubmittedBy = currentUser?.email || '';
         updates.rsaSubmittedAt = serverTimestamp();
         updates.rsaSubmittedBy = currentUser?.email || '';
+    }
+
+    if (movingToAuditQueue) {
+        updates.finalSubmitted = true;
+        updates.rsaSubmitted = true;
+        if (!submission.finalSubmittedAt) updates.finalSubmittedAt = serverTimestamp();
+        if (!submission.finalSubmittedBy) updates.finalSubmittedBy = currentUser?.email || '';
+        if (!submission.rsaSubmittedAt) updates.rsaSubmittedAt = serverTimestamp();
+        if (!submission.rsaSubmittedBy) updates.rsaSubmittedBy = currentUser?.email || '';
+        updates.paymentMadeByUploader = true;
+        updates.paymentMadeAt = serverTimestamp();
+        updates.paymentMadeBy = currentUser?.email || submission.paymentMadeBy || submission.uploadedBy || '';
+        updates.auditCommissionStatus = 'pending';
+        updates.auditCommissionRejectionReason = '';
+        updates.auditCommissionSubmittedAt = serverTimestamp();
+        updates.auditCommissionSubmittedBy = currentUser?.email || '';
+    }
+
+    if (targetStatus === 'paid' || targetStatus === 'cleared') {
+        const commission = getSubmissionCommissionAmountForDisplay(submission);
+        const rsaBalance = getSubmissionRsaBalance(submission);
+        const twentyFive = getSubmissionTwentyFivePercent(submission);
+        updates.commissionPaid = true;
+        updates.commissionPaidAt = serverTimestamp();
+        updates.commissionPaidBy = currentUser?.email || '';
+        updates.auditCommissionStatus = 'accepted';
+        updates.auditCommissionAcceptedAt = serverTimestamp();
+        updates.auditCommissionAcceptedBy = currentUser?.email || '';
+        updates.auditCommissionAmount = commission;
+        updates.auditRsaBalance = rsaBalance;
+        updates.auditRsaTwentyFivePercent = twentyFive;
+        if (targetStatus === 'paid') {
+            updates.paidAt = serverTimestamp();
+            updates.paidBy = currentUser?.email || '';
+        } else {
+            updates.paidAt = submission.paidAt || serverTimestamp();
+            updates.paidBy = submission.paidBy || currentUser?.email || '';
+            updates.clearedAt = serverTimestamp();
+            updates.clearedBy = currentUser?.email || '';
+            updates.auditClearedAt = serverTimestamp();
+            updates.auditClearedBy = currentUser?.email || '';
+        }
     }
 
     const button = document.getElementById('confirmStatusChangeBtn');
@@ -3923,11 +4001,17 @@ async function saveApplicationStatusChange() {
             penNo: getSubmissionPenNumber(submission),
             previousStatus,
             newStatus: targetStatus,
+            selectedStatus,
             clearedFinalSubmissionTimestamps: reopeningFinalSubmission,
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         });
-        showNotification(reopeningFinalSubmission ? 'Application reopened to RSA successfully.' : 'Application status updated successfully.', 'success');
+        const statusMessage = movingToAuditQueue
+            ? 'Application moved to Audit queue successfully.'
+            : reopeningFinalSubmission
+                ? 'Application reopened to RSA successfully.'
+                : 'Application status updated successfully.';
+        showNotification(statusMessage, 'success');
         closeStatusChangeModal();
         setTimeout(openStatusChangeSearchModal, 80);
     } catch (error) {
@@ -6684,10 +6768,15 @@ document.getElementById('settingsTab')?.addEventListener('change', () => {
     if (settingsFormLoaded) settingsFormDirty = true;
 });
 document.getElementById('settingThemePreset')?.addEventListener('change', applySelectedThemePresetToInputs);
+document.getElementById('resetThemeColorsBtn')?.addEventListener('click', resetThemeToDefaultInputs);
 ['settingThemePrimaryColor', 'settingThemeSecondaryColor', 'settingThemeAccentColor'].forEach((id) => {
-    document.getElementById(id)?.addEventListener('input', () => {
+    document.getElementById(id)?.addEventListener('input', (event) => {
+        event.stopPropagation();
+    });
+    document.getElementById(id)?.addEventListener('change', () => {
         const preset = document.getElementById('settingThemePreset');
         if (preset) preset.value = 'custom';
+        if (settingsFormLoaded) settingsFormDirty = true;
     });
 });
 settingsSectionModal?.addEventListener('input', () => {

@@ -92,6 +92,26 @@ body {
   background: linear-gradient(180deg, #1a2b3c 0%, #0f1a26 100%);
 }
 
+.sidebar.admin-sidebar,
+.sidebar.admin-sidebar .logo span,
+.sidebar.admin-sidebar .user-info span,
+.sidebar.admin-sidebar .user-info small,
+.sidebar.admin-sidebar .nav-item,
+.sidebar.admin-sidebar .nav-item span:not(.badge),
+.sidebar.admin-sidebar .nav-item i {
+  color: #ffffff !important;
+}
+
+.sidebar.admin-sidebar .nav-item {
+  opacity: 0.95;
+}
+
+.sidebar.admin-sidebar .nav-item:hover,
+.sidebar.admin-sidebar .nav-item.active {
+  color: #ffffff !important;
+  opacity: 1;
+}
+
 .sidebar .logo {
   padding: var(--spacing-xl) var(--spacing-lg);
   display: flex;
