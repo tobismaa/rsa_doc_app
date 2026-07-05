@@ -23,6 +23,7 @@ import {
     formatCommissionRateLabel,
     getCommissionSettings,
     getDefaultCommissionSettings,
+    getSubmissionCommissionAmount,
     resolveCommissionRateForTimestamp,
     resolveSubmissionCommissionRate
 } from './shared/commission-config.js?v=20260507a';
@@ -35,7 +36,7 @@ import {
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt
 } from './shared/submission-stage.js?v=20260610b';
-import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260704e';
+import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260705a';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 
 let currentUser = null;
@@ -71,6 +72,7 @@ let activeSettingsDropdownTab = '';
 let settingsModalSourceDropdownTab = '';
 let currentScheduledReportPreview = null;
 let scheduledReportConfirmResolver = null;
+let transferConfirmResolver = null;
 let lastScheduledReportLogSnapshot = null;
 let currentScheduledReportSendTab = 'daily';
 let currentScheduledReportDownloadTab = 'daily';
@@ -91,12 +93,14 @@ let currentStatusChangeSubmissionId = '';
 let currentStatusChangeSubmission = null;
 let currentStatusChangeSearchMatches = [];
 let statusChangeSaveInProgress = false;
+let selectedTransferSubmissionIds = new Set();
 const SUPER_ADMIN_DASHBOARD_TABS = [
     'global',
     'admins',
     'routing-rules',
     'agents',
     'application-controls',
+    'transfer',
     'backdate-report',
     'audit',
     'security',
@@ -128,11 +132,44 @@ const ANNOUNCEMENT_TEXT_COLORS = {
     warning: '#9a3412',
     success: '#065f46'
 };
+const SYSTEM_THEME_PRESETS = {
+    default: { primaryColor: '#003366', secondaryColor: '#0066b3', accentColor: '#b8860b' },
+    emerald: { primaryColor: '#065f46', secondaryColor: '#0f766e', accentColor: '#d97706' },
+    royal: { primaryColor: '#4c1d95', secondaryColor: '#7c3aed', accentColor: '#f59e0b' },
+    crimson: { primaryColor: '#991b1b', secondaryColor: '#dc2626', accentColor: '#f59e0b' },
+    slate: { primaryColor: '#1e293b', secondaryColor: '#475569', accentColor: '#0ea5e9' }
+};
 
 function normalizeAnnouncementTarget(value = '') {
     const text = String(value || '').trim().toLowerCase();
     if (['reports_monitoring', 'reports-monitoring', 'reporting_monitoring', 'reporting-monitoring'].includes(text)) return 'audit';
     return text;
+}
+
+function normalizeThemePreset(value = '') {
+    const preset = String(value || '').trim().toLowerCase();
+    return preset === 'custom' || Object.prototype.hasOwnProperty.call(SYSTEM_THEME_PRESETS, preset) ? preset : 'default';
+}
+
+function getThemePresetColors(preset = 'default') {
+    return SYSTEM_THEME_PRESETS[normalizeThemePreset(preset)] || SYSTEM_THEME_PRESETS.default;
+}
+
+function isValidHexColor(value = '') {
+    return /^#[0-9a-f]{6}$/i.test(String(value || '').trim());
+}
+
+function applySelectedThemePresetToInputs() {
+    const presetInput = document.getElementById('settingThemePreset');
+    const preset = normalizeThemePreset(presetInput?.value || 'default');
+    if (preset === 'custom') return;
+    const colors = getThemePresetColors(preset);
+    const primaryInput = document.getElementById('settingThemePrimaryColor');
+    const secondaryInput = document.getElementById('settingThemeSecondaryColor');
+    const accentInput = document.getElementById('settingThemeAccentColor');
+    if (primaryInput) primaryInput.value = colors.primaryColor;
+    if (secondaryInput) secondaryInput.value = colors.secondaryColor;
+    if (accentInput) accentInput.value = colors.accentColor;
 }
 const REPORT_INCEPTION_START_DATE = '1900-01-01';
 const REPORT_INCEPTION_LABEL = 'From Inception';
@@ -399,6 +436,35 @@ function closeScheduledReportConfirmModal(confirmed = false) {
     document.getElementById('scheduledReportConfirmModal')?.classList.remove('active');
     const resolver = scheduledReportConfirmResolver;
     scheduledReportConfirmResolver = null;
+    if (typeof resolver === 'function') resolver(confirmed === true);
+}
+
+function openTransferConfirmModal({
+    count = 0,
+    fromEmail = '',
+    toEmail = '',
+    reason = ''
+} = {}) {
+    const modal = document.getElementById('transferConfirmModal');
+    if (!modal) return Promise.resolve(false);
+    const countEl = document.getElementById('transferConfirmCount');
+    const fromEl = document.getElementById('transferConfirmFrom');
+    const toEl = document.getElementById('transferConfirmTo');
+    const reasonEl = document.getElementById('transferConfirmReason');
+    if (countEl) countEl.textContent = `${count} application${count === 1 ? '' : 's'}`;
+    if (fromEl) fromEl.textContent = getTransferUserOptionLabel(fromEmail);
+    if (toEl) toEl.textContent = getTransferUserOptionLabel(toEmail);
+    if (reasonEl) reasonEl.textContent = reason || '-';
+    modal.classList.add('active');
+    return new Promise((resolve) => {
+        transferConfirmResolver = resolve;
+    });
+}
+
+function closeTransferConfirmModal(confirmed = false) {
+    document.getElementById('transferConfirmModal')?.classList.remove('active');
+    const resolver = transferConfirmResolver;
+    transferConfirmResolver = null;
     if (typeof resolver === 'function') resolver(confirmed === true);
 }
 
@@ -1517,6 +1583,11 @@ function getSubmissionCommissionOnePercent(sub = {}) {
     return Number((base * 0.01).toFixed(2));
 }
 
+function getSubmissionCommissionAmountForDisplay(sub = {}) {
+    const base = getSubmissionTwentyFivePercent(sub);
+    return getSubmissionCommissionAmount(sub, base);
+}
+
 function getUserDisplayNameByEmail(email = '') {
     const normalized = normalizeEmail(email);
     if (!normalized) return 'Unassigned';
@@ -2263,6 +2334,7 @@ function switchTab(tabId) {
         'routing-rules': 'Uploader Routing',
         agents: 'Agent',
         'application-controls': 'Application Controls',
+        transfer: 'Transfer Applications',
         'backdate-report': 'Backdate Report',
         audit: 'Audit',
         security: 'Security',
@@ -2556,6 +2628,255 @@ function normalizeCustomerName(value = '') {
 
 function getSubmissionCustomerName(sub = {}) {
     return String(sub?.customerName || sub?.customerDetails?.name || sub?.customerDetails?.customerName || '').trim();
+}
+
+const TRANSFER_OWNER_FIELDS = [
+    { label: 'Uploader', field: 'uploadedBy', previousField: 'previousUploader' },
+    { label: 'Reviewer', field: 'assignedTo', previousField: 'previousReviewer' },
+    { label: 'RSA', field: 'assignedToRSA', previousField: 'previousRSA' },
+    { label: 'Payment', field: 'assignedToPayment', previousField: 'previousPayment' }
+];
+
+function getTransferMatchedOwnerFields(sub = {}, email = '') {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return [];
+    return TRANSFER_OWNER_FIELDS.filter((item) => normalizeEmail(sub?.[item.field]) === normalized);
+}
+
+function getTransferAgentName(sub = {}) {
+    return String(
+        sub.agentName ||
+        sub.agentFullName ||
+        sub.agent?.fullName ||
+        sub.agent?.name ||
+        sub.agentDetails?.fullName ||
+        sub.agentDetails?.name ||
+        ''
+    ).trim();
+}
+
+function getTransferUserOptionLabel(email = '') {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return 'Unassigned';
+    const user = allUsers.find((entry) => normalizeEmail(entry.email) === normalized);
+    const name = String(user?.fullName || user?.displayName || '').trim();
+    return name && normalizeEmail(name) !== normalized ? `${name} (${normalized})` : normalized;
+}
+
+function buildTransferOptions(items = [], selectedValue = '', placeholder = 'Select user') {
+    const selected = normalizeEmail(selectedValue);
+    const seen = new Set();
+    const options = [`<option value="">${escapeHtml(placeholder)}</option>`];
+    for (const item of items) {
+        const email = normalizeEmail(item?.email || item);
+        if (!email || seen.has(email)) continue;
+        seen.add(email);
+        const label = item?.label || getTransferUserOptionLabel(email);
+        options.push(`<option value="${escapeHtml(email)}" ${email === selected ? 'selected' : ''}>${escapeHtml(label)}</option>`);
+    }
+    return options.join('');
+}
+
+function getTransferSelectableUsers() {
+    return allUsers
+        .filter((user) => normalizeEmail(user.email))
+        .sort((a, b) => getTransferUserOptionLabel(a.email).localeCompare(getTransferUserOptionLabel(b.email)));
+}
+
+function renderTransferSelectOptions() {
+    const fromSelect = document.getElementById('transferFromUser');
+    const toSelect = document.getElementById('transferToUser');
+    if (!fromSelect || !toSelect) return;
+
+    const previousFrom = normalizeEmail(fromSelect.value);
+    const previousTo = normalizeEmail(toSelect.value);
+    const users = getTransferSelectableUsers();
+
+    fromSelect.innerHTML = buildTransferOptions(users, previousFrom, 'Choose source user');
+    toSelect.innerHTML = buildTransferOptions(users, previousTo, 'Choose target user');
+
+    if (previousFrom && [...fromSelect.options].some((option) => normalizeEmail(option.value) === previousFrom)) {
+        fromSelect.value = previousFrom;
+    }
+    if (previousTo && [...toSelect.options].some((option) => normalizeEmail(option.value) === previousTo)) {
+        toSelect.value = previousTo;
+    }
+}
+
+function getTransferFilteredSubmissions() {
+    const fromEmail = normalizeEmail(document.getElementById('transferFromUser')?.value || '');
+    const queryText = String(document.getElementById('transferApplicationSearch')?.value || '').trim().toLowerCase();
+    if (!fromEmail) return [];
+
+    return allSubmissions.filter((sub) => {
+        if (!getTransferMatchedOwnerFields(sub, fromEmail).length) return false;
+        if (!queryText) return true;
+        const haystack = [
+            getSubmissionCustomerName(sub),
+            getSubmissionPenNumber(sub),
+            sub.status,
+            sub.workflowStatus,
+            sub.uploadedBy,
+            sub.assignedTo,
+            sub.assignedToRSA,
+            sub.assignedToPayment
+        ].map((value) => String(value || '').toLowerCase()).join(' ');
+        return haystack.includes(queryText);
+    });
+}
+
+function getTransferRowHtml(sub = {}) {
+    const fromEmail = normalizeEmail(document.getElementById('transferFromUser')?.value || '');
+    const matchedFields = getTransferMatchedOwnerFields(sub, fromEmail);
+    const checked = selectedTransferSubmissionIds.has(sub.id) ? 'checked' : '';
+    const customerName = getSubmissionCustomerName(sub) || 'Unknown';
+    const penNumber = getSubmissionPenNumber(sub) || '-';
+    const agentName = getTransferAgentName(sub) || '-';
+    const status = String(sub.status || sub.workflowStatus || '-');
+    const rsaBalance = getSubmissionRsaBalance(sub);
+    const twentyFive = getSubmissionTwentyFivePercent(sub);
+    const commission = getSubmissionCommissionAmountForDisplay(sub);
+    return `
+        <tr>
+            <td><input type="checkbox" class="transfer-row-check" data-id="${escapeHtml(sub.id)}" ${checked} aria-label="Select application"></td>
+            <td><strong>${escapeHtml(customerName)}</strong></td>
+            <td>${escapeHtml(formatMoneyPreview(rsaBalance))}</td>
+            <td>${escapeHtml(formatMoneyPreview(twentyFive))}</td>
+            <td>${escapeHtml(formatMoneyPreview(commission))}</td>
+            <td>${escapeHtml(status)}</td>
+            <td>${escapeHtml(penNumber)}</td>
+            <td>${escapeHtml(agentName)}</td>
+            <td>
+                <strong>${escapeHtml(getTransferUserOptionLabel(fromEmail))}</strong>
+                <div style="font-size:12px;color:#64748b;margin-top:4px;">${escapeHtml(matchedFields.map((item) => item.label).join(', ') || 'Owner')}</div>
+            </td>
+            <td>${escapeHtml(formatDate(sub.updatedAt || sub.submittedAt || sub.uploadedAt))}</td>
+        </tr>
+    `;
+}
+
+function renderTransferApplications() {
+    const body = document.getElementById('transferApplicationsTableBody');
+    const summary = document.getElementById('transferSummaryText');
+    const selectAllCheckbox = document.getElementById('transferSelectAllCheckbox');
+    const transferButton = document.getElementById('transferSelectedApplicationsBtn');
+    if (!body) return;
+
+    renderTransferSelectOptions();
+
+    const fromEmail = normalizeEmail(document.getElementById('transferFromUser')?.value || '');
+    const toEmail = normalizeEmail(document.getElementById('transferToUser')?.value || '');
+    const rows = getTransferFilteredSubmissions();
+    const visibleIds = new Set(rows.map((sub) => sub.id));
+    selectedTransferSubmissionIds = new Set([...selectedTransferSubmissionIds].filter((id) => visibleIds.has(id)));
+
+    if (!fromEmail) {
+        body.innerHTML = '<tr><td colspan="10" class="no-data">Choose a source user to view applications.</td></tr>';
+        if (summary) summary.textContent = 'Choose a source user to view applications.';
+    } else if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="10" class="no-data">No applications found for this selection.</td></tr>';
+        if (summary) summary.textContent = `0 applications found for ${getTransferUserOptionLabel(fromEmail)}.`;
+    } else {
+        body.innerHTML = rows.map((sub) => getTransferRowHtml(sub)).join('');
+        if (summary) {
+            summary.textContent = `${rows.length} application${rows.length === 1 ? '' : 's'} found. ${selectedTransferSubmissionIds.size} selected.`;
+        }
+    }
+
+    if (selectAllCheckbox) {
+        selectAllCheckbox.checked = rows.length > 0 && selectedTransferSubmissionIds.size === rows.length;
+        selectAllCheckbox.indeterminate = selectedTransferSubmissionIds.size > 0 && selectedTransferSubmissionIds.size < rows.length;
+        selectAllCheckbox.disabled = !rows.length;
+    }
+    if (transferButton) {
+        transferButton.disabled = !fromEmail || !toEmail || fromEmail === toEmail || selectedTransferSubmissionIds.size === 0;
+    }
+}
+
+async function transferSelectedApplications() {
+    const fromEmail = normalizeEmail(document.getElementById('transferFromUser')?.value || '');
+    const toEmail = normalizeEmail(document.getElementById('transferToUser')?.value || '');
+    const reason = String(document.getElementById('transferReasonInput')?.value || '').trim();
+    const button = document.getElementById('transferSelectedApplicationsBtn');
+    const originalHtml = button?.innerHTML || '';
+
+    if (!fromEmail) return showNotification('Choose the user you are transferring from.', 'warning');
+    if (!toEmail) return showNotification('Choose the user you are transferring to.', 'warning');
+    if (fromEmail === toEmail) return showNotification('Source and target user cannot be the same.', 'warning');
+    if (!reason) return showNotification('Enter a reason for this transfer.', 'warning');
+
+    const selectedIds = [...selectedTransferSubmissionIds];
+    const submissionsToTransfer = allSubmissions.filter((sub) => (
+        selectedIds.includes(sub.id) && getTransferMatchedOwnerFields(sub, fromEmail).length > 0
+    ));
+
+    if (!submissionsToTransfer.length) {
+        selectedTransferSubmissionIds.clear();
+        renderTransferApplications();
+        return showNotification('No selected applications are still assigned to the source user.', 'warning');
+    }
+
+    const confirmed = await openTransferConfirmModal({
+        count: submissionsToTransfer.length,
+        fromEmail,
+        toEmail,
+        reason
+    });
+    if (!confirmed) return;
+
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Transferring...';
+        }
+
+        const performedBy = currentUser?.email || '';
+        await Promise.all(submissionsToTransfer.map((sub) => {
+            const matchedFields = getTransferMatchedOwnerFields(sub, fromEmail);
+            const updates = {
+                applicationTransferredAt: serverTimestamp(),
+                applicationTransferredBy: performedBy,
+                applicationTransferType: 'user',
+                applicationTransferReason: reason,
+                applicationTransferFrom: fromEmail,
+                applicationTransferTo: toEmail,
+                applicationTransferFields: matchedFields.map((item) => item.field),
+                updatedAt: serverTimestamp()
+            };
+            matchedFields.forEach((item) => {
+                updates[item.field] = toEmail;
+                updates[item.previousField] = fromEmail;
+            });
+            return updateDoc(doc(db, 'submissions', sub.id), updates);
+        }));
+
+        await addDoc(collection(db, 'audit'), {
+            action: 'applications_transferred',
+            transferType: 'user',
+            transferLabel: 'User',
+            applicationCount: submissionsToTransfer.length,
+            applicationIds: submissionsToTransfer.map((sub) => sub.id).slice(0, 200),
+            applicationIdsTruncated: submissionsToTransfer.length > 200,
+            fromUser: fromEmail,
+            toUser: toEmail,
+            reason,
+            performedBy,
+            timestamp: serverTimestamp()
+        });
+
+        selectedTransferSubmissionIds.clear();
+        const reasonInput = document.getElementById('transferReasonInput');
+        if (reasonInput) reasonInput.value = '';
+        showNotification(`${submissionsToTransfer.length} application${submissionsToTransfer.length === 1 ? '' : 's'} transferred successfully.`, 'success');
+        renderTransferApplications();
+    } catch (error) {
+        showNotification('Failed to transfer selected applications.', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
 }
 
 async function ensureLookupDataLoaded() {
@@ -4043,6 +4364,10 @@ async function loadSettings() {
     const commissionEffectiveFrom = document.getElementById('settingCommissionEffectiveFrom');
     const maxImageUploadMb = document.getElementById('settingMaxImageUploadMb');
     const maxPdfUploadMb = document.getElementById('settingMaxPdfUploadMb');
+    const themePreset = document.getElementById('settingThemePreset');
+    const themePrimaryColor = document.getElementById('settingThemePrimaryColor');
+    const themeSecondaryColor = document.getElementById('settingThemeSecondaryColor');
+    const themeAccentColor = document.getElementById('settingThemeAccentColor');
     const reviewerRoundRobinEnabled = document.getElementById('settingReviewerRoundRobinEnabled');
     const rsaRoundRobinEnabled = document.getElementById('settingRsaRoundRobinEnabled');
     const paymentRoundRobinEnabled = document.getElementById('settingPaymentRoundRobinEnabled');
@@ -4088,6 +4413,10 @@ async function loadSettings() {
     }
     if (maxImageUploadMb) maxImageUploadMb.value = String(Number(data.maxImageUploadMb ?? defaultSystemSettings.maxImageUploadMb));
     if (maxPdfUploadMb) maxPdfUploadMb.value = String(Number(data.maxPdfUploadMb ?? defaultSystemSettings.maxPdfUploadMb));
+    if (themePreset) themePreset.value = normalizeThemePreset(systemSettings.theme?.preset || defaultSystemSettings.theme.preset);
+    if (themePrimaryColor) themePrimaryColor.value = String(systemSettings.theme?.primaryColor || defaultSystemSettings.theme.primaryColor);
+    if (themeSecondaryColor) themeSecondaryColor.value = String(systemSettings.theme?.secondaryColor || defaultSystemSettings.theme.secondaryColor);
+    if (themeAccentColor) themeAccentColor.value = String(systemSettings.theme?.accentColor || defaultSystemSettings.theme.accentColor);
     if (reviewerRoundRobinEnabled) reviewerRoundRobinEnabled.value = String((data.reviewerRoundRobinEnabled ?? defaultSystemSettings.reviewerRoundRobinEnabled) ? 'true' : 'false');
     if (rsaRoundRobinEnabled) rsaRoundRobinEnabled.value = String((data.rsaRoundRobinEnabled ?? defaultSystemSettings.rsaRoundRobinEnabled) ? 'true' : 'false');
     if (paymentRoundRobinEnabled) paymentRoundRobinEnabled.value = String((data.paymentRoundRobinEnabled ?? defaultSystemSettings.paymentRoundRobinEnabled) ? 'true' : 'false');
@@ -4178,6 +4507,7 @@ function renderCurrentTab() {
         return renderApplicationAgentModule();
     }
     if (currentTab === 'application-controls') return renderApplicationControlsSubTabState();
+    if (currentTab === 'transfer') return renderTransferApplications();
     if (currentTab === 'backdate-report') return renderBackdateReport();
     if (currentTab === 'audit') return renderAudit();
     if (currentTab === 'security') return renderSecurity();
@@ -5674,6 +6004,10 @@ window.saveSuperSettings = async (triggerButton = null) => {
     const commissionEffectiveFromValue = String(document.getElementById('settingCommissionEffectiveFrom')?.value || '').trim() || '2026-05-07';
     const maxImageUploadMb = Number(document.getElementById('settingMaxImageUploadMb')?.value || getDefaultSystemSettings().maxImageUploadMb);
     const maxPdfUploadMb = Number(document.getElementById('settingMaxPdfUploadMb')?.value || getDefaultSystemSettings().maxPdfUploadMb);
+    const themePreset = normalizeThemePreset(document.getElementById('settingThemePreset')?.value || getDefaultSystemSettings().theme.preset || 'default');
+    const themePrimaryColor = String(document.getElementById('settingThemePrimaryColor')?.value || getDefaultSystemSettings().theme.primaryColor || '#003366').trim();
+    const themeSecondaryColor = String(document.getElementById('settingThemeSecondaryColor')?.value || getDefaultSystemSettings().theme.secondaryColor || '#0066b3').trim();
+    const themeAccentColor = String(document.getElementById('settingThemeAccentColor')?.value || getDefaultSystemSettings().theme.accentColor || '#b8860b').trim();
     const reviewerRoundRobinEnabled = String(document.getElementById('settingReviewerRoundRobinEnabled')?.value || 'true') === 'true';
     const rsaRoundRobinEnabled = String(document.getElementById('settingRsaRoundRobinEnabled')?.value || 'true') === 'true';
     const paymentRoundRobinEnabled = String(document.getElementById('settingPaymentRoundRobinEnabled')?.value || 'true') === 'true';
@@ -5715,6 +6049,10 @@ window.saveSuperSettings = async (triggerButton = null) => {
     }
     if (!Number.isFinite(maxImageUploadMb) || maxImageUploadMb <= 0 || !Number.isFinite(maxPdfUploadMb) || maxPdfUploadMb <= 0) {
         showNotification('Upload size limits must be greater than 0', 'warning');
+        return false;
+    }
+    if (![themePrimaryColor, themeSecondaryColor, themeAccentColor].every(isValidHexColor)) {
+        showNotification('Choose valid theme colors', 'warning');
         return false;
     }
     if (!Number.isFinite(sessionTimeoutMinutes) || sessionTimeoutMinutes <= 0) {
@@ -5875,6 +6213,12 @@ window.saveSuperSettings = async (triggerButton = null) => {
             commissionRateEffectiveFrom,
             maxImageUploadMb,
             maxPdfUploadMb,
+            theme: {
+                preset: themePreset,
+                primaryColor: themePrimaryColor,
+                secondaryColor: themeSecondaryColor,
+                accentColor: themeAccentColor
+            },
             reviewerRoundRobinEnabled,
             rsaRoundRobinEnabled,
             paymentRoundRobinEnabled,
@@ -5959,6 +6303,10 @@ window.saveSuperSettings = async (triggerButton = null) => {
             globalReadOnlyMessage,
             maxImageUploadMb,
             maxPdfUploadMb,
+            themePreset,
+            themePrimaryColor,
+            themeSecondaryColor,
+            themeAccentColor,
             reviewerRoundRobinEnabled,
             rsaRoundRobinEnabled,
             paymentRoundRobinEnabled,
@@ -6215,10 +6563,10 @@ function setupRealtimeData() {
 }
 
 function ensureRealtimeDataForTab(tabId) {
-    if (tabId === 'global' || tabId === 'admins' || tabId === 'settings' || tabId === 'security' || tabId === 'round-robin' || tabId === 'application-controls' || tabId === 'backdate-report') {
+    if (tabId === 'global' || tabId === 'admins' || tabId === 'settings' || tabId === 'security' || tabId === 'round-robin' || tabId === 'application-controls' || tabId === 'transfer' || tabId === 'backdate-report') {
         startUsersListener();
     }
-    if (tabId === 'global' || tabId === 'settings' || tabId === 'round-robin' || tabId === 'application-controls' || tabId === 'backdate-report') {
+    if (tabId === 'global' || tabId === 'settings' || tabId === 'round-robin' || tabId === 'application-controls' || tabId === 'transfer' || tabId === 'backdate-report') {
         startSubmissionsListener();
     }
     if (tabId === 'audit') startAuditsListener();
@@ -6285,11 +6633,62 @@ document.querySelectorAll('.nav-item[data-tab]').forEach((item) => {
     });
 });
 
+document.getElementById('transferFromUser')?.addEventListener('change', () => {
+    selectedTransferSubmissionIds.clear();
+    renderTransferApplications();
+});
+document.getElementById('transferToUser')?.addEventListener('change', renderTransferApplications);
+document.getElementById('transferApplicationSearch')?.addEventListener('input', renderTransferApplications);
+document.getElementById('transferRefreshBtn')?.addEventListener('click', () => {
+    renderTransferApplications();
+    showNotification('Transfer list refreshed.', 'success');
+});
+document.getElementById('transferClearSelectionBtn')?.addEventListener('click', () => {
+    selectedTransferSubmissionIds.clear();
+    renderTransferApplications();
+});
+document.getElementById('transferSelectAllBtn')?.addEventListener('click', () => {
+    getTransferFilteredSubmissions().forEach((sub) => selectedTransferSubmissionIds.add(sub.id));
+    renderTransferApplications();
+});
+document.getElementById('transferSelectAllCheckbox')?.addEventListener('change', (event) => {
+    const rows = getTransferFilteredSubmissions();
+    if (event.target.checked) {
+        rows.forEach((sub) => selectedTransferSubmissionIds.add(sub.id));
+    } else {
+        rows.forEach((sub) => selectedTransferSubmissionIds.delete(sub.id));
+    }
+    renderTransferApplications();
+});
+document.getElementById('transferApplicationsTableBody')?.addEventListener('change', (event) => {
+    const checkbox = event.target?.closest?.('.transfer-row-check');
+    if (!checkbox) return;
+    const id = String(checkbox.dataset.id || '');
+    if (!id) return;
+    if (checkbox.checked) selectedTransferSubmissionIds.add(id);
+    else selectedTransferSubmissionIds.delete(id);
+    renderTransferApplications();
+});
+document.getElementById('transferSelectedApplicationsBtn')?.addEventListener('click', transferSelectedApplications);
+document.getElementById('closeTransferConfirmModalBtn')?.addEventListener('click', () => closeTransferConfirmModal(false));
+document.getElementById('cancelTransferConfirmBtn')?.addEventListener('click', () => closeTransferConfirmModal(false));
+document.getElementById('confirmTransferConfirmBtn')?.addEventListener('click', () => closeTransferConfirmModal(true));
+document.getElementById('transferConfirmModal')?.addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) closeTransferConfirmModal(false);
+});
+
 document.getElementById('settingsTab')?.addEventListener('input', () => {
     if (settingsFormLoaded) settingsFormDirty = true;
 });
 document.getElementById('settingsTab')?.addEventListener('change', () => {
     if (settingsFormLoaded) settingsFormDirty = true;
+});
+document.getElementById('settingThemePreset')?.addEventListener('change', applySelectedThemePresetToInputs);
+['settingThemePrimaryColor', 'settingThemeSecondaryColor', 'settingThemeAccentColor'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('input', () => {
+        const preset = document.getElementById('settingThemePreset');
+        if (preset) preset.value = 'custom';
+    });
 });
 settingsSectionModal?.addEventListener('input', () => {
     if (settingsFormLoaded) settingsFormDirty = true;

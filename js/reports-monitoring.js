@@ -745,6 +745,12 @@ function getAuditClearedRows() {
         .sort((a, b) => getStageTimestampMillis(b.clearedAt || getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(a.clearedAt || getSubmissionCurrentStageEntryAt(a)));
 }
 
+function getAuditClearedCommissionAmount(sub = {}) {
+    const storedAmount = parseMoney(sub.auditCommissionAmount || sub.commissionAmount || sub.commissionPaidAmount || 0);
+    if (storedAmount > 0) return storedAmount;
+    return getSubmissionFinancials(sub).commission;
+}
+
 function getAuditRejectedRows() {
     const currentEmail = normalizeEmail(currentUser?.email);
     return allSubmissions
@@ -933,7 +939,7 @@ function renderOverview() {
     const clearedRows = getAuditClearedRows();
     const clearedCount = clearedRows.length;
     const commissionPayableAmount = paidRows.reduce((sum, sub) => sum + getSubmissionFinancials(sub).commission, 0);
-    const clearedAmount = clearedRows.reduce((sum, sub) => sum + getSubmissionFinancials(sub).commission, 0);
+    const clearedAmount = clearedRows.reduce((sum, sub) => sum + getAuditClearedCommissionAmount(sub), 0);
 
     setCountBadge('overviewUsersCount', awaitingAuditCount);
     setCountBadge('overviewSentCount', paidCount);
