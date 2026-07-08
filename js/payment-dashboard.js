@@ -119,6 +119,8 @@ const downloadPaymentPdfPreviewBtn = document.getElementById('downloadPaymentPdf
 const paymentQueueSortFilter = document.getElementById('paymentQueueSortFilter');
 const paymentPaidSortFilter = document.getElementById('paymentPaidSortFilter');
 const paymentClearedSortFilter = document.getElementById('paymentClearedSortFilter');
+const paymentSystemSearchInput = document.getElementById('paymentSystemSearchInput');
+const paymentSystemSearchBtn = document.getElementById('paymentSystemSearchBtn');
 const generateSentToPfaReportBtn = document.getElementById('generateSentToPfaReportBtn');
 const generatePaidReportBtn = document.getElementById('generatePaidReportBtn');
 const generateClearedReportBtn = document.getElementById('generateClearedReportBtn');
@@ -1264,11 +1266,89 @@ function attachSortFilterToTableToolbar(selectId, tbodyId) {
     }
 }
 
+function getTableEnhancerControlsForBody(tbodyId) {
+    const tbody = document.getElementById(tbodyId);
+    const table = tbody?.closest('table');
+    const container = table?.closest('.table-container');
+    const controls = container?.previousElementSibling;
+    if (!controls || !controls.classList.contains('table-enhancer-controls')) return null;
+    return controls;
+}
+
+function getTableEnhancerSearchInputForBody(tbodyId) {
+    return getTableEnhancerControlsForBody(tbodyId)?.querySelector('.table-enhancer-search') || null;
+}
+
+let paymentSearchSyncInProgress = false;
+
+function bindSharedPaymentSearchInputs() {
+    const searchInputs = [
+        getTableEnhancerSearchInputForBody('paymentsTableBody'),
+        getTableEnhancerSearchInputForBody('paidCustomersTableBody')
+    ].filter(Boolean);
+
+    if (searchInputs.length < 2) return;
+
+    const applySharedPaymentSearch = (query, sourceInput = null) => {
+        const normalizedQuery = String(query || '');
+
+        if (paymentSystemSearchInput && paymentSystemSearchInput.value !== normalizedQuery) {
+            paymentSystemSearchInput.value = normalizedQuery;
+        }
+
+        searchInputs.forEach((input) => {
+            input.placeholder = 'Search paid and pending payments...';
+            input.style.display = 'none';
+            input.tabIndex = -1;
+            input.setAttribute('aria-hidden', 'true');
+
+            if (input === sourceInput || input.value === normalizedQuery) return;
+            input.value = normalizedQuery;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    };
+
+    searchInputs.forEach((input) => {
+        if (input.dataset.paymentSearchBound === 'true') return;
+        input.dataset.paymentSearchBound = 'true';
+        input.addEventListener('input', () => {
+            if (paymentSearchSyncInProgress) return;
+            paymentSearchSyncInProgress = true;
+            try {
+                applySharedPaymentSearch(input.value, input);
+            } finally {
+                paymentSearchSyncInProgress = false;
+            }
+        });
+    });
+
+    if (paymentSystemSearchBtn && paymentSystemSearchBtn.dataset.paymentSearchBound !== 'true') {
+        paymentSystemSearchBtn.dataset.paymentSearchBound = 'true';
+        paymentSystemSearchBtn.addEventListener('click', () => {
+            applySharedPaymentSearch(paymentSystemSearchInput?.value || '');
+        });
+    }
+
+    if (paymentSystemSearchInput && paymentSystemSearchInput.dataset.paymentSearchBound !== 'true') {
+        paymentSystemSearchInput.dataset.paymentSearchBound = 'true';
+        paymentSystemSearchInput.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            applySharedPaymentSearch(paymentSystemSearchInput.value || '');
+        });
+    }
+
+    if (paymentSystemSearchInput?.value) {
+        applySharedPaymentSearch(paymentSystemSearchInput.value);
+    }
+}
+
 function syncPaymentTableToolbars() {
     window.requestAnimationFrame(() => {
         attachSortFilterToTableToolbar('paymentQueueSortFilter', 'paymentsTableBody');
         attachSortFilterToTableToolbar('paymentPaidSortFilter', 'paidCustomersTableBody');
         attachSortFilterToTableToolbar('paymentClearedSortFilter', 'clearedCustomersTableBody');
+        bindSharedPaymentSearchInputs();
     });
 }
 
@@ -1677,12 +1757,13 @@ function renderPaymentQueue() {
     }
 
     if (paymentQueue.length === 0) {
-        paymentsTableBody.innerHTML = '<tr><td colspan="10" class="no-data">No applications sent to PFA yet</td></tr>';
+        paymentsTableBody.innerHTML = '<tr><td colspan="11" class="no-data">No applications sent to PFA yet</td></tr>';
         return;
     }
 
     paymentsTableBody.innerHTML = paymentQueue.map((sub) => {
         const { pfa, twentyFive, commission2 } = getSubmissionFinancials(sub);
+        const uploadedDate = formatDateValue(sub?.uploadedAt || sub?.createdAt);
         const queueDate = formatDateValue(getSubmissionPaymentEntryAt(sub));
         const uploaderLabel = getUploaderDisplayName(sub?.uploadedBy);
         const assignedLabel = getUploaderDisplayName(sub?.assignedToPayment);
@@ -1706,6 +1787,7 @@ function renderPaymentQueue() {
                 <td>${escapeHtml(pfa)}</td>
                 <td>${formatCurrency(twentyFive)}<div style="font-size:12px;color:#64748b;margin-top:4px;">Rate: ${escapeHtml(rateLabel)}</div></td>
                 <td>${formatCurrency(commission2)}</td>
+                <td>${escapeHtml(uploadedDate)}</td>
                 <td>${escapeHtml(queueDate)}</td>
                 <td><span class="status-badge status-approved">Sent to PFA</span></td>
                 <td>${actionHtml}</td>

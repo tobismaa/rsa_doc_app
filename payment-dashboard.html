@@ -74,6 +74,19 @@
                 </button>
             </header>
 
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 16px;padding:12px 14px;border:1px solid #dbe2ea;border-radius:16px;background:linear-gradient(180deg,#f8fbff 0%,#eef6ff 100%);box-shadow:0 10px 24px rgba(15,59,103,0.08);">
+                <div>
+                    <div style="font-size:13px;font-weight:700;color:#0f172a;">Payment Search</div>
+                    <div style="font-size:12px;color:#64748b;">Search across both Sent to PFA and Paid applications.</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                    <input type="search" id="paymentSystemSearchInput" placeholder="Search customer, agent, uploader, PFA..." aria-label="Search paid and pending payments" style="min-width:280px;max-width:420px;width:min(420px,80vw);padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;color:#0f172a;">
+                    <button type="button" class="action-btn" id="paymentSystemSearchBtn" style="background:linear-gradient(135deg,#0f3b67 0%,#1d4ed8 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(29,78,216,0.28);">
+                        <i class="fas fa-search"></i> Search
+                    </button>
+                </div>
+            </div>
+
             <div id="dashboardTab" class="tab-content active">
                 <div class="overview-cards" style="margin-bottom:16px;">
                     <div class="stat-card pending">
@@ -474,7 +487,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/payment-dashboard.js?v=20260704b"></script>
+    <script type="module" src="js/payment-dashboard.js?v=20260708a"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260705b"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260518a">
     <script type="module" src="js/app-chat.js?v=20260617a"></script>
