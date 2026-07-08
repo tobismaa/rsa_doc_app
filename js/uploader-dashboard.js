@@ -719,6 +719,7 @@ function renderRecentTable() {
                 <td>${uploaderName}</td>
                 <td>
                     <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i></button>
+                    <button class="action-btn" onclick="window.showCustomerDetails('${sub.id}')"><i class="fas fa-user"></i></button>
                     <button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')" style="margin-left:5px; background:#8b5cf6; color:white; border:none; padding:5px 10px; border-radius:4px;"><i class="fas fa-map-marker-alt"></i></button>
                 </td>
             </tr>
@@ -878,3 +879,40 @@ function getApplicationStageSimple(submission) {
 // Make functions global
 window.showLoader = showLoader;
 window.hideLoader = hideLoader;
+
+window.showCustomerDetails = function(submissionId) {
+    const submission = allSubmissions.find(s => s.id === submissionId);
+    if (!submission) {
+        showNotification('Application not found', 'error');
+        return;
+    }
+
+    const modal = document.getElementById('customerDetailsModal');
+    const body = document.getElementById('customerDetailsBody');
+    if (!modal || !body) return;
+
+    const details = submission.customerDetails || {};
+    body.innerHTML = `
+        <p><strong>Name:</strong> ${escapeHtml(submission.customerName)}</p>
+        <p><strong>PEN Number:</strong> ${escapeHtml(submission.penNumber)}</p>
+        <p><strong>Phone:</strong> ${escapeHtml(details.phone)}</p>
+        <p><strong>Email:</strong> ${escapeHtml(details.email)}</p>
+        <p><strong>Address:</strong> ${escapeHtml(details.address)}</p>
+        <p><strong>PFA:</strong> ${escapeHtml(details.pfa)}</p>
+        <p><strong>RSA Balance:</strong> ${formatCurrency(details.rsaBalance)}</p>
+        <p><strong>25% RSA Balance:</strong> ${formatCurrency(details.rsa25Percent)}</p>
+        <p><strong>Account Number:</strong> ${escapeHtml(details.accountNo)}</p>
+        <p><strong>Account Name:</strong> ${escapeHtml(details.accountName)}</p>
+        <p><strong>Bank Name:</strong> ${escapeHtml(details.bankName)}</p>
+    `;
+
+    modal.classList.add('active');
+};
+
+document.getElementById('closeCustomerDetailsModal')?.addEventListener('click', () => {
+    document.getElementById('customerDetailsModal')?.classList.remove('active');
+});
+
+document.getElementById('closeCustomerDetailsBtn')?.addEventListener('click', () => {
+    document.getElementById('customerDetailsModal')?.classList.remove('active');
+});

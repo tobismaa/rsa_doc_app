@@ -51,7 +51,7 @@ let currentPaymentPdfPreviewUrl = '';
 let currentPaymentPdfPreviewBlob = null;
 let currentPaymentPdfPreviewFileName = 'payment-report.pdf';
 const PAYMENT_RATE_CUTOFF_MS = new Date('2026-05-07T00:00:00+01:00').getTime();
-const PAYMENT_DASHBOARD_TABS = ['dashboard', 'sent-to-pfa', 'leave', 'profile', 'help'];
+const PAYMENT_DASHBOARD_TABS = ['dashboard', 'sent-to-pfa', 'paid-customers', 'leave', 'profile', 'help'];
 
 function getInitialPaymentTab() {
     const hashTab = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();

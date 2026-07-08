@@ -1576,6 +1576,22 @@ function roundDownToThousand(value) {
     return Math.max(0, Math.floor(Number(value || 0) / 1000) * 1000);
 }
 
+function roundDownToNearestThousand(value) {
+    const num = Number(value || 0);
+    return Math.max(0, Math.floor(num / 1000) * 1000);
+}
+
+function handleRsaBalanceChangeForCustomerEdit() {
+    const rsaBalanceInput = document.getElementById('customer-edit-rsaBalance') || document.getElementById('customerEditRsaBalance');
+    const rsa25PercentInput = document.getElementById('customer-edit-rsa25') || document.getElementById('customerEditRsa25Percent');
+    if (!rsaBalanceInput || !rsa25PercentInput) return;
+    const rsaBalance = parseFloat(String(rsaBalanceInput.value || '0').replace(/,/g, ''));
+    if (!Number.isNaN(rsaBalance)) {
+        const rsa25Percent = roundDownToNearestThousand(rsaBalance * 0.25);
+        rsa25PercentInput.value = String(rsa25Percent);
+    }
+}
+
 function getSubmissionRsaBalance(sub = {}) {
     return parseMoneyValue(sub?.customerDetails?.rsaBalance || sub?.rsaBalance || 0);
 }
@@ -3329,6 +3345,11 @@ function renderCustomerEditModal(submission = {}) {
                 </label>
             `;
         }).join('');
+    }
+
+    const rsaBalanceInput = document.getElementById('customer-edit-rsaBalance');
+    if (rsaBalanceInput) {
+        rsaBalanceInput.addEventListener('input', handleRsaBalanceChangeForCustomerEdit);
     }
 
     const reason = document.getElementById('customerEditReasonInput');
