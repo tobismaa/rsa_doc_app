@@ -2445,6 +2445,32 @@ body.modal-open {
 .text-success { color: var(--success) !important; }
 .text-warning { color: var(--warning) !important; }
 
+.audit-frozen-uploader-notice {
+  display: inline-grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 2px 7px;
+  min-width: 180px;
+  padding: 9px 11px;
+  border: 1px solid #bae6fd;
+  border-radius: 10px;
+  background: #f0f9ff;
+  color: #075985;
+}
+
+.audit-frozen-uploader-notice i {
+  grid-row: 1 / span 2;
+}
+
+.audit-frozen-uploader-notice span {
+  font-weight: 800;
+}
+
+.audit-frozen-uploader-notice small {
+  color: #475569;
+  line-height: 1.25;
+}
+
 /* Force track modal to show */
 #trackModal,
 .modal[id^="trackModal-"] {

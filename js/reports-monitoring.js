@@ -1226,7 +1226,15 @@ function renderAuditRejectedRows(body, rows) {
         const { rsaBalance, twentyFive, commission } = getSubmissionFinancials(sub);
         const uploaderName = getUserDisplayName(sub.uploadedBy || sub.auditCommissionSubmittedBy || '');
         const rejectionReason = String(sub.auditCommissionRejectionReason || 'No reason provided').trim();
-        const actionCell = `<button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>`;
+        const isFrozen = sub.auditFrozen === true;
+        const freezeButton = isFrozen
+            ? `<button class="action-btn audit-unfreeze-btn" onclick="window.toggleAuditApplicationFreeze('${sub.id}', false)" title="Allow the uploader to act on this application"><i class="fas fa-lock-open"></i> Unfreeze</button>`
+            : `<button class="action-btn audit-freeze-btn" onclick="window.toggleAuditApplicationFreeze('${sub.id}', true)" title="Prevent the uploader from changing this application"><i class="fas fa-lock"></i> Freeze</button>`;
+        const actionCell = `<div class="audit-rejected-actions">
+            <button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>
+            ${freezeButton}
+            ${isFrozen ? '<span class="audit-frozen-pill"><i class="fas fa-snowflake"></i> Frozen</span>' : ''}
+        </div>`;
 
         return `
             <tr>
@@ -2118,6 +2126,72 @@ window.rejectAuditCommission = async (submissionId) => {
         showNotification('Commission rejected and returned to uploader.', 'success');
     } catch (error) {
         showNotification('Failed to reject commission.', 'error');
+    }
+};
+
+window.toggleAuditApplicationFreeze = async (submissionId, shouldFreeze) => {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub) {
+        showNotification('Application not found', 'warning');
+        return;
+    }
+    if (String(sub.auditCommissionStatus || '').toLowerCase() !== 'rejected') {
+        showNotification('Only rejected Audit applications can be frozen or unfrozen.', 'warning');
+        return;
+    }
+
+    const action = shouldFreeze ? 'freeze' : 'unfreeze';
+    const confirmed = window.confirm(
+        shouldFreeze
+            ? `Freeze ${sub.customerName || 'this application'}? The uploader will not be able to resubmit, dissolve, chat, or make other changes until Audit unfreezes it.`
+            : `Unfreeze ${sub.customerName || 'this application'}? The uploader will be able to act on it again.`
+    );
+    if (!confirmed) return;
+
+    try {
+        const actorEmail = currentUser?.email || '';
+        await updateDoc(doc(db, 'submissions', submissionId), shouldFreeze ? {
+            auditFrozen: true,
+            auditFrozenAt: serverTimestamp(),
+            auditFrozenBy: actorEmail,
+            auditUnfrozenAt: null,
+            auditUnfrozenBy: '',
+            updatedAt: serverTimestamp()
+        } : {
+            auditFrozen: false,
+            auditUnfrozenAt: serverTimestamp(),
+            auditUnfrozenBy: actorEmail,
+            updatedAt: serverTimestamp()
+        });
+
+        await addDoc(collection(db, 'audit'), {
+            action: shouldFreeze ? 'audit_application_frozen' : 'audit_application_unfrozen',
+            submissionId,
+            customerName: sub.customerName || '',
+            uploadedBy: sub.uploadedBy || '',
+            performedBy: actorEmail,
+            timestamp: serverTimestamp()
+        }).catch(() => {});
+
+        await notifyUserPushEvent({
+            currentUser,
+            recipientEmail: String(sub.auditCommissionSubmittedBy || sub.paymentMadeBy || sub.uploadedBy || '').trim(),
+            eventType: shouldFreeze ? 'audit_application_frozen' : 'audit_application_unfrozen',
+            title: shouldFreeze ? 'Application Frozen by Audit' : 'Application Unfrozen by Audit',
+            body: shouldFreeze
+                ? `${sub.customerName || 'Your application'} is frozen and cannot be changed until Audit unfreezes it.`
+                : `${sub.customerName || 'Your application'} has been unfrozen and can be actioned again.`,
+            clickUrl: '/dashboard.html',
+            meta: {
+                submissionId,
+                customerName: sub.customerName || '',
+                performedBy: actorEmail
+            }
+        }).catch(() => {});
+
+        showNotification(`Application ${shouldFreeze ? 'frozen' : 'unfrozen'} successfully.`, 'success');
+    } catch (error) {
+        showNotification(`Failed to ${action} application.`, 'error');
     }
 };
 

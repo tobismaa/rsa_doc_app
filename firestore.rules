@@ -137,6 +137,19 @@ service cloud.firestore {
       );
     }
 
+    function submissionAllowsUploaderMutation(data) {
+      return data.uploadedBy != myEmail() ||
+        !('auditFrozen' in data) ||
+        data.auditFrozen != true;
+    }
+
+    function submissionAllowsUploaderMutationById(submissionId) {
+      return !exists(submissionDocPath(submissionId)) ||
+        get(submissionDocPath(submissionId)).data.uploadedBy != myEmail() ||
+        !('auditFrozen' in get(submissionDocPath(submissionId)).data) ||
+        get(submissionDocPath(submissionId)).data.auditFrozen != true;
+    }
+
     match /users/{userId} {
       allow read: if signedIn();
       allow create: if isOwnUserDoc(userId)
@@ -192,10 +205,15 @@ service cloud.firestore {
       allow update: if signedIn() && globalWriteAllowed() && (
         isAdminLike() ||
         isRole('reports_monitoring') ||
-        resource.data.uploadedBy == myEmail() ||
-        resource.data.assignedTo == myEmail() ||
-        resource.data.assignedToRSA == myEmail() ||
-        resource.data.assignedToPayment == myEmail()
+        (
+          submissionAllowsUploaderMutation(resource.data) &&
+          (
+            resource.data.uploadedBy == myEmail() ||
+            resource.data.assignedTo == myEmail() ||
+            resource.data.assignedToRSA == myEmail() ||
+            resource.data.assignedToPayment == myEmail()
+          )
+        )
       );
       allow delete: if globalWriteAllowed() && isAdminLike();
     }
@@ -264,6 +282,11 @@ service cloud.firestore {
       );
       allow create: if signedIn() && (
         globalWriteAllowed()
+        && submissionAllowsUploaderMutationById(
+          request.resource.data.submissionId is string
+            ? request.resource.data.submissionId
+            : chatId
+        )
         && (
           chatDataHasParticipant(request.resource.data) ||
           (request.resource.data.submissionId is string && canAccessSubmissionById(request.resource.data.submissionId)) ||
@@ -271,10 +294,17 @@ service cloud.firestore {
         )
       );
       allow update: if signedIn() && globalWriteAllowed() && (
-        chatDataHasParticipant(resource.data) ||
-        chatDataHasParticipant(request.resource.data) ||
-        (resource.data.submissionId is string && canAccessSubmissionById(resource.data.submissionId)) ||
-        canAccessSubmissionById(chatId)
+        submissionAllowsUploaderMutationById(
+          resource.data.submissionId is string
+            ? resource.data.submissionId
+            : chatId
+        )
+        && (
+          chatDataHasParticipant(resource.data) ||
+          chatDataHasParticipant(request.resource.data) ||
+          (resource.data.submissionId is string && canAccessSubmissionById(resource.data.submissionId)) ||
+          canAccessSubmissionById(chatId)
+        )
       );
       allow delete: if maintenanceWriteAllowed() && isAdminLike();
 
@@ -285,6 +315,7 @@ service cloud.firestore {
         );
         allow create: if signedIn()
           && globalWriteAllowed()
+          && submissionAllowsUploaderMutationById(chatId)
           && (
             canAccessSubmissionById(chatId) ||
             canAccessChatByParticipants(chatId)

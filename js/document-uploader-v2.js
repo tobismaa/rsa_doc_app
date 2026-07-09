@@ -5013,6 +5013,10 @@ function isAuditCommissionRejected(submission = {}) {
   return String(submission.auditCommissionStatus || '').toLowerCase() === 'rejected';
 }
 
+function isAuditApplicationFrozen(submission = {}) {
+  return submission.auditFrozen === true;
+}
+
 function isOwnUploaderSubmission(submission = {}) {
   return normalizeEmail(submission.uploadedBy) === normalizeEmail(currentUser?.email);
 }
@@ -5235,15 +5239,20 @@ async function renderUploaderApplicationsTable() {
     let html = '';
     for (const sub of rows) {
       const auditRejected = isAuditCommissionRejected(sub);
+      const auditFrozen = isAuditApplicationFrozen(sub);
       const fixCount = auditRejected ? Number(sub.auditCommissionResubmitCount || 0) : Number(sub.fixCount || 0);
       const date = safeFormatDate(auditRejected ? (sub.auditCommissionRejectedAt || sub.auditCommissionSubmittedAt || sub.paymentMadeAt) : getSubmissionReviewEntryAt(sub));
       const assignedName = auditRejected ? 'Audit' : (sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned');
       const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
-      const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button>`;
+      const chatBtn = auditFrozen
+        ? `<button class="action-btn app-chat-trigger" disabled title="Application frozen by Audit"><i class="fas fa-lock"></i> Frozen</button>`
+        : `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button>`;
       const reasonBtn = hasRejectionHistory(sub)
         ? `<button class="action-btn reason-btn" onclick="window.openUploaderRejectionReasonModal('${sub.id}')"><i class="fas fa-eye"></i> View Details</button>`
         : 'No reason provided';
-      const actionCell = auditRejected
+      const actionCell = auditFrozen
+        ? `<div class="audit-frozen-uploader-notice"><i class="fas fa-snowflake"></i><span>Frozen by Audit</span><small>Wait for Audit to unfreeze this application.</small></div>`
+        : auditRejected
         ? `<div class="audit-rejection-actions">
             <button class="action-btn edit-btn" onclick="window.openAuditPaymentResubmitModal('${sub.id}')" title="Submit correction to Audit"><i class="fas fa-paper-plane"></i> Resubmit</button>
             <button class="action-btn dissolve-btn" onclick="window.dissolveAuditPaymentRequest('${sub.id}')" title="Return to Sent to PFA"><i class="fas fa-rotate-left"></i> Dissolve</button>
@@ -5504,6 +5513,10 @@ window.openAuditPaymentResubmitModal = async (submissionId) => {
     showNotification('Application not found', 'error');
     return;
   }
+  if (isAuditApplicationFrozen(sub)) {
+    showNotification('This application is frozen by Audit. It must be unfrozen before you can resubmit it.', 'warning');
+    return;
+  }
   if (!isAuditCommissionRejected(sub)) {
     showNotification('Only rejected Audit payment requests can be resubmitted.', 'warning');
     return;
@@ -5582,6 +5595,10 @@ window.dissolveAuditPaymentRequest = async (submissionId) => {
   const sub = allSubmissions.find((item) => item.id === submissionId);
   if (!sub) {
     showNotification('Application not found', 'error');
+    return;
+  }
+  if (isAuditApplicationFrozen(sub)) {
+    showNotification('This application is frozen by Audit. It must be unfrozen before you can dissolve it.', 'warning');
     return;
   }
   if (!isAuditCommissionRejected(sub)) {
