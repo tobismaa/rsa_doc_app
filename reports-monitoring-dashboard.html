@@ -215,12 +215,87 @@
                             <div class="admin-subtab-strip audit-paid-scope-strip" id="auditPaidScopeStrip">
                                 <button type="button" class="admin-subtab-btn active" data-audit-paid-scope="mine">Approved by Me</button>
                                 <button type="button" class="admin-subtab-btn" data-audit-paid-scope="others">Approved by Others</button>
+                                <button type="button" class="admin-subtab-btn" data-audit-paid-scope="all">Approved by Me + Others</button>
                             </div>
                         </div>
                         <button type="button" class="action-btn audit-export-btn" id="exportAuditPaidReportBtn">
                             <i class="fas fa-file-export"></i> Generate Report
                         </button>
                     </div>
+                    <section class="audit-reconciliation-panel" style="margin-bottom:16px;">
+                        <div class="audit-reconciliation-copy">
+                            <h2>Paid Reconciliation</h2>
+                            <p style="margin:0 0 6px;color:#64748b;line-height:1.6;">Upload the same Excel or CSV format used by Application Breakdown. The system will match the file against the paid applications in the currently selected scope so you can clear multiple records at once.</p>
+                            <div id="auditPaidReconciliationFileMeta" class="audit-reconciliation-meta">Upload the same Excel or CSV format used by Application Breakdown. Matching runs against Approved by Me.</div>
+                        </div>
+                        <input type="file" id="auditPaidReconciliationFileInput" accept=".xlsx,.csv" hidden>
+                        <div class="audit-reconciliation-actions">
+                            <button type="button" class="action-btn" id="auditPaidReconciliationSelectBtn">
+                                <i class="fas fa-file-upload"></i> Upload File
+                            </button>
+                            <button type="button" class="action-btn audit-export-btn" id="auditPaidReconciliationRunBtn" disabled>
+                                <i class="fas fa-magnifying-glass"></i> Run Check
+                            </button>
+                            <button type="button" class="action-btn" id="auditPaidReconciliationSelectAllBtn" disabled>
+                                <i class="fas fa-check-double"></i> Select All Found
+                            </button>
+                            <button type="button" class="action-btn" id="auditPaidReconciliationClearSelectedBtn" style="background:#0f766e;color:#fff;border:none;" disabled>
+                                <i class="fas fa-circle-check"></i> Clear Selected
+                            </button>
+                            <button type="button" class="cancel-btn" id="auditPaidReconciliationResetBtn" disabled>
+                                Reset
+                            </button>
+                        </div>
+                    </section>
+
+                    <div id="auditPaidReconciliationSummary" class="audit-reconciliation-summary" style="display:none;margin-bottom:16px;"></div>
+
+                    <div class="table-section" id="auditPaidReconciliationMatchedWrap" style="display:none;">
+                        <div class="audit-table-toolbar">
+                            <h2>Matched Paid Applications</h2>
+                        </div>
+                        <div class="table-container">
+                            <table class="documents-table">
+                                <thead>
+                                    <tr>
+                                        <th>Select</th>
+                                        <th>Upload Row</th>
+                                        <th>Uploaded Name</th>
+                                        <th>Uploaded Account</th>
+                                        <th>Uploaded 25% RSA Balance</th>
+                                        <th>System Name</th>
+                                        <th>Uploader</th>
+                                        <th>System Account</th>
+                                        <th>Paid At</th>
+                                        <th>Result</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="auditPaidReconciliationMatchedBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="table-section" id="auditPaidReconciliationUnmatchedWrap" style="display:none;">
+                        <div class="audit-table-toolbar">
+                            <h2>Not Found in Paid</h2>
+                        </div>
+                        <div class="table-container">
+                            <table class="documents-table">
+                                <thead>
+                                    <tr>
+                                        <th>Upload Row</th>
+                                        <th>Name</th>
+                                        <th>Account Number</th>
+                                        <th>Uploaded 25% RSA Balance</th>
+                                        <th>Result</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="auditPaidReconciliationUnmatchedBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
                     <div class="table-container">
                         <table class="documents-table">
                             <thead>
@@ -466,13 +541,13 @@
                 </div>
                 <div id="paymentReportSummaryChips" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;"></div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
-                    <button type="button" class="action-btn payment-report-preview-tab active" data-payment-report-view="summary" style="background:linear-gradient(135deg,#0f3b67 0%,#1d4ed8 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(29,78,216,0.28);">Daily Summary</button>
+                    <button type="button" class="action-btn payment-report-preview-tab active" data-payment-report-view="summary" style="background:linear-gradient(135deg,#0f3b67 0%,#1d4ed8 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(29,78,216,0.28);">Agent Summary</button>
                     <button type="button" class="action-btn payment-report-preview-tab" data-payment-report-view="details" style="background:linear-gradient(135deg,#334155 0%,#475569 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(51,65,85,0.24);">Application Breakdown</button>
                 </div>
                 <div id="paymentReportSummaryView" class="payment-report-preview-view">
                     <div class="table-container">
                         <table class="customers-table">
-                            <thead><tr><th>Date</th><th>Received</th><th>Attended</th><th>Pending</th></tr></thead>
+                            <thead><tr><th>Uploader Name</th><th>Agent Name</th><th>Agent Account Number</th><th>Agent Bank</th><th>Total Commission Payable</th></tr></thead>
                             <tbody id="paymentReportSummaryBody"></tbody>
                         </table>
                     </div>
@@ -482,7 +557,7 @@
                         <table class="customers-table">
                             <thead>
                                 <tr>
-                                    <th>Received Date</th><th>Customer</th><th>Agent</th><th>Uploader</th><th>PFA</th><th>25% Balance</th><th>Rate</th><th>Commission</th><th>Status</th><th>Attended</th><th>Paid Date</th><th>Cleared Date</th>
+                                    <th>Customer Name</th><th>Customer Account Number</th><th>Uploader Name</th><th>25% RSA Balance</th><th>Commission</th><th>Rate</th><th>Agent Name</th><th>Agent Account Number</th><th>Agent Bank</th><th>Status</th>
                                 </tr>
                             </thead>
                             <tbody id="paymentReportDetailsBody"></tbody>
@@ -515,7 +590,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/reports-monitoring.js?v=20260705b"></script>
+    <script type="module" src="js/reports-monitoring.js?v=20260708d"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260705b"></script>
 </body>
 </html>

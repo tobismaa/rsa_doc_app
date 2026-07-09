@@ -5140,6 +5140,14 @@ function renderUploaderApplicationsEmpty(label) {
   applicationsTableBody.innerHTML = `<tr><td colspan="${getUploaderApplicationColumnCount()}" class="no-data">${escapeHtml(text)}</td></tr>`;
 }
 
+function getUploaderSubmissionDetailsButtonHtml(submissionId, label = 'View') {
+  return `<button class="action-btn view-btn-small" onclick="window.viewSubmissionDetails('${submissionId}')"><i class="fas fa-circle-info"></i> ${escapeHtml(label)}</button>`;
+}
+
+function getUploaderSubmissionDocsButtonHtml(submissionId, label = 'Docs') {
+  return `<button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${submissionId}')"><i class="fas fa-eye"></i> ${escapeHtml(label)}</button>`;
+}
+
 async function renderUploaderApplicationsTable() {
   renderUploaderApplicationBadges();
   if (!applicationsTableBody) return;
@@ -5169,6 +5177,7 @@ async function renderUploaderApplicationsTable() {
           <td>${docCount}</td>
           <td>${safeFormatDate(sub.draftSavedAt || sub.uploadedAt)}</td>
           <td>
+            ${getUploaderSubmissionDetailsButtonHtml(sub.id)}
             <button class="action-btn edit-btn" onclick="window.openDraftSubmission('${sub.id}')"><i class="fas fa-pen"></i> Resume</button>
             <button class="action-btn" onclick="window.deleteDraftSubmission('${sub.id}')" style="background:#b91c1c;color:#fff;border:none;"><i class="fas fa-trash"></i> Delete</button>
           </td>
@@ -5190,7 +5199,7 @@ async function renderUploaderApplicationsTable() {
       const assignedName = await getCurrentHandlerName(sub);
       const whatsapp = await renderStageContactLink(sub);
       const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
-      html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${escapeHtml(sub.comment || '-')}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+      html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${escapeHtml(sub.comment || '-')}</td><td>${getUploaderSubmissionDetailsButtonHtml(sub.id)} ${getUploaderSubmissionDocsButtonHtml(sub.id)} <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
     }
     applicationsTableBody.innerHTML = html;
     return;
@@ -5211,7 +5220,7 @@ async function renderUploaderApplicationsTable() {
       const assignedName = await getCurrentHandlerName(sub);
       const whatsapp = await renderStageContactLink(sub);
       const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
-      html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${uploadDate}</td><td>${escapeHtml(approvedBy || '-')}</td><td>${approvedDate}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDetails('${sub.id}')"><i class="fas fa-circle-info"></i> Details</button> <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> Docs</button> <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+      html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${uploadDate}</td><td>${escapeHtml(approvedBy || '-')}</td><td>${approvedDate}</td><td>${getUploaderSubmissionDetailsButtonHtml(sub.id)} ${getUploaderSubmissionDocsButtonHtml(sub.id)} <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
     }
     applicationsTableBody.innerHTML = html;
     return;
@@ -5240,7 +5249,7 @@ async function renderUploaderApplicationsTable() {
             <button class="action-btn dissolve-btn" onclick="window.dissolveAuditPaymentRequest('${sub.id}')" title="Return to Sent to PFA"><i class="fas fa-rotate-left"></i> Dissolve</button>
           </div>`
         : `<button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-edit"></i> Re-upload</button>`;
-      html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${reasonBtn}</td><td>${actionCell}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+      html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${reasonBtn}</td><td>${actionCell}</td><td>${getUploaderSubmissionDetailsButtonHtml(sub.id)} ${getUploaderSubmissionDocsButtonHtml(sub.id)}</td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
     }
     applicationsTableBody.innerHTML = html;
     return;
@@ -5285,7 +5294,8 @@ async function renderUploaderApplicationsTable() {
         <td>
           ${paymentButton}
           ${auditLabel}
-          <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button>
+          ${getUploaderSubmissionDetailsButtonHtml(sub.id)}
+          ${getUploaderSubmissionDocsButtonHtml(sub.id)}
           <button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button>
         </td>
       </tr>

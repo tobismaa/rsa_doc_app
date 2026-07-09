@@ -53,6 +53,10 @@ let currentPaymentPdfPreviewFileName = 'payment-report.pdf';
 let auditReconciliationSourceRows = [];
 let auditReconciliationResult = null;
 let auditReconciliationFileName = '';
+let auditPaidReconciliationSourceRows = [];
+let auditPaidReconciliationResult = null;
+let auditPaidReconciliationFileName = '';
+let auditPaidReconciliationSelectedSubmissionIds = [];
 let usersListenerStarted = false;
 let submissionsListenerStarted = false;
 const PAYMENT_RATE_CUTOFF_MS = new Date('2026-05-07T00:00:00+01:00').getTime();
@@ -88,6 +92,18 @@ const auditReconciliationMatchedWrap = document.getElementById('auditReconciliat
 const auditReconciliationMatchedBody = document.getElementById('auditReconciliationMatchedBody');
 const auditReconciliationUnmatchedWrap = document.getElementById('auditReconciliationUnmatchedWrap');
 const auditReconciliationUnmatchedBody = document.getElementById('auditReconciliationUnmatchedBody');
+const auditPaidReconciliationFileInput = document.getElementById('auditPaidReconciliationFileInput');
+const auditPaidReconciliationSelectBtn = document.getElementById('auditPaidReconciliationSelectBtn');
+const auditPaidReconciliationRunBtn = document.getElementById('auditPaidReconciliationRunBtn');
+const auditPaidReconciliationSelectAllBtn = document.getElementById('auditPaidReconciliationSelectAllBtn');
+const auditPaidReconciliationClearSelectedBtn = document.getElementById('auditPaidReconciliationClearSelectedBtn');
+const auditPaidReconciliationResetBtn = document.getElementById('auditPaidReconciliationResetBtn');
+const auditPaidReconciliationFileMeta = document.getElementById('auditPaidReconciliationFileMeta');
+const auditPaidReconciliationSummary = document.getElementById('auditPaidReconciliationSummary');
+const auditPaidReconciliationMatchedWrap = document.getElementById('auditPaidReconciliationMatchedWrap');
+const auditPaidReconciliationMatchedBody = document.getElementById('auditPaidReconciliationMatchedBody');
+const auditPaidReconciliationUnmatchedWrap = document.getElementById('auditPaidReconciliationUnmatchedWrap');
+const auditPaidReconciliationUnmatchedBody = document.getElementById('auditPaidReconciliationUnmatchedBody');
 const paymentReportRangeModal = document.getElementById('paymentReportRangeModal');
 const paymentReportPreviewModal = document.getElementById('paymentReportPreviewModal');
 const paymentReportStartDate = document.getElementById('paymentReportStartDate');
@@ -127,6 +143,17 @@ function showNotification(message, type = 'info') {
 
 function normalizeEmail(value) {
     return String(value || '').trim().toLowerCase();
+}
+
+function normalizeAuditPaidScope(value) {
+    return value === 'all' || value === 'others' ? value : 'mine';
+}
+
+function getAuditPaidScopeLabel(value) {
+    const scope = normalizeAuditPaidScope(value);
+    if (scope === 'all') return 'Approved by Me + Others';
+    if (scope === 'others') return 'Approved by Others';
+    return 'Approved by Me';
 }
 
 function formatDate(value) {
@@ -275,6 +302,10 @@ function getSelectedAuditReconciliationFile() {
     return auditReconciliationFileInput?.files?.[0] || null;
 }
 
+function getSelectedAuditPaidReconciliationFile() {
+    return auditPaidReconciliationFileInput?.files?.[0] || null;
+}
+
 function resolveImportColumn(headerMap, acceptedKeys = []) {
     for (const key of acceptedKeys) {
         for (const [colNumber, headerKey] of headerMap.entries()) {
@@ -288,7 +319,7 @@ function getAuditReconciliationColumns(headerMap) {
     return {
         nameColumn: resolveImportColumn(headerMap, ['customername', 'customer', 'name', 'fullname', 'customerfullname', 'accountname', 'membername', 'clientname']),
         accountColumn: resolveImportColumn(headerMap, ['accountnumber', 'accountno', 'acctnumber', 'acctno', 'bankaccountnumber', 'customeraccountnumber', 'customeraccountno']),
-        rsaColumn: resolveImportColumn(headerMap, ['rsabalance', 'rsabal', 'retirementsavingsaccountbalance', 'balance', 'amount', 'rsavalue', 'pensionbalance'])
+        rsaColumn: resolveImportColumn(headerMap, ['25rsabalance', 'rsabalance', 'rsabal', 'retirementsavingsaccountbalance', 'balance', 'amount', 'rsavalue', 'pensionbalance'])
     };
 }
 
@@ -407,8 +438,8 @@ async function parseAuditReconciliationFile(file) {
     return parseAuditReconciliationExcel(file);
 }
 
-function getAuditReconciliationCandidates() {
-    return allSubmissions.map((sub) => {
+function mapSubmissionsToAuditReconciliationCandidates(submissions = []) {
+    return submissions.map((sub) => {
         const financials = getSubmissionFinancials(sub);
         const accountNumber = getCustomerAccountNumber(sub);
         const customerName = String(sub.customerName || sub?.customerDetails?.name || '').trim();
@@ -422,6 +453,14 @@ function getAuditReconciliationCandidates() {
             normalizedRsaBalance: normalizeRsaAmount(financials.rsaBalance)
         };
     });
+}
+
+function getAuditReconciliationCandidates() {
+    return mapSubmissionsToAuditReconciliationCandidates(allSubmissions);
+}
+
+function getAuditPaidReconciliationCandidates(scope = currentAuditPaidScope) {
+    return mapSubmissionsToAuditReconciliationCandidates(getAuditPaidRows(scope));
 }
 
 function getLatestSubmissionMillis(sub = {}) {
@@ -456,8 +495,7 @@ function chooseAuditReconciliationMatch(row, candidates = []) {
     return null;
 }
 
-function computeAuditReconciliationResult(rows = []) {
-    const candidates = getAuditReconciliationCandidates();
+function computeAuditReconciliationResultFromCandidates(rows = [], candidates = []) {
     const matchedRows = [];
     const unmatchedRows = [];
 
@@ -496,12 +534,128 @@ function computeAuditReconciliationResult(rows = []) {
     };
 }
 
+function computeAuditReconciliationResult(rows = []) {
+    return computeAuditReconciliationResultFromCandidates(rows, getAuditReconciliationCandidates());
+}
+
+function recomputeAuditPaidReconciliationResult() {
+    if (!auditPaidReconciliationSourceRows.length) {
+        auditPaidReconciliationResult = null;
+        auditPaidReconciliationSelectedSubmissionIds = [];
+        return;
+    }
+    auditPaidReconciliationResult = computeAuditReconciliationResultFromCandidates(
+        auditPaidReconciliationSourceRows,
+        getAuditPaidReconciliationCandidates(currentAuditPaidScope)
+    );
+    const validSubmissionIds = new Set((auditPaidReconciliationResult?.matchedRows || []).map((row) => row.submissionId).filter(Boolean));
+    auditPaidReconciliationSelectedSubmissionIds = auditPaidReconciliationSelectedSubmissionIds.filter((submissionId) => validSubmissionIds.has(submissionId));
+}
+
+function resetAuditPaidReconciliationState() {
+    auditPaidReconciliationSourceRows = [];
+    auditPaidReconciliationResult = null;
+    auditPaidReconciliationFileName = '';
+    auditPaidReconciliationSelectedSubmissionIds = [];
+    if (auditPaidReconciliationFileInput) auditPaidReconciliationFileInput.value = '';
+}
+
 function resetAuditReconciliationState() {
     auditReconciliationSourceRows = [];
     auditReconciliationResult = null;
     auditReconciliationFileName = '';
     if (auditReconciliationFileInput) auditReconciliationFileInput.value = '';
     renderAuditReconciliation();
+}
+
+function renderAuditPaidReconciliation() {
+    const selectedFile = getSelectedAuditPaidReconciliationFile();
+    const scopeLabel = getAuditPaidScopeLabel(currentAuditPaidScope);
+    const matchedRows = auditPaidReconciliationResult?.matchedRows || [];
+    const unmatchedRows = auditPaidReconciliationResult?.unmatchedRows || [];
+    const selectedSubmissionIds = Array.from(new Set(auditPaidReconciliationSelectedSubmissionIds.filter(Boolean)));
+    const selectedCount = selectedSubmissionIds.length;
+
+    if (auditPaidReconciliationFileMeta) {
+        auditPaidReconciliationFileMeta.textContent = auditPaidReconciliationFileName
+            ? `Selected file: ${auditPaidReconciliationFileName}. Matching against ${scopeLabel}.`
+            : `Upload the same Excel or CSV format used by Application Breakdown. Matching runs against ${scopeLabel}.`;
+    }
+    if (auditPaidReconciliationRunBtn) auditPaidReconciliationRunBtn.disabled = !selectedFile;
+    if (auditPaidReconciliationResetBtn) auditPaidReconciliationResetBtn.disabled = !selectedFile && !auditPaidReconciliationResult && !auditPaidReconciliationFileName;
+    if (auditPaidReconciliationSelectAllBtn) auditPaidReconciliationSelectAllBtn.disabled = !matchedRows.length;
+    if (auditPaidReconciliationClearSelectedBtn) auditPaidReconciliationClearSelectedBtn.disabled = !selectedCount;
+
+    if (!auditPaidReconciliationResult) {
+        if (auditPaidReconciliationSummary) {
+            auditPaidReconciliationSummary.style.display = 'none';
+            auditPaidReconciliationSummary.innerHTML = '';
+        }
+        if (auditPaidReconciliationMatchedWrap) auditPaidReconciliationMatchedWrap.style.display = 'none';
+        if (auditPaidReconciliationMatchedBody) auditPaidReconciliationMatchedBody.innerHTML = '';
+        if (auditPaidReconciliationUnmatchedWrap) auditPaidReconciliationUnmatchedWrap.style.display = 'none';
+        if (auditPaidReconciliationUnmatchedBody) auditPaidReconciliationUnmatchedBody.innerHTML = '';
+        return;
+    }
+
+    if (auditPaidReconciliationSummary) {
+        auditPaidReconciliationSummary.style.display = 'grid';
+        auditPaidReconciliationSummary.innerHTML = [
+            { label: 'Uploaded Rows', value: auditPaidReconciliationResult.totalRows },
+            { label: 'Found in Paid', value: matchedRows.length },
+            { label: 'Exact Balance', value: auditPaidReconciliationResult.exactCount },
+            { label: 'Balance Differs', value: auditPaidReconciliationResult.balanceDifferenceCount },
+            { label: 'Not Found', value: unmatchedRows.length },
+            { label: 'Selected for Clearing', value: selectedCount }
+        ].map((chip) => `
+            <div class="audit-reconciliation-chip">
+                <span>${escapeHtml(chip.label)}</span>
+                <strong>${String(chip.value)}</strong>
+            </div>
+        `).join('');
+    }
+
+    if (auditPaidReconciliationMatchedWrap) auditPaidReconciliationMatchedWrap.style.display = matchedRows.length ? 'block' : 'none';
+    if (auditPaidReconciliationMatchedBody) {
+        const selectedSet = new Set(selectedSubmissionIds);
+        auditPaidReconciliationMatchedBody.innerHTML = matchedRows.length
+            ? matchedRows.map((row) => {
+                const statusClass = row.balanceMatches ? 'audit-recon-status exact' : 'audit-recon-status partial';
+                const matchText = row.balanceMatches ? `Exact match (${row.matchMethod})` : `Balance differs (${row.matchMethod})`;
+                const isChecked = selectedSet.has(row.submissionId) ? 'checked' : '';
+                return `
+                    <tr>
+                        <td><input type="checkbox" data-paid-recon-select="${escapeHtml(row.submissionId)}" ${isChecked}></td>
+                        <td>${escapeHtml(row.rowNumber)}</td>
+                        <td>${escapeHtml(row.customerName || '-')}</td>
+                        <td>${escapeHtml(row.accountNumber || '-')}</td>
+                        <td>${row.hasRsaBalance ? formatCurrency(row.normalizedRsaBalance) : '-'}</td>
+                        <td><strong>${escapeHtml(row.systemName || '-')}</strong></td>
+                        <td>${escapeHtml(row.uploaderName || '-')}</td>
+                        <td>${escapeHtml(row.systemAccountNumber || '-')}</td>
+                        <td>${escapeHtml(formatDate(row.submission?.paidAt || row.submission?.updatedAt || ''))}</td>
+                        <td><span class="${statusClass}">${escapeHtml(matchText)}</span></td>
+                        <td><button type="button" class="action-btn" onclick="window.openMonitoringApplicationDetails('${row.submissionId}')"><i class="fas fa-eye"></i> View</button></td>
+                    </tr>
+                `;
+            }).join('')
+            : '<tr><td colspan="11" class="no-data">No paid applications matched this file</td></tr>';
+    }
+
+    if (auditPaidReconciliationUnmatchedWrap) auditPaidReconciliationUnmatchedWrap.style.display = unmatchedRows.length ? 'block' : 'none';
+    if (auditPaidReconciliationUnmatchedBody) {
+        auditPaidReconciliationUnmatchedBody.innerHTML = unmatchedRows.length
+            ? unmatchedRows.map((row) => `
+                <tr>
+                    <td>${escapeHtml(row.rowNumber)}</td>
+                    <td>${escapeHtml(row.customerName || '-')}</td>
+                    <td>${escapeHtml(row.accountNumber || '-')}</td>
+                    <td>${row.hasRsaBalance ? formatCurrency(row.normalizedRsaBalance) : '-'}</td>
+                    <td>${escapeHtml(row.reason || 'No paid match found')}</td>
+                </tr>
+            `).join('')
+            : '<tr><td colspan="5" class="no-data">No missing paid records</td></tr>';
+    }
 }
 
 function renderCopyableCustomerAccount(sub = {}) {
@@ -727,14 +881,15 @@ function getAuditApprovalEmail(sub = {}) {
 }
 
 function getAuditPaidRows(scope = currentAuditPaidScope) {
+    const resolvedScope = normalizeAuditPaidScope(scope);
     const currentEmail = normalizeEmail(currentUser?.email);
     return allSubmissions
         .filter((sub) => String(sub.status || '').toLowerCase() === 'paid')
         .filter((sub) => {
-            if (scope === 'all') return true;
+            if (resolvedScope === 'all') return true;
             const approvedBy = getAuditApprovalEmail(sub);
-            if (!currentEmail) return scope !== 'mine';
-            return scope === 'mine' ? approvedBy === currentEmail : approvedBy !== currentEmail;
+            if (!currentEmail) return resolvedScope !== 'mine';
+            return resolvedScope === 'mine' ? approvedBy === currentEmail : approvedBy !== currentEmail;
         })
         .sort((a, b) => getStageTimestampMillis(b.paidAt || getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(a.paidAt || getSubmissionCurrentStageEntryAt(a)));
 }
@@ -1100,6 +1255,7 @@ function renderAuditWorkflowTabs() {
     renderAuditMoneyRows(auditPaidTableBody, getAuditPaidRows(currentAuditPaidScope), 'paid');
     renderAuditMoneyRows(auditClearedTableBody, getAuditClearedRows(), 'cleared');
     renderAuditRejectedRows(auditRejectedTableBody, getAuditRejectedRows());
+    renderAuditPaidReconciliation();
 }
 
 function buildPaymentStageReport(records = [], options = {}) {
@@ -1113,19 +1269,27 @@ function buildPaymentStageReport(records = [], options = {}) {
     } = options;
 
     const summaryMap = new Map();
+    const agentSummaryMap = new Map();
     const details = records
         .map((sub) => {
             const { twentyFive, commission } = getSubmissionFinancials(sub);
             const dateMs = getDateMs(sub);
             const attended = attendedResolver(sub);
             const statusText = statusResolver(sub);
+            const agentName = String(sub?.agentName || '').trim() || 'No Agent';
+            const agentAccountNumber = String(sub?.agentAccountNumber || '').trim() || '-';
+            const agentBank = String(sub?.agentAccountBank || '').trim() || '-';
+            const uploaderName = getUserDisplayName(sub?.uploadedBy);
             const detailRow = {
                 id: sub.id,
                 receivedAtMs: dateMs,
                 receivedDate: formatDateOnly(dateMs),
                 customerName: String(sub?.customerName || 'Unknown').trim() || 'Unknown',
-                agentName: String(sub?.agentName || '').trim() || 'No Agent',
-                uploaderName: getUserDisplayName(sub?.uploadedBy),
+                customerAccountNumber: getCustomerAccountNumber(sub),
+                agentName,
+                agentAccountNumber,
+                agentBank,
+                uploaderName,
                 pfa: getSubmissionPfaName(sub),
                 twentyFive,
                 commission,
@@ -1148,11 +1312,34 @@ function buildPaymentStageReport(records = [], options = {}) {
             if (attended) existingSummary.attended += 1;
             else existingSummary.pending += 1;
             summaryMap.set(summaryKey, existingSummary);
+
+            const agentSummaryKey = String(sub?.agentId || '').trim() || `${agentName.toLowerCase()}::${normalizeEmail(sub?.uploadedBy)}::${agentAccountNumber}::${agentBank.toLowerCase()}`;
+            const existingAgentSummary = agentSummaryMap.get(agentSummaryKey) || {
+                agentName,
+                uploaderName,
+                agentAccountNumber,
+                agentBank,
+                totalCommissionPayable: 0
+            };
+            if ((!existingAgentSummary.uploaderName || existingAgentSummary.uploaderName === '-') && uploaderName && uploaderName !== '-') {
+                existingAgentSummary.uploaderName = uploaderName;
+            }
+            if ((!existingAgentSummary.agentAccountNumber || existingAgentSummary.agentAccountNumber === '-') && agentAccountNumber && agentAccountNumber !== '-') {
+                existingAgentSummary.agentAccountNumber = agentAccountNumber;
+            }
+            if ((!existingAgentSummary.agentBank || existingAgentSummary.agentBank === '-') && agentBank && agentBank !== '-') {
+                existingAgentSummary.agentBank = agentBank;
+            }
+            existingAgentSummary.totalCommissionPayable += commission;
+            agentSummaryMap.set(agentSummaryKey, existingAgentSummary);
+
             return detailRow;
         })
         .sort((a, b) => b.receivedAtMs - a.receivedAtMs);
 
     const summaryRows = Array.from(summaryMap.values()).sort((a, b) => String(a.key).localeCompare(String(b.key)));
+    const agentSummaryRows = Array.from(agentSummaryMap.values())
+        .sort((a, b) => b.totalCommissionPayable - a.totalCommissionPayable || a.agentName.localeCompare(b.agentName) || String(a.uploaderName || '').localeCompare(String(b.uploaderName || '')));
     const totals = summaryRows.reduce((acc, row) => ({
         received: acc.received + row.received,
         attended: acc.attended + row.attended,
@@ -1164,8 +1351,9 @@ function buildPaymentStageReport(records = [], options = {}) {
         exportKey,
         rangeStart: options.rangeStart || '',
         rangeEnd: options.rangeEnd || '',
-        metaText: `${title} generated from ${records.length} record(s). Summary grouped by ${dateLabel.toLowerCase()}.`,
+        metaText: `${title} generated from ${records.length} record(s). Includes agent commission summary and application breakdown for the selected ${dateLabel.toLowerCase()} range.`,
         summaryRows,
+        agentSummaryRows,
         details,
         totals,
         dateCount: summaryRows.length
@@ -1227,13 +1415,14 @@ function createStageReportFromDateRange(request, startDate, endDate) {
         });
     }
 
-    const records = getAuditPaidRows(currentAuditPaidScope).filter((sub) => {
+    const paidScope = normalizeAuditPaidScope(request?.scope || currentAuditPaidScope);
+    const records = getAuditPaidRows(paidScope).filter((sub) => {
         const dateMs = getTimestampMillis(sub.paidAt);
         return dateMs >= startMs && dateMs <= endMs;
     });
     return buildPaymentStageReport(records, {
-        title: 'Paid Report',
-        exportKey: `paid-report-${startDate}-to-${endDate}`,
+        title: `Paid Report - ${getAuditPaidScopeLabel(paidScope)}`,
+        exportKey: `paid-report-${paidScope}-${startDate}-to-${endDate}`,
         rangeStart: startDate,
         rangeEnd: endDate,
         dateLabel: 'paid date',
@@ -1246,38 +1435,36 @@ function createStageReportFromDateRange(request, startDate, endDate) {
 function renderPaymentReportPreview(report) {
     currentPaymentReport = report;
     if (paymentReportPreviewMeta) paymentReportPreviewMeta.textContent = report.metaText || 'Payment report preview.';
+    const totalCommissionPayable = report.details.reduce((total, row) => total + Number(row.commission || 0), 0);
     if (paymentReportSummaryChips) {
         paymentReportSummaryChips.innerHTML = [
-            { label: 'Days Covered', value: report.dateCount, bg: '#dbeafe', color: '#1d4ed8' },
-            { label: 'Applications Received', value: report.totals.received, bg: '#e2e8f0', color: '#334155' },
-            { label: 'Attended', value: report.totals.attended, bg: '#dcfce7', color: '#166534' },
-            { label: 'Pending', value: report.totals.pending, bg: '#fee2e2', color: '#b91c1c' }
+            { label: 'Agents Covered', value: report.agentSummaryRows.length, bg: '#dbeafe', color: '#1d4ed8' },
+            { label: 'Applications', value: report.details.length, bg: '#e2e8f0', color: '#334155' },
+            { label: 'Total Commission Payable', value: formatCurrency(totalCommissionPayable), bg: '#dcfce7', color: '#166534' }
         ].map((item) => `<span style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:${item.bg};color:${item.color};font-size:12px;font-weight:700;"><span>${escapeHtml(item.label)}</span><span>${escapeHtml(String(item.value))}</span></span>`).join('');
     }
     if (paymentReportSummaryBody) {
-        paymentReportSummaryBody.innerHTML = report.summaryRows.length
-            ? report.summaryRows.map((row) => `<tr><td>${escapeHtml(row.dateLabel)}</td><td>${escapeHtml(String(row.received))}</td><td>${escapeHtml(String(row.attended))}</td><td>${escapeHtml(String(row.pending))}</td></tr>`).join('')
-            : '<tr><td colspan="4" class="no-data">No payment applications found for this date range</td></tr>';
+        paymentReportSummaryBody.innerHTML = report.agentSummaryRows.length
+            ? report.agentSummaryRows.map((row) => `<tr><td>${escapeHtml(row.uploaderName || '-')}</td><td>${escapeHtml(row.agentName)}</td><td>${escapeHtml(row.agentAccountNumber || '-')}</td><td>${escapeHtml(row.agentBank || '-')}</td><td>${formatCurrency(row.totalCommissionPayable)}</td></tr>`).join('')
+            : '<tr><td colspan="5" class="no-data">No commission breakdown available for this date range</td></tr>';
     }
     if (paymentReportDetailsBody) {
         paymentReportDetailsBody.innerHTML = report.details.length
             ? report.details.map((row) => `
                 <tr>
-                    <td>${escapeHtml(row.receivedDate)}</td>
                     <td><strong>${escapeHtml(row.customerName)}</strong></td>
-                    <td>${escapeHtml(row.agentName)}</td>
+                    <td>${escapeHtml(row.customerAccountNumber || '-')}</td>
                     <td>${escapeHtml(row.uploaderName || '-')}</td>
-                    <td>${escapeHtml(row.pfa)}</td>
                     <td>${formatCurrency(row.twentyFive)}</td>
-                    <td>${escapeHtml(row.rateLabel)}</td>
                     <td>${formatCurrency(row.commission)}</td>
+                    <td>${escapeHtml(row.rateLabel || '-')}</td>
+                    <td>${escapeHtml(row.agentName)}</td>
+                    <td>${escapeHtml(row.agentAccountNumber || '-')}</td>
+                    <td>${escapeHtml(row.agentBank || '-')}</td>
                     <td>${escapeHtml(row.statusLabel)}</td>
-                    <td>${escapeHtml(row.attendedLabel)}</td>
-                    <td>${escapeHtml(row.paidDate)}</td>
-                    <td>${escapeHtml(row.clearedDate)}</td>
                 </tr>
             `).join('')
-            : '<tr><td colspan="12" class="no-data">No application breakdown available for this date range</td></tr>';
+            : '<tr><td colspan="10" class="no-data">No application breakdown available for this date range</td></tr>';
     }
 }
 
@@ -1317,38 +1504,40 @@ function closePaymentPdfPreviewModal() {
 async function exportPaymentReportExcel(report) {
     if (!report) return;
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'CMBank RSA Payment Dashboard';
+    workbook.creator = 'CMBank RSA Audit Dashboard';
     workbook.created = new Date();
 
-    const summarySheet = workbook.addWorksheet('Daily Summary');
+    const summarySheet = workbook.addWorksheet('Agent Summary');
     summarySheet.columns = [
-        { header: 'Date', key: 'dateLabel', width: 18 },
-        { header: 'Applications Received', key: 'received', width: 22 },
-        { header: 'Attended', key: 'attended', width: 14 },
-        { header: 'Pending', key: 'pending', width: 14 }
+        { header: 'Uploader Name', key: 'uploaderName', width: 28 },
+        { header: 'Agent Name', key: 'agentName', width: 30 },
+        { header: 'Agent Account Number', key: 'agentAccountNumber', width: 22 },
+        { header: 'Agent Bank', key: 'agentBank', width: 24 },
+        { header: 'Total Commission Payable', key: 'totalCommissionPayable', width: 26, style: { numFmt: '#,##0.00' } }
     ];
-    summarySheet.addRow({ dateLabel: 'Range', received: `${report.rangeStart} to ${report.rangeEnd}`, attended: '', pending: '' });
+    summarySheet.addRow({ uploaderName: 'Range', agentName: `${report.rangeStart} to ${report.rangeEnd}` });
     summarySheet.addRow({});
-    report.summaryRows.forEach((row) => summarySheet.addRow(row));
+    (report.agentSummaryRows || []).forEach((row) => summarySheet.addRow(row));
     summarySheet.addRow({});
-    summarySheet.addRow({ dateLabel: 'Total', received: report.totals.received, attended: report.totals.attended, pending: report.totals.pending });
+    summarySheet.addRow({
+        uploaderName: 'Grand Total',
+        totalCommissionPayable: (report.agentSummaryRows || []).reduce((total, row) => total + Number(row.totalCommissionPayable || 0), 0)
+    });
     summarySheet.getRow(1).font = { bold: true };
-    summarySheet.getRow(3).font = { bold: true };
+    summarySheet.getRow(summarySheet.rowCount).font = { bold: true };
 
     const detailsSheet = workbook.addWorksheet('Application Breakdown');
     detailsSheet.columns = [
-        { header: 'Received Date', key: 'receivedDate', width: 18 },
-        { header: 'Customer', key: 'customerName', width: 28 },
-        { header: 'Agent', key: 'agentName', width: 24 },
-        { header: 'Uploader', key: 'uploaderName', width: 24 },
-        { header: 'PFA', key: 'pfa', width: 20 },
-        { header: '25% Balance', key: 'twentyFive', width: 18, style: { numFmt: '#,##0.00' } },
-        { header: 'Rate', key: 'rateLabel', width: 12 },
+        { header: 'Customer Name', key: 'customerName', width: 28 },
+        { header: 'Customer Account Number', key: 'customerAccountNumber', width: 22 },
+        { header: 'Uploader Name', key: 'uploaderName', width: 24 },
+        { header: '25% RSA Balance', key: 'twentyFive', width: 18, style: { numFmt: '#,##0.00' } },
         { header: 'Commission', key: 'commission', width: 18, style: { numFmt: '#,##0.00' } },
+        { header: 'Rate', key: 'rateLabel', width: 12 },
+        { header: 'Agent Name', key: 'agentName', width: 24 },
+        { header: 'Agent Account Number', key: 'agentAccountNumber', width: 22 },
+        { header: 'Agent Bank', key: 'agentBank', width: 22 },
         { header: 'Status', key: 'statusLabel', width: 16 },
-        { header: 'Attended', key: 'attendedLabel', width: 12 },
-        { header: 'Paid Date', key: 'paidDate', width: 22 },
-        { header: 'Cleared Date', key: 'clearedDate', width: 22 }
     ];
     report.details.forEach((row) => detailsSheet.addRow(row));
     detailsSheet.getRow(1).font = { bold: true };
@@ -1362,32 +1551,39 @@ async function exportPaymentReportExcel(report) {
 async function exportPaymentReportPdf(report) {
     if (!report || !window.jspdf?.jsPDF) throw new Error('PDF library not available.');
     const pdf = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const totalCommissionPayable = report.details.reduce((total, row) => total + Number(row.commission || 0), 0);
     pdf.setFontSize(16);
     pdf.text(report.title || 'Payment Report', 40, 36);
     pdf.setFontSize(10);
     pdf.text(report.metaText || '', 40, 54);
-    pdf.text(`Received: ${report.totals.received}   Attended: ${report.totals.attended}   Pending: ${report.totals.pending}`, 40, 70);
+    pdf.text(`Agents: ${report.agentSummaryRows.length}   Applications: ${report.details.length}   Total Commission Payable: ${formatCurrency(totalCommissionPayable)}`, 40, 70);
     pdf.autoTable({
         startY: 88,
-        head: [['Date', 'Received', 'Attended', 'Pending']],
-        body: report.summaryRows.map((row) => [row.dateLabel, row.received, row.attended, row.pending]),
+        head: [['Uploader Name', 'Agent Name', 'Agent Account Number', 'Agent Bank', 'Total Commission Payable']],
+        body: report.agentSummaryRows.map((row) => [
+            row.uploaderName || '-',
+            row.agentName,
+            row.agentAccountNumber || '-',
+            row.agentBank || '-',
+            Number(row.totalCommissionPayable || 0).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        ]),
         styles: { fontSize: 9 },
         headStyles: { fillColor: [15, 59, 103] }
     });
     pdf.autoTable({
         startY: pdf.lastAutoTable.finalY + 18,
-        head: [['Received Date', 'Customer', 'Agent', 'Uploader', 'PFA', '25% Balance', 'Rate', 'Commission', 'Status', 'Attended']],
+        head: [['Customer', 'Customer Account', 'Uploader', '25% RSA Balance', 'Commission', 'Rate', 'Agent', 'Agent Account', 'Agent Bank', 'Status']],
         body: report.details.map((row) => [
-            row.receivedDate,
             row.customerName,
-            row.agentName,
+            row.customerAccountNumber || '-',
             row.uploaderName,
-            row.pfa,
             Number(row.twentyFive || 0).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-            row.rateLabel,
             Number(row.commission || 0).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            row.rateLabel,
+            row.agentName,
+            row.agentAccountNumber || '-',
+            row.agentBank || '-',
             row.statusLabel,
-            row.attendedLabel
         ]),
         styles: { fontSize: 7, cellPadding: 2.5, overflow: 'linebreak', valign: 'middle' },
         headStyles: { fillColor: [15, 118, 110] },
@@ -1395,15 +1591,15 @@ async function exportPaymentReportPdf(report) {
         margin: { left: 18, right: 18 },
         tableWidth: 'auto',
         columnStyles: {
-            0: { cellWidth: 58 },
-            1: { cellWidth: 112 },
-            2: { cellWidth: 88 },
-            3: { cellWidth: 88 },
-            4: { cellWidth: 58 },
-            5: { cellWidth: 72, halign: 'right' },
-            6: { cellWidth: 36, halign: 'center' },
-            7: { cellWidth: 72, halign: 'right' },
-            8: { cellWidth: 54, halign: 'center' },
+            0: { cellWidth: 96 },
+            1: { cellWidth: 72 },
+            2: { cellWidth: 82 },
+            3: { cellWidth: 60, halign: 'right' },
+            4: { cellWidth: 60, halign: 'right' },
+            5: { cellWidth: 36, halign: 'center' },
+            6: { cellWidth: 80 },
+            7: { cellWidth: 72 },
+            8: { cellWidth: 68 },
             9: { cellWidth: 48, halign: 'center' }
         }
     });
@@ -1681,8 +1877,9 @@ function getAuditCorrectionSummaryHtml(submission = {}) {
 function showAuditActionModal({ mode = 'accept', submission = {} } = {}) {
     return new Promise((resolve) => {
         const isReject = mode === 'reject';
-        const isClear = mode === 'clear';
-        const title = isReject ? 'Reject Payment Request' : isClear ? 'Clear Payment' : 'Approve Payment Request';
+        const isBulkClear = mode === 'clear-multiple';
+        const isClear = mode === 'clear' || isBulkClear;
+        const title = isReject ? 'Reject Payment Request' : isBulkClear ? 'Clear Multiple Payments' : isClear ? 'Clear Payment' : 'Approve Payment Request';
         const message = isReject
             ? 'Enter a reason for rejecting'
             : isClear
@@ -1697,7 +1894,7 @@ function showAuditActionModal({ mode = 'accept', submission = {} } = {}) {
                 </div>
                 <h2>${title}</h2>
                 <p>${message} <strong>${escapeHtml(submission.customerName || 'this application')}</strong>.</p>
-                ${getAuditCorrectionSummaryHtml(submission)}
+                ${isBulkClear ? '' : getAuditCorrectionSummaryHtml(submission)}
                 ${isReject ? '<textarea id="auditRejectReasonInput" rows="4" placeholder="Enter rejection reason"></textarea>' : ''}
                 <div class="audit-action-actions">
                     <button type="button" class="cancel-btn" data-audit-action="cancel">Cancel</button>
@@ -1740,6 +1937,50 @@ function showAuditActionModal({ mode = 'accept', submission = {} } = {}) {
 
 window.openMonitoringApplicationDetails = openApplicationDetailsModal;
 
+async function clearAuditPaymentRecord(sub = {}) {
+    const submissionId = String(sub?.id || '').trim();
+    if (!submissionId) throw new Error('Application not found.');
+    if (String(sub.status || '').toLowerCase() !== 'paid') throw new Error('Only paid applications can be cleared.');
+
+    const { commission, twentyFive, rsaBalance } = getSubmissionFinancials(sub);
+    await updateDoc(doc(db, 'submissions', submissionId), {
+        status: 'cleared',
+        clearedAt: serverTimestamp(),
+        clearedBy: currentUser?.email || '',
+        auditClearedAt: serverTimestamp(),
+        auditClearedBy: currentUser?.email || '',
+        auditCommissionAmount: commission,
+        auditRsaBalance: rsaBalance,
+        auditRsaTwentyFivePercent: twentyFive,
+        updatedAt: serverTimestamp()
+    });
+
+    await addDoc(collection(db, 'audit'), {
+        action: 'audit_payment_cleared',
+        submissionId,
+        customerName: sub.customerName || '',
+        uploadedBy: sub.uploadedBy || '',
+        commissionAmount: commission,
+        performedBy: currentUser?.email || '',
+        timestamp: serverTimestamp()
+    }).catch(() => {});
+
+    await notifyUserPushEvent({
+        currentUser,
+        recipientEmail: String(sub.auditCommissionSubmittedBy || sub.paymentMadeBy || sub.uploadedBy || '').trim(),
+        eventType: 'audit_payment_cleared',
+        title: 'Payment Cleared',
+        body: `${sub.customerName || 'Your application'} has been cleared by Audit.`,
+        clickUrl: '/dashboard.html',
+        meta: {
+            submissionId,
+            customerName: sub.customerName || '',
+            clearedBy: currentUser?.email || '',
+            commissionAmount: commission
+        }
+    }).catch(() => {});
+}
+
 window.clearAuditPayment = async (submissionId) => {
     const sub = allSubmissions.find((item) => item.id === submissionId);
     if (!sub) {
@@ -1755,47 +1996,10 @@ window.clearAuditPayment = async (submissionId) => {
     if (!confirmed) return;
 
     try {
-        const { commission, twentyFive, rsaBalance } = getSubmissionFinancials(sub);
-        await updateDoc(doc(db, 'submissions', submissionId), {
-            status: 'cleared',
-            clearedAt: serverTimestamp(),
-            clearedBy: currentUser?.email || '',
-            auditClearedAt: serverTimestamp(),
-            auditClearedBy: currentUser?.email || '',
-            auditCommissionAmount: commission,
-            auditRsaBalance: rsaBalance,
-            auditRsaTwentyFivePercent: twentyFive,
-            updatedAt: serverTimestamp()
-        });
-
-        await addDoc(collection(db, 'audit'), {
-            action: 'audit_payment_cleared',
-            submissionId,
-            customerName: sub.customerName || '',
-            uploadedBy: sub.uploadedBy || '',
-            commissionAmount: commission,
-            performedBy: currentUser?.email || '',
-            timestamp: serverTimestamp()
-        }).catch(() => {});
-
-        await notifyUserPushEvent({
-            currentUser,
-            recipientEmail: String(sub.auditCommissionSubmittedBy || sub.paymentMadeBy || sub.uploadedBy || '').trim(),
-            eventType: 'audit_payment_cleared',
-            title: 'Payment Cleared',
-            body: `${sub.customerName || 'Your application'} has been cleared by Audit.`,
-            clickUrl: '/dashboard.html',
-            meta: {
-                submissionId,
-                customerName: sub.customerName || '',
-                clearedBy: currentUser?.email || '',
-                commissionAmount: commission
-            }
-        }).catch(() => {});
-
+        await clearAuditPaymentRecord(sub);
         showNotification('Payment cleared successfully.', 'success');
     } catch (error) {
-        showNotification('Failed to clear payment.', 'error');
+        showNotification(error?.message || 'Failed to clear payment.', 'error');
     }
 };
 
@@ -1942,7 +2146,8 @@ function bindEvents() {
     });
     document.querySelectorAll('[data-audit-paid-scope]').forEach((button) => {
         button.addEventListener('click', () => {
-            currentAuditPaidScope = button.dataset.auditPaidScope === 'others' ? 'others' : 'mine';
+            currentAuditPaidScope = normalizeAuditPaidScope(button.dataset.auditPaidScope);
+            if (auditPaidReconciliationSourceRows.length) recomputeAuditPaidReconciliationResult();
             renderAuditWorkflowTabs();
         });
     });
@@ -1973,7 +2178,7 @@ function bindEvents() {
         openPaymentReportRangeModal();
     });
     exportAuditPaidReportBtn?.addEventListener('click', () => {
-        pendingPaymentReportRequest = { kind: 'paid' };
+        pendingPaymentReportRequest = { kind: 'paid', scope: currentAuditPaidScope };
         openPaymentReportRangeModal();
     });
     exportAuditClearedReportBtn?.addEventListener('click', () => {
@@ -2052,6 +2257,116 @@ function bindEvents() {
     auditReconciliationClearBtn?.addEventListener('click', () => {
         resetAuditReconciliationState();
         showNotification('Reconciliation cleared.', 'info');
+    });
+    auditPaidReconciliationSelectBtn?.addEventListener('click', () => {
+        if (auditPaidReconciliationFileInput) auditPaidReconciliationFileInput.value = '';
+        auditPaidReconciliationFileInput?.click();
+    });
+    auditPaidReconciliationFileInput?.addEventListener('change', () => {
+        const selectedFile = getSelectedAuditPaidReconciliationFile();
+        auditPaidReconciliationFileName = selectedFile?.name || '';
+        auditPaidReconciliationSourceRows = [];
+        auditPaidReconciliationResult = null;
+        auditPaidReconciliationSelectedSubmissionIds = [];
+        renderAuditPaidReconciliation();
+        if (selectedFile) setTimeout(() => showNotification('File uploaded. Click Run Check to match paid applications.', 'success'), 0);
+    });
+    auditPaidReconciliationRunBtn?.addEventListener('click', async () => {
+        const file = getSelectedAuditPaidReconciliationFile();
+        if (!file) {
+            showNotification('Select a file first.', 'warning');
+            return;
+        }
+        const originalHtml = auditPaidReconciliationRunBtn.innerHTML;
+        auditPaidReconciliationRunBtn.disabled = true;
+        auditPaidReconciliationRunBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
+        try {
+            auditPaidReconciliationFileName = file.name;
+            auditPaidReconciliationSourceRows = await parseAuditReconciliationFile(file);
+            auditPaidReconciliationSelectedSubmissionIds = [];
+            recomputeAuditPaidReconciliationResult();
+            renderAuditPaidReconciliation();
+            showNotification(`Reconciliation complete. ${auditPaidReconciliationResult?.matchedRows?.length || 0} paid application(s) found.`, 'success');
+        } catch (error) {
+            auditPaidReconciliationSourceRows = [];
+            auditPaidReconciliationResult = null;
+            auditPaidReconciliationSelectedSubmissionIds = [];
+            renderAuditPaidReconciliation();
+            showNotification(error?.message || 'Failed to run paid reconciliation.', 'error');
+        } finally {
+            auditPaidReconciliationRunBtn.disabled = !getSelectedAuditPaidReconciliationFile();
+            auditPaidReconciliationRunBtn.innerHTML = originalHtml;
+        }
+    });
+    auditPaidReconciliationSelectAllBtn?.addEventListener('click', () => {
+        auditPaidReconciliationSelectedSubmissionIds = Array.from(new Set((auditPaidReconciliationResult?.matchedRows || []).map((row) => row.submissionId).filter(Boolean)));
+        renderAuditPaidReconciliation();
+    });
+    auditPaidReconciliationMatchedBody?.addEventListener('change', (event) => {
+        const checkbox = event.target.closest('[data-paid-recon-select]');
+        if (!checkbox) return;
+        const submissionId = String(checkbox.dataset.paidReconSelect || '').trim();
+        if (!submissionId) return;
+        const selected = new Set(auditPaidReconciliationSelectedSubmissionIds);
+        if (checkbox.checked) selected.add(submissionId);
+        else selected.delete(submissionId);
+        auditPaidReconciliationSelectedSubmissionIds = Array.from(selected);
+        renderAuditPaidReconciliation();
+    });
+    auditPaidReconciliationClearSelectedBtn?.addEventListener('click', async () => {
+        const submissionIds = Array.from(new Set(auditPaidReconciliationSelectedSubmissionIds.filter(Boolean)));
+        if (!submissionIds.length) {
+            showNotification('Select at least one paid application to clear.', 'warning');
+            return;
+        }
+        const confirmed = await showAuditActionModal({
+            mode: 'clear-multiple',
+            submission: {
+                customerName: `${submissionIds.length} selected application${submissionIds.length === 1 ? '' : 's'}`
+            }
+        });
+        if (!confirmed) return;
+
+        const originalHtml = auditPaidReconciliationClearSelectedBtn.innerHTML;
+        auditPaidReconciliationClearSelectedBtn.disabled = true;
+        auditPaidReconciliationClearSelectedBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clearing...';
+        auditPaidReconciliationSelectedSubmissionIds = [];
+        renderAuditPaidReconciliation();
+
+        try {
+            let clearedCount = 0;
+            let skippedCount = 0;
+            let failedCount = 0;
+
+            for (const submissionId of submissionIds) {
+                const sub = allSubmissions.find((item) => item.id === submissionId);
+                if (!sub || String(sub.status || '').toLowerCase() !== 'paid') {
+                    skippedCount += 1;
+                    continue;
+                }
+                try {
+                    await clearAuditPaymentRecord(sub);
+                    clearedCount += 1;
+                } catch (_) {
+                    failedCount += 1;
+                }
+            }
+
+            const parts = [];
+            if (clearedCount) parts.push(`Cleared ${clearedCount} application(s)`);
+            if (skippedCount) parts.push(`Skipped ${skippedCount}`);
+            if (failedCount) parts.push(`Failed ${failedCount}`);
+            const message = parts.length ? `${parts.join('. ')}.` : 'No payments were cleared.';
+            showNotification(message, failedCount ? (clearedCount ? 'warning' : 'error') : 'success');
+        } finally {
+            auditPaidReconciliationClearSelectedBtn.innerHTML = originalHtml;
+            renderAuditPaidReconciliation();
+        }
+    });
+    auditPaidReconciliationResetBtn?.addEventListener('click', () => {
+        resetAuditPaidReconciliationState();
+        renderAuditPaidReconciliation();
+        showNotification('Paid reconciliation cleared.', 'info');
     });
     document.getElementById('closePaymentReportRangeModalBtn')?.addEventListener('click', closePaymentReportRangeModal);
     document.getElementById('cancelPaymentReportRangeBtn')?.addEventListener('click', closePaymentReportRangeModal);
@@ -2175,6 +2490,9 @@ function loadSubmissions() {
         allSubmissions = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
         if (auditReconciliationSourceRows.length && auditReconciliationResult) {
             auditReconciliationResult = computeAuditReconciliationResult(auditReconciliationSourceRows);
+        }
+        if (auditPaidReconciliationSourceRows.length) {
+            recomputeAuditPaidReconciliationResult();
         }
         renderCurrentTab();
     }, () => {
