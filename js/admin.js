@@ -8576,6 +8576,7 @@ async function handleTestDistributionRSA() {
                 lastDate = data.lastDate || '';
             }
 
+            const today = await getTrustedDateKey();
             const nextIndex = (lastIndex + 1) % rsaUsers.length;
             const nextRSA = rsaUsers[nextIndex];
 
@@ -8769,6 +8770,7 @@ async function handleTestDistributionPayment() {
                 lastDate = data.lastDate || '';
             }
 
+            const today = await getTrustedDateKey();
             const nextIndex = (lastIndex + 1) % paymentUsers.length;
             const nextPaymentUser = paymentUsers[nextIndex];
 

@@ -1540,6 +1540,16 @@ async function getRSAEmails() {
         .sort(); // alphabetical so order is deterministic
 }
 
+function pickFallbackRSAUser(rsaUsers, seed = '') {
+    if (!rsaUsers.length) return null;
+    const text = String(seed || Date.now());
+    let hash = 0;
+    for (let i = 0; i < text.length; i += 1) {
+        hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+    }
+    return rsaUsers[Math.abs(hash) % rsaUsers.length] || rsaUsers[0] || null;
+}
+
 async function assignRoundRobinRSA(submissionRef) {
     let uploaderEmail = '';
     try {
@@ -1596,7 +1606,7 @@ async function assignRoundRobinRSA(submissionRef) {
             tx.update(submissionRef, { assignedToRSA: assigned, rsaAssignedAt: serverTimestamp(), rsaAssignmentMode: 'round_robin' });
         });
     } catch (error) {
-        assigned = rsaUsers[0] || null;
+        assigned = pickFallbackRSAUser(rsaUsers, submissionRef?.id || trustedDateKey);
         if (assigned) {
             await updateDoc(submissionRef, { assignedToRSA: assigned, rsaAssignedAt: serverTimestamp(), rsaAssignmentMode: 'round_robin_fallback' });
             assignmentMethod = 'round_robin_fallback';

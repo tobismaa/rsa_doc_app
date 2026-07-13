@@ -967,6 +967,16 @@ async function getRSAEmails() {
     .sort();
 }
 
+function pickFallbackRSAUser(rsaUsers, seed = '') {
+  if (!rsaUsers.length) return '';
+  const text = String(seed || Date.now());
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+  }
+  return rsaUsers[Math.abs(hash) % rsaUsers.length] || rsaUsers[0] || '';
+}
+
 async function assignDirectToRSA(subRef, uploaderEmail = '') {
   const routingRule = await getUploaderRoutingRule(uploaderEmail);
   const mappedRsa = routingRule?.rsaEmail || '';
@@ -1013,7 +1023,7 @@ async function assignDirectToRSA(subRef, uploaderEmail = '') {
       });
     });
   } catch (_) {
-    assigned = rsaUsers[0] || '';
+    assigned = pickFallbackRSAUser(rsaUsers, subRef?.id || trustedDateKey);
     if (assigned) {
       await updateDoc(subRef, {
         assignedTo: '',
@@ -1341,6 +1351,22 @@ function isCurrentEditableSubmission(submissionId) {
   return Boolean(submissionId) && (submissionId === currentDraftId || submissionId === currentEditId);
 }
 
+function getEditableSubmissionById(submissionId = '') {
+  if (!submissionId) return null;
+  return allSubmissions.find((submission) => submission.id === submissionId) || null;
+}
+
+function getCurrentEditableSubmission() {
+  return getEditableSubmissionById(currentEditId || currentDraftId || '');
+}
+
+function isUnchangedEditablePenNumber(penNo = '', submissionId = currentEditId || currentDraftId || '') {
+  const normalizedPenNo = normalizePenNumber(penNo);
+  if (!normalizedPenNo || !submissionId) return false;
+  const submission = getEditableSubmissionById(submissionId);
+  return Boolean(submission && getSubmissionCustomerPenNo(submission) === normalizedPenNo);
+}
+
 async function findExistingPenNumberSubmissions({ penNo = '', excludeSubmissionId = '' } = {}) {
   const normalizedPenNo = normalizePenNumber(penNo);
   if (!normalizedPenNo) return [];
@@ -1462,6 +1488,10 @@ function formatPenNoDuplicateMessage(duplicate) {
 
 async function validatePenNumberAvailable(penNo = '', excludeSubmissionId = '', options = {}) {
   const { inline = false, notify = true } = options || {};
+  if (isUnchangedEditablePenNumber(penNo, excludeSubmissionId)) {
+    if (inline) clearPenNoError();
+    return true;
+  }
   const duplicate = await validateCustomerDuplicateContact({ penNo, excludeSubmissionId });
   if (!duplicate) {
     if (inline) clearPenNoError();
@@ -1483,6 +1513,11 @@ async function validatePenNoFieldInline() {
     return true;
   }
   const excludeSubmissionId = currentEditId || currentDraftId || '';
+  if (isUnchangedEditablePenNumber(penNo, excludeSubmissionId)) {
+    if (currentSequence !== penNoValidationSequence) return true;
+    clearPenNoError();
+    return true;
+  }
   const duplicate = await validateCustomerDuplicateContact({ penNo, excludeSubmissionId });
   if (currentSequence !== penNoValidationSequence) return true;
   if (duplicate) {
@@ -4090,7 +4125,97 @@ function updateSubmitButton() {
   syncUploadRequirementUi();
 }
 
+const REQUIRED_SUBMISSION_FIELD_KEYS = {
+  customerName: ['name', 'customerName'],
+  customerDob: ['dob', 'dateOfBirth', 'customerDob'],
+  customerEmail: ['email', 'customerEmail'],
+  customerPhone: ['phone', 'customerPhone'],
+  customerNIN: ['nin', 'customerNIN'],
+  customerAddress: ['address', 'customerAddress'],
+  accountNo: ['accountNo'],
+  employer: ['employer'],
+  originatingTP: ['originatingTP'],
+  mortgageLoanApplicationFormDate: ['mortgageLoanApplicationFormDate'],
+  pfa: ['pfa', 'pfaName'],
+  penNo: ['penNo'],
+  rsaStatementDate: ['rsaStatementDate'],
+  rsaBalance: ['rsaBalance'],
+  propertyType: ['propertyType'],
+  propertyValue: ['propertyValue'],
+  facilityFee: ['facilityFee'],
+  loanAmount: ['loanAmount']
+};
+
+function getStoredSubmissionFieldValue(submission = {}, fieldId = '') {
+  const keys = REQUIRED_SUBMISSION_FIELD_KEYS[fieldId] || [fieldId];
+  return getSubmissionDetailValue(submission, keys, '');
+}
+
+function getDerivedSubmissionFieldValue(fieldId = '', submission = getCurrentEditableSubmission()) {
+  const rsaBalance = parseMoney(getFormValue('rsaBalance') || getStoredSubmissionFieldValue(submission, 'rsaBalance'));
+  if (!rsaBalance) return '';
+  const rule = determinePropertyByRsa(rsaBalance);
+  if (!rule) return '';
+  if (fieldId === 'propertyType') return String(rule.name || '');
+  if (fieldId === 'propertyValue') return String(rule.value || '');
+  if (fieldId === 'facilityFee') return String(rule.fee || '');
+  if (fieldId === 'loanAmount') {
+    return String(roundUpToNearestThousand(Number(rule.value || 0) - calculateRoundedRsa25(rsaBalance)));
+  }
+  return '';
+}
+
+function setFieldValueIfEmpty(fieldId = '', value = '') {
+  const el = document.getElementById(fieldId);
+  if (!el || String(el.value || '').trim() || String(value || '').trim() === '') return;
+  el.value = value;
+}
+
+function syncMoneyDisplayField(fieldId = '', displayId = '') {
+  const value = getFormValue(fieldId);
+  const displayEl = document.getElementById(displayId);
+  if (displayEl && value) displayEl.textContent = formatCurrency(value);
+}
+
+function hydrateEditableSubmissionRequiredFields() {
+  if (!currentEditId && !currentDraftId) return;
+  const submission = getCurrentEditableSubmission();
+  if (!submission) return;
+
+  Object.keys(REQUIRED_SUBMISSION_FIELD_KEYS).forEach((fieldId) => {
+    const storedValue = getStoredSubmissionFieldValue(submission, fieldId);
+    setFieldValueIfEmpty(fieldId, storedValue);
+  });
+
+  ['propertyType', 'propertyValue', 'facilityFee', 'loanAmount'].forEach((fieldId) => {
+    setFieldValueIfEmpty(fieldId, getDerivedSubmissionFieldValue(fieldId, submission));
+  });
+
+  const rsaBalance = parseMoney(getFormValue('rsaBalance') || getStoredSubmissionFieldValue(submission, 'rsaBalance'));
+  if (rsaBalance && !String(getFormValue('rsa25Percent') || '').trim()) {
+    const rsa25Rounded = calculateRoundedRsa25(rsaBalance);
+    const rsa25PercentEl = document.getElementById('rsa25Percent');
+    if (rsa25PercentEl) rsa25PercentEl.value = rsa25Rounded;
+    const rsa25FormattedEl = document.getElementById('rsa25Formatted');
+    if (rsa25FormattedEl) rsa25FormattedEl.textContent = formatCurrency(rsa25Rounded);
+  }
+
+  syncMoneyDisplayField('propertyValue', 'propertyValueFormatted');
+  syncMoneyDisplayField('facilityFee', 'facilityFeeFormatted');
+  syncMoneyDisplayField('loanAmount', 'loanAmountFormatted');
+}
+
+function getRequiredSubmissionFieldValue(fieldId = '') {
+  const formValue = String(getFormValue(fieldId) || '').trim();
+  if (formValue) return formValue;
+  const submission = getCurrentEditableSubmission();
+  const storedValue = submission ? String(getStoredSubmissionFieldValue(submission, fieldId) || '').trim() : '';
+  if (storedValue) return storedValue;
+  return String(getDerivedSubmissionFieldValue(fieldId, submission) || '').trim();
+}
+
 function getMissingRequiredSubmissionFields() {
+  hydrateEditableSubmissionRequiredFields();
   const allowOptionalCustomerFields = isCurrentUserUploaderLevel2();
   const requiredFields = [
     { id: 'customerName', label: 'Customer Name' }, { id: 'customerDob', label: 'Date of Birth' },
@@ -4106,7 +4231,7 @@ function getMissingRequiredSubmissionFields() {
   requiredFields.forEach(field => {
     const el = document.getElementById(field.id);
     if (!el) return;
-    const value = String(el.value || '').trim();
+    const value = getRequiredSubmissionFieldValue(field.id);
     const isRequiredForUser = !allowOptionalCustomerFields || field.id === 'customerName';
     if (!value) {
       if (isRequiredForUser) missingLabels.push(field.label);
@@ -4382,6 +4507,7 @@ window.openEditModal = async (id) => {
   await loadApprovedAgents();
   try {
     applyDraftFormValues(sub);
+    hydrateEditableSubmissionRequiredFields();
     syncCurrentSubmissionAgentFallbackFromSubmission(sub);
     populateApprovedAgentSelect();
     if (customerAgentSelect) {
@@ -4508,6 +4634,7 @@ window.openDraftSubmission = async (id) => {
   syncCurrentSubmissionAgentFallbackFromSubmission(sub);
   populateApprovedAgentSelect();
   applyDraftFormValues(sub);
+  hydrateEditableSubmissionRequiredFields();
   hydrateCurrentUploads(sub.documents || []);
   if (customerAgentSelect) customerAgentSelect.value = getStoredAgentSelectionValue(sub);
   enableDraftEditingState();
