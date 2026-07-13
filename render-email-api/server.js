@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
 const sgMail = require('@sendgrid/mail');
+const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -18,6 +19,7 @@ const app = express();
 const port = Number(process.env.PORT || 5000);
 const requireAuth = String(process.env.REQUIRE_FIREBASE_AUTH || 'true').toLowerCase() !== 'false';
 const maxPdfRenderPayloadSize = String(process.env.PDF_RENDER_BODY_LIMIT || '24mb').trim() || '24mb';
+const maxBackblazeUploadBytes = Number(process.env.BACKBLAZE_UPLOAD_LIMIT_BYTES || 50 * 1024 * 1024);
 const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map((v) => v.trim())
@@ -467,6 +469,140 @@ app.use('/assets', express.static(path.join(__dirname, 'assets'), {
     maxAge: '30d',
     immutable: true
 }));
+
+const backblazeUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: maxBackblazeUploadBytes }
+});
+
+function getBackblazeConfig() {
+    const applicationKeyId = String(process.env.BACKBLAZE_APPLICATION_KEY_ID || '').trim();
+    const applicationKey = String(process.env.BACKBLAZE_APPLICATION_KEY || '').trim();
+    const bucketId = String(process.env.BACKBLAZE_BUCKET_ID || '').trim();
+    const hasPlaceholder = [applicationKeyId, applicationKey, bucketId].some((value) => value.includes('PASTE'));
+    if (!applicationKeyId || !applicationKey || !bucketId || hasPlaceholder) {
+        const error = new Error('Backblaze credentials are not configured on the server.');
+        error.statusCode = 500;
+        throw error;
+    }
+    return { applicationKeyId, applicationKey, bucketId };
+}
+
+async function backblazeJsonRequest(url, options = {}) {
+    const response = await fetch(url, options);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const error = new Error(String(data.message || data.error || `Backblaze returned ${response.status}`));
+        error.statusCode = response.status;
+        error.details = data;
+        throw error;
+    }
+    return data;
+}
+
+app.post('/api/backblaze-upload', backblazeUpload.single('file'), async (req, res) => {
+    try {
+        const { applicationKeyId, applicationKey, bucketId } = getBackblazeConfig();
+        const payload = req.body || {};
+        const action = String(payload.action || '').trim();
+
+        if (action === 'authorize') {
+            const basicAuth = Buffer.from(`${applicationKeyId}:${applicationKey}`).toString('base64');
+            const data = await backblazeJsonRequest('https://api.backblazeb2.com/b2api/v2/b2_authorize_account', {
+                method: 'GET',
+                headers: {
+                    Authorization: `Basic ${basicAuth}`,
+                    Accept: 'application/json'
+                }
+            });
+
+            return res.json({
+                authorizationToken: data.authorizationToken || null,
+                apiUrl: data.apiUrl || null,
+                downloadUrl: data.downloadUrl || null,
+                bucketId
+            });
+        }
+
+        if (action === 'getUploadUrl') {
+            const authorizationToken = String(payload.authorizationToken || '').trim();
+            const apiUrl = String(payload.apiUrl || '').trim();
+            const requestedBucketId = String(payload.bucketId || '').trim();
+
+            if (!authorizationToken || !apiUrl || !requestedBucketId) {
+                return res.status(400).json({ error: 'Missing authorizationToken, apiUrl, or bucketId' });
+            }
+            if (requestedBucketId !== bucketId) {
+                return res.status(403).json({ error: 'Invalid bucket' });
+            }
+
+            const data = await backblazeJsonRequest(`${apiUrl.replace(/\/+$/, '')}/b2api/v2/b2_get_upload_url`, {
+                method: 'POST',
+                headers: {
+                    Authorization: authorizationToken,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ bucketId })
+            });
+
+            return res.json({
+                uploadUrl: data.uploadUrl || null,
+                authorizationToken: data.authorizationToken || null
+            });
+        }
+
+        if (action === 'upload') {
+            const file = req.file;
+            const uploadUrl = String(payload.uploadUrl || '').trim();
+            const uploadAuthToken = String(payload.uploadAuthToken || '').trim();
+            const fileName = String(payload.fileName || '').trim();
+            const contentType = String(payload.contentType || file?.mimetype || 'application/octet-stream').trim() || 'application/octet-stream';
+            const sha1 = String(payload.sha1 || '').trim();
+
+            if (!file) {
+                return res.status(400).json({ error: 'No file uploaded' });
+            }
+            if (!uploadUrl || !uploadAuthToken || !fileName || !sha1) {
+                return res.status(400).json({ error: 'Missing upload parameters' });
+            }
+
+            const response = await fetch(uploadUrl, {
+                method: 'POST',
+                headers: {
+                    Authorization: uploadAuthToken,
+                    'X-Bz-File-Name': encodeURIComponent(fileName),
+                    'Content-Type': contentType,
+                    'X-Bz-Content-Sha1': sha1,
+                    'X-Bz-Content-Disposition': 'inline'
+                },
+                body: file.buffer
+            });
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                return res.status(response.status || 502).json({
+                    error: 'Backblaze upload failed',
+                    details: data
+                });
+            }
+
+            return res.json({
+                fileId: data.fileId || null,
+                fileName: data.fileName || null
+            });
+        }
+
+        return res.status(400).json({ error: 'Invalid action' });
+    } catch (err) {
+        if (err instanceof multer.MulterError) {
+            return res.status(400).json({ error: err.message || 'Invalid upload' });
+        }
+        return res.status(err.statusCode || 500).json({
+            error: String(err?.message || 'Server error'),
+            details: err?.details
+        });
+    }
+});
 
 app.get('/health', (_req, res) => {
     res.json({

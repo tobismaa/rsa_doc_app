@@ -1,4 +1,5 @@
 api/backblaze-config.php
 render-email-api/.env
+render-email-api/node_modules/
 
 FIREBASE_SERVICE_ACCOUNT_JSON_RENDER.txt

@@ -7,10 +7,8 @@ const sharedBackblazeState = {
 export class BackblazeStorage {
     constructor() {
         this.bucketName = 'cmbank-rsa-documents';
-        const isLocalHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname);
-        this.apiProxyEndpoint = isLocalHost
-            ? 'https://cmbankrsa.com/api/backblaze-upload.php'
-            : '/api/backblaze-upload.php';
+        const defaultRenderEndpoint = 'https://rsa-email-api.onrender.com/api/backblaze-upload';
+        this.apiProxyEndpoint = String(window.__BACKBLAZE_UPLOAD_API_URL__ || defaultRenderEndpoint).trim();
         this.bucketId = null;
         this.authorizationToken = null;
         this.apiUrl = null;
