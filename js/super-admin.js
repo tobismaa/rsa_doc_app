@@ -1686,6 +1686,94 @@ const BACKDATE_STAGE_DEFINITIONS = [
     }
 ];
 
+const BACKDATE_RESTORABLE_FIELDS = new Set([
+    ...BACKDATE_STAGE_DEFINITIONS.flatMap((stage) => [
+        stage.timestampField,
+        stage.personField,
+        ...(stage.mirrorPersonFields || [])
+    ]),
+    'commissionRate'
+]);
+
+function createBackdateRestoreSnapshot(submission = {}, changes = []) {
+    const storedSnapshot = submission?.backdateRestoreStatus === 'available'
+        && submission?.backdateRestoreSnapshot?.values
+        ? submission.backdateRestoreSnapshot
+        : null;
+    const existing = storedSnapshot || getLegacyBackdateRestoreSnapshot(submission.id || '');
+    const values = { ...(existing?.values || {}) };
+
+    changes.forEach((change) => {
+        const field = String(change?.field || '').trim();
+        if (!BACKDATE_RESTORABLE_FIELDS.has(field) || Object.prototype.hasOwnProperty.call(values, field)) return;
+        const exists = Object.prototype.hasOwnProperty.call(submission, field);
+        values[field] = {
+            exists,
+            value: exists ? (submission[field] ?? null) : null
+        };
+    });
+
+    return {
+        version: 1,
+        capturedAtIso: existing?.capturedAtIso || new Date().toISOString(),
+        capturedBy: existing?.capturedBy || currentUser?.email || '',
+        values
+    };
+}
+
+function getLegacyBackdateRestoreSnapshot(submissionId = '', auditEntries = allAudits) {
+    const entries = auditEntries
+        .filter((entry) => entry.action === 'application_backdated' && entry.submissionId === submissionId)
+        .sort((a, b) => getTimestampMillis(a.timestamp) - getTimestampMillis(b.timestamp));
+    const values = {};
+
+    entries.forEach((entry) => {
+        (Array.isArray(entry.changes) ? entry.changes : []).forEach((change) => {
+            const field = String(change?.field || '').trim();
+            if (!BACKDATE_RESTORABLE_FIELDS.has(field) || Object.prototype.hasOwnProperty.call(values, field)) return;
+            const oldValue = change?.oldValue;
+            if (!String(oldValue || '').trim()) {
+                values[field] = { exists: false, value: null };
+                return;
+            }
+            const stage = BACKDATE_STAGE_DEFINITIONS.find((item) => item.timestampField === field);
+            if (stage) {
+                const date = new Date(oldValue);
+                if (Number.isFinite(date.getTime())) values[field] = { exists: true, value: date };
+                return;
+            }
+            if (field === 'commissionRate') {
+                const percent = Number.parseFloat(String(oldValue).replace('%', ''));
+                if (Number.isFinite(percent)) values[field] = { exists: true, value: percent / 100 };
+                return;
+            }
+            values[field] = { exists: true, value: String(oldValue) };
+        });
+    });
+
+    return Object.keys(values).length
+        ? { version: 1, capturedAtIso: '', capturedBy: '', values, legacy: true }
+        : null;
+}
+
+async function fetchLegacyBackdateRestoreSnapshot(submissionId = '') {
+    if (!submissionId) return null;
+    const snap = await getDocs(query(
+        collection(db, 'audit'),
+        where('submissionId', '==', submissionId)
+    ));
+    const entries = snap.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+    return getLegacyBackdateRestoreSnapshot(submissionId, entries);
+}
+
+function getBackdateRestoreSnapshot(submission = {}) {
+    if (submission?.backdateRestoreStatus === 'restored') return null;
+    if (submission?.backdateRestoreSnapshot?.values && Object.keys(submission.backdateRestoreSnapshot.values).length) {
+        return submission.backdateRestoreSnapshot;
+    }
+    return getLegacyBackdateRestoreSnapshot(submission.id || '');
+}
+
 const CUSTOMER_EDIT_FIELDS = [
     { key: 'name', label: 'Customer Name', type: 'text' },
     { key: 'dob', label: 'Date of Birth', type: 'date' },
@@ -3203,6 +3291,11 @@ async function saveBackdateChanges() {
         return;
     }
 
+    updates.backdateRestoreSnapshot = createBackdateRestoreSnapshot(submission, changes);
+    updates.backdateRestoreStatus = 'available';
+    updates.backdateRestoredAt = deleteField();
+    updates.backdateRestoredBy = deleteField();
+
     const button = document.getElementById('saveBackdateChangesBtn');
     const originalHtml = button?.innerHTML || '';
     try {
@@ -3234,6 +3327,96 @@ async function saveBackdateChanges() {
         }
     }
 }
+
+window.restoreBackdatedApplication = async (submissionId) => {
+    const cachedSubmission = allSubmissions.find((sub) => sub.id === submissionId);
+    if (!cachedSubmission) {
+        showNotification('Backdated application not found.', 'error');
+        return;
+    }
+
+    const confirmed = window.confirm(
+        `Restore the original date, time, and handler values for ${getSubmissionCustomerName(cachedSubmission) || 'this application'}?`
+    );
+    if (!confirmed) return;
+
+    const button = document.querySelector(`[data-restore-backdate="${CSS.escape(submissionId)}"]`);
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Restoring...';
+        }
+
+        const latestSnap = await getDoc(doc(db, 'submissions', submissionId));
+        if (!latestSnap.exists()) throw new Error('Application no longer exists.');
+        const submission = { id: latestSnap.id, ...latestSnap.data() };
+        if (submission.backdateRestoreStatus === 'restored') {
+            showNotification('This application has already been restored.', 'info');
+            return;
+        }
+
+        const snapshot = getBackdateRestoreSnapshot(submission)
+            || await fetchLegacyBackdateRestoreSnapshot(submissionId);
+        const values = snapshot?.values || {};
+        const restoreUpdates = {};
+        const restoredChanges = [];
+
+        Object.entries(values).forEach(([field, original]) => {
+            if (!BACKDATE_RESTORABLE_FIELDS.has(field)) return;
+            const exists = original?.exists === true;
+            restoreUpdates[field] = exists ? original.value : deleteField();
+            restoredChanges.push({
+                field,
+                backdatedValue: Object.prototype.hasOwnProperty.call(submission, field) ? submission[field] : null,
+                restoredValue: exists ? original.value : null,
+                restoredAsMissing: !exists
+            });
+        });
+
+        if (!restoredChanges.length) {
+            showNotification('The original values are unavailable for this backdate record.', 'warning');
+            return;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(values, 'commissionRate')) {
+            const originalRate = values.commissionRate?.exists === true ? Number(values.commissionRate.value || 0) : 0;
+            restoreUpdates.commissionRatePercent = originalRate > 0
+                ? Number((originalRate * 100).toFixed(4))
+                : deleteField();
+            restoreUpdates.commissionRateLabel = originalRate > 0
+                ? formatCommissionRateLabel(originalRate)
+                : deleteField();
+        }
+
+        restoreUpdates.backdateRestoreStatus = 'restored';
+        restoreUpdates.backdateRestoredAt = serverTimestamp();
+        restoreUpdates.backdateRestoredBy = currentUser?.email || '';
+        restoreUpdates.updatedAt = serverTimestamp();
+        restoreUpdates.updatedBy = currentUser?.email || '';
+
+        await updateDoc(doc(db, 'submissions', submissionId), restoreUpdates);
+        await addDoc(collection(db, 'audit'), {
+            action: 'application_backdate_restored',
+            submissionId,
+            customerName: getSubmissionCustomerName(submission),
+            penNo: getSubmissionPenNumber(submission),
+            restoredChanges,
+            source: snapshot?.legacy ? 'audit_history' : 'stored_snapshot',
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        });
+        showNotification('Original application date and time restored successfully.', 'success');
+    } catch (error) {
+        console.error('Backdate restore failed:', error);
+        showNotification(error?.message || 'Failed to restore original application date and time.', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+};
 
 function setCustomerEditSearchStatus(message = '', type = 'info') {
     const status = document.getElementById('customerEditSearchStatus');
@@ -4081,9 +4264,13 @@ function getBackdatedSubmissionsForReport() {
 
 function buildBackdateReportRow(sub = {}) {
     const commissionRate = Number(sub.commissionRate || 0);
+    const restoreSnapshot = getBackdateRestoreSnapshot(sub);
+    const isRestored = sub.backdateRestoreStatus === 'restored';
     return {
+        submissionId: sub.id || '',
         backdatedAt: formatDate(sub.backdatedAt),
         customerName: getSubmissionCustomerName(sub) || 'Unknown',
+        uploader: getUserDisplayNameByEmail(sub.uploadedBy || ''),
         penNo: getSubmissionPenNumber(sub) || '-',
         status: String(sub.status || '-').replaceAll('_', ' '),
         uploadedAt: formatDate(sub.uploadedAt || sub.createdAt),
@@ -4092,7 +4279,11 @@ function buildBackdateReportRow(sub = {}) {
         reviewer: getUserDisplayNameByEmail(sub.assignedTo || ''),
         rsa: getUserDisplayNameByEmail(sub.assignedToRSA || ''),
         payment: getUserDisplayNameByEmail(sub.assignedToPayment || ''),
-        commissionRate: commissionRate ? formatCommissionRateLabel(commissionRate) : String(sub.commissionRateLabel || '-')
+        commissionRate: commissionRate ? formatCommissionRateLabel(commissionRate) : String(sub.commissionRateLabel || '-'),
+        canRestore: !isRestored,
+        restoreStatus: isRestored
+            ? `Restored ${formatDate(sub.backdateRestoredAt)}`
+            : (restoreSnapshot ? 'Available' : 'History lookup')
     };
 }
 
@@ -4106,14 +4297,20 @@ function renderBackdateReport() {
         summary.textContent = `${rows.length} backdated application${rows.length === 1 ? '' : 's'} found`;
     }
     if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="11" class="no-data">No backdated applications found</td></tr>';
+        body.innerHTML = '<tr><td colspan="13" class="no-data">No backdated applications found</td></tr>';
         return;
     }
 
     body.innerHTML = rows.map((row) => `
         <tr>
+            <td>
+                ${row.canRestore
+                    ? `<button type="button" class="action-btn backdate-restore-btn" data-restore-backdate="${escapeHtml(row.submissionId)}" onclick="window.restoreBackdatedApplication('${escapeHtml(row.submissionId)}')"><i class="fas fa-clock-rotate-left"></i> Restore Original</button>`
+                    : `<span class="backdate-restore-state ${row.restoreStatus.startsWith('Restored') ? 'restored' : 'unavailable'}">${escapeHtml(row.restoreStatus)}</span>`}
+            </td>
             <td>${escapeHtml(row.backdatedAt)}</td>
             <td><strong>${escapeHtml(row.customerName)}</strong></td>
+            <td>${escapeHtml(row.uploader)}</td>
             <td>${escapeHtml(row.penNo)}</td>
             <td>${escapeHtml(row.status)}</td>
             <td>${escapeHtml(row.uploadedAt)}</td>
@@ -4145,6 +4342,7 @@ async function downloadBackdateReportWorkbook() {
     worksheet.columns = [
         { header: 'Backdated At', key: 'backdatedAt', width: 24 },
         { header: 'Customer Name', key: 'customerName', width: 28 },
+        { header: 'Uploader', key: 'uploader', width: 28 },
         { header: 'PEN', key: 'penNo', width: 22 },
         { header: 'Status', key: 'status', width: 18 },
         { header: 'Uploaded At', key: 'uploadedAt', width: 24 },
@@ -4153,7 +4351,8 @@ async function downloadBackdateReportWorkbook() {
         { header: 'Reviewer', key: 'reviewer', width: 28 },
         { header: 'RSA', key: 'rsa', width: 28 },
         { header: 'Payment', key: 'payment', width: 28 },
-        { header: 'Commission Rate', key: 'commissionRate', width: 18 }
+        { header: 'Commission Rate', key: 'commissionRate', width: 18 },
+        { header: 'Restore Status', key: 'restoreStatus', width: 24 }
     ];
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF003366' } };
@@ -6675,6 +6874,7 @@ function ensureRealtimeDataForTab(tabId) {
         startSubmissionsListener();
     }
     if (tabId === 'audit') startAuditsListener();
+    if (tabId === 'backdate-report') startAuditsListener();
     if (tabId === 'routing-rules') startRoutingRulesListener();
     if (tabId === 'agents') startAgentsListener();
 }
@@ -6709,6 +6909,7 @@ function startAuditsListener() {
         allAudits = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         updateNavigationCounts();
         if (currentTab === 'audit') renderAudit();
+        if (currentTab === 'backdate-report') renderBackdateReport();
     });
 }
 

@@ -393,12 +393,14 @@
                     <div class="filters-bar">
                         <div class="search-box">
                             <i class="fas fa-search"></i>
-                            <input type="text" id="trackUserSearch" placeholder="Search uploader by name or email..." aria-label="Search uploader">
+                            <input type="text" id="trackUserSearch" list="trackUploaderSuggestions" placeholder="Search uploader by name or email..." aria-label="Search uploader">
+                            <datalist id="trackUploaderSuggestions"></datalist>
                         </div>
                         <input type="date" id="trackStartDate" aria-label="Start date">
                         <input type="date" id="trackEndDate" aria-label="End date">
                         <select id="trackStatusFilter" aria-label="Filter by status">
                             <option value="all">All Status</option>
+                            <option value="draft">Draft</option>
                             <option value="pending">Pending</option>
                             <option value="approved">Approved</option>
                             <option value="rejected">Rejected</option>
@@ -406,12 +408,15 @@
                         <button class="action-btn" id="trackFilterBtn" style="padding: 6px 12px;">Filter</button>
                     </div>
 
+                    <div id="trackUserApplicationsSummary" class="backdate-report-summary" style="margin:12px 0;">All uploader applications</div>
+
                     <div class="table-container">
                         <table class="documents-table" data-no-enhance="true">
                             <thead>
                                 <tr>
                                     <th>Customer</th>
                                     <th>Uploaded By</th>
+                                    <th>Uploaded Date/Time</th>
                                     <th>Agent</th>
                                     <th>Status</th>
                                     <th>Current Stage</th>
@@ -1391,7 +1396,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=20260704b"></script>
+    <script type="module" src="js/admin.js?v=20260709a"></script>
     <script src="js/table-enhancer.js?v=20260512b"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260705b"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260518a">

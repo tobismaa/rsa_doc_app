@@ -2,6 +2,8 @@ import { auth, db } from './firebase-config.js?v=20260625c';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
 import {
     collection,
+    query,
+    where,
     addDoc,
     doc,
     onSnapshot,
@@ -25,6 +27,8 @@ let currentUser = null;
 let currentUserData = null;
 let allUsers = [];
 let allSubmissions = [];
+let userDisplayNamesByEmail = new Map();
+let auditRenderTimer = null;
 let currentTab = 'overview';
 const AUDIT_DASHBOARD_TABS = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'reconciliation', 'profile', 'help'];
 
@@ -58,7 +62,9 @@ let auditPaidReconciliationResult = null;
 let auditPaidReconciliationFileName = '';
 let auditPaidReconciliationSelectedSubmissionIds = [];
 let usersListenerStarted = false;
-let submissionsListenerStarted = false;
+let submissionsListenerMode = '';
+let submissionListenerUnsubs = [];
+const submissionSnapshotSources = new Map();
 const PAYMENT_RATE_CUTOFF_MS = new Date('2026-05-07T00:00:00+01:00').getTime();
 
 const pageTitle = document.getElementById('pageTitle');
@@ -697,8 +703,7 @@ async function copyTextToClipboard(text = '') {
 function getUserDisplayName(email = '') {
     const normalized = normalizeEmail(email);
     if (!normalized) return '-';
-    const user = allUsers.find((entry) => normalizeEmail(entry.email) === normalized);
-    return user?.fullName || email;
+    return userDisplayNamesByEmail.get(normalized) || email;
 }
 
 function roleLabel(role) {
@@ -1772,9 +1777,42 @@ function renderProfile() {
 }
 
 function renderCurrentTab() {
-    renderOverview();
-    renderAuditWorkflowTabs();
-    renderAuditReconciliation();
+    renderAuditWorkflowBadges();
+
+    if (currentTab === 'overview') {
+        renderOverview();
+        renderAuditMoneyRows(auditOverviewPendingTableBody, getAuditSentToPfaRows(), 'sent');
+        return;
+    }
+    if (currentTab === 'sent-to-pfa') {
+        renderAuditMoneyRows(auditSentToPfaTableBody, getAuditSentToPfaRows(), 'sent');
+        return;
+    }
+    if (currentTab === 'paid') {
+        document.querySelectorAll('[data-audit-paid-scope]').forEach((button) => {
+            button.classList.toggle('active', button.dataset.auditPaidScope === currentAuditPaidScope);
+        });
+        renderAuditMoneyRows(auditPaidTableBody, getAuditPaidRows(currentAuditPaidScope), 'paid');
+        renderAuditPaidReconciliation();
+        return;
+    }
+    if (currentTab === 'cleared') {
+        renderAuditMoneyRows(auditClearedTableBody, getAuditClearedRows(), 'cleared');
+        return;
+    }
+    if (currentTab === 'rejected') {
+        renderAuditRejectedRows(auditRejectedTableBody, getAuditRejectedRows());
+        return;
+    }
+    if (currentTab === 'reconciliation') {
+        renderAuditReconciliation();
+        renderAuditPaidReconciliation();
+    }
+}
+
+function scheduleCurrentTabRender() {
+    clearTimeout(auditRenderTimer);
+    auditRenderTimer = setTimeout(renderCurrentTab, 40);
 }
 
 function switchTab(tabId) {
@@ -1786,6 +1824,7 @@ function switchTab(tabId) {
     document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
     document.querySelectorAll('.tab-content').forEach((tab) => tab.classList.remove('active'));
     document.getElementById(`${tabId}Tab`)?.classList.add('active');
+    renderCurrentTab();
 
     const titles = {
         overview: 'Audit Overview',
@@ -1801,8 +1840,9 @@ function switchTab(tabId) {
 }
 
 function ensureDataForTab(tabId) {
-    if (tabId === 'overview' || tabId === 'sent-to-pfa' || tabId === 'paid' || tabId === 'cleared' || tabId === 'reconciliation') loadUsers();
-    if (tabId === 'overview' || tabId === 'sent-to-pfa' || tabId === 'paid' || tabId === 'cleared' || tabId === 'reconciliation') loadSubmissions();
+    const dataTabs = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'reconciliation'];
+    if (dataTabs.includes(tabId)) loadUsers();
+    if (dataTabs.includes(tabId)) loadSubmissions({ full: tabId === 'reconciliation' });
 }
 
 function toggleSidebar(open) {
@@ -2222,7 +2262,7 @@ function bindEvents() {
         button.addEventListener('click', () => {
             currentAuditPaidScope = normalizeAuditPaidScope(button.dataset.auditPaidScope);
             if (auditPaidReconciliationSourceRows.length) recomputeAuditPaidReconciliationResult();
-            renderAuditWorkflowTabs();
+            renderCurrentTab();
         });
     });
 
@@ -2551,27 +2591,73 @@ function loadUsers() {
         allUsers = snapshot.docs
             .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))
             .sort((a, b) => String(a.fullName || a.email || '').localeCompare(String(b.fullName || b.email || '')));
-        renderCurrentTab();
+        userDisplayNamesByEmail = new Map(allUsers
+            .map((user) => [normalizeEmail(user.email), String(user.fullName || user.email || '').trim()])
+            .filter(([email]) => email));
+        scheduleCurrentTabRender();
     }, () => {
         showNotification('Failed to load users', 'error');
     });
 }
 
-function loadSubmissions() {
-    if (submissionsListenerStarted) return;
-    submissionsListenerStarted = true;
-    onSnapshot(collection(db, 'submissions'), (snapshot) => {
-        allSubmissions = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }));
+function loadSubmissions({ full = false } = {}) {
+    const mode = full ? 'full' : 'audit';
+    if (submissionsListenerMode === mode) return;
+
+    submissionListenerUnsubs.forEach((unsubscribe) => {
+        try { unsubscribe(); } catch (_) {}
+    });
+    submissionListenerUnsubs = [];
+    submissionSnapshotSources.clear();
+    submissionsListenerMode = mode;
+
+    const refreshMergedSubmissions = () => {
+        const merged = new Map();
+        submissionSnapshotSources.forEach((rows) => {
+            rows.forEach((row) => merged.set(row.id, row));
+        });
+        allSubmissions = Array.from(merged.values());
         if (auditReconciliationSourceRows.length && auditReconciliationResult) {
             auditReconciliationResult = computeAuditReconciliationResult(auditReconciliationSourceRows);
         }
         if (auditPaidReconciliationSourceRows.length) {
             recomputeAuditPaidReconciliationResult();
         }
-        renderCurrentTab();
-    }, () => {
-        showNotification('Failed to load applications', 'error');
-    });
+        scheduleCurrentTabRender();
+    };
+
+    const attachListener = (sourceKey, sourceQuery) => {
+        const unsubscribe = onSnapshot(sourceQuery, (snapshot) => {
+            submissionSnapshotSources.set(
+                sourceKey,
+                snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))
+            );
+            refreshMergedSubmissions();
+        }, () => {
+            showNotification('Failed to load applications', 'error');
+        });
+        submissionListenerUnsubs.push(unsubscribe);
+    };
+
+    if (full) {
+        attachListener('all', collection(db, 'submissions'));
+        return;
+    }
+
+    attachListener(
+        'payment-lifecycle',
+        query(
+            collection(db, 'submissions'),
+            where('status', 'in', ['sent_to_pfa', 'rsa_submitted', 'paid', 'cleared'])
+        )
+    );
+    attachListener(
+        'audit-requests',
+        query(
+            collection(db, 'submissions'),
+            where('auditCommissionStatus', 'in', ['pending', 'rejected'])
+        )
+    );
 }
 
 auth.onAuthStateChanged(async (user) => {

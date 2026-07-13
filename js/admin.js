@@ -7048,9 +7048,19 @@ function renderTrackApplications() {
     const end = endVal ? new Date(endVal) : null;
     if (end) end.setHours(23, 59, 59, 999);
 
-    let list = Array.isArray(allSubmissions)
-        ? allSubmissions.filter((s) => String(s.status || '').toLowerCase() !== 'draft')
-        : [];
+    const uploaderEmails = Array.from(new Set(
+        (Array.isArray(allSubmissions) ? allSubmissions : [])
+            .map((submission) => String(submission.uploadedBy || '').trim().toLowerCase())
+            .filter(Boolean)
+    )).sort((a, b) => getDisplayNameByEmail(a).localeCompare(getDisplayNameByEmail(b)));
+    const uploaderSuggestions = document.getElementById('trackUploaderSuggestions');
+    if (uploaderSuggestions) {
+        uploaderSuggestions.innerHTML = uploaderEmails.map((email) => (
+            `<option value="${escapeHtml(getDisplayNameByEmail(email))}" label="${escapeHtml(email)}"></option>`
+        )).join('');
+    }
+
+    let list = Array.isArray(allSubmissions) ? [...allSubmissions] : [];
 
     if (statusFilter && statusFilter !== 'all') {
         list = list.filter((s) => matchesTrackStatusFilter(s, statusFilter));
@@ -7058,7 +7068,7 @@ function renderTrackApplications() {
 
     if (start || end) {
         list = list.filter((s) => {
-            const entryMs = getStageTimestampMillis(getSubmissionCurrentStageEntryAt(s));
+            const entryMs = getStageTimestampMillis(s.uploadedAt || s.createdAt);
             if (!entryMs) return false;
             if (start && entryMs < start.getTime()) return false;
             if (end && entryMs > end.getTime()) return false;
@@ -7067,16 +7077,27 @@ function renderTrackApplications() {
     }
 
     if (search) {
+        const exactUploaderEmail = uploaderEmails.find((email) => (
+            email === search || getDisplayNameByEmail(email).toLowerCase() === search
+        ));
         list = list.filter((s) => {
             const uploaderEmail = String(s.uploadedBy || '').toLowerCase();
             const uploaderName = getDisplayNameByEmail(uploaderEmail).toLowerCase();
-            const customerName = String(s.customerName || '').toLowerCase();
-            return uploaderEmail.includes(search) || uploaderName.includes(search) || customerName.includes(search);
+            if (exactUploaderEmail) return uploaderEmail === exactUploaderEmail;
+            return uploaderEmail.includes(search) || uploaderName.includes(search);
         });
     }
-    list = list.slice().sort((a, b) => getStageTimestampMillis(getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(getSubmissionCurrentStageEntryAt(a)));
+    list = list.slice().sort((a, b) => (
+        getStageTimestampMillis(b.uploadedAt || b.createdAt) - getStageTimestampMillis(a.uploadedAt || a.createdAt)
+    ));
 
     const totalRecords = list.length;
+    const summary = document.getElementById('trackUserApplicationsSummary');
+    if (summary) {
+        summary.textContent = search
+            ? `${totalRecords} application${totalRecords === 1 ? '' : 's'} found for matching uploader${totalRecords === 1 ? '' : 's'}`
+            : `${totalRecords} uploader application${totalRecords === 1 ? '' : 's'} found`;
+    }
     const totalPages = Math.max(1, Math.ceil(totalRecords / TRACK_PAGE_SIZE));
     trackAppsPage = Math.min(Math.max(1, trackAppsPage), totalPages);
 
@@ -7086,7 +7107,7 @@ function renderTrackApplications() {
     if (trackJumpPageInput) trackJumpPageInput.max = String(totalPages);
 
     if (list.length === 0) {
-        trackAppsTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No matching applications</td></tr>';
+        trackAppsTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No matching applications</td></tr>';
         return;
     }
 
@@ -7096,6 +7117,7 @@ function renderTrackApplications() {
     trackAppsTableBody.innerHTML = pageItems.map((s) => {
         const uploaderEmail = String(s.uploadedBy || '').toLowerCase();
         const uploaderLabel = uploaderEmail ? `${getDisplayNameByEmail(uploaderEmail)}` : 'Unknown';
+        const uploadedAt = formatDate(s.uploadedAt || s.createdAt);
         const currentStage = getApplicationCurrentStage(s);
         const lastStageTime = formatDate(getSubmissionCurrentStageEntryAt(s));
         const status = String(s.status || '').trim() || '-';
@@ -7105,6 +7127,7 @@ function renderTrackApplications() {
             <tr>
                 <td><strong>${escapeHtml(s.customerName || 'Unknown')}</strong></td>
                 <td>${escapeHtml(uploaderLabel)}</td>
+                <td>${escapeHtml(uploadedAt)}</td>
                 <td>${escapeHtml(agentLabel)}</td>
                 <td><span class="status-badge ${getTrackStatusBadgeClass(status)}">${escapeHtml(formatStatusLabel(status))}</span></td>
                 <td>${escapeHtml(currentStage.label)}</td>
