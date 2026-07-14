@@ -17,6 +17,15 @@ export class BackblazeStorage {
         this.initErrorMessage = '';
     }
 
+    formatProxyError(response, data) {
+        const detail = data?.details || {};
+        const detailMessage = detail?.message || detail?.error || detail?.code || '';
+        const baseMessage = data?.error || `Request failed (${response.status})`;
+        return detailMessage && detailMessage !== baseMessage
+            ? `${baseMessage}: ${detailMessage}`
+            : baseMessage;
+    }
+
     async callProxy(action, payload = null, file = null) {
         let response;
 
@@ -46,7 +55,7 @@ export class BackblazeStorage {
             if (['127.0.0.1', 'localhost'].includes(window.location.hostname)) {
                 throw new Error(`Cannot reach upload API at ${this.apiProxyEndpoint}.`);
             }
-            throw error;
+            throw new Error(`Cannot reach upload API. Check your internet connection and try again. (${error?.message || 'Network error'})`);
         }
 
         let data = null;
@@ -57,7 +66,7 @@ export class BackblazeStorage {
         }
 
         if (!response.ok) {
-            const message = data?.error || `Request failed (${response.status})`;
+            const message = this.formatProxyError(response, data);
             if (response.status === 405) {
                 throw new Error('Upload API endpoint rejected POST (405).');
             }
@@ -113,6 +122,9 @@ export class BackblazeStorage {
             if (!this.authorizationToken) {
                 await this.init();
             }
+            if (!file) {
+                throw new Error('No file selected for upload.');
+            }
 
             let uploadUrlData = sharedBackblazeState.uploadUrl;
             if (!uploadUrlData) {
@@ -122,6 +134,10 @@ export class BackblazeStorage {
                     bucketId: this.bucketId
                 });
                 sharedBackblazeState.uploadUrl = uploadUrlData;
+            }
+            if (!uploadUrlData?.uploadUrl || !uploadUrlData?.authorizationToken) {
+                sharedBackblazeState.uploadUrl = null;
+                throw new Error('Upload server did not return a valid Backblaze upload URL.');
             }
 
             const safeName = (str) => String(str || '').replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -171,6 +187,7 @@ export class BackblazeStorage {
                 timestamp: Date.now()
             };
         } catch (error) {
+            console.error('Backblaze upload failed', error);
             throw error;
         }
     }

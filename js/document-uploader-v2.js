@@ -1,6 +1,6 @@
 ﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// js/document-uploader.js - COMPLETE FIXED VERSION WITH WORKING FILE SIZE MODALS AND CALCULATIONS
 import { auth, db } from './firebase-config.js';
-import { BackblazeStorage } from './backblaze-storage.js';
+import { BackblazeStorage } from './backblaze-storage.js?v=20260714a';
 import { queueViewerAssignmentEmail } from './email-alerts.js';
 import { notifyStatusChangePush } from './status-push.js';
 import { notifyAdminPushEvent } from './push-alerts.js';
@@ -3777,7 +3777,9 @@ async function handleBatchFiles(files) {
         setUploadedDocForType(targetType, { name: fileToSend.name, fileId: result.fileId, fileUrl: result.fileUrl, uploadedAt: await getTrustedNowIso(), localAddedAt: Date.now() });
         successCount++;
       } catch (e) {
-        showNotification(`Upload failed for ${file.name}`, 'error');
+        console.error('Batch upload failed for file', file.name, e);
+        const reason = String(e?.message || 'Unknown upload error');
+        showNotification(`Upload failed for ${file.name}: ${reason}`, 'error');
         failCount++;
       }
 
@@ -3954,6 +3956,7 @@ async function uploadSingleDocument() {
     showNotification('✅ Document uploaded successfully!', 'success');
     closeModal(singleUploadModal);
   } catch (error) {
+    console.error('Single document upload failed', error);
     showNotification('Upload failed: ' + error.message, 'error');
   } finally {
     if (confirmSingleUpload) {
