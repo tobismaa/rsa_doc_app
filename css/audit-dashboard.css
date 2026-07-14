@@ -673,10 +673,28 @@
   text-overflow: ellipsis;
 }
 
-.audit-duplicate-view-btn {
+.audit-duplicate-actions {
+  display: grid;
+  gap: 6px;
+}
+
+.audit-duplicate-view-btn,
+.audit-duplicate-delete-btn {
   width: 100%;
   justify-content: center;
   padding: 8px 10px;
+  box-shadow: none;
+}
+
+.audit-duplicate-delete-btn {
+  background: #fee2e2 !important;
+  color: #991b1b !important;
+  border: 1px solid #fecaca !important;
+}
+
+.audit-duplicate-delete-btn:hover {
+  background: #991b1b !important;
+  color: #ffffff !important;
 }
 
 @media (max-width: 768px) {

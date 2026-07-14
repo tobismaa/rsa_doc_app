@@ -1253,6 +1253,7 @@ let __batchFilesBuffer = [];
 let currentCommissionTab = 'sent_to_pfa';
 let currentUploaderApplicationTab = 'draft';
 let currentUploaderPaidScope = 'mine';
+let submissionInProgress = false;
 const UPLOADER_DASHBOARD_TABS = ['overview', 'draft', 'applications', 'pending', 'approved', 'rejected', 'paid', 'register-agent', 'profile', 'help'];
 const UPLOADER_APPLICATION_TABS = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'audit', 'paid', 'cleared'];
 let registeredAgents = [];
@@ -1365,7 +1366,12 @@ function showNewSubmissionConfirmModal({ customerName = '', agentPayload = {}, d
       </div>
     `;
 
+    let resolved = false;
     const close = (value) => {
+      if (resolved) return;
+      resolved = true;
+      const submitBtn = modal.querySelector('[data-submit-confirm="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
       modal.remove();
       document.removeEventListener('keydown', onKeyDown);
       resolve(value);
@@ -4493,21 +4499,26 @@ function getMissingRequiredSubmissionFields() {
 }
 
 async function submitCustomer() {
+  if (submissionInProgress) {
+    showNotification('Submission is already in progress. Please wait.', 'info');
+    return;
+  }
   if (!assertWritable('Submission')) return;
   const customerName = customerNameInput.value.trim();
   const allowWithoutDocuments = canCurrentUserSubmitWithoutDocuments();
   const allowOptionalCustomerFields = isCurrentUserUploaderLevel2();
   if (!customerName) return;
   if (!customerDetailsSaved) { showNotification('Please save customer details before submitting', 'error'); return; }
-  const rolePermissions = (await getSystemSettings(db, { force: true })).rolePermissions || {};
-  const currentRole = String(currentUserProfile?.role || 'uploader').trim().toLowerCase();
-  if (currentRole === 'uploader' && rolePermissions.uploaderCanUpload === false) {
-    showNotification('Uploader submissions are currently disabled by Super Admin.', 'error');
-    return;
-  }
+  submissionInProgress = true;
   submitCustomerBtn.disabled = true;
   submitCustomerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
   try {
+    const rolePermissions = (await getSystemSettings(db, { force: true })).rolePermissions || {};
+    const currentRole = String(currentUserProfile?.role || 'uploader').trim().toLowerCase();
+    if (currentRole === 'uploader' && rolePermissions.uploaderCanUpload === false) {
+      showNotification('Uploader submissions are currently disabled by Super Admin.', 'error');
+      return;
+    }
     const missingFields = getMissingRequiredSubmissionFields();
     if (missingFields.length > 0) {
       submitCustomerBtn.disabled = false;
@@ -4755,7 +4766,9 @@ async function submitCustomer() {
       showNotification('Submission failed: ' + error.message, 'error');
     }
   } finally {
+    submissionInProgress = false;
     syncUploadRequirementUi();
+    updateSubmitButton();
   }
 }
 

@@ -220,7 +220,7 @@ service cloud.firestore {
           resource.data.submissionId == request.resource.data.submissionId ||
           isAdminLike()
         );
-      allow delete: if signedIn() && globalWriteAllowed() && isAdminLike();
+      allow delete: if signedIn() && globalWriteAllowed() && canMonitorAll();
     }
 
     match /submissions/{submissionId} {
@@ -242,7 +242,7 @@ service cloud.firestore {
           )
         )
       );
-      allow delete: if globalWriteAllowed() && isAdminLike();
+      allow delete: if globalWriteAllowed() && canMonitorAll();
     }
 
     match /uploaderRoutingRules/{docId} {

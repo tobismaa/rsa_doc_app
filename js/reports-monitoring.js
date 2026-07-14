@@ -1070,7 +1070,13 @@ function renderAuditDuplicateScan() {
                     <td>${escapeHtml(getUserDisplayName(sub.uploadedBy || ''))}</td>
                     <td class="audit-duplicate-nowrap">${escapeHtml(formatDate(getSubmissionOriginalUploadAt(sub)))}</td>
                     <td><code class="audit-duplicate-id">${escapeHtml(sub.id || '-')}</code></td>
-                    <td><button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button></td>
+                    <td>
+                        <div class="audit-duplicate-actions">
+                            <button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>
+                            <button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationTrack('${sub.id}')"><i class="fas fa-route"></i> Track</button>
+                            <button type="button" class="action-btn audit-duplicate-delete-btn" onclick="window.deleteAuditDuplicateApplication('${sub.id}')"><i class="fas fa-trash"></i> Delete</button>
+                        </div>
+                    </td>
                 </tr>
                 ${rowIndex === group.rows.length - 1 && groupIndex < groups.length - 1 ? '<tr><td colspan="9" style="height:8px;background:#f8fafc;"></td></tr>' : ''}
             `;
@@ -2329,6 +2335,94 @@ function closeApplicationDetailsModal() {
     applicationDetailsModal?.classList.remove('active');
 }
 
+function openApplicationTrackModal(submissionId) {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub) {
+        showNotification('Application not found', 'warning');
+        return;
+    }
+
+    const rows = [
+        ['Application ID', sub.id || '-'],
+        ['Customer Name', sub.customerName || '-'],
+        ['Current Status', statusLabel(sub.status || '-')],
+        ['Current Stage', getApplicationStage(sub)],
+        ['Original Upload', formatDate(getSubmissionOriginalUploadAt(sub))],
+        ['Current Stage Since', formatDate(getSubmissionCurrentStageEntryAt(sub))],
+        ['Uploader', sub.uploadedBy || '-'],
+        ['Reviewer', sub.assignedTo || sub.reviewedBy || '-'],
+        ['RSA Officer', sub.assignedToRSA || '-'],
+        ['Payment Officer', sub.assignedToPayment || '-'],
+        ['Paid At', formatDate(sub.paidAt)],
+        ['Cleared At', formatDate(sub.clearedAt || sub.auditClearedAt)],
+        ['Audit Status', statusLabel(sub.auditCommissionStatus || '-')]
+    ];
+
+    const title = document.getElementById('applicationDetailsTitle');
+    const body = document.getElementById('applicationDetailsBody');
+    if (title) title.textContent = `Application Track - ${sub.customerName || 'Customer'}`;
+    if (body) {
+        body.innerHTML = rows.map(([label, value]) => `
+            <tr>
+                <th style="width:240px;background:#f8fafc;">${escapeHtml(label)}</th>
+                <td>${escapeHtml(value)}</td>
+            </tr>
+        `).join('');
+    }
+    applicationDetailsModal?.classList.add('active');
+}
+
+function getSubmissionUniqueKeyDocId(type, value) {
+    return encodeURIComponent(`${String(type || '').trim().toLowerCase()}:${String(value || '').trim()}`);
+}
+
+function getSubmissionUniqueKeyRefs(sub = {}) {
+    const keys = [
+        ['account_number', normalizeAccountNumber(getCustomerAccountNumber(sub))],
+        ['nin', getCustomerNin(sub)],
+        ['pen', normalizePenNumber(getCustomerPenNumber(sub))],
+        ['phone', getCustomerPhoneNumber(sub)],
+        ['customer_name', normalizeCustomerName(sub.customerName || sub?.customerDetails?.name || '')]
+    ].filter(([, value]) => String(value || '').trim());
+    return keys.map(([type, value]) => doc(db, 'submissionUniqueKeys', getSubmissionUniqueKeyDocId(type, value)));
+}
+
+async function deleteAuditDuplicateApplication(submissionId) {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub) {
+        showNotification('Application not found', 'warning');
+        return;
+    }
+
+    const customerName = sub.customerName || sub?.customerDetails?.name || 'this application';
+    const confirmed = window.confirm(`Delete duplicate application for "${customerName}"?\n\nThis will permanently remove this application record from the system.`);
+    if (!confirmed) return;
+
+    try {
+        const batch = writeBatch(db);
+        batch.delete(doc(db, 'submissions', submissionId));
+        getSubmissionUniqueKeyRefs(sub).forEach((keyRef) => batch.delete(keyRef));
+        await batch.commit();
+
+        await addDoc(collection(db, 'audit'), {
+            action: 'audit_duplicate_application_deleted',
+            submissionId,
+            customerName,
+            accountNumber: getCustomerAccountNumber(sub),
+            penNo: getCustomerPenNumber(sub),
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        }).catch(() => {});
+
+        allSubmissions = allSubmissions.filter((item) => item.id !== submissionId);
+        auditDuplicateScanResult = buildAuditDuplicateScanResult();
+        renderAuditDuplicateScan();
+        showNotification('Duplicate application deleted.', 'success');
+    } catch (error) {
+        showNotification(`Failed to delete duplicate application: ${error.message || error}`, 'error');
+    }
+}
+
 function getLatestAuditCorrectionDocument(submission = {}) {
     const docs = Array.isArray(submission.auditCommissionCorrectionDocuments)
         ? submission.auditCommissionCorrectionDocuments
@@ -2446,6 +2540,8 @@ function showAuditSuccessModal({ title = 'Success', message = '', detail = '' } 
 }
 
 window.openMonitoringApplicationDetails = openApplicationDetailsModal;
+window.openMonitoringApplicationTrack = openApplicationTrackModal;
+window.deleteAuditDuplicateApplication = deleteAuditDuplicateApplication;
 
 function getAuditPaymentClearPayload(sub = {}) {
     const { commission, twentyFive, rsaBalance } = getSubmissionFinancials(sub);
