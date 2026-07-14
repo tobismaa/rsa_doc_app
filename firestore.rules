@@ -196,6 +196,33 @@ service cloud.firestore {
       );
     }
 
+    match /submissionUniqueKeys/{keyId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && globalWriteAllowed()
+        && request.resource.data.type in ['account_number', 'nin', 'pen', 'phone', 'customer_name']
+        && request.resource.data.value is string
+        && request.resource.data.value.size() > 0
+        && request.resource.data.submissionId is string
+        && request.resource.data.uploadedBy == myEmail()
+        && existsAfter(submissionDocPath(request.resource.data.submissionId))
+        && getAfter(submissionDocPath(request.resource.data.submissionId)).data.uploadedBy == myEmail();
+      allow update: if signedIn()
+        && globalWriteAllowed()
+        && request.resource.data.type in ['account_number', 'nin', 'pen', 'phone', 'customer_name']
+        && request.resource.data.value is string
+        && request.resource.data.value.size() > 0
+        && request.resource.data.submissionId is string
+        && request.resource.data.uploadedBy == myEmail()
+        && existsAfter(submissionDocPath(request.resource.data.submissionId))
+        && getAfter(submissionDocPath(request.resource.data.submissionId)).data.uploadedBy == myEmail()
+        && (
+          resource.data.submissionId == request.resource.data.submissionId ||
+          isAdminLike()
+        );
+      allow delete: if signedIn() && globalWriteAllowed() && isAdminLike();
+    }
+
     match /submissions/{submissionId} {
       allow read: if canReadSubmission();
       allow create: if signedIn()

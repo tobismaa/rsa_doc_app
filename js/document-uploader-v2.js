@@ -1422,6 +1422,10 @@ function normalizeDigitsOnly(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
+function normalizeCustomerNameKey(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
 function getSubmissionCustomerEmail(submission) {
   return normalizeEmail(submission?.customerDetails?.email || submission?.customerEmail || submission?.email || '');
 }
@@ -1444,6 +1448,87 @@ function normalizePenNumber(value) {
 
 function getSubmissionCustomerPenNo(submission) {
   return normalizePenNumber(submission?.customerDetails?.penNoNormalized || submission?.penNoNormalized || submission?.customerDetails?.penNo || submission?.penNo || '');
+}
+
+function getSubmissionCustomerNameKey(submission) {
+  return normalizeCustomerNameKey(submission?.customerName || submission?.customerDetails?.name || '');
+}
+
+function submissionUniqueKeyDocId(type, value) {
+  return encodeURIComponent(`${String(type || '').trim().toLowerCase()}:${String(value || '').trim()}`);
+}
+
+function buildSubmissionUniqueKeysFromDetails(customerDetails = {}, customerName = '') {
+  const keys = [
+    { type: 'account_number', label: 'account number', value: normalizeDigitsOnly(customerDetails.accountNo) },
+    { type: 'nin', label: 'NIN', value: normalizeDigitsOnly(customerDetails.nin) },
+    { type: 'pen', label: 'PEN', value: normalizePenNumber(customerDetails.penNoNormalized || customerDetails.penNo) },
+    { type: 'phone', label: 'phone number', value: normalizeCustomerPhone(customerDetails.phone) },
+    { type: 'customer_name', label: 'customer name', value: normalizeCustomerNameKey(customerName || customerDetails.name) }
+  ];
+  return keys
+    .filter((item) => item.value)
+    .filter((item) => {
+      if (item.type === 'account_number') return item.value.length === 10;
+      if (item.type === 'nin') return item.value.length === 11;
+      if (item.type === 'phone') return item.value.length >= 10;
+      if (item.type === 'customer_name') return item.value.length >= 3;
+      return true;
+    });
+}
+
+function getSubmissionUniqueKeyConflicts(existingDoc, submissionId = '') {
+  if (!existingDoc?.exists()) return null;
+  const data = existingDoc.data() || {};
+  const existingSubmissionId = String(data.submissionId || '').trim();
+  if (existingSubmissionId && existingSubmissionId === String(submissionId || '').trim()) return null;
+  return data;
+}
+
+function formatSubmissionDuplicateLockMessage(conflicts = []) {
+  const labels = [...new Set(conflicts.map((item) => item.label).filter(Boolean))];
+  const first = conflicts[0]?.data || {};
+  const customerName = String(first.customerName || '').trim();
+  const suffix = customerName ? `\nExisting customer: ${customerName}` : '';
+  return `Duplicate application blocked. Existing ${labels.join(', ')} already found in the database.${suffix}`;
+}
+
+async function saveSubmissionWithUniqueLocks(subRef, submissionPayload = {}, { mode = 'set' } = {}) {
+  const submissionId = subRef?.id || '';
+  const keys = buildSubmissionUniqueKeysFromDetails(submissionPayload.customerDetails || {}, submissionPayload.customerName || '');
+  await runTransaction(db, async (tx) => {
+    const keyRefs = keys.map((item) => ({
+      ...item,
+      ref: doc(db, 'submissionUniqueKeys', submissionUniqueKeyDocId(item.type, item.value))
+    }));
+    const keySnaps = await Promise.all(keyRefs.map((item) => tx.get(item.ref)));
+    const conflicts = keySnaps
+      .map((snap, index) => ({ ...keyRefs[index], data: getSubmissionUniqueKeyConflicts(snap, submissionId) }))
+      .filter((item) => item.data);
+    if (conflicts.length) {
+      const error = new Error(formatSubmissionDuplicateLockMessage(conflicts));
+      error.code = 'duplicate-submission-lock';
+      throw error;
+    }
+
+    if (mode === 'update') {
+      tx.update(subRef, submissionPayload);
+    } else {
+      tx.set(subRef, submissionPayload, { merge: mode === 'merge' });
+    }
+
+    keyRefs.forEach((item) => {
+      tx.set(item.ref, {
+        type: item.type,
+        label: item.label,
+        value: item.value,
+        submissionId,
+        customerName: submissionPayload.customerName || submissionPayload.customerDetails?.name || '',
+        uploadedBy: normalizeEmail(submissionPayload.uploadedBy || currentUser?.email || ''),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    });
+  });
 }
 
 function getPenNumberQueryVariants(penNo = '') {
@@ -1509,12 +1594,51 @@ async function findExistingPenNumberSubmissions({ penNo = '', excludeSubmissionI
   return Array.from(matches.values());
 }
 
-function findDuplicateCustomerContacts({ email = '', phone = '', accountNo = '', nin = '', penNo = '', excludeSubmissionId = '' } = {}) {
+async function findExistingSubmissionFieldMatches({ phone = '', accountNo = '', nin = '', customerName = '', excludeSubmissionId = '' } = {}) {
+  const specs = [
+    { value: normalizeCustomerPhone(phone), compare: getSubmissionCustomerPhone, fields: ['customerDetails.phone', 'customerPhone', 'phone'] },
+    { value: normalizeDigitsOnly(accountNo), compare: getSubmissionCustomerAccountNo, fields: ['customerDetails.accountNo', 'accountNo'] },
+    { value: normalizeDigitsOnly(nin), compare: getSubmissionCustomerNin, fields: ['customerDetails.nin', 'customerNIN', 'nin'] },
+    { value: String(customerName || '').trim(), compare: (sub) => String(sub?.customerName || sub?.customerDetails?.name || '').trim(), fields: ['customerName', 'customerDetails.name'] }
+  ].filter((spec) => spec.value);
+  const matches = new Map();
+  await Promise.all(specs.flatMap((spec) => spec.fields.map(async (field) => {
+    try {
+      const snap = await getDocs(query(collection(db, 'submissions'), where(field, '==', spec.value)));
+      snap.forEach((docSnap) => {
+        if (excludeSubmissionId && docSnap.id === excludeSubmissionId) return;
+        const submission = { id: docSnap.id, ...(docSnap.data() || {}) };
+        const left = field.includes('name') || field === 'customerName'
+          ? normalizeCustomerNameKey(spec.compare(submission))
+          : String(spec.compare(submission) || '');
+        const right = field.includes('name') || field === 'customerName'
+          ? normalizeCustomerNameKey(spec.value)
+          : String(spec.value || '');
+        if (left && left === right) matches.set(docSnap.id, submission);
+      });
+    } catch (_) {}
+  })));
+  return Array.from(matches.values());
+}
+
+async function findSubmissionUniqueLockConflicts(customerDetails = {}, customerName = '', excludeSubmissionId = '') {
+  const keys = buildSubmissionUniqueKeysFromDetails(customerDetails, customerName);
+  if (!keys.length) return [];
+  const docs = await Promise.all(keys.map(async (item) => {
+    const snap = await getDoc(doc(db, 'submissionUniqueKeys', submissionUniqueKeyDocId(item.type, item.value))).catch(() => null);
+    const data = getSubmissionUniqueKeyConflicts(snap, excludeSubmissionId);
+    return data ? { ...item, data } : null;
+  }));
+  return docs.filter(Boolean);
+}
+
+function findDuplicateCustomerContacts({ email = '', phone = '', accountNo = '', nin = '', penNo = '', customerName = '', excludeSubmissionId = '' } = {}) {
   const normalizedEmail = normalizeEmail(email);
   const normalizedPhone = normalizeCustomerPhone(phone);
   const normalizedAccountNo = normalizeDigitsOnly(accountNo);
   const normalizedNin = normalizeDigitsOnly(nin);
   const normalizedPenNo = normalizePenNumber(penNo);
+  const normalizedCustomerName = normalizeCustomerNameKey(customerName);
   return allSubmissions.filter((submission) => {
     if (excludeSubmissionId && submission.id === excludeSubmissionId) return false;
     if (isCurrentEditableSubmission(submission.id) && submission.id === excludeSubmissionId) return false;
@@ -1523,43 +1647,53 @@ function findDuplicateCustomerContacts({ email = '', phone = '', accountNo = '',
     const accountMatch = normalizedAccountNo && getSubmissionCustomerAccountNo(submission) === normalizedAccountNo;
     const ninMatch = normalizedNin && getSubmissionCustomerNin(submission) === normalizedNin;
     const penMatch = normalizedPenNo && getSubmissionCustomerPenNo(submission) === normalizedPenNo;
-    return emailMatch || phoneMatch || accountMatch || ninMatch || penMatch;
+    const nameMatch = normalizedCustomerName && getSubmissionCustomerNameKey(submission) === normalizedCustomerName;
+    return emailMatch || phoneMatch || accountMatch || ninMatch || penMatch || nameMatch;
   });
 }
 
-function formatDuplicateCustomerSummary(submission, { email = '', phone = '', accountNo = '', nin = '', penNo = '' } = {}) {
+function formatDuplicateCustomerSummary(submission, { email = '', phone = '', accountNo = '', nin = '', penNo = '', customerName = '' } = {}) {
   const emailMatch = normalizeEmail(email) && getSubmissionCustomerEmail(submission) === normalizeEmail(email);
   const phoneMatch = normalizeCustomerPhone(phone) && getSubmissionCustomerPhone(submission) === normalizeCustomerPhone(phone);
   const accountMatch = normalizeDigitsOnly(accountNo) && getSubmissionCustomerAccountNo(submission) === normalizeDigitsOnly(accountNo);
   const ninMatch = normalizeDigitsOnly(nin) && getSubmissionCustomerNin(submission) === normalizeDigitsOnly(nin);
   const penMatch = normalizePenNumber(penNo) && getSubmissionCustomerPenNo(submission) === normalizePenNumber(penNo);
+  const nameMatch = normalizeCustomerNameKey(customerName) && getSubmissionCustomerNameKey(submission) === normalizeCustomerNameKey(customerName);
   const reasons = [];
   if (emailMatch) reasons.push('email');
   if (phoneMatch) reasons.push('phone');
   if (accountMatch) reasons.push('account number');
   if (ninMatch) reasons.push('NIN');
   if (penMatch) reasons.push('PEN number');
-  const customerName = String(submission?.customerName || submission?.customerDetails?.name || 'Unknown Customer').trim() || 'Unknown Customer';
+  if (nameMatch) reasons.push('customer name');
+  const duplicateCustomerName = String(submission?.customerName || submission?.customerDetails?.name || 'Unknown Customer').trim() || 'Unknown Customer';
   const status = String(submission?.status || 'the system').replace(/_/g, ' ');
-  return `- ${customerName} (${reasons.join(' and ')}) [${status}]`;
+  return `- ${duplicateCustomerName} (${reasons.join(' and ')}) [${status}]`;
 }
 
-async function validateCustomerDuplicateContact({ email = '', phone = '', accountNo = '', nin = '', penNo = '', excludeSubmissionId = '' } = {}) {
-  const localMatches = findDuplicateCustomerContacts({ email, phone, accountNo, nin, penNo, excludeSubmissionId });
+async function validateCustomerDuplicateContact({ email = '', phone = '', accountNo = '', nin = '', penNo = '', customerName = '', excludeSubmissionId = '' } = {}) {
+  const localMatches = findDuplicateCustomerContacts({ email, phone, accountNo, nin, penNo, customerName, excludeSubmissionId });
   const remotePenMatches = await findExistingPenNumberSubmissions({ penNo, excludeSubmissionId });
-  const existingMatches = Array.from(new Map([...localMatches, ...remotePenMatches].map((submission) => [submission.id, submission])).values());
-  if (!existingMatches.length) return null;
+  const remoteFieldMatches = await findExistingSubmissionFieldMatches({ phone, accountNo, nin, customerName, excludeSubmissionId });
+  const lockConflicts = await findSubmissionUniqueLockConflicts({ phone, accountNo, nin, penNo }, customerName, excludeSubmissionId);
+  const existingMatches = Array.from(new Map([...localMatches, ...remotePenMatches, ...remoteFieldMatches].map((submission) => [submission.id, submission])).values());
+  if (!existingMatches.length && !lockConflicts.length) return null;
 
   const reasons = [];
   if (normalizeEmail(email) && existingMatches.some((submission) => getSubmissionCustomerEmail(submission) === normalizeEmail(email))) reasons.push('email address');
-  if (normalizeCustomerPhone(phone) && existingMatches.some((submission) => getSubmissionCustomerPhone(submission) === normalizeCustomerPhone(phone))) reasons.push('phone number');
-  if (normalizeDigitsOnly(accountNo) && existingMatches.some((submission) => getSubmissionCustomerAccountNo(submission) === normalizeDigitsOnly(accountNo))) reasons.push('account number');
-  if (normalizeDigitsOnly(nin) && existingMatches.some((submission) => getSubmissionCustomerNin(submission) === normalizeDigitsOnly(nin))) reasons.push('NIN');
-  if (normalizePenNumber(penNo) && existingMatches.some((submission) => getSubmissionCustomerPenNo(submission) === normalizePenNumber(penNo))) reasons.push('PEN number');
-  const duplicateLines = existingMatches.map((submission) => formatDuplicateCustomerSummary(submission, { email, phone, accountNo, nin, penNo }));
+  if ((normalizeCustomerPhone(phone) && existingMatches.some((submission) => getSubmissionCustomerPhone(submission) === normalizeCustomerPhone(phone))) || lockConflicts.some((item) => item.type === 'phone')) reasons.push('phone number');
+  if ((normalizeDigitsOnly(accountNo) && existingMatches.some((submission) => getSubmissionCustomerAccountNo(submission) === normalizeDigitsOnly(accountNo))) || lockConflicts.some((item) => item.type === 'account_number')) reasons.push('account number');
+  if ((normalizeDigitsOnly(nin) && existingMatches.some((submission) => getSubmissionCustomerNin(submission) === normalizeDigitsOnly(nin))) || lockConflicts.some((item) => item.type === 'nin')) reasons.push('NIN');
+  if ((normalizePenNumber(penNo) && existingMatches.some((submission) => getSubmissionCustomerPenNo(submission) === normalizePenNumber(penNo))) || lockConflicts.some((item) => item.type === 'pen')) reasons.push('PEN number');
+  if ((normalizeCustomerNameKey(customerName) && existingMatches.some((submission) => getSubmissionCustomerNameKey(submission) === normalizeCustomerNameKey(customerName))) || lockConflicts.some((item) => item.type === 'customer_name')) reasons.push('customer name');
+  const duplicateLines = existingMatches.map((submission) => formatDuplicateCustomerSummary(submission, { email, phone, accountNo, nin, penNo, customerName }));
+  lockConflicts.forEach((item) => {
+    const lockedName = String(item.data?.customerName || 'Existing application').trim();
+    duplicateLines.push(`- ${lockedName} (${item.label}) [existing application]`);
+  });
   return {
     submissions: existingMatches,
-    message: `Duplicate customer details found for this ${reasons.join(' and ')}.\n\nExisting matching record(s):\n${duplicateLines.join('\n')}`
+    message: `Duplicate application blocked. Existing ${[...new Set(reasons)].join(' and ')} already found in the database.\n\nMatching record(s):\n${duplicateLines.join('\n')}`
   };
 }
 
@@ -4385,9 +4519,20 @@ async function submitCustomer() {
       syncUploadRequirementUi();
       return;
     }
-    const penNo = document.getElementById('penNo')?.value?.trim() || '';
     const duplicateExcludeId = currentEditId || currentDraftId || '';
-    if (penNo && !(await validatePenNumberAvailable(penNo, duplicateExcludeId, { inline: true, notify: false }))) {
+    const duplicateCheckDetails = collectDraftableCustomerDetails();
+    duplicateCheckDetails.name = customerName;
+    const duplicate = await validateCustomerDuplicateContact({
+      phone: duplicateCheckDetails.phone,
+      accountNo: duplicateCheckDetails.accountNo,
+      nin: duplicateCheckDetails.nin,
+      penNo: duplicateCheckDetails.penNo,
+      customerName,
+      excludeSubmissionId: duplicateExcludeId
+    });
+    if (duplicate) {
+      if (duplicate.message.toLowerCase().includes('pen')) showPenNoError(formatPenNoDuplicateMessage(duplicate));
+      showNotification(duplicate.message, 'error');
       submitCustomerBtn.disabled = false;
       syncUploadRequirementUi();
       return;
@@ -4433,7 +4578,7 @@ async function submitCustomer() {
       const previousRejectedBy = String(existingSub.latestRejectedBy || existingSub.previousRejectedBy || existingSub.reviewedBy || '').trim();
       const previousRejectedAt = existingSub.latestRejectedAt || existingSub.previousRejectedAt || existingSub.reviewedAt || null;
       const preservedCommissionRate = resolveSubmissionCommissionRate(existingSub);
-      await updateDoc(submissionRef, {
+      const correctionPayload = {
         customerName, customerDetails, status: rsaRejectFlow ? 'processing_to_pfa' : 'pending', documents,
         documentTypes: getUploadedDocumentTypes(), reuploadedAt: serverTimestamp(),
         houseNumber: customerDetails.houseNumber || '',
@@ -4462,7 +4607,8 @@ async function submitCustomer() {
         commissionRate: preservedCommissionRate,
         commissionRatePercent: Number((preservedCommissionRate * 100).toFixed(4)),
         commissionRateLabel: formatCommissionRateLabel(preservedCommissionRate)
-      });
+      };
+      await saveSubmissionWithUniqueLocks(submissionRef, correctionPayload, { mode: 'update' });
       if (!rsaRejectFlow && !reviewerToReassign) {
         await assignRoundRobin(submissionRef);
       }
@@ -4541,15 +4687,16 @@ async function submitCustomer() {
     let subRef;
     if (currentDraftId) {
       subRef = doc(db, 'submissions', currentDraftId);
-      await updateDoc(subRef, {
+      await saveSubmissionWithUniqueLocks(subRef, {
         ...submissionPayload,
         uploadedAt: serverTimestamp()
-      });
+      }, { mode: 'update' });
     } else {
-      subRef = await addDoc(collection(db, 'submissions'), {
+      subRef = doc(collection(db, 'submissions'));
+      await saveSubmissionWithUniqueLocks(subRef, {
         ...submissionPayload,
         uploadedAt: serverTimestamp()
-      });
+      }, { mode: 'set' });
     }
     const routingRule = await getUploaderRoutingRule(uploaderEmail);
     const systemSettings = await getSystemSettings(db);
@@ -4602,7 +4749,11 @@ async function submitCustomer() {
     closeModal(uploadModal);
     currentDraftId = null;
   } catch (error) {
-    showNotification('Submission failed: ' + error.message, 'error');
+    if (error?.code === 'duplicate-submission-lock') {
+      showNotification(error.message || 'Duplicate application blocked.', 'error');
+    } else {
+      showNotification('Submission failed: ' + error.message, 'error');
+    }
   } finally {
     syncUploadRequirementUi();
   }

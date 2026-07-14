@@ -1053,18 +1053,24 @@ function renderAuditDuplicateScan() {
             const accountNumber = getCustomerAccountNumber(sub);
             const penNumber = getCustomerPenNumber(sub);
             const signalClass = group.strength === 'strong' ? 'audit-recon-status partial' : 'audit-recon-status info';
-            const signalText = `${group.key}${rowIndex === 0 ? ` (${group.rows.length} independent applications)` : ''}`;
+            const signalText = rowIndex === 0 ? group.key : 'Same duplicate group';
+            const signalMeta = rowIndex === 0 ? `${group.rows.length} independent applications` : '';
             return `
                 <tr>
-                    <td><span class="${signalClass}">${escapeHtml(signalText)}</span></td>
-                    <td><strong>${escapeHtml(sub.customerName || sub?.customerDetails?.name || 'Unknown')}</strong></td>
-                    <td>${escapeHtml(accountNumber || '-')}</td>
-                    <td>${escapeHtml(penNumber || '-')}</td>
-                    <td>${escapeHtml(statusLabel(sub.status || '-'))}</td>
+                    <td>
+                        <span class="${signalClass} audit-duplicate-signal">
+                            <span>${escapeHtml(signalText)}</span>
+                            ${signalMeta ? `<small>${escapeHtml(signalMeta)}</small>` : ''}
+                        </span>
+                    </td>
+                    <td class="audit-duplicate-customer"><strong>${escapeHtml(sub.customerName || sub?.customerDetails?.name || 'Unknown')}</strong></td>
+                    <td class="audit-duplicate-nowrap">${escapeHtml(accountNumber || '-')}</td>
+                    <td class="audit-duplicate-nowrap">${escapeHtml(penNumber || '-')}</td>
+                    <td><span class="audit-duplicate-status">${escapeHtml(statusLabel(sub.status || '-'))}</span></td>
                     <td>${escapeHtml(getUserDisplayName(sub.uploadedBy || ''))}</td>
-                    <td>${escapeHtml(formatDate(getSubmissionOriginalUploadAt(sub)))}</td>
-                    <td>${escapeHtml(sub.id || '-')}</td>
-                    <td><button type="button" class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button></td>
+                    <td class="audit-duplicate-nowrap">${escapeHtml(formatDate(getSubmissionOriginalUploadAt(sub)))}</td>
+                    <td><code class="audit-duplicate-id">${escapeHtml(sub.id || '-')}</code></td>
+                    <td><button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button></td>
                 </tr>
                 ${rowIndex === group.rows.length - 1 && groupIndex < groups.length - 1 ? '<tr><td colspan="9" style="height:8px;background:#f8fafc;"></td></tr>' : ''}
             `;
