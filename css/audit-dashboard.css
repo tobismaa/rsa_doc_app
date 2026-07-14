@@ -427,6 +427,12 @@
   flex-wrap: wrap;
 }
 
+.audit-reconciliation-subtab-strip {
+  margin-top: 12px;
+  width: fit-content;
+  max-width: 100%;
+}
+
 .audit-paid-upload-modal {
   max-width: 620px !important;
 }
@@ -615,7 +621,7 @@
 
 .audit-duplicate-table th:nth-child(9),
 .audit-duplicate-table td:nth-child(9) {
-  width: 92px;
+  width: 118px;
 }
 
 .audit-duplicate-table td {
@@ -679,11 +685,23 @@
 }
 
 .audit-duplicate-view-btn,
+.audit-duplicate-reject-btn,
 .audit-duplicate-delete-btn {
   width: 100%;
   justify-content: center;
   padding: 8px 10px;
   box-shadow: none;
+}
+
+.audit-duplicate-reject-btn {
+  background: #fff7ed !important;
+  color: #9a3412 !important;
+  border: 1px solid #fed7aa !important;
+}
+
+.audit-duplicate-reject-btn:hover {
+  background: #c2410c !important;
+  color: #ffffff !important;
 }
 
 .audit-duplicate-delete-btn {

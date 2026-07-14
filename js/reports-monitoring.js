@@ -61,6 +61,7 @@ let auditReconciliationSourceRows = [];
 let auditReconciliationResult = null;
 let auditReconciliationFileName = '';
 let auditDuplicateScanResult = null;
+let auditReconciliationActiveView = 'excel';
 let auditPaidReconciliationSourceRows = [];
 let auditPaidReconciliationResult = null;
 let auditPaidReconciliationFileName = '';
@@ -852,9 +853,31 @@ function resetAuditReconciliationState() {
     auditReconciliationResult = null;
     auditReconciliationFileName = '';
     auditDuplicateScanResult = null;
+    auditReconciliationActiveView = 'excel';
     if (auditReconciliationFileInput) auditReconciliationFileInput.value = '';
     renderAuditReconciliation();
     renderAuditDuplicateScan();
+}
+
+function syncAuditReconciliationViewVisibility() {
+    const activeView = auditReconciliationActiveView === 'duplicates' ? 'duplicates' : 'excel';
+    document.querySelectorAll('[data-audit-reconciliation-view]').forEach((button) => {
+        const isActive = button.dataset.auditReconciliationView === activeView;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-audit-reconciliation-panel]').forEach((panel) => {
+        if (panel.dataset.auditReconciliationPanel !== activeView) {
+            panel.style.display = 'none';
+        }
+    });
+}
+
+function showAuditReconciliationView(viewName = 'excel') {
+    auditReconciliationActiveView = viewName === 'duplicates' ? 'duplicates' : 'excel';
+    renderAuditReconciliation();
+    renderAuditDuplicateScan();
+    syncAuditReconciliationViewVisibility();
 }
 
 function renderAuditPaidReconciliation() {
@@ -1013,6 +1036,9 @@ function renderAuditPaidReconciliation() {
 }
 
 function renderAuditDuplicateScan() {
+    const selectedFile = getSelectedAuditReconciliationFile();
+    if (auditReconciliationClearBtn) auditReconciliationClearBtn.disabled = !selectedFile && !auditReconciliationResult && !auditDuplicateScanResult;
+    if (auditReconciliationExportBtn) auditReconciliationExportBtn.disabled = !auditReconciliationResult && !auditDuplicateScanResult;
     if (!auditDuplicateScanResult) {
         if (auditDuplicateScanSummary) {
             auditDuplicateScanSummary.style.display = 'none';
@@ -1020,6 +1046,7 @@ function renderAuditDuplicateScan() {
         }
         if (auditDuplicateScanWrap) auditDuplicateScanWrap.style.display = 'none';
         if (auditDuplicateScanBody) auditDuplicateScanBody.innerHTML = '';
+        syncAuditReconciliationViewVisibility();
         return;
     }
 
@@ -1045,6 +1072,7 @@ function renderAuditDuplicateScan() {
     if (!auditDuplicateScanBody) return;
     if (!groups.length) {
         auditDuplicateScanBody.innerHTML = '<tr><td colspan="9" class="no-data">No duplicate applications found</td></tr>';
+        syncAuditReconciliationViewVisibility();
         return;
     }
 
@@ -1074,6 +1102,7 @@ function renderAuditDuplicateScan() {
                         <div class="audit-duplicate-actions">
                             <button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>
                             <button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationTrack('${sub.id}')"><i class="fas fa-route"></i> Track</button>
+                            <button type="button" class="action-btn audit-duplicate-reject-btn" onclick="window.rejectAuditDuplicateApplication('${sub.id}')"><i class="fas fa-ban"></i> Reject</button>
                             <button type="button" class="action-btn audit-duplicate-delete-btn" onclick="window.deleteAuditDuplicateApplication('${sub.id}')"><i class="fas fa-trash"></i> Delete</button>
                         </div>
                     </td>
@@ -1082,6 +1111,7 @@ function renderAuditDuplicateScan() {
             `;
         }).join('')
     )).join('');
+    syncAuditReconciliationViewVisibility();
 }
 
 function renderCopyableCustomerAccount(sub = {}) {
@@ -1368,8 +1398,8 @@ function renderAuditReconciliation() {
             : (selectedFile ? `Selected file: ${selectedFile.name}` : 'No file selected.');
     }
     if (auditReconciliationRunBtn) auditReconciliationRunBtn.disabled = !selectedFile;
-    if (auditReconciliationClearBtn) auditReconciliationClearBtn.disabled = !selectedFile && !auditReconciliationResult;
-    if (auditReconciliationExportBtn) auditReconciliationExportBtn.disabled = !auditReconciliationResult;
+    if (auditReconciliationClearBtn) auditReconciliationClearBtn.disabled = !selectedFile && !auditReconciliationResult && !auditDuplicateScanResult;
+    if (auditReconciliationExportBtn) auditReconciliationExportBtn.disabled = !auditReconciliationResult && !auditDuplicateScanResult;
 
     if (!auditReconciliationResult) {
         if (auditReconciliationSummary) {
@@ -1380,6 +1410,7 @@ function renderAuditReconciliation() {
         if (auditReconciliationMatchedBody) auditReconciliationMatchedBody.innerHTML = '';
         if (auditReconciliationUnmatchedWrap) auditReconciliationUnmatchedWrap.style.display = 'none';
         if (auditReconciliationUnmatchedBody) auditReconciliationUnmatchedBody.innerHTML = '';
+        syncAuditReconciliationViewVisibility();
         return;
     }
 
@@ -1440,6 +1471,7 @@ function renderAuditReconciliation() {
             `).join('')
             : '<tr><td colspan="5" class="no-data">No missing records</td></tr>';
     }
+    syncAuditReconciliationViewVisibility();
 }
 
 async function downloadAuditReconciliationTemplate() {
@@ -1463,57 +1495,90 @@ async function downloadAuditReconciliationTemplate() {
 }
 
 async function exportAuditReconciliationResult() {
-    if (!auditReconciliationResult) throw new Error('Run reconciliation first.');
+    if (!auditReconciliationResult && !auditDuplicateScanResult) throw new Error('Run reconciliation or duplicate scan first.');
     if (!window.ExcelJS) throw new Error('Excel library is not available right now.');
     const workbook = new window.ExcelJS.Workbook();
     workbook.creator = 'CMBank RSA Audit Dashboard';
     workbook.created = new Date();
 
-    const foundSheet = workbook.addWorksheet('Found Records');
-    foundSheet.columns = [
-        { header: 'Upload Row', key: 'rowNumber', width: 12 },
-        { header: 'Uploaded Name', key: 'customerName', width: 30 },
-        { header: 'Uploaded Account', key: 'accountNumber', width: 18 },
-        { header: 'Uploaded RSA Balance', key: 'uploadedRsaBalance', width: 20 },
-        { header: 'System Name', key: 'systemName', width: 30 },
-        { header: 'Uploader', key: 'uploaderName', width: 28 },
-        { header: 'System Account', key: 'systemAccountNumber', width: 18 },
-        { header: 'System RSA Balance', key: 'systemRsaBalance', width: 20 },
-        { header: 'System Status', key: 'systemStatus', width: 16 },
-        { header: 'Match Status', key: 'matchStatus', width: 26 },
-        { header: 'Application ID', key: 'submissionId', width: 28 }
-    ];
-    auditReconciliationResult.matchedRows.forEach((row) => foundSheet.addRow({
-        rowNumber: row.rowNumber,
-        customerName: row.customerName,
-        accountNumber: row.accountNumber,
-        uploadedRsaBalance: row.hasRsaBalance ? row.normalizedRsaBalance : '',
-        systemName: row.systemName,
-        uploaderName: row.uploaderName,
-        systemAccountNumber: row.systemAccountNumber,
-        systemRsaBalance: row.systemRsaBalance,
-        systemStatus: row.systemStatus,
-        matchStatus: row.balanceMatches ? `Found (${row.matchMethod})` : `Found, balance differs (${row.matchMethod})`,
-        submissionId: row.submissionId
-    }));
-    foundSheet.getRow(1).font = { bold: true };
+    if (auditReconciliationResult) {
+        const foundSheet = workbook.addWorksheet('Found Records');
+        foundSheet.columns = [
+            { header: 'Upload Row', key: 'rowNumber', width: 12 },
+            { header: 'Uploaded Name', key: 'customerName', width: 30 },
+            { header: 'Uploaded Account', key: 'accountNumber', width: 18 },
+            { header: 'Uploaded RSA Balance', key: 'uploadedRsaBalance', width: 20 },
+            { header: 'System Name', key: 'systemName', width: 30 },
+            { header: 'Uploader', key: 'uploaderName', width: 28 },
+            { header: 'System Account', key: 'systemAccountNumber', width: 18 },
+            { header: 'System RSA Balance', key: 'systemRsaBalance', width: 20 },
+            { header: 'System Status', key: 'systemStatus', width: 16 },
+            { header: 'Match Status', key: 'matchStatus', width: 26 },
+            { header: 'Application ID', key: 'submissionId', width: 28 }
+        ];
+        auditReconciliationResult.matchedRows.forEach((row) => foundSheet.addRow({
+            rowNumber: row.rowNumber,
+            customerName: row.customerName,
+            accountNumber: row.accountNumber,
+            uploadedRsaBalance: row.hasRsaBalance ? row.normalizedRsaBalance : '',
+            systemName: row.systemName,
+            uploaderName: row.uploaderName,
+            systemAccountNumber: row.systemAccountNumber,
+            systemRsaBalance: row.systemRsaBalance,
+            systemStatus: row.systemStatus,
+            matchStatus: row.balanceMatches ? `Found (${row.matchMethod})` : `Found, balance differs (${row.matchMethod})`,
+            submissionId: row.submissionId
+        }));
+        foundSheet.getRow(1).font = { bold: true };
 
-    const notFoundSheet = workbook.addWorksheet('Not Found');
-    notFoundSheet.columns = [
-        { header: 'Upload Row', key: 'rowNumber', width: 12 },
-        { header: 'Name', key: 'customerName', width: 30 },
-        { header: 'Account Number', key: 'accountNumber', width: 18 },
-        { header: 'RSA Balance', key: 'rsaBalance', width: 20 },
-        { header: 'Result', key: 'reason', width: 48 }
-    ];
-    auditReconciliationResult.unmatchedRows.forEach((row) => notFoundSheet.addRow({
-        rowNumber: row.rowNumber,
-        customerName: row.customerName,
-        accountNumber: row.accountNumber,
-        rsaBalance: row.hasRsaBalance ? row.normalizedRsaBalance : '',
-        reason: row.reason || 'Not found'
-    }));
-    notFoundSheet.getRow(1).font = { bold: true };
+        const notFoundSheet = workbook.addWorksheet('Not Found');
+        notFoundSheet.columns = [
+            { header: 'Upload Row', key: 'rowNumber', width: 12 },
+            { header: 'Name', key: 'customerName', width: 30 },
+            { header: 'Account Number', key: 'accountNumber', width: 18 },
+            { header: 'RSA Balance', key: 'rsaBalance', width: 20 },
+            { header: 'Result', key: 'reason', width: 48 }
+        ];
+        auditReconciliationResult.unmatchedRows.forEach((row) => notFoundSheet.addRow({
+            rowNumber: row.rowNumber,
+            customerName: row.customerName,
+            accountNumber: row.accountNumber,
+            rsaBalance: row.hasRsaBalance ? row.normalizedRsaBalance : '',
+            reason: row.reason || 'Not found'
+        }));
+        notFoundSheet.getRow(1).font = { bold: true };
+    }
+
+    if (auditDuplicateScanResult) {
+        const duplicateSheet = workbook.addWorksheet('Duplicate Applications');
+        duplicateSheet.columns = [
+            { header: 'Group', key: 'group', width: 10 },
+            { header: 'Duplicate Signal', key: 'signal', width: 42 },
+            { header: 'Signal Strength', key: 'strength', width: 16 },
+            { header: 'Customer', key: 'customerName', width: 30 },
+            { header: 'Account Number', key: 'accountNumber', width: 18 },
+            { header: 'PEN', key: 'penNo', width: 22 },
+            { header: 'Status', key: 'status', width: 18 },
+            { header: 'Uploader', key: 'uploader', width: 28 },
+            { header: 'Uploaded At', key: 'uploadedAt', width: 24 },
+            { header: 'Application ID', key: 'submissionId', width: 28 }
+        ];
+        (auditDuplicateScanResult.groups || []).forEach((group, groupIndex) => {
+            (group.rows || []).forEach((sub) => duplicateSheet.addRow({
+                group: groupIndex + 1,
+                signal: group.key || group.signal || '',
+                strength: group.strength || '',
+                customerName: sub.customerName || sub?.customerDetails?.name || '',
+                accountNumber: getCustomerAccountNumber(sub),
+                penNo: getCustomerPenNumber(sub),
+                status: statusLabel(sub.status || ''),
+                uploader: getUserDisplayName(sub.uploadedBy || ''),
+                uploadedAt: formatDate(getSubmissionOriginalUploadAt(sub)),
+                submissionId: sub.id || ''
+            }));
+        });
+        duplicateSheet.getRow(1).font = { bold: true };
+    }
 
     const buffer = await workbook.xlsx.writeBuffer();
     saveBlob(`audit-reconciliation-result-${Date.now()}.xlsx`, new Blob([buffer], {
@@ -2387,6 +2452,134 @@ function getSubmissionUniqueKeyRefs(sub = {}) {
     return keys.map(([type, value]) => doc(db, 'submissionUniqueKeys', getSubmissionUniqueKeyDocId(type, value)));
 }
 
+function showAuditDuplicateRejectModal(submission = {}) {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'modal active audit-action-modal';
+        modal.innerHTML = `
+            <div class="modal-content audit-action-card reject">
+                <div class="audit-action-icon">
+                    <i class="fas fa-ban"></i>
+                </div>
+                <h2>Reject Duplicate Application</h2>
+                <p>Send <strong>${escapeHtml(submission.customerName || 'this application')}</strong> back to the uploader for correction.</p>
+                <textarea id="auditDuplicateRejectReasonInput" rows="4" placeholder="Reason for rejection">Duplicate application found. Please correct the duplicated customer/account details and resubmit.</textarea>
+                <div class="audit-action-actions">
+                    <button type="button" class="cancel-btn" data-audit-duplicate-reject="cancel">Cancel</button>
+                    <button type="button" class="submit-btn danger" data-audit-duplicate-reject="confirm">
+                        <i class="fas fa-paper-plane"></i> Reject
+                    </button>
+                </div>
+            </div>
+        `;
+        const close = (value) => {
+            modal.remove();
+            resolve(value);
+        };
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal || event.target.closest('[data-audit-duplicate-reject="cancel"]')) {
+                close('');
+                return;
+            }
+            if (!event.target.closest('[data-audit-duplicate-reject="confirm"]')) return;
+            const reasonInput = modal.querySelector('#auditDuplicateRejectReasonInput');
+            const reason = String(reasonInput?.value || '').trim();
+            if (!reason) {
+                reasonInput?.classList.add('invalid');
+                return;
+            }
+            close(reason);
+        });
+        document.body.appendChild(modal);
+        setTimeout(() => modal.querySelector('#auditDuplicateRejectReasonInput')?.focus(), 0);
+    });
+}
+
+async function rejectAuditDuplicateApplication(submissionId) {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub) {
+        showNotification('Application not found', 'warning');
+        return;
+    }
+
+    const reason = await showAuditDuplicateRejectModal(sub);
+    if (!reason) return;
+
+    const rejectedBy = currentUser?.email || '';
+    const customerName = sub.customerName || sub?.customerDetails?.name || 'this application';
+    try {
+        await updateDoc(doc(db, 'submissions', submissionId), {
+            status: 'rejected',
+            comment: reason,
+            rejectionHistory: arrayUnion({
+                reason,
+                rejectedAt: new Date().toISOString(),
+                rejectedBy,
+                source: 'audit_duplicate_scan'
+            }),
+            latestRejectionReason: reason,
+            latestRejectedBy: rejectedBy,
+            latestRejectedAt: serverTimestamp(),
+            previousRejectionReason: reason,
+            previousRejectedBy: rejectedBy,
+            previousRejectedAt: serverTimestamp(),
+            resubmittedAfterRejection: false,
+            latestRejectedStage: 'audit',
+            auditDuplicateRejected: true,
+            auditDuplicateRejectedBy: rejectedBy,
+            auditDuplicateRejectedAt: serverTimestamp(),
+            auditDuplicateRejectionReason: reason,
+            updatedAt: serverTimestamp()
+        });
+
+        await addDoc(collection(db, 'audit'), {
+            action: 'audit_duplicate_application_rejected',
+            submissionId,
+            customerName,
+            accountNumber: getCustomerAccountNumber(sub),
+            penNo: getCustomerPenNumber(sub),
+            reason,
+            performedBy: rejectedBy,
+            timestamp: serverTimestamp()
+        }).catch(() => {});
+
+        notifyUserPushEvent({
+            currentUser,
+            recipientEmail: String(sub.uploadedBy || '').trim(),
+            eventType: 'audit_duplicate_application_rejected',
+            title: 'Application Needs Correction',
+            body: `${customerName} was rejected by Audit because it appears duplicated.`,
+            clickUrl: '/dashboard.html#rejected',
+            meta: {
+                submissionId,
+                customerName,
+                reason,
+                rejectedBy
+            }
+        }).catch(() => {});
+
+        const localSub = allSubmissions.find((item) => item.id === submissionId);
+        if (localSub) {
+            localSub.status = 'rejected';
+            localSub.comment = reason;
+            localSub.latestRejectionReason = reason;
+            localSub.latestRejectedBy = rejectedBy;
+            localSub.previousRejectionReason = reason;
+            localSub.previousRejectedBy = rejectedBy;
+            localSub.resubmittedAfterRejection = false;
+            localSub.latestRejectedStage = 'audit';
+            localSub.auditDuplicateRejected = true;
+            localSub.auditDuplicateRejectionReason = reason;
+        }
+
+        auditDuplicateScanResult = buildAuditDuplicateScanResult();
+        showAuditReconciliationView('duplicates');
+        showNotification('Duplicate application rejected for uploader correction.', 'success');
+    } catch (error) {
+        showNotification(`Failed to reject duplicate application: ${error.message || error}`, 'error');
+    }
+}
+
 async function deleteAuditDuplicateApplication(submissionId) {
     const sub = allSubmissions.find((item) => item.id === submissionId);
     if (!sub) {
@@ -2541,6 +2734,7 @@ function showAuditSuccessModal({ title = 'Success', message = '', detail = '' } 
 
 window.openMonitoringApplicationDetails = openApplicationDetailsModal;
 window.openMonitoringApplicationTrack = openApplicationTrackModal;
+window.rejectAuditDuplicateApplication = rejectAuditDuplicateApplication;
 window.deleteAuditDuplicateApplication = deleteAuditDuplicateApplication;
 
 function getAuditPaymentClearPayload(sub = {}) {
@@ -2945,6 +3139,9 @@ function bindEvents() {
         pendingPaymentReportRequest = { kind: 'rejected' };
         openPaymentReportRangeModal();
     });
+    document.querySelectorAll('[data-audit-reconciliation-view]').forEach((button) => {
+        button.addEventListener('click', () => showAuditReconciliationView(button.dataset.auditReconciliationView || 'excel'));
+    });
     auditReconciliationTemplateBtn?.addEventListener('click', async () => {
         const originalHtml = auditReconciliationTemplateBtn.innerHTML;
         auditReconciliationTemplateBtn.disabled = true;
@@ -2968,6 +3165,7 @@ function bindEvents() {
         auditReconciliationFileName = selectedFile?.name || '';
         auditReconciliationSourceRows = [];
         auditReconciliationResult = null;
+        auditReconciliationActiveView = 'excel';
         renderAuditReconciliation();
         if (selectedFile) setTimeout(() => showNotification('File uploaded. Click Run Check to start reconciliation.', 'success'), 0);
     });
@@ -2984,6 +3182,7 @@ function bindEvents() {
             auditReconciliationFileName = file.name;
             auditReconciliationSourceRows = await parseAuditReconciliationFile(file);
             auditReconciliationResult = computeAuditReconciliationResult(auditReconciliationSourceRows);
+            auditReconciliationActiveView = 'excel';
             renderAuditReconciliation();
             showNotification(`Reconciliation complete. ${auditReconciliationResult.matchedRows.length} row(s) found.`, 'success');
         } catch (error) {
@@ -3002,6 +3201,7 @@ function bindEvents() {
         auditDuplicateScanBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
         try {
             auditDuplicateScanResult = buildAuditDuplicateScanResult();
+            auditReconciliationActiveView = 'duplicates';
             renderAuditDuplicateScan();
             showNotification(`Duplicate scan complete. ${auditDuplicateScanResult.groups.length} group(s) found.`, auditDuplicateScanResult.groups.length ? 'warning' : 'success');
         } catch (error) {
@@ -3023,7 +3223,7 @@ function bindEvents() {
         } catch (error) {
             showNotification(error?.message || 'Failed to export result', 'error');
         } finally {
-            auditReconciliationExportBtn.disabled = !auditReconciliationResult;
+            auditReconciliationExportBtn.disabled = !auditReconciliationResult && !auditDuplicateScanResult;
             auditReconciliationExportBtn.innerHTML = originalHtml;
         }
     });
