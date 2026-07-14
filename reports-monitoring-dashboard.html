@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
     <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
-    <link rel="stylesheet" href="css/audit-dashboard.css?v=20260714m">
+    <link rel="stylesheet" href="css/audit-dashboard.css?v=20260714n">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -338,6 +338,8 @@
                         <div class="admin-subtab-strip audit-reconciliation-subtab-strip" id="auditReconciliationSubtabStrip" role="tablist" aria-label="Reconciliation views">
                             <button type="button" class="admin-subtab-btn active" data-audit-reconciliation-view="excel" role="tab" aria-selected="true">Excel Match</button>
                             <button type="button" class="admin-subtab-btn" data-audit-reconciliation-view="duplicates" role="tab" aria-selected="false">Duplicates</button>
+                            <button type="button" class="admin-subtab-btn" data-audit-reconciliation-view="ignored" role="tab" aria-selected="false">Ignored</button>
+                            <button type="button" class="admin-subtab-btn" data-audit-reconciliation-view="rejected" role="tab" aria-selected="false">Rejected</button>
                         </div>
                     </div>
                     <input type="file" id="auditReconciliationFileInput" accept=".xlsx,.csv" hidden>
@@ -382,6 +384,51 @@
                                 </tr>
                             </thead>
                             <tbody id="auditDuplicateScanBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="table-section audit-reconciliation-view" id="auditDuplicateIgnoredWrap" data-audit-reconciliation-panel="ignored" style="display:none;">
+                    <div class="audit-table-toolbar">
+                        <h2>Ignored Duplicate Applications</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Account</th>
+                                    <th>PEN</th>
+                                    <th>Uploader</th>
+                                    <th>Ignored By</th>
+                                    <th>Ignored At</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditDuplicateIgnoredBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="table-section audit-reconciliation-view" id="auditDuplicateRejectedWrap" data-audit-reconciliation-panel="rejected" style="display:none;">
+                    <div class="audit-table-toolbar">
+                        <h2>Rejected Duplicate Applications</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Account</th>
+                                    <th>PEN</th>
+                                    <th>Uploader</th>
+                                    <th>Rejected By</th>
+                                    <th>Rejected At</th>
+                                    <th>Reason</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditDuplicateRejectedBody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -691,7 +738,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/reports-monitoring.js?v=20260714s"></script>
+    <script type="module" src="js/reports-monitoring.js?v=20260714u"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260705b"></script>
 </body>
 </html>

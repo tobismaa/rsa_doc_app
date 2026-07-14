@@ -35,6 +35,7 @@ let auditRenderTimer = null;
 let currentTab = 'overview';
 const AUDIT_DASHBOARD_TABS = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'reconciliation', 'profile', 'help'];
 const AUDIT_BULK_CLEAR_BATCH_SIZE = 200;
+const AUDIT_RECONCILIATION_VIEWS = ['excel', 'duplicates', 'ignored', 'rejected'];
 
 function getInitialAuditTab() {
     const hashTab = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();
@@ -105,6 +106,10 @@ const auditReconciliationSummary = document.getElementById('auditReconciliationS
 const auditDuplicateScanSummary = document.getElementById('auditDuplicateScanSummary');
 const auditDuplicateScanWrap = document.getElementById('auditDuplicateScanWrap');
 const auditDuplicateScanBody = document.getElementById('auditDuplicateScanBody');
+const auditDuplicateIgnoredWrap = document.getElementById('auditDuplicateIgnoredWrap');
+const auditDuplicateIgnoredBody = document.getElementById('auditDuplicateIgnoredBody');
+const auditDuplicateRejectedWrap = document.getElementById('auditDuplicateRejectedWrap');
+const auditDuplicateRejectedBody = document.getElementById('auditDuplicateRejectedBody');
 const auditReconciliationMatchedWrap = document.getElementById('auditReconciliationMatchedWrap');
 const auditReconciliationMatchedBody = document.getElementById('auditReconciliationMatchedBody');
 const auditReconciliationUnmatchedWrap = document.getElementById('auditReconciliationUnmatchedWrap');
@@ -861,7 +866,7 @@ function resetAuditReconciliationState() {
 }
 
 function syncAuditReconciliationViewVisibility() {
-    const activeView = auditReconciliationActiveView === 'duplicates' ? 'duplicates' : 'excel';
+    const activeView = AUDIT_RECONCILIATION_VIEWS.includes(auditReconciliationActiveView) ? auditReconciliationActiveView : 'excel';
     document.querySelectorAll('[data-audit-reconciliation-view]').forEach((button) => {
         const isActive = button.dataset.auditReconciliationView === activeView;
         button.classList.toggle('active', isActive);
@@ -875,9 +880,11 @@ function syncAuditReconciliationViewVisibility() {
 }
 
 function showAuditReconciliationView(viewName = 'excel') {
-    auditReconciliationActiveView = viewName === 'duplicates' ? 'duplicates' : 'excel';
+    auditReconciliationActiveView = AUDIT_RECONCILIATION_VIEWS.includes(viewName) ? viewName : 'excel';
     renderAuditReconciliation();
     renderAuditDuplicateScan();
+    renderAuditDuplicateIgnoredTable();
+    renderAuditDuplicateRejectedTable();
     syncAuditReconciliationViewVisibility();
 }
 
@@ -1119,6 +1126,69 @@ function renderAuditDuplicateScan() {
             ${spacer}
         `;
     }).join('');
+    syncAuditReconciliationViewVisibility();
+}
+
+function getAuditDuplicateIgnoredRows() {
+    return allSubmissions
+        .filter((sub) => sub.auditDuplicateIgnored === true)
+        .sort((a, b) => getTimestampMillis(b.auditDuplicateIgnoredAt || b.updatedAt) - getTimestampMillis(a.auditDuplicateIgnoredAt || a.updatedAt));
+}
+
+function getAuditDuplicateRejectedRows() {
+    return allSubmissions
+        .filter((sub) => sub.auditDuplicateRejected === true)
+        .sort((a, b) => getTimestampMillis(b.auditDuplicateRejectedAt || b.latestRejectedAt || b.updatedAt) - getTimestampMillis(a.auditDuplicateRejectedAt || a.latestRejectedAt || a.updatedAt));
+}
+
+function renderAuditDuplicateIgnoredTable() {
+    if (!auditDuplicateIgnoredWrap || !auditDuplicateIgnoredBody) return;
+    const rows = getAuditDuplicateIgnoredRows();
+    auditDuplicateIgnoredWrap.style.display = 'block';
+    auditDuplicateIgnoredBody.innerHTML = rows.length
+        ? rows.map((sub) => `
+            <tr>
+                <td><strong>${escapeHtml(sub.customerName || sub?.customerDetails?.name || 'Unknown')}</strong></td>
+                <td>${escapeHtml(getCustomerAccountNumber(sub) || '-')}</td>
+                <td>${escapeHtml(getCustomerPenNumber(sub) || '-')}</td>
+                <td>${escapeHtml(getUserDisplayName(sub.uploadedBy || ''))}</td>
+                <td>${escapeHtml(getUserDisplayName(sub.auditDuplicateIgnoredBy || ''))}</td>
+                <td>${escapeHtml(formatDate(sub.auditDuplicateIgnoredAt || sub.updatedAt))}</td>
+                <td>
+                    <div class="audit-duplicate-actions">
+                        <button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>
+                        <button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationTrack('${sub.id}')"><i class="fas fa-route"></i> Track</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('')
+        : '<tr><td colspan="7" class="no-data">No ignored duplicate applications</td></tr>';
+    syncAuditReconciliationViewVisibility();
+}
+
+function renderAuditDuplicateRejectedTable() {
+    if (!auditDuplicateRejectedWrap || !auditDuplicateRejectedBody) return;
+    const rows = getAuditDuplicateRejectedRows();
+    auditDuplicateRejectedWrap.style.display = 'block';
+    auditDuplicateRejectedBody.innerHTML = rows.length
+        ? rows.map((sub) => `
+            <tr>
+                <td><strong>${escapeHtml(sub.customerName || sub?.customerDetails?.name || 'Unknown')}</strong></td>
+                <td>${escapeHtml(getCustomerAccountNumber(sub) || '-')}</td>
+                <td>${escapeHtml(getCustomerPenNumber(sub) || '-')}</td>
+                <td>${escapeHtml(getUserDisplayName(sub.uploadedBy || ''))}</td>
+                <td>${escapeHtml(getUserDisplayName(sub.auditDuplicateRejectedBy || sub.latestRejectedBy || ''))}</td>
+                <td>${escapeHtml(formatDate(sub.auditDuplicateRejectedAt || sub.latestRejectedAt || sub.updatedAt))}</td>
+                <td>${escapeHtml(sub.auditDuplicateRejectionReason || sub.latestRejectionReason || sub.comment || '-')}</td>
+                <td>
+                    <div class="audit-duplicate-actions">
+                        <button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>
+                        <button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationTrack('${sub.id}')"><i class="fas fa-route"></i> Track</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('')
+        : '<tr><td colspan="8" class="no-data">No rejected duplicate applications</td></tr>';
     syncAuditReconciliationViewVisibility();
 }
 
@@ -2317,6 +2387,8 @@ function renderCurrentTab() {
     if (currentTab === 'reconciliation') {
         renderAuditReconciliation();
         renderAuditDuplicateScan();
+        renderAuditDuplicateIgnoredTable();
+        renderAuditDuplicateRejectedTable();
         renderAuditPaidReconciliation();
     }
 }
@@ -2503,6 +2575,40 @@ function showAuditDuplicateRejectModal(submission = {}) {
     });
 }
 
+function showAuditConfirmModal({ title = 'Confirm Action', message = '', confirmLabel = 'Confirm', icon = 'fa-check', danger = false } = {}) {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'modal active audit-action-modal';
+        modal.innerHTML = `
+            <div class="modal-content audit-action-card ${danger ? 'reject' : 'accept'}">
+                <div class="audit-action-icon">
+                    <i class="fas ${escapeHtml(icon)}"></i>
+                </div>
+                <h2>${escapeHtml(title)}</h2>
+                <p>${escapeHtml(message)}</p>
+                <div class="audit-action-actions">
+                    <button type="button" class="cancel-btn" data-audit-confirm="cancel">Cancel</button>
+                    <button type="button" class="submit-btn ${danger ? 'danger' : ''}" data-audit-confirm="confirm">
+                        <i class="fas ${escapeHtml(icon)}"></i> ${escapeHtml(confirmLabel)}
+                    </button>
+                </div>
+            </div>
+        `;
+        const close = (value) => {
+            modal.remove();
+            resolve(value);
+        };
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal || event.target.closest('[data-audit-confirm="cancel"]')) {
+                close(false);
+                return;
+            }
+            if (event.target.closest('[data-audit-confirm="confirm"]')) close(true);
+        });
+        document.body.appendChild(modal);
+    });
+}
+
 async function rejectAuditDuplicateApplication(submissionId) {
     const sub = allSubmissions.find((item) => item.id === submissionId);
     if (!sub) {
@@ -2577,6 +2683,8 @@ async function rejectAuditDuplicateApplication(submissionId) {
             localSub.resubmittedAfterRejection = false;
             localSub.latestRejectedStage = 'audit';
             localSub.auditDuplicateRejected = true;
+            localSub.auditDuplicateRejectedAt = new Date().toISOString();
+            localSub.auditDuplicateRejectedBy = rejectedBy;
             localSub.auditDuplicateRejectionReason = reason;
         }
 
@@ -2596,7 +2704,12 @@ async function ignoreAuditDuplicateApplication(submissionId) {
     }
 
     const customerName = sub.customerName || sub?.customerDetails?.name || 'this application';
-    const confirmed = window.confirm(`Ignore "${customerName}" in duplicate checks?\n\nIt will no longer appear in Find Duplicates unless this flag is changed in the database.`);
+    const confirmed = await showAuditConfirmModal({
+        title: 'Ignore Duplicate',
+        message: `Ignore "${customerName}" in duplicate checks? It will no longer appear in Find Duplicates unless this flag is changed in the database.`,
+        confirmLabel: 'Ignore',
+        icon: 'fa-eye-slash'
+    });
     if (!confirmed) return;
 
     try {
@@ -3136,11 +3249,15 @@ window.toggleAuditApplicationFreeze = async (submissionId, shouldFreeze) => {
     }
 
     const action = shouldFreeze ? 'freeze' : 'unfreeze';
-    const confirmed = window.confirm(
-        shouldFreeze
+    const confirmed = await showAuditConfirmModal({
+        title: shouldFreeze ? 'Freeze Application' : 'Unfreeze Application',
+        message: shouldFreeze
             ? `Freeze ${sub.customerName || 'this application'}? The uploader will not be able to resubmit, dissolve, chat, or make other changes until Audit unfreezes it.`
-            : `Unfreeze ${sub.customerName || 'this application'}? The uploader will be able to act on it again.`
-    );
+            : `Unfreeze ${sub.customerName || 'this application'}? The uploader will be able to act on it again.`,
+        confirmLabel: shouldFreeze ? 'Freeze' : 'Unfreeze',
+        icon: shouldFreeze ? 'fa-snowflake' : 'fa-unlock',
+        danger: shouldFreeze
+    });
     if (!confirmed) return;
 
     try {
