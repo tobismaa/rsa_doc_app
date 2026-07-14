@@ -468,6 +468,9 @@
                     <button type="button" class="audit-paid-results-tab active" data-paid-reconciliation-view="matched" role="tab" aria-selected="true">
                         <i class="fas fa-link"></i> Matched Records
                     </button>
+                    <button type="button" class="audit-paid-results-tab" data-paid-reconciliation-view="not-selected" role="tab" aria-selected="false">
+                        <i class="fas fa-ban"></i> Not Selected for Clearing
+                    </button>
                     <button type="button" class="audit-paid-results-tab" data-paid-reconciliation-view="unmatched" role="tab" aria-selected="false">
                         <i class="fas fa-triangle-exclamation"></i> Unmatched Records
                     </button>
@@ -498,6 +501,30 @@
                                 </tr>
                             </thead>
                             <tbody id="auditPaidReconciliationMatchedBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="table-section audit-paid-results-view" id="auditPaidReconciliationNotSelectedWrap" style="display:none;">
+                    <div class="audit-table-toolbar">
+                        <h2>Not Selected for Clearing</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Upload Row</th>
+                                    <th>Uploaded Name</th>
+                                    <th>Uploaded Account</th>
+                                    <th>Uploaded 25% RSA Balance</th>
+                                    <th>Uploaded Status</th>
+                                    <th>System Name</th>
+                                    <th>System Account</th>
+                                    <th>System Status</th>
+                                    <th>Reason</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditPaidReconciliationNotSelectedBody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -630,7 +657,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/reports-monitoring.js?v=20260714d"></script>
+    <script type="module" src="js/reports-monitoring.js?v=20260714f"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260705b"></script>
 </body>
 </html>

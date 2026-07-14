@@ -112,6 +112,8 @@ const auditPaidReconciliationFileMeta = document.getElementById('auditPaidReconc
 const auditPaidReconciliationSummary = document.getElementById('auditPaidReconciliationSummary');
 const auditPaidReconciliationMatchedWrap = document.getElementById('auditPaidReconciliationMatchedWrap');
 const auditPaidReconciliationMatchedBody = document.getElementById('auditPaidReconciliationMatchedBody');
+const auditPaidReconciliationNotSelectedWrap = document.getElementById('auditPaidReconciliationNotSelectedWrap');
+const auditPaidReconciliationNotSelectedBody = document.getElementById('auditPaidReconciliationNotSelectedBody');
 const auditPaidReconciliationUnmatchedWrap = document.getElementById('auditPaidReconciliationUnmatchedWrap');
 const auditPaidReconciliationUnmatchedBody = document.getElementById('auditPaidReconciliationUnmatchedBody');
 const paymentReportRangeModal = document.getElementById('paymentReportRangeModal');
@@ -542,6 +544,10 @@ function isSystemPaidForClearing(row = {}) {
     return String(row?.submission?.status || '').toLowerCase() === 'paid';
 }
 
+function isAuditPaidRowClearable(row = {}) {
+    return isSystemPaidForClearing(row) && isClearableImportStatus(row);
+}
+
 function getLatestSubmissionMillis(sub = {}) {
     return getTimestampMillis(sub.updatedAt || sub.paidAt || sub.clearedAt || sub.uploadedAt || getSubmissionCurrentStageEntryAt(sub));
 }
@@ -627,7 +633,7 @@ function recomputeAuditPaidReconciliationResult() {
         auditPaidReconciliationSourceRows,
         getAuditPaidReconciliationCandidates(currentAuditPaidScope)
     );
-    const validSubmissionIds = new Set((auditPaidReconciliationResult?.matchedRows || []).filter((row) => isSystemPaidForClearing(row)).map((row) => row.submissionId).filter(Boolean));
+    const validSubmissionIds = new Set((auditPaidReconciliationResult?.matchedRows || []).filter((row) => isAuditPaidRowClearable(row)).map((row) => row.submissionId).filter(Boolean));
     auditPaidReconciliationSelectedSubmissionIds = auditPaidReconciliationSelectedSubmissionIds.filter((submissionId) => validSubmissionIds.has(submissionId));
 }
 
@@ -660,7 +666,7 @@ function closeAuditPaidReconciliationResultsModal() {
 }
 
 function showAuditPaidReconciliationResultsTab(tabName = 'matched') {
-    auditPaidReconciliationActiveResultsTab = tabName === 'unmatched' ? 'unmatched' : 'matched';
+    auditPaidReconciliationActiveResultsTab = ['matched', 'not-selected', 'unmatched'].includes(tabName) ? tabName : 'matched';
     document.querySelectorAll('[data-paid-reconciliation-view]').forEach((button) => {
         const isActive = button.dataset.paidReconciliationView === auditPaidReconciliationActiveResultsTab;
         button.classList.toggle('active', isActive);
@@ -683,6 +689,33 @@ function renderAuditPaidReconciliation() {
     const matchedRows = auditPaidReconciliationResult?.matchedRows || [];
     const unmatchedRows = auditPaidReconciliationResult?.unmatchedRows || [];
     const selectedSubmissionIds = Array.from(new Set(auditPaidReconciliationSelectedSubmissionIds.filter(Boolean)));
+    const selectedSet = new Set(selectedSubmissionIds);
+    const countedSelectedIds = new Set();
+    const notSelectedRows = matchedRows.reduce((rows, row) => {
+        const submissionId = String(row.submissionId || '').trim();
+        const isSelected = submissionId && selectedSet.has(submissionId);
+        const isClearable = isAuditPaidRowClearable(row);
+        if (!isSelected || !isClearable) {
+            rows.push({
+                ...row,
+                notSelectedReason: !isClearable
+                    ? (!isSystemPaidForClearing(row)
+                        ? `System status is ${row.systemStatus || 'not paid'}`
+                        : `Uploaded status is ${row.sourceStatus || 'not clearable'}`)
+                    : 'Manually not selected'
+            });
+            return rows;
+        }
+        if (countedSelectedIds.has(submissionId)) {
+            rows.push({
+                ...row,
+                notSelectedReason: 'Duplicate upload row for the same application'
+            });
+            return rows;
+        }
+        countedSelectedIds.add(submissionId);
+        return rows;
+    }, []);
     const selectedCount = selectedSubmissionIds.length;
 
     if (auditPaidReconciliationFileMeta) {
@@ -692,7 +725,7 @@ function renderAuditPaidReconciliation() {
     }
     if (auditPaidReconciliationRunBtn) auditPaidReconciliationRunBtn.disabled = !selectedFile;
     if (auditPaidReconciliationResetBtn) auditPaidReconciliationResetBtn.disabled = !selectedFile && !auditPaidReconciliationResult && !auditPaidReconciliationFileName;
-    if (auditPaidReconciliationSelectAllBtn) auditPaidReconciliationSelectAllBtn.disabled = !matchedRows.some((row) => isSystemPaidForClearing(row));
+    if (auditPaidReconciliationSelectAllBtn) auditPaidReconciliationSelectAllBtn.disabled = !matchedRows.some((row) => isAuditPaidRowClearable(row));
     if (auditPaidReconciliationClearSelectedBtn) auditPaidReconciliationClearSelectedBtn.disabled = !selectedCount;
 
     if (!auditPaidReconciliationResult) {
@@ -702,6 +735,8 @@ function renderAuditPaidReconciliation() {
         }
         if (auditPaidReconciliationMatchedWrap) auditPaidReconciliationMatchedWrap.style.display = 'none';
         if (auditPaidReconciliationMatchedBody) auditPaidReconciliationMatchedBody.innerHTML = '';
+        if (auditPaidReconciliationNotSelectedWrap) auditPaidReconciliationNotSelectedWrap.style.display = 'none';
+        if (auditPaidReconciliationNotSelectedBody) auditPaidReconciliationNotSelectedBody.innerHTML = '';
         if (auditPaidReconciliationUnmatchedWrap) auditPaidReconciliationUnmatchedWrap.style.display = 'none';
         if (auditPaidReconciliationUnmatchedBody) auditPaidReconciliationUnmatchedBody.innerHTML = '';
         return;
@@ -715,6 +750,7 @@ function renderAuditPaidReconciliation() {
             { label: 'Exact Balance', value: auditPaidReconciliationResult.exactCount },
             { label: 'Balance Differs', value: auditPaidReconciliationResult.balanceDifferenceCount },
             { label: 'Not Found', value: unmatchedRows.length },
+            { label: 'Not Selected', value: notSelectedRows.length },
             { label: 'Selected for Clearing', value: selectedCount }
         ].map((chip) => `
             <div class="audit-reconciliation-chip">
@@ -732,18 +768,20 @@ function renderAuditPaidReconciliation() {
 
     if (auditPaidReconciliationMatchedWrap) auditPaidReconciliationMatchedWrap.style.display = auditPaidReconciliationActiveResultsTab === 'matched' ? 'block' : 'none';
     if (auditPaidReconciliationMatchedBody) {
-        const selectedSet = new Set(selectedSubmissionIds);
         auditPaidReconciliationMatchedBody.innerHTML = matchedRows.length
             ? matchedRows.map((row) => {
                 const isPaid = isSystemPaidForClearing(row);
+                const isClearable = isAuditPaidRowClearable(row);
                 const statusClass = isPaid && row.balanceMatches ? 'audit-recon-status exact' : 'audit-recon-status partial';
                 const matchText = !isPaid
                     ? `Found but ${row.systemStatus || 'not paid'}`
-                    : (row.balanceMatches ? `Exact match (${row.matchMethod})` : `Balance differs (${row.matchMethod})`);
+                    : (!isClearableImportStatus(row)
+                        ? `Found but uploaded status is ${row.sourceStatus || 'not clearable'}`
+                        : (row.balanceMatches ? `Exact match (${row.matchMethod})` : `Balance differs (${row.matchMethod})`));
                 const isChecked = selectedSet.has(row.submissionId) ? 'checked' : '';
                 return `
                     <tr>
-                        <td><input type="checkbox" data-paid-recon-select="${escapeHtml(row.submissionId)}" ${isChecked} ${isPaid ? '' : 'disabled'}></td>
+                        <td><input type="checkbox" data-paid-recon-select="${escapeHtml(row.submissionId)}" ${isChecked} ${isClearable ? '' : 'disabled'}></td>
                         <td>${escapeHtml(row.rowNumber)}</td>
                         <td>${escapeHtml(row.customerName || '-')}</td>
                         <td>${escapeHtml(row.accountNumber || '-')}</td>
@@ -753,12 +791,35 @@ function renderAuditPaidReconciliation() {
                         <td>${escapeHtml(row.uploaderName || '-')}</td>
                         <td>${escapeHtml(row.systemAccountNumber || '-')}</td>
                         <td>${escapeHtml(formatDate(row.submission?.paidAt || row.submission?.updatedAt || ''))}</td>
-                        <td><span class="${isPaid ? statusClass : 'audit-recon-status partial'}">${escapeHtml(matchText)}</span></td>
+                        <td><span class="${isClearable ? statusClass : 'audit-recon-status partial'}">${escapeHtml(matchText)}</span></td>
                         <td><button type="button" class="action-btn" onclick="window.openMonitoringApplicationDetails('${row.submissionId}')"><i class="fas fa-eye"></i> View</button></td>
                     </tr>
                 `;
             }).join('')
             : '<tr><td colspan="12" class="no-data">No paid applications matched this file</td></tr>';
+    }
+
+    if (auditPaidReconciliationNotSelectedWrap) auditPaidReconciliationNotSelectedWrap.style.display = auditPaidReconciliationActiveResultsTab === 'not-selected' ? 'block' : 'none';
+    if (auditPaidReconciliationNotSelectedBody) {
+        auditPaidReconciliationNotSelectedBody.innerHTML = notSelectedRows.length
+            ? notSelectedRows.map((row) => {
+                const reason = row.notSelectedReason || 'Not selected for clearing';
+                return `
+                    <tr>
+                        <td>${escapeHtml(row.rowNumber)}</td>
+                        <td>${escapeHtml(row.customerName || '-')}</td>
+                        <td>${escapeHtml(row.accountNumber || '-')}</td>
+                        <td>${row.hasRsaBalance ? formatCurrency(row.normalizedRsaBalance) : '-'}</td>
+                        <td>${escapeHtml(row.sourceStatus || '-')}</td>
+                        <td><strong>${escapeHtml(row.systemName || '-')}</strong></td>
+                        <td>${escapeHtml(row.systemAccountNumber || '-')}</td>
+                        <td>${escapeHtml(row.systemStatus || '-')}</td>
+                        <td><span class="audit-recon-status partial">${escapeHtml(reason)}</span></td>
+                        <td><button type="button" class="action-btn" onclick="window.openMonitoringApplicationDetails('${row.submissionId}')"><i class="fas fa-eye"></i> View</button></td>
+                    </tr>
+                `;
+            }).join('')
+            : '<tr><td colspan="10" class="no-data">All matched clearable records are selected</td></tr>';
     }
 
     if (auditPaidReconciliationUnmatchedWrap) auditPaidReconciliationUnmatchedWrap.style.display = auditPaidReconciliationActiveResultsTab === 'unmatched' ? 'block' : 'none';
@@ -2530,8 +2591,7 @@ function bindEvents() {
             recomputeAuditPaidReconciliationResult();
             auditPaidReconciliationSelectedSubmissionIds = Array.from(new Set(
                 (auditPaidReconciliationResult?.matchedRows || [])
-                    .filter((row) => isClearableImportStatus(row))
-                    .filter((row) => isSystemPaidForClearing(row))
+                    .filter((row) => isAuditPaidRowClearable(row))
                     .map((row) => row.submissionId)
                     .filter(Boolean)
             ));
@@ -2554,7 +2614,7 @@ function bindEvents() {
     auditPaidReconciliationSelectAllBtn?.addEventListener('click', () => {
         auditPaidReconciliationSelectedSubmissionIds = Array.from(new Set(
             (auditPaidReconciliationResult?.matchedRows || [])
-                .filter((row) => isSystemPaidForClearing(row))
+                .filter((row) => isAuditPaidRowClearable(row))
                 .map((row) => row.submissionId)
                 .filter(Boolean)
         ));
