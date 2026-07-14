@@ -1087,6 +1087,7 @@ async function getApplicationStage(submission) {
   if (!submission) return 'Unknown';
   try {
     const status = String(submission.status || '').toLowerCase();
+    if (status === 'deleted') return 'Deleted';
     if (status === 'cleared') return 'Cleared';
     if (status === 'paid') return 'Paid';
     if (status === 'sent_to_pfa' || status === 'rsa_submitted') return 'Sent to PFA';
@@ -1255,7 +1256,7 @@ let currentUploaderApplicationTab = 'draft';
 let currentUploaderPaidScope = 'mine';
 let submissionInProgress = false;
 const UPLOADER_DASHBOARD_TABS = ['overview', 'draft', 'applications', 'pending', 'approved', 'rejected', 'paid', 'register-agent', 'profile', 'help'];
-const UPLOADER_APPLICATION_TABS = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'audit', 'paid', 'cleared'];
+const UPLOADER_APPLICATION_TABS = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'audit', 'paid', 'cleared', 'deleted'];
 let registeredAgents = [];
 let agentAccountLookupSequence = 0;
 let agentAccountLookupDebounce = null;
@@ -5401,6 +5402,7 @@ function isUploaderSentToPfaStatus(submission = {}) {
 function getUploaderApplicationBucket(submission = {}) {
   const status = String(submission.status || '').toLowerCase();
   const auditStatus = String(submission.auditCommissionStatus || '').toLowerCase();
+  if (status === 'deleted') return 'deleted';
   if (status === 'draft') return 'draft';
   if (status === 'pending') return 'pending';
   if (auditStatus === 'rejected') return 'rejected';
@@ -5445,7 +5447,17 @@ function getUploaderApplicationCounts() {
     const bucket = getUploaderApplicationBucket(sub);
     if (bucket && Object.prototype.hasOwnProperty.call(acc, bucket) && isVisibleUploaderApplicationForTab(sub, bucket)) acc[bucket] += 1;
     return acc;
-  }, { draft: 0, pending: 0, approved: 0, rejected: 0, sent_to_pfa: 0, audit: 0, paid: 0, cleared: 0 });
+  }, { draft: 0, pending: 0, approved: 0, rejected: 0, sent_to_pfa: 0, audit: 0, paid: 0, cleared: 0, deleted: 0 });
+}
+
+function getUploaderDeletedReason(submission = {}) {
+  return String(
+    submission.deletedReason ||
+    submission.auditDuplicateDeleteReason ||
+    submission.deleteReason ||
+    submission.comment ||
+    ''
+  ).trim() || 'No reason provided';
 }
 
 function getSubmissionPfaName(submission = {}) {
@@ -5507,7 +5519,8 @@ function getUploaderApplicationRows(tab = currentUploaderApplicationTab) {
         getSubmissionAgentDisplayName(sub),
         getSubmissionPfaName(sub),
         formatSubmissionStatusLabel(sub.status || ''),
-        getUploaderAuditNote(sub)
+        getUploaderAuditNote(sub),
+        getUploaderDeletedReason(sub)
       ].some((value) => String(value || '').toLowerCase().includes(search));
     })
     .sort((a, b) => getSubmissionSortMillis(b) - getSubmissionSortMillis(a));
@@ -5523,7 +5536,8 @@ function renderUploaderApplicationBadges() {
     appSentToPfaCount: counts.sent_to_pfa,
     appAuditCount: counts.audit,
     appPaidCount: counts.paid,
-    appClearedCount: counts.cleared
+    appClearedCount: counts.cleared,
+    appDeletedCount: counts.deleted
   };
   Object.entries(badgeMap).forEach(([id, value]) => {
     const badge = document.getElementById(id);
@@ -5663,6 +5677,33 @@ async function renderUploaderApplicationsTable() {
           </div>`
         : `<button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-edit"></i> Re-upload</button>`;
       html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${reasonBtn}</td><td>${actionCell}</td><td>${getUploaderSubmissionDetailsButtonHtml(sub.id)} ${getUploaderSubmissionDocsButtonHtml(sub.id)}</td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    }
+    applicationsTableBody.innerHTML = html;
+    return;
+  }
+
+  if (currentUploaderApplicationTab === 'deleted') {
+    setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Deleted By', 'Deleted Date/Time', 'Uploaded Date/Time', 'Reason']);
+    if (!rows.length) {
+      renderUploaderApplicationsEmpty('deleted');
+      return;
+    }
+    let html = '';
+    for (const sub of rows) {
+      const deletedByKey = normalizeEmail(sub.deletedBy || sub.auditDuplicateDeletedBy || '');
+      const deletedBy = deletedByKey ? await getUserFullName(deletedByKey) : '-';
+      const deletedAt = safeFormatDate(sub.deletedAt || sub.auditDuplicateDeletedAt || sub.updatedAt);
+      const uploadedAt = safeFormatDate(getSubmissionOriginalUploadAt(sub));
+      html += `
+        <tr data-submission-id="${sub.id}">
+          <td><strong>${escapeHtml(sub.customerName || '-')}</strong></td>
+          <td>${escapeHtml(getSubmissionAgentDisplayName(sub))}</td>
+          <td>${escapeHtml(deletedBy || '-')}</td>
+          <td>${deletedAt}</td>
+          <td>${uploadedAt}</td>
+          <td>${escapeHtml(getUploaderDeletedReason(sub))}</td>
+        </tr>
+      `;
     }
     applicationsTableBody.innerHTML = html;
     return;
@@ -6565,6 +6606,7 @@ function formatSubmissionStatusLabel(status) {
   if (normalized === 'processing_to_pfa' || normalized === 'approved') return 'Processing to PFA';
   if (normalized === 'sent_to_pfa' || normalized === 'rsa_submitted') return 'Sent to PFA';
   if (normalized === 'rejected_by_rsa') return 'Rejected by RSA';
+  if (normalized === 'deleted') return 'Deleted';
   if (normalized === 'paid') return 'Paid';
   if (normalized === 'cleared') return 'Cleared';
   return normalized.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());

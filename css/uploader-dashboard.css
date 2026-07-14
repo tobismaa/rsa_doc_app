@@ -884,6 +884,7 @@ body {
 .status-badge.status-pending { background: #fef3c7; color: #92400e; }
 .status-badge.status-approved { background: #d1fae5; color: #065f46; }
 .status-badge.status-rejected { background: #fee2e2; color: #991b1b; }
+.status-badge.status-deleted { background: #e5e7eb; color: #374151; }
 
 .action-btn {
   background: transparent;

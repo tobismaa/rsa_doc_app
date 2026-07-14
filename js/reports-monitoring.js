@@ -6,6 +6,7 @@ import {
     where,
     addDoc,
     doc,
+    getDoc,
     onSnapshot,
     serverTimestamp,
     arrayUnion,
@@ -668,7 +669,7 @@ function computeAuditReconciliationResult(rows = []) {
 }
 
 function getAuditableDuplicateSubmissions() {
-    const ignoredStatuses = new Set(['draft', 'rejected', 'rejected_by_reviewer', 'rejected_by_rsa']);
+    const ignoredStatuses = new Set(['draft', 'rejected', 'rejected_by_reviewer', 'rejected_by_rsa', 'deleted']);
     return allSubmissions.filter((sub) => {
         const status = String(sub.status || '').toLowerCase();
         return !ignoredStatuses.has(status);
@@ -1071,33 +1072,24 @@ function renderAuditDuplicateScan() {
     if (auditDuplicateScanWrap) auditDuplicateScanWrap.style.display = 'block';
     if (!auditDuplicateScanBody) return;
     if (!groups.length) {
-        auditDuplicateScanBody.innerHTML = '<tr><td colspan="9" class="no-data">No duplicate applications found</td></tr>';
+        auditDuplicateScanBody.innerHTML = '<tr><td colspan="7" class="no-data">No duplicate applications found</td></tr>';
         syncAuditReconciliationViewVisibility();
         return;
     }
 
-    auditDuplicateScanBody.innerHTML = groups.map((group, groupIndex) => (
-        group.rows.map((sub, rowIndex) => {
+    auditDuplicateScanBody.innerHTML = groups.map((group, groupIndex) => {
+        const signalClass = group.strength === 'strong' ? 'audit-recon-status partial' : 'audit-recon-status info';
+        const groupRows = group.rows.map((sub) => {
             const accountNumber = getCustomerAccountNumber(sub);
             const penNumber = getCustomerPenNumber(sub);
-            const signalClass = group.strength === 'strong' ? 'audit-recon-status partial' : 'audit-recon-status info';
-            const signalText = rowIndex === 0 ? group.key : 'Same duplicate group';
-            const signalMeta = rowIndex === 0 ? `${group.rows.length} independent applications` : '';
             return `
-                <tr>
-                    <td>
-                        <span class="${signalClass} audit-duplicate-signal">
-                            <span>${escapeHtml(signalText)}</span>
-                            ${signalMeta ? `<small>${escapeHtml(signalMeta)}</small>` : ''}
-                        </span>
-                    </td>
+                <tr class="audit-duplicate-member-row">
                     <td class="audit-duplicate-customer"><strong>${escapeHtml(sub.customerName || sub?.customerDetails?.name || 'Unknown')}</strong></td>
                     <td class="audit-duplicate-nowrap">${escapeHtml(accountNumber || '-')}</td>
                     <td class="audit-duplicate-nowrap">${escapeHtml(penNumber || '-')}</td>
                     <td><span class="audit-duplicate-status">${escapeHtml(statusLabel(sub.status || '-'))}</span></td>
                     <td>${escapeHtml(getUserDisplayName(sub.uploadedBy || ''))}</td>
                     <td class="audit-duplicate-nowrap">${escapeHtml(formatDate(getSubmissionOriginalUploadAt(sub)))}</td>
-                    <td><code class="audit-duplicate-id">${escapeHtml(sub.id || '-')}</code></td>
                     <td>
                         <div class="audit-duplicate-actions">
                             <button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>
@@ -1107,10 +1099,24 @@ function renderAuditDuplicateScan() {
                         </div>
                     </td>
                 </tr>
-                ${rowIndex === group.rows.length - 1 && groupIndex < groups.length - 1 ? '<tr><td colspan="9" style="height:8px;background:#f8fafc;"></td></tr>' : ''}
             `;
-        }).join('')
-    )).join('');
+        }).join('');
+        const spacer = groupIndex < groups.length - 1 ? '<tr class="audit-duplicate-group-spacer"><td colspan="7"></td></tr>' : '';
+        return `
+            <tr class="audit-duplicate-group-row">
+                <td colspan="7">
+                    <div class="audit-duplicate-group-heading">
+                        <span class="${signalClass} audit-duplicate-group-badge">${escapeHtml(group.strength === 'strong' ? 'Strong duplicate signal' : 'Possible duplicate signal')}</span>
+                        <span class="audit-duplicate-group-count">${escapeHtml(`${group.rows.length} applications`)}</span>
+                        <strong>Group ${groupIndex + 1}</strong>
+                        <span>${escapeHtml(group.key || group.signal || 'Duplicate match')}</span>
+                    </div>
+                </td>
+            </tr>
+            ${groupRows}
+            ${spacer}
+        `;
+    }).join('');
     syncAuditReconciliationViewVisibility();
 }
 
@@ -2580,6 +2586,65 @@ async function rejectAuditDuplicateApplication(submissionId) {
     }
 }
 
+function showAuditDuplicateDeleteModal(submission = {}) {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'modal active audit-action-modal';
+        modal.innerHTML = `
+            <div class="modal-content audit-action-card reject">
+                <div class="audit-action-icon">
+                    <i class="fas fa-trash"></i>
+                </div>
+                <h2>Delete Duplicate Application</h2>
+                <p>Move <strong>${escapeHtml(submission.customerName || 'this application')}</strong> to the uploader's Deleted records.</p>
+                <textarea id="auditDuplicateDeleteReasonInput" rows="4" placeholder="Reason for delete">Duplicate application deleted by Audit.</textarea>
+                <div class="audit-action-actions">
+                    <button type="button" class="cancel-btn" data-audit-duplicate-delete="cancel">Cancel</button>
+                    <button type="button" class="submit-btn danger" data-audit-duplicate-delete="confirm">
+                        <i class="fas fa-trash"></i> Delete
+                    </button>
+                </div>
+            </div>
+        `;
+        const close = (value) => {
+            modal.remove();
+            resolve(value);
+        };
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal || event.target.closest('[data-audit-duplicate-delete="cancel"]')) {
+                close('');
+                return;
+            }
+            if (!event.target.closest('[data-audit-duplicate-delete="confirm"]')) return;
+            const reasonInput = modal.querySelector('#auditDuplicateDeleteReasonInput');
+            const reason = String(reasonInput?.value || '').trim();
+            if (!reason) {
+                reasonInput?.classList.add('invalid');
+                return;
+            }
+            close(reason);
+        });
+        document.body.appendChild(modal);
+        setTimeout(() => modal.querySelector('#auditDuplicateDeleteReasonInput')?.focus(), 0);
+    });
+}
+
+async function getOwnedSubmissionUniqueKeyRefs(sub = {}) {
+    const submissionId = String(sub?.id || '').trim();
+    if (!submissionId) return [];
+    const refs = getSubmissionUniqueKeyRefs(sub);
+    const ownedRefs = [];
+    await Promise.all(refs.map(async (keyRef) => {
+        try {
+            const snap = await getDoc(keyRef);
+            if (snap.exists() && String(snap.data()?.submissionId || '').trim() === submissionId) {
+                ownedRefs.push(keyRef);
+            }
+        } catch (_) {}
+    }));
+    return ownedRefs;
+}
+
 async function deleteAuditDuplicateApplication(submissionId) {
     const sub = allSubmissions.find((item) => item.id === submissionId);
     if (!sub) {
@@ -2588,13 +2653,24 @@ async function deleteAuditDuplicateApplication(submissionId) {
     }
 
     const customerName = sub.customerName || sub?.customerDetails?.name || 'this application';
-    const confirmed = window.confirm(`Delete duplicate application for "${customerName}"?\n\nThis will permanently remove this application record from the system.`);
-    if (!confirmed) return;
+    const reason = await showAuditDuplicateDeleteModal(sub);
+    if (!reason) return;
 
     try {
         const batch = writeBatch(db);
-        batch.delete(doc(db, 'submissions', submissionId));
-        getSubmissionUniqueKeyRefs(sub).forEach((keyRef) => batch.delete(keyRef));
+        batch.update(doc(db, 'submissions', submissionId), {
+            status: 'deleted',
+            deletedAt: serverTimestamp(),
+            deletedBy: currentUser?.email || '',
+            deletedReason: reason,
+            auditDuplicateDeleted: true,
+            auditDuplicateDeletedAt: serverTimestamp(),
+            auditDuplicateDeletedBy: currentUser?.email || '',
+            auditDuplicateDeleteReason: reason,
+            updatedAt: serverTimestamp()
+        });
+        const ownedKeyRefs = await getOwnedSubmissionUniqueKeyRefs(sub);
+        ownedKeyRefs.forEach((keyRef) => batch.delete(keyRef));
         await batch.commit();
 
         await addDoc(collection(db, 'audit'), {
@@ -2603,14 +2679,25 @@ async function deleteAuditDuplicateApplication(submissionId) {
             customerName,
             accountNumber: getCustomerAccountNumber(sub),
             penNo: getCustomerPenNumber(sub),
+            reason,
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         }).catch(() => {});
 
-        allSubmissions = allSubmissions.filter((item) => item.id !== submissionId);
+        const localSub = allSubmissions.find((item) => item.id === submissionId);
+        if (localSub) {
+            localSub.status = 'deleted';
+            localSub.deletedAt = new Date().toISOString();
+            localSub.deletedBy = currentUser?.email || '';
+            localSub.deletedReason = reason;
+            localSub.auditDuplicateDeleted = true;
+            localSub.auditDuplicateDeletedAt = localSub.deletedAt;
+            localSub.auditDuplicateDeletedBy = currentUser?.email || '';
+            localSub.auditDuplicateDeleteReason = reason;
+        }
         auditDuplicateScanResult = buildAuditDuplicateScanResult();
-        renderAuditDuplicateScan();
-        showNotification('Duplicate application deleted.', 'success');
+        showAuditReconciliationView('duplicates');
+        showNotification('Duplicate application moved to uploader Deleted records.', 'success');
     } catch (error) {
         showNotification(`Failed to delete duplicate application: ${error.message || error}`, 'error');
     }
