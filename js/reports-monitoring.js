@@ -333,6 +333,26 @@ function getCustomerPenNumber(sub = {}) {
     ).trim();
 }
 
+function getCustomerPhoneNumber(sub = {}) {
+    return String(
+        sub?.customerDetails?.phone ||
+        sub?.customerDetails?.phoneNumber ||
+        sub?.customerDetails?.whatsapp ||
+        sub?.customerPhone ||
+        sub?.phone ||
+        ''
+    ).replace(/\D/g, '');
+}
+
+function getCustomerNin(sub = {}) {
+    return String(
+        sub?.customerDetails?.nin ||
+        sub?.customerDetails?.nationalId ||
+        sub?.nin ||
+        ''
+    ).replace(/\D/g, '');
+}
+
 function getSelectedAuditReconciliationFile() {
     return auditReconciliationFileInput?.files?.[0] || null;
 }
@@ -647,11 +667,59 @@ function computeAuditReconciliationResult(rows = []) {
 }
 
 function getAuditableDuplicateSubmissions() {
-    const ignoredStatuses = new Set(['draft']);
+    const ignoredStatuses = new Set(['draft', 'rejected', 'rejected_by_reviewer', 'rejected_by_rsa']);
     return allSubmissions.filter((sub) => {
         const status = String(sub.status || '').toLowerCase();
         return !ignoredStatuses.has(status);
     });
+}
+
+function isAuditDuplicateIgnoredCorrectionCopy(sub = {}) {
+    const status = String(sub.status || '').trim().toLowerCase();
+    return ['rejected', 'rejected_by_reviewer', 'rejected_by_rsa'].includes(status);
+}
+
+function getDuplicateLineageKey(sub = {}) {
+    const explicit = String(
+        sub.rootSubmissionId ||
+        sub.originalSubmissionId ||
+        sub.parentSubmissionId ||
+        sub.sourceSubmissionId ||
+        sub.previousSubmissionId ||
+        sub.linkedSubmissionId ||
+        sub.duplicateOf ||
+        ''
+    ).trim();
+    return explicit || String(sub.id || '').trim();
+}
+
+function getDuplicateRepresentative(rows = []) {
+    return rows
+        .slice()
+        .sort((a, b) => {
+            const aRejected = isAuditDuplicateIgnoredCorrectionCopy(a) ? 1 : 0;
+            const bRejected = isAuditDuplicateIgnoredCorrectionCopy(b) ? 1 : 0;
+            if (aRejected !== bRejected) return aRejected - bRejected;
+            return getTimestampMillis(getSubmissionOriginalUploadAt(b)) - getTimestampMillis(getSubmissionOriginalUploadAt(a));
+        })[0] || rows[0] || null;
+}
+
+function collapseDuplicateRowsByLineage(rows = []) {
+    const byLineage = new Map();
+    rows.forEach((sub) => {
+        const lineageKey = getDuplicateLineageKey(sub);
+        if (!lineageKey) return;
+        const next = byLineage.get(lineageKey) || [];
+        next.push(sub);
+        byLineage.set(lineageKey, next);
+    });
+    return Array.from(byLineage.entries())
+        .map(([lineageKey, lineageRows]) => ({
+            lineageKey,
+            rowCount: lineageRows.length,
+            representative: getDuplicateRepresentative(lineageRows)
+        }))
+        .filter((item) => item.representative);
 }
 
 function buildAuditDuplicateScanResult() {
@@ -660,26 +728,55 @@ function buildAuditDuplicateScanResult() {
         if (!key) return;
         const bucketKey = `${signal}:${key}`;
         const existing = buckets.get(bucketKey) || { key, signal, strength, rows: [] };
-        existing.rows.push(sub);
+        if (!existing.rows.some((row) => row.id === sub.id)) existing.rows.push(sub);
         buckets.set(bucketKey, existing);
     };
 
-    getAuditableDuplicateSubmissions().forEach((sub) => {
+    const ignoredCorrectionCount = allSubmissions.filter(isAuditDuplicateIgnoredCorrectionCopy).length;
+    const auditableRows = getAuditableDuplicateSubmissions();
+    auditableRows.forEach((sub) => {
         const accountKey = normalizeAccountNumber(getCustomerAccountNumber(sub));
         const penKey = normalizePenNumber(getCustomerPenNumber(sub));
         const nameKey = normalizeCustomerName(sub.customerName || sub?.customerDetails?.name || '');
+        const phoneKey = getCustomerPhoneNumber(sub);
+        const ninKey = getCustomerNin(sub);
+        const pfaKey = normalizeCustomerName(getSubmissionPfaName(sub));
         if (accountKey) addBucket(accountKey, 'Account Number', 'strong', sub);
         if (penKey) addBucket(penKey, 'PEN', 'strong', sub);
-        if (nameKey) addBucket(nameKey, 'Customer Name', 'possible', sub);
+        if (phoneKey && phoneKey.length >= 10) addBucket(phoneKey, 'Phone Number', 'strong', sub);
+        if (ninKey && ninKey.length >= 10) addBucket(ninKey, 'NIN', 'strong', sub);
+        if (nameKey.length >= 8 && nameKey.split(' ').length >= 2 && pfaKey) {
+            addBucket(`${nameKey}|${pfaKey}`, 'Customer Name + PFA', 'possible', sub);
+        }
     });
 
-    const groups = Array.from(buckets.values())
-        .filter((bucket) => bucket.rows.length > 1)
-        .map((bucket) => ({
-            ...bucket,
-            rows: bucket.rows
-                .slice()
-                .sort((a, b) => getTimestampMillis(getSubmissionOriginalUploadAt(a)) - getTimestampMillis(getSubmissionOriginalUploadAt(b)))
+    const groupMap = new Map();
+    Array.from(buckets.values()).forEach((bucket) => {
+        const independentRows = collapseDuplicateRowsByLineage(bucket.rows);
+        if (independentRows.length <= 1) return;
+        const rows = independentRows
+            .map((item) => item.representative)
+            .sort((a, b) => getTimestampMillis(getSubmissionOriginalUploadAt(a)) - getTimestampMillis(getSubmissionOriginalUploadAt(b)));
+        const clusterKey = independentRows.map((item) => item.lineageKey).sort().join('|');
+        const existing = groupMap.get(clusterKey) || {
+            key: '',
+            signals: [],
+            strength: 'possible',
+            rows,
+            hiddenCorrectionRows: 0
+        };
+        existing.signals.push({ signal: bucket.signal, key: bucket.key, strength: bucket.strength });
+        existing.strength = existing.strength === 'strong' || bucket.strength === 'strong' ? 'strong' : 'possible';
+        existing.rows = rows;
+        existing.hiddenCorrectionRows += independentRows.reduce((sum, item) => sum + Math.max(0, Number(item.rowCount || 0) - 1), 0);
+        groupMap.set(clusterKey, existing);
+    });
+
+    const groups = Array.from(groupMap.values())
+        .map((group) => ({
+            ...group,
+            signal: group.signals.map((item) => item.signal).join(' + '),
+            key: group.signals.map((item) => `${item.signal}: ${item.key}`).join('; ')
         }))
         .sort((a, b) => {
             if (a.strength !== b.strength) return a.strength === 'strong' ? -1 : 1;
@@ -689,7 +786,8 @@ function buildAuditDuplicateScanResult() {
     const duplicateApplicationIds = new Set();
     groups.forEach((group) => group.rows.forEach((sub) => duplicateApplicationIds.add(sub.id)));
     return {
-        scannedCount: getAuditableDuplicateSubmissions().length,
+        scannedCount: auditableRows.length,
+        ignoredCorrectionCount,
         groups,
         duplicateCount: duplicateApplicationIds.size,
         strongGroupCount: groups.filter((group) => group.strength === 'strong').length,
@@ -930,10 +1028,11 @@ function renderAuditDuplicateScan() {
         auditDuplicateScanSummary.style.display = 'grid';
         auditDuplicateScanSummary.innerHTML = [
             { label: 'System Records Scanned', value: auditDuplicateScanResult.scannedCount },
+            { label: 'Rejected Corrections Ignored', value: auditDuplicateScanResult.ignoredCorrectionCount || 0 },
             { label: 'Duplicate Groups', value: groups.length },
             { label: 'Applications Affected', value: auditDuplicateScanResult.duplicateCount },
             { label: 'Strong Signals', value: auditDuplicateScanResult.strongGroupCount },
-            { label: 'Possible Name Matches', value: auditDuplicateScanResult.possibleGroupCount }
+            { label: 'Possible Matches', value: auditDuplicateScanResult.possibleGroupCount }
         ].map((chip) => `
             <div class="audit-reconciliation-chip">
                 <span>${escapeHtml(chip.label)}</span>
@@ -954,7 +1053,7 @@ function renderAuditDuplicateScan() {
             const accountNumber = getCustomerAccountNumber(sub);
             const penNumber = getCustomerPenNumber(sub);
             const signalClass = group.strength === 'strong' ? 'audit-recon-status partial' : 'audit-recon-status info';
-            const signalText = `${group.signal}: ${group.key}${rowIndex === 0 ? ` (${group.rows.length} records)` : ''}`;
+            const signalText = `${group.key}${rowIndex === 0 ? ` (${group.rows.length} independent applications)` : ''}`;
             return `
                 <tr>
                     <td><span class="${signalClass}">${escapeHtml(signalText)}</span></td>
