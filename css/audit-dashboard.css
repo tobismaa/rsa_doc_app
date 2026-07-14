@@ -594,7 +594,7 @@
 
 .audit-duplicate-table {
   table-layout: fixed;
-  min-width: 1040px;
+  min-width: 1240px;
 }
 
 .audit-duplicate-table th:nth-child(1),
@@ -629,7 +629,7 @@
 
 .audit-duplicate-table th:nth-child(7),
 .audit-duplicate-table td:nth-child(7) {
-  width: 320px;
+  width: 390px;
 }
 
 .audit-duplicate-table td {
@@ -721,6 +721,7 @@
 }
 
 .audit-duplicate-view-btn,
+.audit-duplicate-ignore-btn,
 .audit-duplicate-reject-btn,
 .audit-duplicate-delete-btn {
   width: auto;
@@ -728,6 +729,17 @@
   justify-content: center;
   padding: 7px 8px;
   box-shadow: none;
+}
+
+.audit-duplicate-ignore-btn {
+  background: #e0f2fe !important;
+  color: #075985 !important;
+  border: 1px solid #bae6fd !important;
+}
+
+.audit-duplicate-ignore-btn:hover {
+  background: #0369a1 !important;
+  color: #ffffff !important;
 }
 
 .audit-duplicate-reject-btn {

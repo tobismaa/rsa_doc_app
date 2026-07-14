@@ -98,7 +98,6 @@ const auditReconciliationFileInput = document.getElementById('auditReconciliatio
 const auditReconciliationTemplateBtn = document.getElementById('auditReconciliationTemplateBtn');
 const auditReconciliationSelectBtn = document.getElementById('auditReconciliationSelectBtn');
 const auditReconciliationRunBtn = document.getElementById('auditReconciliationRunBtn');
-const auditDuplicateScanBtn = document.getElementById('auditDuplicateScanBtn');
 const auditReconciliationExportBtn = document.getElementById('auditReconciliationExportBtn');
 const auditReconciliationClearBtn = document.getElementById('auditReconciliationClearBtn');
 const auditReconciliationFileMeta = document.getElementById('auditReconciliationFileMeta');
@@ -672,6 +671,7 @@ function getAuditableDuplicateSubmissions() {
     const ignoredStatuses = new Set(['draft', 'rejected', 'rejected_by_reviewer', 'rejected_by_rsa', 'deleted']);
     return allSubmissions.filter((sub) => {
         const status = String(sub.status || '').toLowerCase();
+        if (sub.auditDuplicateIgnored === true) return false;
         return !ignoredStatuses.has(status);
     });
 }
@@ -1037,6 +1037,7 @@ function renderAuditPaidReconciliation() {
 }
 
 function renderAuditDuplicateScan() {
+    if (!auditDuplicateScanResult) auditDuplicateScanResult = buildAuditDuplicateScanResult();
     const selectedFile = getSelectedAuditReconciliationFile();
     if (auditReconciliationClearBtn) auditReconciliationClearBtn.disabled = !selectedFile && !auditReconciliationResult && !auditDuplicateScanResult;
     if (auditReconciliationExportBtn) auditReconciliationExportBtn.disabled = !auditReconciliationResult && !auditDuplicateScanResult;
@@ -1094,6 +1095,7 @@ function renderAuditDuplicateScan() {
                         <div class="audit-duplicate-actions">
                             <button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>
                             <button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationTrack('${sub.id}')"><i class="fas fa-route"></i> Track</button>
+                            <button type="button" class="action-btn audit-duplicate-ignore-btn" onclick="window.ignoreAuditDuplicateApplication('${sub.id}')"><i class="fas fa-eye-slash"></i> Ignore</button>
                             <button type="button" class="action-btn audit-duplicate-reject-btn" onclick="window.rejectAuditDuplicateApplication('${sub.id}')"><i class="fas fa-ban"></i> Reject</button>
                             <button type="button" class="action-btn audit-duplicate-delete-btn" onclick="window.deleteAuditDuplicateApplication('${sub.id}')"><i class="fas fa-trash"></i> Delete</button>
                         </div>
@@ -2586,6 +2588,49 @@ async function rejectAuditDuplicateApplication(submissionId) {
     }
 }
 
+async function ignoreAuditDuplicateApplication(submissionId) {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub) {
+        showNotification('Application not found', 'warning');
+        return;
+    }
+
+    const customerName = sub.customerName || sub?.customerDetails?.name || 'this application';
+    const confirmed = window.confirm(`Ignore "${customerName}" in duplicate checks?\n\nIt will no longer appear in Find Duplicates unless this flag is changed in the database.`);
+    if (!confirmed) return;
+
+    try {
+        await updateDoc(doc(db, 'submissions', submissionId), {
+            auditDuplicateIgnored: true,
+            auditDuplicateIgnoredAt: serverTimestamp(),
+            auditDuplicateIgnoredBy: currentUser?.email || '',
+            updatedAt: serverTimestamp()
+        });
+
+        await addDoc(collection(db, 'audit'), {
+            action: 'audit_duplicate_application_ignored',
+            submissionId,
+            customerName,
+            accountNumber: getCustomerAccountNumber(sub),
+            penNo: getCustomerPenNumber(sub),
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        }).catch(() => {});
+
+        const localSub = allSubmissions.find((item) => item.id === submissionId);
+        if (localSub) {
+            localSub.auditDuplicateIgnored = true;
+            localSub.auditDuplicateIgnoredAt = new Date().toISOString();
+            localSub.auditDuplicateIgnoredBy = currentUser?.email || '';
+        }
+        auditDuplicateScanResult = buildAuditDuplicateScanResult();
+        showAuditReconciliationView('duplicates');
+        showNotification('Application ignored for future duplicate scans.', 'success');
+    } catch (error) {
+        showNotification(`Failed to ignore duplicate application: ${error.message || error}`, 'error');
+    }
+}
+
 function showAuditDuplicateDeleteModal(submission = {}) {
     return new Promise((resolve) => {
         const modal = document.createElement('div');
@@ -2821,6 +2866,7 @@ function showAuditSuccessModal({ title = 'Success', message = '', detail = '' } 
 
 window.openMonitoringApplicationDetails = openApplicationDetailsModal;
 window.openMonitoringApplicationTrack = openApplicationTrackModal;
+window.ignoreAuditDuplicateApplication = ignoreAuditDuplicateApplication;
 window.rejectAuditDuplicateApplication = rejectAuditDuplicateApplication;
 window.deleteAuditDuplicateApplication = deleteAuditDuplicateApplication;
 
@@ -3280,24 +3326,6 @@ function bindEvents() {
         } finally {
             auditReconciliationRunBtn.disabled = !getSelectedAuditReconciliationFile();
             auditReconciliationRunBtn.innerHTML = originalHtml;
-        }
-    });
-    auditDuplicateScanBtn?.addEventListener('click', () => {
-        const originalHtml = auditDuplicateScanBtn.innerHTML;
-        auditDuplicateScanBtn.disabled = true;
-        auditDuplicateScanBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
-        try {
-            auditDuplicateScanResult = buildAuditDuplicateScanResult();
-            auditReconciliationActiveView = 'duplicates';
-            renderAuditDuplicateScan();
-            showNotification(`Duplicate scan complete. ${auditDuplicateScanResult.groups.length} group(s) found.`, auditDuplicateScanResult.groups.length ? 'warning' : 'success');
-        } catch (error) {
-            auditDuplicateScanResult = null;
-            renderAuditDuplicateScan();
-            showNotification(error?.message || 'Failed to scan duplicate applications.', 'error');
-        } finally {
-            auditDuplicateScanBtn.disabled = false;
-            auditDuplicateScanBtn.innerHTML = originalHtml;
         }
     });
     auditReconciliationExportBtn?.addEventListener('click', async () => {

@@ -444,6 +444,7 @@ async function resolveCustomerAccountName({ silent = false } = {}) {
     if (customerNameInput) {
       customerNameInput.value = accountName;
       updateSubmitButton();
+      scheduleInlineDuplicateValidation(150);
     }
     setAccountLookupStatus(accountName ? `Verified: ${accountName}` : 'Account verified.', 'success');
     return true;
@@ -1728,6 +1729,43 @@ function showPenNoError(message = 'PEN No already existed.') {
   }
 }
 
+function getDuplicateFieldInputs() {
+  return [accountNoInput, document.getElementById('customerPhone'), document.getElementById('customerNIN'), penNoInput, customerNameInput].filter(Boolean);
+}
+
+function clearInlineDuplicateError() {
+  inlineDuplicateBlocked = false;
+  inlineDuplicateChecking = false;
+  clearInlineDuplicateError();
+  getDuplicateFieldInputs().forEach((input) => {
+    if (input === penNoInput) return;
+    input.style.borderColor = '';
+    input.style.boxShadow = '';
+    input.removeAttribute('aria-invalid');
+  });
+}
+
+function showInlineDuplicateError(duplicate) {
+  clearInlineDuplicateError();
+  inlineDuplicateBlocked = true;
+  const message = duplicate?.message || 'Duplicate application already exists.';
+  showPenNoError(message);
+  const lowerMessage = message.toLowerCase();
+  const fieldMap = [
+    { input: accountNoInput, needles: ['account number'] },
+    { input: document.getElementById('customerPhone'), needles: ['phone number'] },
+    { input: document.getElementById('customerNIN'), needles: ['nin'] },
+    { input: penNoInput, needles: ['pen'] },
+    { input: customerNameInput, needles: ['customer name'] }
+  ];
+  fieldMap.forEach(({ input, needles }) => {
+    if (!input || !needles.some((needle) => lowerMessage.includes(needle))) return;
+    input.style.borderColor = '#dc2626';
+    input.style.boxShadow = '0 0 0 3px rgba(220, 38, 38, 0.12)';
+    input.setAttribute('aria-invalid', 'true');
+  });
+}
+
 function getDuplicateCustomerDisplayName(duplicate) {
   const submission = duplicate?.submissions?.[0] || {};
   return String(submission?.customerName || submission?.customerDetails?.name || '').trim();
@@ -1758,26 +1796,87 @@ async function validatePenNumberAvailable(penNo = '', excludeSubmissionId = '', 
 }
 
 async function validatePenNoFieldInline() {
-  const currentSequence = ++penNoValidationSequence;
-  const penNo = penNoInput?.value?.trim() || '';
-  if (!penNo) {
-    clearPenNoError();
-    return true;
-  }
+  return validateSubmissionDuplicateFieldsInline();
+}
+
+function collectInlineDuplicateCheckDetails() {
+  const details = collectDraftableCustomerDetails();
+  return {
+    phone: details.phone,
+    accountNo: details.accountNo,
+    nin: details.nin,
+    penNo: details.penNo,
+    customerName: String(customerNameInput?.value || details.name || '').trim()
+  };
+}
+
+function hasEnoughInlineDuplicateValue(details = {}) {
+  return (
+    normalizeCustomerPhone(details.phone).length >= 10 ||
+    normalizeDigitsOnly(details.accountNo).length === 10 ||
+    normalizeDigitsOnly(details.nin).length === 11 ||
+    normalizePenNumber(details.penNo).length > 0 ||
+    normalizeCustomerNameKey(details.customerName).length >= 3
+  );
+}
+
+async function validateSubmissionDuplicateFieldsInline() {
+  const currentSequence = ++duplicateValidationSequence;
+  inlineDuplicateChecking = true;
+  updateSubmitButton();
   const excludeSubmissionId = currentEditId || currentDraftId || '';
-  if (isUnchangedEditablePenNumber(penNo, excludeSubmissionId)) {
-    if (currentSequence !== penNoValidationSequence) return true;
-    clearPenNoError();
+  const details = collectInlineDuplicateCheckDetails();
+  if (!hasEnoughInlineDuplicateValue(details)) {
+    if (currentSequence !== duplicateValidationSequence) return true;
+    clearInlineDuplicateError();
+    updateSubmitButton();
     return true;
   }
-  const duplicate = await validateCustomerDuplicateContact({ penNo, excludeSubmissionId });
-  if (currentSequence !== penNoValidationSequence) return true;
+  if (details.penNo && isUnchangedEditablePenNumber(details.penNo, excludeSubmissionId)) {
+    details.penNo = '';
+  }
+  let duplicate = null;
+  try {
+    duplicate = await validateCustomerDuplicateContact({ ...details, excludeSubmissionId });
+  } catch (_) {
+    if (currentSequence === duplicateValidationSequence) {
+      inlineDuplicateChecking = false;
+      updateSubmitButton();
+    }
+    return true;
+  }
+  if (currentSequence !== duplicateValidationSequence) return true;
+  inlineDuplicateChecking = false;
   if (duplicate) {
-    showPenNoError(formatPenNoDuplicateMessage(duplicate));
+    if (details.penNo && duplicate.message.toLowerCase().includes('pen')) {
+      clearInlineDuplicateError();
+      showPenNoError(formatPenNoDuplicateMessage(duplicate));
+      inlineDuplicateBlocked = true;
+    } else {
+      showInlineDuplicateError(duplicate);
+    }
+    updateSubmitButton();
     return false;
   }
-  clearPenNoError();
+  clearInlineDuplicateError();
+  updateSubmitButton();
   return true;
+}
+
+function scheduleInlineDuplicateValidation(delay = 350) {
+  duplicateValidationSequence += 1;
+  clearTimeout(inlineDuplicateValidationDebounce);
+  const details = collectInlineDuplicateCheckDetails();
+  if (!hasEnoughInlineDuplicateValue(details)) {
+    clearInlineDuplicateError();
+    updateSubmitButton();
+    return;
+  }
+  inlineDuplicateChecking = true;
+  updateSubmitButton();
+  inlineDuplicateValidationDebounce = setTimeout(() => {
+    void validateSubmissionDuplicateFieldsInline();
+  }, delay);
 }
 
 function collectDraftableCustomerDetails() {
@@ -2503,6 +2602,10 @@ const DEFAULT_HOUSE_NUMBER_RULES = {
 let PROPERTY_RULES = [...DEFAULT_PROPERTY_RULES];
 let HOUSE_NUMBER_RULES = { ...DEFAULT_HOUSE_NUMBER_RULES };
 let penNoValidationSequence = 0;
+let duplicateValidationSequence = 0;
+let inlineDuplicateBlocked = false;
+let inlineDuplicateChecking = false;
+let inlineDuplicateValidationDebounce = null;
 let accountLookupSequence = 0;
 let accountLookupDebounce = null;
 let accountLookupBanks = [];
@@ -3190,7 +3293,12 @@ function setupEventListeners() {
       if (input) input.click();
     });
   });
-  if (customerNameInput) customerNameInput.addEventListener('input', updateSubmitButton);
+  if (customerNameInput) {
+    customerNameInput.addEventListener('input', () => {
+      updateSubmitButton();
+      scheduleInlineDuplicateValidation();
+    });
+  }
   if (accountNoInput) {
     accountNoInput.addEventListener('input', () => {
       const digits = String(accountNoInput.value || '').replace(/\D/g, '').slice(0, 10);
@@ -3198,9 +3306,11 @@ function setupEventListeners() {
       clearVerifiedAccountLookup();
       setAccountLookupStatus('', 'info');
       scheduleCustomerAccountLookup();
+      scheduleInlineDuplicateValidation();
     });
     accountNoInput.addEventListener('blur', () => {
       void resolveCustomerAccountName();
+      void validateSubmissionDuplicateFieldsInline();
     });
   }
   if (accountBankSelect) {
@@ -3213,12 +3323,26 @@ function setupEventListeners() {
   if (penNoInput) {
     penNoInput.addEventListener('input', () => {
       penNoValidationSequence += 1;
-      clearPenNoError();
+      scheduleInlineDuplicateValidation();
     });
     penNoInput.addEventListener('blur', () => {
       void validatePenNoFieldInline();
     });
   }
+  ['customerPhone', 'customerNIN'].forEach((fieldId) => {
+    const input = document.getElementById(fieldId);
+    if (!input) return;
+    input.addEventListener('input', () => {
+      if (fieldId === 'customerPhone' || fieldId === 'customerNIN') {
+        input.value = String(input.value || '').replace(/\D/g, '').slice(0, 11);
+      }
+      updateSubmitButton();
+      scheduleInlineDuplicateValidation();
+    });
+    input.addEventListener('blur', () => {
+      void validateSubmissionDuplicateFieldsInline();
+    });
+  });
   if (saveDetailsBtn) saveDetailsBtn.addEventListener('click', saveCustomerDetails);
   if (resetDetailsBtn) resetDetailsBtn.addEventListener('click', resetCustomerDetails);
   if (agentRegistrationForm) {
@@ -3463,6 +3587,7 @@ function openUploadModal() {
     if (el) el.value = '';
   });
   if (accountBankSelect) accountBankSelect.value = DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME;
+  clearInlineDuplicateError();
   clearVerifiedAccountLookup();
   setAccountLookupStatus('', 'info');
 
@@ -4369,14 +4494,14 @@ function updateSubmitButton() {
   const hasAnyDoc = Object.keys(currentCustomerUploads || {}).some(id => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0);
   if (currentEditId) {
     uploadedCountSpan.textContent = Object.keys(currentCustomerUploads || {}).filter((id) => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0).length;
-    submitCustomerBtn.disabled = !(customerName && (hasAnyDoc || allowWithoutDocuments));
+    submitCustomerBtn.disabled = inlineDuplicateBlocked || inlineDuplicateChecking || !(customerName && (hasAnyDoc || allowWithoutDocuments));
     syncUploadRequirementUi();
     return;
   }
   const requiredDocs = DOCUMENT_TYPES.filter(d => d.required !== false).map(d => d.id);
   const uploadedRequired = requiredDocs.filter(id => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0).length;
   uploadedCountSpan.textContent = Object.keys(currentCustomerUploads || {}).filter((id) => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0).length;
-  submitCustomerBtn.disabled = !(customerName && customerDetailsSaved && (allowWithoutDocuments || uploadedRequired === requiredDocs.length));
+  submitCustomerBtn.disabled = inlineDuplicateBlocked || inlineDuplicateChecking || !(customerName && customerDetailsSaved && (allowWithoutDocuments || uploadedRequired === requiredDocs.length));
   syncUploadRequirementUi();
 }
 
@@ -4543,10 +4668,17 @@ async function submitCustomer() {
       excludeSubmissionId: duplicateExcludeId
     });
     if (duplicate) {
-      if (duplicate.message.toLowerCase().includes('pen')) showPenNoError(formatPenNoDuplicateMessage(duplicate));
+      if (duplicate.message.toLowerCase().includes('pen')) {
+        clearInlineDuplicateError();
+        showPenNoError(formatPenNoDuplicateMessage(duplicate));
+        inlineDuplicateBlocked = true;
+      } else {
+        showInlineDuplicateError(duplicate);
+      }
       showNotification(duplicate.message, 'error');
       submitCustomerBtn.disabled = false;
       syncUploadRequirementUi();
+      updateSubmitButton();
       return;
     }
     if (currentEditId) {
