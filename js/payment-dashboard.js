@@ -21,15 +21,16 @@ import {
 } from './shared/commission-config.js?v=20260507a';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 import {
+    getSubmissionOriginalUploadAt,
     getSubmissionPaymentEntryAt,
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt
-} from './shared/submission-stage.js?v=20260609a';
+} from './shared/submission-stage.js?v=20260714a';
 import {
     buildDashboardStageReport,
     renderDashboardStageReport,
     exportDashboardStageReportExcel
-} from './shared/dashboard-stage-report.js?v=20260610a';
+} from './shared/dashboard-stage-report.js?v=20260714a';
 
 let currentUser = null;
 let currentUserData = null;
@@ -338,7 +339,7 @@ function getSubmissionFinancials(sub) {
 }
 
 function getSubmissionUploadedAtMillis(sub) {
-    return getTimestampMillis(sub?.uploadedAt || sub?.createdAt || sub?.updatedAt);
+    return getTimestampMillis(getSubmissionOriginalUploadAt(sub));
 }
 
 function getPaymentReceivedAtMillis(sub) {
@@ -1763,7 +1764,7 @@ function renderPaymentQueue() {
 
     paymentsTableBody.innerHTML = paymentQueue.map((sub) => {
         const { pfa, twentyFive, commission2 } = getSubmissionFinancials(sub);
-        const uploadedDate = formatDateValue(sub?.uploadedAt || sub?.createdAt);
+        const uploadedDate = formatDateValue(getSubmissionOriginalUploadAt(sub));
         const queueDate = formatDateValue(getSubmissionPaymentEntryAt(sub));
         const uploaderLabel = getUploaderDisplayName(sub?.uploadedBy);
         const assignedLabel = getUploaderDisplayName(sub?.assignedToPayment);

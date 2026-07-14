@@ -203,6 +203,12 @@
   max-width: 100%;
 }
 
+.audit-rejected-scope-strip {
+  margin-top: 10px;
+  width: fit-content;
+  max-width: 100%;
+}
+
 .audit-export-btn {
   background: linear-gradient(135deg, #0f3b67, #0f766e) !important;
   color: #fff !important;

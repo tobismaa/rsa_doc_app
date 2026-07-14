@@ -9,14 +9,16 @@ import {
     onSnapshot,
     serverTimestamp,
     arrayUnion,
-    updateDoc
+    updateDoc,
+    writeBatch
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { formatAppDateTime } from './shared/app-time.js';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 import {
     getTimestampMillis as getStageTimestampMillis,
+    getSubmissionOriginalUploadAt,
     getSubmissionCurrentStageEntryAt
-} from './shared/submission-stage.js?v=20260609a';
+} from './shared/submission-stage.js?v=20260714a';
 import {
     getSubmissionCommissionAmount,
     resolveSubmissionCommissionRate
@@ -31,6 +33,7 @@ let userDisplayNamesByEmail = new Map();
 let auditRenderTimer = null;
 let currentTab = 'overview';
 const AUDIT_DASHBOARD_TABS = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'reconciliation', 'profile', 'help'];
+const AUDIT_BULK_CLEAR_BATCH_SIZE = 200;
 
 function getInitialAuditTab() {
     const hashTab = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();
@@ -62,6 +65,7 @@ let auditPaidReconciliationResult = null;
 let auditPaidReconciliationFileName = '';
 let auditPaidReconciliationSelectedSubmissionIds = [];
 let auditPaidReconciliationActiveResultsTab = 'matched';
+let currentAuditRejectedScope = 'rejected';
 let usersListenerStarted = false;
 let submissionsListenerMode = '';
 let submissionListenerUnsubs = [];
@@ -273,7 +277,7 @@ function getSubmissionPfaName(sub = {}) {
 }
 
 function getSubmissionRatePercent(sub = {}) {
-    const uploadedAtMs = getTimestampMillis(sub?.uploadedAt || sub?.createdAt || sub?.updatedAt);
+    const uploadedAtMs = getTimestampMillis(getSubmissionOriginalUploadAt(sub));
     if (uploadedAtMs && uploadedAtMs < PAYMENT_RATE_CUTOFF_MS) return 10;
     return 7;
 }
@@ -1093,6 +1097,15 @@ function getAuditRejectedRows() {
         .sort((a, b) => getStageTimestampMillis(b.auditCommissionRejectedAt) - getStageTimestampMillis(a.auditCommissionRejectedAt));
 }
 
+function normalizeAuditRejectedScope(value) {
+    return value === 'frozen' ? 'frozen' : 'rejected';
+}
+
+function getAuditRejectedRowsForScope(scope = currentAuditRejectedScope) {
+    const resolvedScope = normalizeAuditRejectedScope(scope);
+    return getAuditRejectedRows().filter((sub) => resolvedScope === 'frozen' ? sub.auditFrozen === true : sub.auditFrozen !== true);
+}
+
 function setCountBadge(id, value) {
     const el = document.getElementById(id);
     if (el) el.textContent = String(value);
@@ -1437,11 +1450,14 @@ function renderAuditWorkflowTabs() {
     document.querySelectorAll('[data-audit-paid-scope]').forEach((button) => {
         button.classList.toggle('active', button.dataset.auditPaidScope === currentAuditPaidScope);
     });
+    document.querySelectorAll('[data-audit-rejected-scope]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.auditRejectedScope === currentAuditRejectedScope);
+    });
     renderAuditMoneyRows(auditOverviewPendingTableBody, getAuditSentToPfaRows(), 'sent');
     renderAuditMoneyRows(auditSentToPfaTableBody, getAuditSentToPfaRows(), 'sent');
     renderAuditMoneyRows(auditPaidTableBody, getAuditPaidRows(currentAuditPaidScope), 'paid');
     renderAuditMoneyRows(auditClearedTableBody, getAuditClearedRows(), 'cleared');
-    renderAuditRejectedRows(auditRejectedTableBody, getAuditRejectedRows());
+    renderAuditRejectedRows(auditRejectedTableBody, getAuditRejectedRowsForScope(currentAuditRejectedScope));
     renderAuditPaidReconciliation();
 }
 
@@ -1977,7 +1993,10 @@ function renderCurrentTab() {
         return;
     }
     if (currentTab === 'rejected') {
-        renderAuditRejectedRows(auditRejectedTableBody, getAuditRejectedRows());
+        document.querySelectorAll('[data-audit-rejected-scope]').forEach((button) => {
+            button.classList.toggle('active', button.dataset.auditRejectedScope === currentAuditRejectedScope);
+        });
+        renderAuditRejectedRows(auditRejectedTableBody, getAuditRejectedRowsForScope(currentAuditRejectedScope));
         return;
     }
     if (currentTab === 'reconciliation') {
@@ -2051,7 +2070,7 @@ function openApplicationDetailsModal(submissionId) {
         ['Customer Account Number', getCustomerAccountNumber(sub)],
         ['Audit Commission Status', statusLabel(sub.auditCommissionStatus || '-')],
         ['Audit Rejection Reason', sub.auditCommissionRejectionReason || '-'],
-        ['Uploaded At', formatDate(sub.uploadedAt)],
+        ['Uploaded At', formatDate(getSubmissionOriginalUploadAt(sub))],
         ['Updated At', formatDate(sub.updatedAt || sub.uploadedAt)]
     ];
 
@@ -2159,50 +2178,150 @@ function showAuditActionModal({ mode = 'accept', submission = {} } = {}) {
     });
 }
 
+function showAuditSuccessModal({ title = 'Success', message = '', detail = '' } = {}) {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'modal active audit-action-modal';
+        modal.innerHTML = `
+            <div class="modal-content audit-action-card accept">
+                <div class="audit-action-icon">
+                    <i class="fas fa-circle-check"></i>
+                </div>
+                <h2>${escapeHtml(title)}</h2>
+                <p>${escapeHtml(message)}</p>
+                ${detail ? `<p style="font-size:13px;color:#64748b;">${escapeHtml(detail)}</p>` : ''}
+                <div class="audit-action-actions">
+                    <button type="button" class="submit-btn" data-audit-success="ok">
+                        <i class="fas fa-check"></i> OK
+                    </button>
+                </div>
+            </div>
+        `;
+        const close = () => {
+            modal.remove();
+            resolve(true);
+        };
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal || event.target.closest('[data-audit-success="ok"]')) close();
+        });
+        document.body.appendChild(modal);
+    });
+}
+
 window.openMonitoringApplicationDetails = openApplicationDetailsModal;
+
+function getAuditPaymentClearPayload(sub = {}) {
+    const { commission, twentyFive, rsaBalance } = getSubmissionFinancials(sub);
+    return {
+        updates: {
+            status: 'cleared',
+            clearedAt: serverTimestamp(),
+            clearedBy: currentUser?.email || '',
+            auditClearedAt: serverTimestamp(),
+            auditClearedBy: currentUser?.email || '',
+            auditCommissionAmount: commission,
+            auditRsaBalance: rsaBalance,
+            auditRsaTwentyFivePercent: twentyFive,
+            updatedAt: serverTimestamp()
+        },
+        auditLog: {
+            action: 'audit_payment_cleared',
+            submissionId: String(sub?.id || '').trim(),
+            customerName: sub.customerName || '',
+            uploadedBy: sub.uploadedBy || '',
+            commissionAmount: commission,
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        },
+        notification: {
+            currentUser,
+            recipientEmail: String(sub.auditCommissionSubmittedBy || sub.paymentMadeBy || sub.uploadedBy || '').trim(),
+            eventType: 'audit_payment_cleared',
+            title: 'Payment Cleared',
+            body: `${sub.customerName || 'Your application'} has been cleared by Audit.`,
+            clickUrl: '/dashboard.html',
+            meta: {
+                submissionId: String(sub?.id || '').trim(),
+                customerName: sub.customerName || '',
+                clearedBy: currentUser?.email || '',
+                commissionAmount: commission
+            }
+        }
+    };
+}
+
+function queueAuditPaymentClearSideEffects(records = []) {
+    if (!records.length) return;
+    setTimeout(() => {
+        records.forEach(({ sub, payload }) => {
+            addDoc(collection(db, 'audit'), payload.auditLog).catch(() => {});
+            notifyUserPushEvent(payload.notification).catch(() => {});
+        });
+    }, 0);
+}
+
+function markAuditPaymentRecordsClearedLocally(records = []) {
+    records.forEach(({ sub }) => {
+        const submissionId = String(sub?.id || '').trim();
+        const localSub = allSubmissions.find((item) => item.id === submissionId);
+        if (!localSub) return;
+        localSub.status = 'cleared';
+        localSub.clearedBy = currentUser?.email || '';
+        localSub.auditClearedBy = currentUser?.email || '';
+        localSub.auditCommissionStatus = 'cleared';
+    });
+}
+
+async function clearAuditPaymentRecordsBulk(submissions = [], { onProgress = null } = {}) {
+    const clearableRecords = [];
+    let skippedCount = 0;
+
+    submissions.forEach((sub) => {
+        const submissionId = String(sub?.id || '').trim();
+        if (!submissionId || String(sub.status || '').toLowerCase() !== 'paid') {
+            skippedCount += 1;
+            return;
+        }
+        clearableRecords.push({ sub, payload: getAuditPaymentClearPayload(sub) });
+    });
+
+    let clearedCount = 0;
+    let failedCount = 0;
+    const clearedRecords = [];
+
+    for (let index = 0; index < clearableRecords.length; index += AUDIT_BULK_CLEAR_BATCH_SIZE) {
+        const chunk = clearableRecords.slice(index, index + AUDIT_BULK_CLEAR_BATCH_SIZE);
+        const batch = writeBatch(db);
+        chunk.forEach(({ sub, payload }) => {
+            batch.update(doc(db, 'submissions', String(sub.id)), payload.updates);
+        });
+
+        try {
+            await batch.commit();
+            clearedCount += chunk.length;
+            clearedRecords.push(...chunk);
+            markAuditPaymentRecordsClearedLocally(chunk);
+            if (typeof onProgress === 'function') onProgress(clearedCount, clearableRecords.length);
+        } catch (_) {
+            failedCount += chunk.length;
+        }
+    }
+
+    queueAuditPaymentClearSideEffects(clearedRecords);
+    return { clearedCount, skippedCount, failedCount };
+}
 
 async function clearAuditPaymentRecord(sub = {}) {
     const submissionId = String(sub?.id || '').trim();
     if (!submissionId) throw new Error('Application not found.');
     if (String(sub.status || '').toLowerCase() !== 'paid') throw new Error('Only paid applications can be cleared.');
 
-    const { commission, twentyFive, rsaBalance } = getSubmissionFinancials(sub);
-    await updateDoc(doc(db, 'submissions', submissionId), {
-        status: 'cleared',
-        clearedAt: serverTimestamp(),
-        clearedBy: currentUser?.email || '',
-        auditClearedAt: serverTimestamp(),
-        auditClearedBy: currentUser?.email || '',
-        auditCommissionAmount: commission,
-        auditRsaBalance: rsaBalance,
-        auditRsaTwentyFivePercent: twentyFive,
-        updatedAt: serverTimestamp()
-    });
+    const payload = getAuditPaymentClearPayload(sub);
+    await updateDoc(doc(db, 'submissions', submissionId), payload.updates);
 
-    await addDoc(collection(db, 'audit'), {
-        action: 'audit_payment_cleared',
-        submissionId,
-        customerName: sub.customerName || '',
-        uploadedBy: sub.uploadedBy || '',
-        commissionAmount: commission,
-        performedBy: currentUser?.email || '',
-        timestamp: serverTimestamp()
-    }).catch(() => {});
+    await addDoc(collection(db, 'audit'), payload.auditLog).catch(() => {});
 
-    await notifyUserPushEvent({
-        currentUser,
-        recipientEmail: String(sub.auditCommissionSubmittedBy || sub.paymentMadeBy || sub.uploadedBy || '').trim(),
-        eventType: 'audit_payment_cleared',
-        title: 'Payment Cleared',
-        body: `${sub.customerName || 'Your application'} has been cleared by Audit.`,
-        clickUrl: '/dashboard.html',
-        meta: {
-            submissionId,
-            customerName: sub.customerName || '',
-            clearedBy: currentUser?.email || '',
-            commissionAmount: commission
-        }
-    }).catch(() => {});
+    await notifyUserPushEvent(payload.notification).catch(() => {});
 }
 
 window.clearAuditPayment = async (submissionId) => {
@@ -2405,6 +2524,14 @@ window.toggleAuditApplicationFreeze = async (submissionId, shouldFreeze) => {
             }
         }).catch(() => {});
 
+        sub.auditFrozen = shouldFreeze;
+        if (shouldFreeze) {
+            sub.auditFrozenBy = actorEmail;
+            sub.auditUnfrozenBy = '';
+        } else {
+            sub.auditUnfrozenBy = actorEmail;
+        }
+        renderCurrentTab();
         showNotification(`Application ${shouldFreeze ? 'frozen' : 'unfrozen'} successfully.`, 'success');
     } catch (error) {
         showNotification(`Failed to ${action} application.`, 'error');
@@ -2438,6 +2565,12 @@ function bindEvents() {
         button.addEventListener('click', () => {
             currentAuditPaidScope = normalizeAuditPaidScope(button.dataset.auditPaidScope);
             if (auditPaidReconciliationSourceRows.length) recomputeAuditPaidReconciliationResult();
+            renderCurrentTab();
+        });
+    });
+    document.querySelectorAll('[data-audit-rejected-scope]').forEach((button) => {
+        button.addEventListener('click', () => {
+            currentAuditRejectedScope = normalizeAuditRejectedScope(button.dataset.auditRejectedScope);
             renderCurrentTab();
         });
     });
@@ -2651,32 +2784,35 @@ function bindEvents() {
         auditPaidReconciliationSelectedSubmissionIds = [];
         renderAuditPaidReconciliation();
 
+        let result = { clearedCount: 0, skippedCount: 0, failedCount: 0 };
         try {
-            let clearedCount = 0;
-            let skippedCount = 0;
-            let failedCount = 0;
-
-            for (const submissionId of submissionIds) {
-                const sub = allSubmissions.find((item) => item.id === submissionId);
-                if (!sub || String(sub.status || '').toLowerCase() !== 'paid') {
-                    skippedCount += 1;
-                    continue;
+            const selectedSubmissions = submissionIds.map((submissionId) => allSubmissions.find((item) => item.id === submissionId)).filter(Boolean);
+            result = await clearAuditPaymentRecordsBulk(selectedSubmissions, {
+                onProgress: (cleared, total) => {
+                    auditPaidReconciliationClearSelectedBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Clearing ${cleared}/${total}...`;
                 }
-                try {
-                    await clearAuditPaymentRecord(sub);
-                    clearedCount += 1;
-                } catch (_) {
-                    failedCount += 1;
-                }
-            }
+            });
 
             const parts = [];
-            if (clearedCount) parts.push(`Cleared ${clearedCount} application(s)`);
-            if (skippedCount) parts.push(`Skipped ${skippedCount}`);
-            if (failedCount) parts.push(`Failed ${failedCount}`);
+            if (result.clearedCount) parts.push(`Cleared ${result.clearedCount} application(s)`);
+            if (result.skippedCount) parts.push(`Skipped ${result.skippedCount}`);
+            if (result.failedCount) parts.push(`Failed ${result.failedCount}`);
             const message = parts.length ? `${parts.join('. ')}.` : 'No payments were cleared.';
-            showNotification(message, failedCount ? (clearedCount ? 'warning' : 'error') : 'success');
+            showNotification(message, result.failedCount ? (result.clearedCount ? 'warning' : 'error') : 'success');
+            if (!result.failedCount && result.clearedCount) {
+                closeAuditPaidReconciliationResultsModal();
+                closeAuditPaidReconciliationUploadModal();
+                resetAuditPaidReconciliationState();
+                renderAuditPaidReconciliation();
+                renderCurrentTab();
+                await showAuditSuccessModal({
+                    title: 'Clearing Complete',
+                    message: `${result.clearedCount} application${result.clearedCount === 1 ? '' : 's'} cleared successfully.`,
+                    detail: result.skippedCount ? `${result.skippedCount} already-cleared or unavailable application${result.skippedCount === 1 ? '' : 's'} skipped.` : ''
+                });
+            }
         } finally {
+            if (auditPaidReconciliationSourceRows.length) recomputeAuditPaidReconciliationResult();
             auditPaidReconciliationClearSelectedBtn.innerHTML = originalHtml;
             renderAuditPaidReconciliation();
         }

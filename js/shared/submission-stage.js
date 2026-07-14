@@ -16,6 +16,17 @@ function pickTimestamp(...values) {
     return null;
 }
 
+function getSubmissionOriginalUploadAt(submission = {}) {
+    return pickTimestamp(
+        submission?.originalUploadedAt,
+        submission?.firstUploadedAt,
+        submission?.initialUploadedAt,
+        submission?.submittedAt,
+        submission?.createdAt,
+        submission?.uploadedAt
+    );
+}
+
 function getSubmissionDraftEntryAt(submission = {}) {
     return pickTimestamp(submission?.draftSavedAt, submission?.updatedAt, submission?.uploadedAt, submission?.createdAt);
 }
@@ -94,5 +105,6 @@ export {
     getSubmissionPaymentEntryAt,
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt,
+    getSubmissionOriginalUploadAt,
     getSubmissionCurrentStageEntryAt
 };

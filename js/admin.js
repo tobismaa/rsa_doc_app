@@ -36,11 +36,13 @@ import {
     getSubmissionReviewEntryAt,
     getSubmissionApprovalEntryAt,
     getSubmissionRejectionEntryAt,
+    getSubmissionRsaEntryAt,
+    getSubmissionOriginalUploadAt,
     getSubmissionFinalSubmissionEntryAt,
     getSubmissionPaymentEntryAt,
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt
-} from './shared/submission-stage.js?v=20260609a';
+} from './shared/submission-stage.js?v=20260714a';
 
 // Security: suppress console output in admin dashboard.
 (() => {
@@ -292,7 +294,7 @@ const PDF_TEMPLATE_CONFIGS = {
 
 const TAB_GROUPS = {
     'user-management': ['users', 'pending-users', 'pending-agents', 'registered-agents'],
-    'application-management': ['draft-docs', 'pending-docs', 'approved-docs', 'rejected-docs', 'escalations', 'track-apps', 'generate-documents', 'finally-submitted', 'payments', 'agent-commissions']
+    'application-management': ['draft-docs', 'pending-docs', 'approved-docs', 'rejected-docs', 'escalations', 'sla-breaches', 'track-apps', 'generate-documents', 'finally-submitted', 'payments', 'agent-commissions']
 };
 
 const TAB_LABELS = {
@@ -305,6 +307,7 @@ const TAB_LABELS = {
     'approved-docs': 'Approved',
     'rejected-docs': 'Rejected',
     escalations: 'Escalations',
+    'sla-breaches': 'SLA Breach',
     'track-apps': 'Track Applications',
     'generate-documents': 'Generate Document',
     'finally-submitted': 'Final Submission',
@@ -320,6 +323,9 @@ const ADMIN_DASHBOARD_TABS = [
     'round-robin',
     'help'
 ];
+const SLA_HOUR_MS = 60 * 60 * 1000;
+const RSA_SLA_MS = 48 * SLA_HOUR_MS;
+const PAYMENT_SLA_MS = 72 * SLA_HOUR_MS;
 
 function getInitialAdminTab() {
     const hashTab = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();
@@ -352,6 +358,7 @@ function getAdminSubTabCount(tabId) {
     }).length;
     if (tabId === 'rejected-docs') return allSubmissions.filter((s) => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase())).length;
     if (tabId === 'escalations') return allEscalations.filter((item) => item?.escalationHandled !== true).length;
+    if (tabId === 'sla-breaches') return getSlaBreachRows().length;
     if (tabId === 'track-apps') return allSubmissions.filter((s) => String(s.status || '').toLowerCase() !== 'draft').length;
     if (tabId === 'generate-documents') return allSubmissions.filter((s) => {
         const status = String(s.status || '').toLowerCase();
@@ -371,6 +378,73 @@ function getAdminSubTabCount(tabId) {
         return keys.size;
     }
     return 0;
+}
+
+function formatSlaDuration(ms = 0) {
+    const totalMinutes = Math.max(0, Math.floor(Number(ms || 0) / 60000));
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+    const parts = [];
+    if (days) parts.push(`${days}d`);
+    if (hours || days) parts.push(`${hours}h`);
+    parts.push(`${minutes}m`);
+    return parts.join(' ');
+}
+
+function getSlaBreachRows(nowMs = Date.now()) {
+    return allSubmissions
+        .flatMap((sub) => {
+            const status = String(sub.status || '').toLowerCase();
+            const rows = [];
+            const isInRsaStage = ['approved', 'processing_to_pfa'].includes(status) && !(sub.finalSubmitted === true || sub.rsaSubmitted === true);
+            const isInPaymentStage = (
+                ['sent_to_pfa', 'rsa_submitted'].includes(status) ||
+                sub.finalSubmitted === true ||
+                sub.rsaSubmitted === true
+            ) && !['paid', 'cleared'].includes(status);
+
+            if (isInRsaStage) {
+                const startedAt = getSubmissionRsaEntryAt(sub);
+                const startedMs = getStageTimestampMillis(startedAt);
+                const dueMs = startedMs + RSA_SLA_MS;
+                if (startedMs && nowMs > dueMs) {
+                    rows.push({
+                        sub,
+                        stageKey: 'rsa',
+                        stageLabel: 'RSA',
+                        allowedMs: RSA_SLA_MS,
+                        startedAt,
+                        startedMs,
+                        dueMs,
+                        overdueMs: nowMs - dueMs,
+                        officerEmail: String(sub.assignedToRSA || '').trim()
+                    });
+                }
+            }
+
+            if (isInPaymentStage) {
+                const startedAt = getSubmissionPaymentEntryAt(sub);
+                const startedMs = getStageTimestampMillis(startedAt);
+                const dueMs = startedMs + PAYMENT_SLA_MS;
+                if (startedMs && nowMs > dueMs) {
+                    rows.push({
+                        sub,
+                        stageKey: 'payment',
+                        stageLabel: 'Payment',
+                        allowedMs: PAYMENT_SLA_MS,
+                        startedAt,
+                        startedMs,
+                        dueMs,
+                        overdueMs: nowMs - dueMs,
+                        officerEmail: String(sub.assignedToPayment || '').trim()
+                    });
+                }
+            }
+
+            return rows;
+        })
+        .sort((a, b) => b.overdueMs - a.overdueMs);
 }
 
 function updateAdminNavigationCounts() {
@@ -510,6 +584,10 @@ const pendingDocsTableBody = document.getElementById('pendingDocsTableBody');
 const approvedDocsTableBody = document.getElementById('approvedDocsTableBody');
 const rejectedDocsTableBody = document.getElementById('rejectedDocsTableBody');
 const escalationsTableBody = document.getElementById('escalationsTableBody');
+const slaBreachesTableBody = document.getElementById('slaBreachesTableBody');
+const slaBreachSummary = document.getElementById('slaBreachSummary');
+const slaBreachSearch = document.getElementById('slaBreachSearch');
+const slaBreachStageFilter = document.getElementById('slaBreachStageFilter');
 const paymentsTableBody = document.getElementById('paymentsTableBody');
 const agentCommissionTableBody = document.getElementById('agentCommissionTableBody');
 const trackAppsTableBody = document.getElementById('trackAppsTableBody');
@@ -600,6 +678,7 @@ const profileStatusEl = document.getElementById('profileStatus');
 let currentAgentCommissionGroup = null;
 let currentAgentCommissionView = 'sent_to_pfa';
 let applicationReportHasViewed = false;
+let slaRefreshTimer = null;
 // Admin password reset removed (per request).
 
 function renderProfileTab() {
@@ -943,6 +1022,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupMobileSidebar();
     setupForceRefreshButtons();
     setupIdleLogout();
+    setupSlaRefreshTimer();
 });
 
 window.signOutUser = async () => {
@@ -979,6 +1059,15 @@ function setupIdleLogout() {
         if (Date.now() - idleLastActivity >= IDLE_TIMEOUT_MS) {
             window.signOutUser();
         }
+    }, 60 * 1000);
+}
+
+function setupSlaRefreshTimer() {
+    if (slaRefreshTimer) return;
+    slaRefreshTimer = setInterval(() => {
+        renderSlaBreaches();
+        renderAdminSubTabs(currentParentTab);
+        updateAdminNavigationCounts();
     }, 60 * 1000);
 }
 
@@ -1241,6 +1330,8 @@ function setupEventListeners() {
     document.getElementById('approvedDocDate')?.addEventListener('change', filterApprovedDocs);
     document.getElementById('rejectedDocSearch')?.addEventListener('input', filterRejectedDocs);
     document.getElementById('rejectedDocDate')?.addEventListener('change', filterRejectedDocs);
+    slaBreachSearch?.addEventListener('input', renderSlaBreaches);
+    slaBreachStageFilter?.addEventListener('change', renderSlaBreaches);
     closeAdminRejectionReasonModal?.addEventListener('click', closeAdminRejectionReasonModalFn);
     closeAdminRejectionReasonBtn?.addEventListener('click', closeAdminRejectionReasonModalFn);
     document.getElementById('closeAgentCommissionModal')?.addEventListener('click', closeAgentCommissionModalFn);
@@ -1485,6 +1576,9 @@ function runTabEffects(tabId) {
     if (tabId === 'escalations') {
         renderEscalations();
     }
+    if (tabId === 'sla-breaches') {
+        renderSlaBreaches();
+    }
     if (tabId === 'track-apps') {
         renderTrackApplications();
     }
@@ -1530,6 +1624,7 @@ function switchLeafTab(tabId) {
         'approved-docs': 'Application Management - Approved',
         'rejected-docs': 'Application Management - Rejected',
         escalations: 'Application Management - Escalations',
+        'sla-breaches': 'Application Management - SLA Breach',
         'track-apps': 'Application Management - Track Applications',
         'generate-documents': 'Application Management - Generate Document',
         'finally-submitted': 'Application Management - Final Submission',
@@ -1943,6 +2038,7 @@ function loadSubmissions() {
         renderApprovedDocs();
         renderRejectedDocs();
         renderEscalations();
+        renderSlaBreaches();
         renderTrackApplications();
         renderFinallySubmitted();
         renderPaymentQueue();
@@ -2560,6 +2656,73 @@ function renderPaymentQueue() {
                 <td>${formatCurrency(twentyFive)}</td>
                 <td>${formatCurrency(commission2)}</td>
                 <td><span class="status-badge status-approved">${statusLabel}</span></td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderSlaBreaches() {
+    if (!slaBreachesTableBody) return;
+
+    const search = String(slaBreachSearch?.value || '').trim().toLowerCase();
+    const stageFilter = String(slaBreachStageFilter?.value || 'all').trim().toLowerCase();
+    let rows = getSlaBreachRows();
+
+    if (stageFilter && stageFilter !== 'all') {
+        rows = rows.filter((row) => row.stageKey === stageFilter);
+    }
+
+    if (search) {
+        rows = rows.filter(({ sub, officerEmail }) => {
+            const uploaderEmail = String(sub.uploadedBy || '').toLowerCase();
+            const officer = String(officerEmail || '').toLowerCase();
+            return String(sub.customerName || '').toLowerCase().includes(search) ||
+                uploaderEmail.includes(search) ||
+                getDisplayNameByEmail(uploaderEmail).toLowerCase().includes(search) ||
+                officer.includes(search) ||
+                getDisplayNameByEmail(officer).toLowerCase().includes(search);
+        });
+    }
+
+    const allRows = getSlaBreachRows();
+    const rsaCount = allRows.filter((row) => row.stageKey === 'rsa').length;
+    const paymentCount = allRows.filter((row) => row.stageKey === 'payment').length;
+    if (slaBreachSummary) {
+        slaBreachSummary.textContent = `${allRows.length} overdue application${allRows.length === 1 ? '' : 's'}: ${rsaCount} RSA, ${paymentCount} Payment`;
+    }
+
+    if (!rows.length) {
+        slaBreachesTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No applications have breached the RSA or Payment SLA</td></tr>';
+        return;
+    }
+
+    slaBreachesTableBody.innerHTML = rows.map(({ sub, stageKey, stageLabel, allowedMs, startedAt, dueMs, overdueMs, officerEmail }) => {
+        const uploaderEmail = String(sub.uploadedBy || '').trim().toLowerCase();
+        const officerName = officerEmail ? getDisplayNameByEmail(officerEmail) : 'Unassigned';
+        const badgeClass = stageKey === 'rsa' ? 'status-processing' : 'status-pending';
+        return `
+            <tr>
+                <td>
+                    <strong>${escapeHtml(sub.customerName || 'Unknown')}</strong>
+                    <div style="font-size:12px;color:#64748b;margin-top:4px;">Uploaded: ${escapeHtml(formatDate(getSubmissionOriginalUploadAt(sub)))}</div>
+                </td>
+                <td>${escapeHtml(uploaderEmail ? getDisplayNameByEmail(uploaderEmail) : 'Unknown')}</td>
+                <td><span class="status-badge ${badgeClass}">${escapeHtml(stageLabel)} ${Math.round(allowedMs / SLA_HOUR_MS)}h</span></td>
+                <td>${escapeHtml(officerName)}</td>
+                <td>${escapeHtml(formatDate(startedAt))}</td>
+                <td>${escapeHtml(formatDate(new Date(dueMs)))}</td>
+                <td><strong style="color:#b91c1c;">${escapeHtml(formatSlaDuration(overdueMs))}</strong></td>
+                <td>${escapeHtml(formatStatusLabel(sub.status || '-'))}</td>
+                <td>
+                    <div class="track-row-actions">
+                        <button class="action-btn view-btn-small" onclick="window.openTrackApplicationModal('${sub.id}')">
+                            <i class="fas fa-route"></i> Track
+                        </button>
+                        <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
+                            <i class="fas fa-eye"></i> View
+                        </button>
+                    </div>
+                </td>
             </tr>
         `;
     }).join('');

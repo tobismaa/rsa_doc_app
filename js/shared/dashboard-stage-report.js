@@ -7,8 +7,9 @@ import {
     getSubmissionFinalSubmissionEntryAt,
     getSubmissionPaymentEntryAt,
     getSubmissionPaidEntryAt,
-    getSubmissionClearedEntryAt
-} from './submission-stage.js?v=20260609a';
+    getSubmissionClearedEntryAt,
+    getSubmissionOriginalUploadAt
+} from './submission-stage.js?v=20260714a';
 
 function parseMoneyValue(value) {
     const num = Number(String(value ?? '').replace(/[^0-9.\-]/g, ''));
@@ -143,7 +144,7 @@ function buildUploaderSheetRows(records = [], resolveName = () => 'Unassigned') 
         rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
         commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
         status: String(sub.status || '').replace(/_/g, ' '),
-        uploadedAt: formatDate(getSubmissionReviewEntryAt(sub)),
+        uploadedAt: formatDate(getSubmissionOriginalUploadAt(sub)),
         rejectionReason: getRejectionReason(sub),
         rejectionOfficer: getRejectionOfficerName(sub, resolveName),
         rejectionCount: getRejectionCount(sub)

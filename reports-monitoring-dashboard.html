@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
     <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
-    <link rel="stylesheet" href="css/audit-dashboard.css?v=20260714b">
+    <link rel="stylesheet" href="css/audit-dashboard.css?v=20260714c">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -297,7 +297,13 @@
             <div id="rejectedTab" class="tab-content">
                 <div class="table-section">
                     <div class="audit-table-toolbar">
-                        <h2>Rejected</h2>
+                        <div>
+                            <h2>Rejected</h2>
+                            <div class="admin-subtab-strip audit-rejected-scope-strip" id="auditRejectedScopeStrip">
+                                <button type="button" class="admin-subtab-btn active" data-audit-rejected-scope="rejected">Rejected</button>
+                                <button type="button" class="admin-subtab-btn" data-audit-rejected-scope="frozen">Freeze</button>
+                            </div>
+                        </div>
                         <button type="button" class="action-btn audit-export-btn" id="exportAuditRejectedReportBtn">
                             <i class="fas fa-file-export"></i> Generate Report
                         </button>
@@ -657,7 +663,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/reports-monitoring.js?v=20260714f"></script>
+    <script type="module" src="js/reports-monitoring.js?v=20260714h"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260705b"></script>
 </body>
 </html>

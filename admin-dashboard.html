@@ -363,6 +363,45 @@
                 </div>
             </div>
 
+            <div id="sla-breachesTab" class="tab-content">
+                <div class="all-documents">
+                    <h2>SLA Breach Monitor</h2>
+                    <p style="color:#666;margin-bottom:20px;">Applications not treated within the required RSA 48-hour or Payment 72-hour window.</p>
+                    <div class="filters-bar">
+                        <div class="search-box">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="slaBreachSearch" placeholder="Search customer, uploader, or officer..." aria-label="Search SLA breaches">
+                        </div>
+                        <select id="slaBreachStageFilter" aria-label="Filter SLA breach stage">
+                            <option value="all">All Stages</option>
+                            <option value="rsa">RSA - 48 Hours</option>
+                            <option value="payment">Payment - 72 Hours</option>
+                        </select>
+                    </div>
+                    <div id="slaBreachSummary" class="backdate-report-summary" style="margin:12px 0;">No overdue applications</div>
+                    <div class="table-container">
+                        <table class="documents-table" data-no-enhance="true">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Uploader</th>
+                                    <th>Stage</th>
+                                    <th>Responsible Officer</th>
+                                    <th>Started At</th>
+                                    <th>Due At</th>
+                                    <th>Overdue By</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="slaBreachesTableBody">
+                                <tr><td colspan="9" class="loading-row"><div class="loading-spinner"></div> Loading SLA breaches...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <div id="adminRejectionReasonModal" class="modal">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -1396,7 +1435,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=20260709a"></script>
+    <script type="module" src="js/admin.js?v=20260714a"></script>
     <script src="js/table-enhancer.js?v=20260512b"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260705b"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260518a">
