@@ -366,9 +366,13 @@ const approvedTableBody = document.getElementById('approvedTableBody');
 const rejectedTableBody = document.getElementById('rejectedTableBody');
 const commentModal = document.getElementById('commentModal');
 const reviewContextModal = document.getElementById('reviewContextModal');
+const reviewerTrackModal = document.getElementById('reviewerTrackModal');
+const reviewerTrackModalBody = document.getElementById('reviewerTrackModalBody');
 const viewerModal = document.getElementById('viewerModal');
 const closeCommentModal = document.getElementById('closeCommentModal');
 const closeReviewContextModal = document.getElementById('closeReviewContextModal');
+const closeReviewerTrackModal = document.getElementById('closeReviewerTrackModal');
+const closeReviewerTrackFooterBtn = document.getElementById('closeReviewerTrackFooterBtn');
 const closeViewer = document.getElementById('closeViewer');
 const cancelComment = document.getElementById('cancelComment');
 const closeReviewContextBtn = document.getElementById('closeReviewContextBtn');
@@ -1028,6 +1032,8 @@ function applyZoom() {
 function setupEventListeners() {
     if (closeCommentModal) closeCommentModal.addEventListener('click', () => closeModal(commentModal));
     if (closeReviewContextModal) closeReviewContextModal.addEventListener('click', () => closeModal(reviewContextModal));
+    if (closeReviewerTrackModal) closeReviewerTrackModal.addEventListener('click', () => closeModal(reviewerTrackModal));
+    if (closeReviewerTrackFooterBtn) closeReviewerTrackFooterBtn.addEventListener('click', () => closeModal(reviewerTrackModal));
     if (closeViewer) closeViewer.addEventListener('click', closeViewerModal);
     if (cancelComment) cancelComment.addEventListener('click', () => closeModal(commentModal));
     if (closeReviewContextBtn) closeReviewContextBtn.addEventListener('click', () => closeModal(reviewContextModal));
@@ -1051,6 +1057,7 @@ function setupEventListeners() {
     window.addEventListener('click', (e) => {
         if (e.target === commentModal) closeModal(commentModal);
         if (e.target === reviewContextModal) closeModal(reviewContextModal);
+        if (e.target === reviewerTrackModal) closeModal(reviewerTrackModal);
         if (e.target === viewerModal) closeViewerModal();
         if (e.target === document.getElementById('reviewerLeaveApplicationsModal')) {
             document.getElementById('reviewerLeaveApplicationsModal')?.classList.remove('active');
@@ -1079,18 +1086,21 @@ async function loadSubmissions() {
         });
         const uploaderEmails = [...new Set(relevantDocs.map(doc => doc.data().uploadedBy))];
         const reviewerEmails = [...new Set(relevantDocs.map(doc => doc.data().reviewedBy))];
-        const allEmails = [...new Set([...uploaderEmails, ...reviewerEmails].filter(Boolean))];
+        const rsaEmails = [...new Set(relevantDocs.map(doc => doc.data().assignedToRSA))];
+        const allEmails = [...new Set([...uploaderEmails, ...reviewerEmails, ...rsaEmails].filter(Boolean))];
         await Promise.all(allEmails.map(email => getUserFullName(email)));
 
         const nextSubmissions = await Promise.all(relevantDocs.map(async (docSnap) => {
             const data = docSnap.data();
             const uploaderName = await getUserFullName(data.uploadedBy);
             const reviewerName = data.reviewedBy ? await getUserFullName(data.reviewedBy) : null;
+            const assignedToRSAName = data.assignedToRSA ? await getUserFullName(data.assignedToRSA) : null;
             return {
                 id: docSnap.id,
                 ...data,
                 uploadedByName: uploaderName,
-                reviewedByName: reviewerName
+                reviewedByName: reviewerName,
+                assignedToRSAName
             };
         }));
         if (loadVersion !== submissionsLoadVersion) return;
@@ -1130,18 +1140,21 @@ async function loadSubmissionsFallback() {
 
         const uploaderEmails = [...new Set(docsSorted.map(doc => doc.data().uploadedBy))];
         const reviewerEmails = [...new Set(docsSorted.map(doc => doc.data().reviewedBy))];
-        const allEmails = [...new Set([...uploaderEmails, ...reviewerEmails].filter(Boolean))];
+        const rsaEmails = [...new Set(docsSorted.map(doc => doc.data().assignedToRSA))];
+        const allEmails = [...new Set([...uploaderEmails, ...reviewerEmails, ...rsaEmails].filter(Boolean))];
         await Promise.all(allEmails.map(email => getUserFullName(email)));
 
         const nextSubmissions = await Promise.all(docsSorted.map(async (docSnap) => {
             const data = docSnap.data();
             const uploaderName = await getUserFullName(data.uploadedBy);
             const reviewerName = data.reviewedBy ? await getUserFullName(data.reviewedBy) : null;
+            const assignedToRSAName = data.assignedToRSA ? await getUserFullName(data.assignedToRSA) : null;
             return {
                 id: docSnap.id,
                 ...data,
                 uploadedByName: uploaderName,
-                reviewedByName: reviewerName
+                reviewedByName: reviewerName,
+                assignedToRSAName
             };
         }));
         if (loadVersion !== submissionsLoadVersion) return;
@@ -1305,11 +1318,63 @@ function renderPendingTable(submissions) {
     }).join('');
 }
 
+function getAssignedRsaDisplayName(submission = {}) {
+    if (submission.assignedToRSAName && submission.assignedToRSAName !== 'Unknown') return submission.assignedToRSAName;
+    const email = normalizeEmail(submission.assignedToRSA || '');
+    if (!email) return 'Pending';
+    return email;
+}
+
+function renderReviewerTrackItem(label, value, tone = '') {
+    const toneStyle = tone === 'current' ? 'border-left-color:#1e6cb9;background:#eff6ff;' : '';
+    return `
+        <div style="border:1px solid #dbe2ea;border-left:4px solid #cbd5e1;border-radius:8px;padding:12px;background:#fff;${toneStyle}">
+            <div style="font-size:12px;color:#64748b;font-weight:700;text-transform:uppercase;">${escapeHtml(label)}</div>
+            <div style="margin-top:5px;color:#1e293b;font-weight:600;">${escapeHtml(value || '-')}</div>
+        </div>
+    `;
+}
+
+window.openReviewerTrackModal = (submissionId) => {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub || !reviewerTrackModal || !reviewerTrackModalBody) return;
+
+    const status = formatReviewerStatusLabel(sub.status || '');
+    const uploadedAt = formatTimestamp(sub.uploadedAt) || 'N/A';
+    const approvedAt = formatTimestamp(getSubmissionApprovalEntryAt(sub)) || 'N/A';
+    const rsaAssignedAt = formatTimestamp(sub.rsaAssignedAt || getSubmissionApprovalEntryAt(sub)) || 'Pending';
+    const sentToPaymentAt = formatTimestamp(sub.finalSubmittedAt || sub.rsaSubmittedAt || sub.paymentAssignedAt) || 'Pending';
+    const paidAt = formatTimestamp(sub.paidAt) || 'Pending';
+    const assignedRsa = getAssignedRsaDisplayName(sub);
+    const paymentOfficer = sub.assignedToPayment ? normalizeEmail(sub.assignedToPayment) : 'Pending';
+
+    reviewerTrackModalBody.innerHTML = `
+        <div class="document-info" style="margin-bottom:14px;">
+            <h3>${escapeHtml(sub.customerName || 'Unknown')}</h3>
+            <p>Status: ${escapeHtml(status)}</p>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px;">
+            ${renderReviewerTrackItem('Uploaded By', sub.uploadedByName || sub.uploadedBy || 'Unknown')}
+            ${renderReviewerTrackItem('Approved By', sub.reviewedByName || sub.reviewedBy || 'N/A')}
+            ${renderReviewerTrackItem('Assigned To', assignedRsa)}
+            ${renderReviewerTrackItem('Payment Officer', paymentOfficer)}
+        </div>
+        <div style="display:grid;gap:10px;">
+            ${renderReviewerTrackItem('Upload', uploadedAt)}
+            ${renderReviewerTrackItem('Reviewer Approval', approvedAt)}
+            ${renderReviewerTrackItem('RSA Stage', rsaAssignedAt, ['approved', 'processing_to_pfa'].includes(String(sub.status || '').toLowerCase()) ? 'current' : '')}
+            ${renderReviewerTrackItem('Payment Stage', sentToPaymentAt, ['sent_to_pfa', 'rsa_submitted'].includes(String(sub.status || '').toLowerCase()) ? 'current' : '')}
+            ${renderReviewerTrackItem('Paid', paidAt, String(sub.status || '').toLowerCase() === 'paid' ? 'current' : '')}
+        </div>
+    `;
+    reviewerTrackModal.classList.add('active');
+};
+
 function renderApprovedTable(submissions) {
     if (!approvedTableBody) return;
 
     if (submissions.length === 0) {
-        approvedTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No approved documents found</td></tr>';
+        approvedTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No approved documents found</td></tr>';
         return;
     }
 
@@ -1321,6 +1386,7 @@ function renderApprovedTable(submissions) {
         
         const approvedDate = formatTimestamp(getSubmissionApprovalEntryAt(sub)) || 'N/A';
         const whatsapp = renderWhatsAppLink(sub.customerDetails?.phone || sub.customerPhone || '');
+        const assignedTo = getAssignedRsaDisplayName(sub);
 
         return `
             <tr>
@@ -1330,11 +1396,15 @@ function renderApprovedTable(submissions) {
                 <td>${whatsapp}</td>
                 <td>${sub.uploadedByName || 'N/A'}</td>
                 <td>${sub.reviewedByName || 'N/A'}</td>
+                <td>${escapeHtml(assignedTo)}</td>
                 <td>${approvedDate}</td>
                 <td>
                     <div class="action-buttons">
                         <button class="action-btn view-btn-small" onclick="window.viewSubmission('${sub.id}')">
                             <i class="fas fa-eye"></i> View
+                        </button>
+                        <button class="action-btn view-btn-small" onclick="window.openReviewerTrackModal('${sub.id}')">
+                            <i class="fas fa-route"></i> Track
                         </button>
                         <button class="action-btn download-all-btn" onclick="window.downloadAll('${sub.id}')" ${downloadInProgress ? 'disabled' : ''}>
                             ${downloadInProgress ? '<i class="fas fa-spinner fa-spin"></i>' : '<i class="fas fa-download"></i>'} Download
@@ -1511,7 +1581,7 @@ async function getUploaderRoutingRule(uploaderEmail) {
     return getUploaderRoutingRuleShared(db, uploaderEmail);
 }
 
-async function isActiveRSAUser(email) {
+async function isActiveRSAUser(email, { allowRoundRobinSkipped = false } = {}) {
     const normalized = normalizeEmail(email);
     if (!normalized) return false;
     try {
@@ -1523,7 +1593,7 @@ async function isActiveRSAUser(email) {
         return role === 'rsa'
             && status !== 'deactivated'
             && leaveStatus !== 'on_leave'
-            && data?.skipRsaRoundRobin !== true;
+            && (allowRoundRobinSkipped || data?.skipRsaRoundRobin !== true);
     } catch (_) {
         return false;
     }
@@ -1567,7 +1637,7 @@ async function assignRoundRobinRSA(submissionRef) {
 
     const routingRule = await getUploaderRoutingRule(uploaderEmail);
     const mappedRsa = routingRule?.rsaEmail || '';
-    if (mappedRsa && await isActiveRSAUser(mappedRsa)) {
+    if (mappedRsa && await isActiveRSAUser(mappedRsa, { allowRoundRobinSkipped: true })) {
         await updateDoc(submissionRef, { assignedToRSA: mappedRsa, rsaAssignedAt: serverTimestamp(), rsaAssignmentMode: 'uploader_routing' });
         try {
             const subSnap = await getDoc(submissionRef);
@@ -1588,10 +1658,14 @@ async function assignRoundRobinRSA(submissionRef) {
     }
 
     const rsaUsers = await getRSAEmails();
-    if (!rsaUsers.length) return null;
     const systemSettings = await getSystemSettings(db);
-    if (!systemSettings.rsaRoundRobinEnabled) {
-        await updateDoc(submissionRef, { assignedToRSA: '', rsaAssignmentMode: 'round_robin_disabled' });
+    const fallbackMode = String(systemSettings.routingPolicies?.fallbackAssignmentMode || 'round_robin').trim().toLowerCase();
+    if (!rsaUsers.length) {
+        await updateDoc(submissionRef, { assignedToRSA: '', rsaAssignedAt: null, rsaAssignmentMode: 'no_rsa_available' });
+        return null;
+    }
+    if (!systemSettings.rsaRoundRobinEnabled || fallbackMode === 'manual_review') {
+        await updateDoc(submissionRef, { assignedToRSA: '', rsaAssignedAt: null, rsaAssignmentMode: fallbackMode === 'manual_review' ? 'manual_review' : 'round_robin_disabled' });
         return null;
     }
     
@@ -1614,10 +1688,18 @@ async function assignRoundRobinRSA(submissionRef) {
             tx.update(submissionRef, { assignedToRSA: assigned, rsaAssignedAt: serverTimestamp(), rsaAssignmentMode: 'round_robin' });
         });
     } catch (error) {
-        assigned = pickFallbackRSAUser(rsaUsers, submissionRef?.id || trustedDateKey);
-        if (assigned) {
-            await updateDoc(submissionRef, { assignedToRSA: assigned, rsaAssignedAt: serverTimestamp(), rsaAssignmentMode: 'round_robin_fallback' });
-            assignmentMethod = 'round_robin_fallback';
+        if (fallbackMode === 'manual_review') {
+            await updateDoc(submissionRef, { assignedToRSA: '', rsaAssignedAt: null, rsaAssignmentMode: 'manual_review' });
+            assignmentMethod = 'manual_review';
+        } else {
+            assigned = pickFallbackRSAUser(rsaUsers, submissionRef?.id || trustedDateKey);
+            if (assigned) {
+                await updateDoc(submissionRef, { assignedToRSA: assigned, rsaAssignedAt: serverTimestamp(), rsaAssignmentMode: 'round_robin_fallback' });
+                assignmentMethod = 'round_robin_fallback';
+            } else {
+                await updateDoc(submissionRef, { assignedToRSA: '', rsaAssignedAt: null, rsaAssignmentMode: 'round_robin_fallback_unavailable' });
+                assignmentMethod = 'round_robin_fallback_unavailable';
+            }
         }
         console.error('RSA round-robin transaction failed; using fallback assignment.', {
             submissionId: submissionRef?.id || '',
@@ -1763,22 +1845,29 @@ async function reviewDocument(action) {
         // If approving, assign to RSA user using round-robin
         if (action === 'approved') {
             const rsaAssigned = await assignRoundRobinRSA(submissionRef);
-            
-            await updateDoc(submissionRef, {
+            const normalizedRsaAssigned = normalizeEmail(rsaAssigned);
+            const reviewerEmail = normalizeEmail(currentUser?.email || '');
+            const approvalPayload = {
                 status: 'processing_to_pfa',
                 comment: comment || '',
-                reviewedBy: currentUser.email,
+                reviewedBy: reviewerEmail,
                 reviewedAt: serverTimestamp(),
                 reviewerDecision: 'approved',
-                reviewerDecisionBy: currentUser.email,
+                reviewerDecisionBy: reviewerEmail,
                 reviewerDecisionAt: serverTimestamp(),
                 rsaReady: true
-            });
+            };
+            if (normalizedRsaAssigned) {
+                approvalPayload.assignedToRSA = normalizedRsaAssigned;
+                approvalPayload.rsaAssignedAt = serverTimestamp();
+            }
+            
+            await updateDoc(submissionRef, approvalPayload);
 
-            if (rsaAssigned) {
+            if (normalizedRsaAssigned) {
                 queueRsaApprovalEmail({
                     submissionId: currentSubmissionId,
-                    rsaEmail: rsaAssigned,
+                    rsaEmail: normalizedRsaAssigned,
                     customerName,
                     reviewerEmail: currentUser?.email || '',
                     uploaderEmail
@@ -1792,7 +1881,7 @@ async function reviewDocument(action) {
                     uploaderEmail,
                     customerName,
                     reviewerEmail: currentUser?.email || '',
-                    rsaEmail: rsaAssigned || ''
+                    rsaEmail: normalizedRsaAssigned || ''
                 }).catch((emailError) => {
                 });
             }
@@ -1806,7 +1895,7 @@ async function reviewDocument(action) {
                 message: `Application for ${customerName || 'this customer'} was approved and moved to Processing to PFA.`
             }).catch(() => {});
             
-            showNotification(`Document moved to Processing to PFA and assigned to RSA: ${rsaAssigned || 'pending'}`, 'success');
+            showNotification(`Document moved to Processing to PFA and assigned to RSA: ${normalizedRsaAssigned || 'pending'}`, 'success');
         } else {
             // If rejecting, don't assign to RSA
             const currentHistory = getRejectionHistoryEntries(currentSub);

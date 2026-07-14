@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
     <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
-    <link rel="stylesheet" href="css/audit-dashboard.css?v=20260714c">
+    <link rel="stylesheet" href="css/audit-dashboard.css?v=20260714d">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -347,6 +347,9 @@
                         <button type="button" class="action-btn audit-export-btn" id="auditReconciliationRunBtn" disabled>
                             <i class="fas fa-magnifying-glass"></i> Run Check
                         </button>
+                        <button type="button" class="action-btn" id="auditDuplicateScanBtn">
+                            <i class="fas fa-clone"></i> Find Duplicates
+                        </button>
                         <button type="button" class="action-btn" id="auditReconciliationExportBtn" disabled>
                             <i class="fas fa-file-excel"></i> Export Result
                         </button>
@@ -357,6 +360,32 @@
                 </section>
 
                 <div id="auditReconciliationSummary" class="audit-reconciliation-summary" style="display:none;"></div>
+
+                <div id="auditDuplicateScanSummary" class="audit-reconciliation-summary" style="display:none;"></div>
+
+                <div class="table-section" id="auditDuplicateScanWrap" style="display:none;">
+                    <div class="audit-table-toolbar">
+                        <h2>Duplicate Applications</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Duplicate Signal</th>
+                                    <th>Customer</th>
+                                    <th>Account</th>
+                                    <th>PEN</th>
+                                    <th>Status</th>
+                                    <th>Uploader</th>
+                                    <th>Uploaded At</th>
+                                    <th>Application ID</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditDuplicateScanBody"></tbody>
+                        </table>
+                    </div>
+                </div>
 
                 <div class="table-section" id="auditReconciliationMatchedWrap" style="display:none;">
                     <div class="audit-table-toolbar">
@@ -663,7 +692,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/reports-monitoring.js?v=20260714h"></script>
+    <script type="module" src="js/reports-monitoring.js?v=20260714i"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260705b"></script>
 </body>
 </html>

@@ -581,6 +581,11 @@
   color: #92400e;
 }
 
+.audit-recon-status.info {
+  background: #e0f2fe;
+  color: #075985;
+}
+
 @media (max-width: 768px) {
   .audit-dashboard-page .dashboard-grid {
     grid-template-columns: 1fr;

@@ -1520,9 +1520,10 @@ function renderRows(submissions) {
 function loadQueue() {
     // We need to fetch both rsaReady==true records AND rsaSubmitted==true records (old structure)
     // Firestore doesn't support OR in where clauses, so we'll fetch all assigned records and filter in memory
+    const currentUserEmail = normalizeEmail(currentUser?.email || '');
     let q = query(
         collection(db,'submissions'),
-        where('assignedToRSA','==', currentUser?.email || ''),
+        where('assignedToRSA','==', currentUserEmail),
         orderBy('uploadedAt','desc')
     );
 

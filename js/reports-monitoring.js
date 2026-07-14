@@ -60,6 +60,7 @@ let currentPaymentPdfPreviewFileName = 'payment-report.pdf';
 let auditReconciliationSourceRows = [];
 let auditReconciliationResult = null;
 let auditReconciliationFileName = '';
+let auditDuplicateScanResult = null;
 let auditPaidReconciliationSourceRows = [];
 let auditPaidReconciliationResult = null;
 let auditPaidReconciliationFileName = '';
@@ -95,10 +96,14 @@ const auditReconciliationFileInput = document.getElementById('auditReconciliatio
 const auditReconciliationTemplateBtn = document.getElementById('auditReconciliationTemplateBtn');
 const auditReconciliationSelectBtn = document.getElementById('auditReconciliationSelectBtn');
 const auditReconciliationRunBtn = document.getElementById('auditReconciliationRunBtn');
+const auditDuplicateScanBtn = document.getElementById('auditDuplicateScanBtn');
 const auditReconciliationExportBtn = document.getElementById('auditReconciliationExportBtn');
 const auditReconciliationClearBtn = document.getElementById('auditReconciliationClearBtn');
 const auditReconciliationFileMeta = document.getElementById('auditReconciliationFileMeta');
 const auditReconciliationSummary = document.getElementById('auditReconciliationSummary');
+const auditDuplicateScanSummary = document.getElementById('auditDuplicateScanSummary');
+const auditDuplicateScanWrap = document.getElementById('auditDuplicateScanWrap');
+const auditDuplicateScanBody = document.getElementById('auditDuplicateScanBody');
 const auditReconciliationMatchedWrap = document.getElementById('auditReconciliationMatchedWrap');
 const auditReconciliationMatchedBody = document.getElementById('auditReconciliationMatchedBody');
 const auditReconciliationUnmatchedWrap = document.getElementById('auditReconciliationUnmatchedWrap');
@@ -242,6 +247,10 @@ function normalizeAccountNumber(value) {
     return digits.length > 0 && digits.length < 10 ? digits.padStart(10, '0') : digits;
 }
 
+function normalizePenNumber(value) {
+    return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
 function normalizeRsaAmount(value) {
     const amount = parseMoney(value);
     return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : 0;
@@ -312,6 +321,16 @@ function getCustomerAccountNumber(sub = {}) {
         sub?.accountNumber ||
         '-'
     ).trim() || '-';
+}
+
+function getCustomerPenNumber(sub = {}) {
+    return String(
+        sub?.customerDetails?.penNo ||
+        sub?.customerDetails?.penNumber ||
+        sub?.penNo ||
+        sub?.penNumber ||
+        ''
+    ).trim();
 }
 
 function getSelectedAuditReconciliationFile() {
@@ -627,6 +646,57 @@ function computeAuditReconciliationResult(rows = []) {
     return computeAuditReconciliationResultFromCandidates(rows, getAuditReconciliationCandidates());
 }
 
+function getAuditableDuplicateSubmissions() {
+    const ignoredStatuses = new Set(['draft']);
+    return allSubmissions.filter((sub) => {
+        const status = String(sub.status || '').toLowerCase();
+        return !ignoredStatuses.has(status);
+    });
+}
+
+function buildAuditDuplicateScanResult() {
+    const buckets = new Map();
+    const addBucket = (key, signal, strength, sub) => {
+        if (!key) return;
+        const bucketKey = `${signal}:${key}`;
+        const existing = buckets.get(bucketKey) || { key, signal, strength, rows: [] };
+        existing.rows.push(sub);
+        buckets.set(bucketKey, existing);
+    };
+
+    getAuditableDuplicateSubmissions().forEach((sub) => {
+        const accountKey = normalizeAccountNumber(getCustomerAccountNumber(sub));
+        const penKey = normalizePenNumber(getCustomerPenNumber(sub));
+        const nameKey = normalizeCustomerName(sub.customerName || sub?.customerDetails?.name || '');
+        if (accountKey) addBucket(accountKey, 'Account Number', 'strong', sub);
+        if (penKey) addBucket(penKey, 'PEN', 'strong', sub);
+        if (nameKey) addBucket(nameKey, 'Customer Name', 'possible', sub);
+    });
+
+    const groups = Array.from(buckets.values())
+        .filter((bucket) => bucket.rows.length > 1)
+        .map((bucket) => ({
+            ...bucket,
+            rows: bucket.rows
+                .slice()
+                .sort((a, b) => getTimestampMillis(getSubmissionOriginalUploadAt(a)) - getTimestampMillis(getSubmissionOriginalUploadAt(b)))
+        }))
+        .sort((a, b) => {
+            if (a.strength !== b.strength) return a.strength === 'strong' ? -1 : 1;
+            return b.rows.length - a.rows.length;
+        });
+
+    const duplicateApplicationIds = new Set();
+    groups.forEach((group) => group.rows.forEach((sub) => duplicateApplicationIds.add(sub.id)));
+    return {
+        scannedCount: getAuditableDuplicateSubmissions().length,
+        groups,
+        duplicateCount: duplicateApplicationIds.size,
+        strongGroupCount: groups.filter((group) => group.strength === 'strong').length,
+        possibleGroupCount: groups.filter((group) => group.strength !== 'strong').length
+    };
+}
+
 function recomputeAuditPaidReconciliationResult() {
     if (!auditPaidReconciliationSourceRows.length) {
         auditPaidReconciliationResult = null;
@@ -683,8 +753,10 @@ function resetAuditReconciliationState() {
     auditReconciliationSourceRows = [];
     auditReconciliationResult = null;
     auditReconciliationFileName = '';
+    auditDuplicateScanResult = null;
     if (auditReconciliationFileInput) auditReconciliationFileInput.value = '';
     renderAuditReconciliation();
+    renderAuditDuplicateScan();
 }
 
 function renderAuditPaidReconciliation() {
@@ -840,6 +912,65 @@ function renderAuditPaidReconciliation() {
             `).join('')
             : '<tr><td colspan="5" class="no-data">No missing paid records</td></tr>';
     }
+}
+
+function renderAuditDuplicateScan() {
+    if (!auditDuplicateScanResult) {
+        if (auditDuplicateScanSummary) {
+            auditDuplicateScanSummary.style.display = 'none';
+            auditDuplicateScanSummary.innerHTML = '';
+        }
+        if (auditDuplicateScanWrap) auditDuplicateScanWrap.style.display = 'none';
+        if (auditDuplicateScanBody) auditDuplicateScanBody.innerHTML = '';
+        return;
+    }
+
+    const groups = auditDuplicateScanResult.groups || [];
+    if (auditDuplicateScanSummary) {
+        auditDuplicateScanSummary.style.display = 'grid';
+        auditDuplicateScanSummary.innerHTML = [
+            { label: 'System Records Scanned', value: auditDuplicateScanResult.scannedCount },
+            { label: 'Duplicate Groups', value: groups.length },
+            { label: 'Applications Affected', value: auditDuplicateScanResult.duplicateCount },
+            { label: 'Strong Signals', value: auditDuplicateScanResult.strongGroupCount },
+            { label: 'Possible Name Matches', value: auditDuplicateScanResult.possibleGroupCount }
+        ].map((chip) => `
+            <div class="audit-reconciliation-chip">
+                <span>${escapeHtml(chip.label)}</span>
+                <strong>${String(chip.value)}</strong>
+            </div>
+        `).join('');
+    }
+
+    if (auditDuplicateScanWrap) auditDuplicateScanWrap.style.display = 'block';
+    if (!auditDuplicateScanBody) return;
+    if (!groups.length) {
+        auditDuplicateScanBody.innerHTML = '<tr><td colspan="9" class="no-data">No duplicate applications found</td></tr>';
+        return;
+    }
+
+    auditDuplicateScanBody.innerHTML = groups.map((group, groupIndex) => (
+        group.rows.map((sub, rowIndex) => {
+            const accountNumber = getCustomerAccountNumber(sub);
+            const penNumber = getCustomerPenNumber(sub);
+            const signalClass = group.strength === 'strong' ? 'audit-recon-status partial' : 'audit-recon-status info';
+            const signalText = `${group.signal}: ${group.key}${rowIndex === 0 ? ` (${group.rows.length} records)` : ''}`;
+            return `
+                <tr>
+                    <td><span class="${signalClass}">${escapeHtml(signalText)}</span></td>
+                    <td><strong>${escapeHtml(sub.customerName || sub?.customerDetails?.name || 'Unknown')}</strong></td>
+                    <td>${escapeHtml(accountNumber || '-')}</td>
+                    <td>${escapeHtml(penNumber || '-')}</td>
+                    <td>${escapeHtml(statusLabel(sub.status || '-'))}</td>
+                    <td>${escapeHtml(getUserDisplayName(sub.uploadedBy || ''))}</td>
+                    <td>${escapeHtml(formatDate(getSubmissionOriginalUploadAt(sub)))}</td>
+                    <td>${escapeHtml(sub.id || '-')}</td>
+                    <td><button type="button" class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button></td>
+                </tr>
+                ${rowIndex === group.rows.length - 1 && groupIndex < groups.length - 1 ? '<tr><td colspan="9" style="height:8px;background:#f8fafc;"></td></tr>' : ''}
+            `;
+        }).join('')
+    )).join('');
 }
 
 function renderCopyableCustomerAccount(sub = {}) {
@@ -2001,6 +2132,7 @@ function renderCurrentTab() {
     }
     if (currentTab === 'reconciliation') {
         renderAuditReconciliation();
+        renderAuditDuplicateScan();
         renderAuditPaidReconciliation();
     }
 }
@@ -2663,6 +2795,23 @@ function bindEvents() {
             auditReconciliationRunBtn.innerHTML = originalHtml;
         }
     });
+    auditDuplicateScanBtn?.addEventListener('click', () => {
+        const originalHtml = auditDuplicateScanBtn.innerHTML;
+        auditDuplicateScanBtn.disabled = true;
+        auditDuplicateScanBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
+        try {
+            auditDuplicateScanResult = buildAuditDuplicateScanResult();
+            renderAuditDuplicateScan();
+            showNotification(`Duplicate scan complete. ${auditDuplicateScanResult.groups.length} group(s) found.`, auditDuplicateScanResult.groups.length ? 'warning' : 'success');
+        } catch (error) {
+            auditDuplicateScanResult = null;
+            renderAuditDuplicateScan();
+            showNotification(error?.message || 'Failed to scan duplicate applications.', 'error');
+        } finally {
+            auditDuplicateScanBtn.disabled = false;
+            auditDuplicateScanBtn.innerHTML = originalHtml;
+        }
+    });
     auditReconciliationExportBtn?.addEventListener('click', async () => {
         const originalHtml = auditReconciliationExportBtn.innerHTML;
         auditReconciliationExportBtn.disabled = true;
@@ -2963,6 +3112,9 @@ function loadSubmissions({ full = false } = {}) {
         }
         if (auditPaidReconciliationSourceRows.length) {
             recomputeAuditPaidReconciliationResult();
+        }
+        if (auditDuplicateScanResult) {
+            auditDuplicateScanResult = buildAuditDuplicateScanResult();
         }
         scheduleCurrentTabRender();
     };

@@ -936,7 +936,7 @@ async function assignRoundRobin(subRef) {
   return assignRoundRobinShared({ db, currentUser, subRef, counterDoc: RR_COUNTER_DOC });
 }
 
-async function isActiveRSAUser(email) {
+async function isActiveRSAUser(email, { allowRoundRobinSkipped = false } = {}) {
   const normalized = normalizeEmail(email);
   if (!normalized) return false;
   try {
@@ -948,10 +948,23 @@ async function isActiveRSAUser(email) {
     return role === 'rsa'
       && status !== 'deactivated'
       && leaveStatus !== 'on_leave'
-      && data?.skipRsaRoundRobin !== true;
+      && (allowRoundRobinSkipped || data?.skipRsaRoundRobin !== true);
   } catch (_) {
     return false;
   }
+}
+
+async function markDirectRsaManualReview(subRef, assignmentMode = 'manual_review') {
+  await updateDoc(subRef, {
+    assignedTo: '',
+    assignedToRSA: '',
+    rsaAssignedAt: null,
+    status: 'processing_to_pfa',
+    rsaReady: true,
+    assignmentMode: 'skip_reviewer_routing',
+    rsaAssignmentMode: assignmentMode,
+    reviewerSkipped: true
+  });
 }
 
 async function getRSAEmails() {
@@ -988,7 +1001,7 @@ function pickFallbackRSAUser(rsaUsers, seed = '') {
 async function assignDirectToRSA(subRef, uploaderEmail = '') {
   const routingRule = await getUploaderRoutingRule(uploaderEmail);
   const mappedRsa = routingRule?.rsaEmail || '';
-  if (mappedRsa && await isActiveRSAUser(mappedRsa)) {
+  if (mappedRsa && await isActiveRSAUser(mappedRsa, { allowRoundRobinSkipped: true })) {
     await updateDoc(subRef, {
       assignedTo: '',
       assignedToRSA: mappedRsa,
@@ -1002,8 +1015,17 @@ async function assignDirectToRSA(subRef, uploaderEmail = '') {
     return mappedRsa;
   }
 
+  const systemSettings = await getSystemSettings(db);
+  const fallbackMode = String(systemSettings.routingPolicies?.fallbackAssignmentMode || 'round_robin').trim().toLowerCase();
   const rsaUsers = await getRSAEmails();
-  if (!rsaUsers.length) return '';
+  if (!rsaUsers.length) {
+    await markDirectRsaManualReview(subRef, 'no_rsa_available');
+    return '';
+  }
+  if (!systemSettings.rsaRoundRobinEnabled || fallbackMode === 'manual_review') {
+    await markDirectRsaManualReview(subRef, fallbackMode === 'manual_review' ? 'manual_review' : 'round_robin_disabled');
+    return '';
+  }
 
   const counterRef = doc(db, 'counters', 'roundRobinRSA');
   let assigned = '';
@@ -1031,18 +1053,24 @@ async function assignDirectToRSA(subRef, uploaderEmail = '') {
       });
     });
   } catch (error) {
-    assigned = pickFallbackRSAUser(rsaUsers, subRef?.id || trustedDateKey);
-    if (assigned) {
-      await updateDoc(subRef, {
-        assignedTo: '',
-        assignedToRSA: assigned,
-        rsaAssignedAt: serverTimestamp(),
-        status: 'processing_to_pfa',
-        rsaReady: true,
-        assignmentMode: 'skip_reviewer_routing',
-        rsaAssignmentMode: 'round_robin_fallback',
-        reviewerSkipped: true
-      });
+    if (fallbackMode === 'manual_review') {
+      await markDirectRsaManualReview(subRef, 'manual_review');
+    } else {
+      assigned = pickFallbackRSAUser(rsaUsers, subRef?.id || trustedDateKey);
+      if (assigned) {
+        await updateDoc(subRef, {
+          assignedTo: '',
+          assignedToRSA: assigned,
+          rsaAssignedAt: serverTimestamp(),
+          status: 'processing_to_pfa',
+          rsaReady: true,
+          assignmentMode: 'skip_reviewer_routing',
+          rsaAssignmentMode: 'round_robin_fallback',
+          reviewerSkipped: true
+        });
+      } else {
+        await markDirectRsaManualReview(subRef, 'round_robin_fallback_unavailable');
+      }
     }
     console.error('Direct RSA round-robin transaction failed; using rotating fallback assignment.', {
       submissionId: subRef?.id || '',

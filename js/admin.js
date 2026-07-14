@@ -112,6 +112,7 @@ let escalationsListenerStarted = false;
 let auditListenerStarted = false;
 let adminNamesLoaded = false;
 let uploaderNamesLoaded = false;
+let activeSlaBreachStage = 'rsa';
 
 const GENERATED_DOCUMENT_TYPES = [
     { id: 'offer_letter', label: 'Offer Letter', description: 'Mortgage facility offer and terms.' },
@@ -326,6 +327,7 @@ const ADMIN_DASHBOARD_TABS = [
 const SLA_HOUR_MS = 60 * 60 * 1000;
 const RSA_SLA_MS = 48 * SLA_HOUR_MS;
 const PAYMENT_SLA_MS = 72 * SLA_HOUR_MS;
+const SLA_MONITOR_START_MS = Date.parse('2026-07-14T13:58:26+01:00');
 
 function getInitialAdminTab() {
     const hashTab = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();
@@ -392,6 +394,10 @@ function formatSlaDuration(ms = 0) {
     return parts.join(' ');
 }
 
+function isSlaStageEntryTracked(startedMs = 0) {
+    return Number(startedMs || 0) >= SLA_MONITOR_START_MS;
+}
+
 function getSlaBreachRows(nowMs = Date.now()) {
     return allSubmissions
         .flatMap((sub) => {
@@ -408,7 +414,7 @@ function getSlaBreachRows(nowMs = Date.now()) {
                 const startedAt = getSubmissionRsaEntryAt(sub);
                 const startedMs = getStageTimestampMillis(startedAt);
                 const dueMs = startedMs + RSA_SLA_MS;
-                if (startedMs && nowMs > dueMs) {
+                if (startedMs && isSlaStageEntryTracked(startedMs) && nowMs > dueMs) {
                     rows.push({
                         sub,
                         stageKey: 'rsa',
@@ -427,7 +433,7 @@ function getSlaBreachRows(nowMs = Date.now()) {
                 const startedAt = getSubmissionPaymentEntryAt(sub);
                 const startedMs = getStageTimestampMillis(startedAt);
                 const dueMs = startedMs + PAYMENT_SLA_MS;
-                if (startedMs && nowMs > dueMs) {
+                if (startedMs && isSlaStageEntryTracked(startedMs) && nowMs > dueMs) {
                     rows.push({
                         sub,
                         stageKey: 'payment',
@@ -587,7 +593,9 @@ const escalationsTableBody = document.getElementById('escalationsTableBody');
 const slaBreachesTableBody = document.getElementById('slaBreachesTableBody');
 const slaBreachSummary = document.getElementById('slaBreachSummary');
 const slaBreachSearch = document.getElementById('slaBreachSearch');
-const slaBreachStageFilter = document.getElementById('slaBreachStageFilter');
+const slaBreachSubtabs = document.getElementById('slaBreachSubtabs');
+const slaRsaCount = document.getElementById('slaRsaCount');
+const slaPaymentCount = document.getElementById('slaPaymentCount');
 const paymentsTableBody = document.getElementById('paymentsTableBody');
 const agentCommissionTableBody = document.getElementById('agentCommissionTableBody');
 const trackAppsTableBody = document.getElementById('trackAppsTableBody');
@@ -1331,7 +1339,14 @@ function setupEventListeners() {
     document.getElementById('rejectedDocSearch')?.addEventListener('input', filterRejectedDocs);
     document.getElementById('rejectedDocDate')?.addEventListener('change', filterRejectedDocs);
     slaBreachSearch?.addEventListener('input', renderSlaBreaches);
-    slaBreachStageFilter?.addEventListener('change', renderSlaBreaches);
+    slaBreachSubtabs?.querySelectorAll('[data-sla-stage]')?.forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const nextStage = String(btn.getAttribute('data-sla-stage') || 'rsa').trim().toLowerCase();
+            if (!['rsa', 'payment'].includes(nextStage)) return;
+            activeSlaBreachStage = nextStage;
+            renderSlaBreaches();
+        });
+    });
     closeAdminRejectionReasonModal?.addEventListener('click', closeAdminRejectionReasonModalFn);
     closeAdminRejectionReasonBtn?.addEventListener('click', closeAdminRejectionReasonModalFn);
     document.getElementById('closeAgentCommissionModal')?.addEventListener('click', closeAgentCommissionModalFn);
@@ -2665,12 +2680,8 @@ function renderSlaBreaches() {
     if (!slaBreachesTableBody) return;
 
     const search = String(slaBreachSearch?.value || '').trim().toLowerCase();
-    const stageFilter = String(slaBreachStageFilter?.value || 'all').trim().toLowerCase();
-    let rows = getSlaBreachRows();
-
-    if (stageFilter && stageFilter !== 'all') {
-        rows = rows.filter((row) => row.stageKey === stageFilter);
-    }
+    const stageFilter = ['rsa', 'payment'].includes(activeSlaBreachStage) ? activeSlaBreachStage : 'rsa';
+    let rows = getSlaBreachRows().filter((row) => row.stageKey === stageFilter);
 
     if (search) {
         rows = rows.filter(({ sub, officerEmail }) => {
@@ -2687,12 +2698,21 @@ function renderSlaBreaches() {
     const allRows = getSlaBreachRows();
     const rsaCount = allRows.filter((row) => row.stageKey === 'rsa').length;
     const paymentCount = allRows.filter((row) => row.stageKey === 'payment').length;
+    if (slaRsaCount) slaRsaCount.textContent = String(rsaCount);
+    if (slaPaymentCount) slaPaymentCount.textContent = String(paymentCount);
+    slaBreachSubtabs?.querySelectorAll('[data-sla-stage]')?.forEach((btn) => {
+        const isActive = String(btn.getAttribute('data-sla-stage') || '').toLowerCase() === stageFilter;
+        btn.classList.toggle('active', isActive);
+    });
     if (slaBreachSummary) {
-        slaBreachSummary.textContent = `${allRows.length} overdue application${allRows.length === 1 ? '' : 's'}: ${rsaCount} RSA, ${paymentCount} Payment`;
+        const activeLabel = stageFilter === 'payment' ? 'Payment' : 'RSA';
+        const activeCount = stageFilter === 'payment' ? paymentCount : rsaCount;
+        slaBreachSummary.textContent = `${activeLabel}: ${activeCount} overdue application${activeCount === 1 ? '' : 's'} (${rsaCount} RSA, ${paymentCount} Payment total)`;
     }
 
     if (!rows.length) {
-        slaBreachesTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No applications have breached the RSA or Payment SLA</td></tr>';
+        const emptyLabel = stageFilter === 'payment' ? 'Payment' : 'RSA';
+        slaBreachesTableBody.innerHTML = `<tr><td colspan="9" class="no-data">No applications have breached the ${emptyLabel} SLA</td></tr>`;
         return;
     }
 
@@ -8071,9 +8091,12 @@ function filterApprovedDocs() {
     });
 
     const filtered = approved.filter(sub => {
+        const assignedLabel = sub.assignedToRSA ? getDisplayNameByEmail(sub.assignedToRSA) : '';
         const matchesSearch = searchTerm === '' ||
             sub.customerName?.toLowerCase().includes(searchTerm) ||
-            sub.uploadedBy?.toLowerCase().includes(searchTerm);
+            sub.uploadedBy?.toLowerCase().includes(searchTerm) ||
+            String(sub.assignedToRSA || '').toLowerCase().includes(searchTerm) ||
+            assignedLabel.toLowerCase().includes(searchTerm);
         const matchesDate = matchesExactDate(getSubmissionApprovalEntryAt(sub), dateFilter);
         return matchesSearch && matchesDate;
     }).sort((a, b) => getStageTimestampMillis(getSubmissionApprovalEntryAt(b)) - getStageTimestampMillis(getSubmissionApprovalEntryAt(a)));
@@ -8081,7 +8104,7 @@ function filterApprovedDocs() {
     if (!approvedDocsTableBody) return;
 
     if (filtered.length === 0) {
-        approvedDocsTableBody.innerHTML = '<tr><td colspan="6" class="no-data">No approved documents</td></tr>';
+        approvedDocsTableBody.innerHTML = '<tr><td colspan="7" class="no-data">No approved documents</td></tr>';
         return;
     }
 
@@ -8092,6 +8115,7 @@ function filterApprovedDocs() {
             (sub.reviewedAt.toDate ? sub.reviewedAt.toDate() : new Date(sub.reviewedAt)).toLocaleString() : 'N/A';
         const uploaderFullName = uploaderNames[sub.uploadedBy] || sub.uploadedBy?.split('@')[0] || 'Unknown';
         const approverFullName = adminNames[sub.reviewedBy] || sub.reviewedBy?.split('@')[0] || 'N/A';
+        const assignedToName = sub.assignedToRSA ? getDisplayNameByEmail(sub.assignedToRSA) : 'Unassigned';
 
         return `
             <tr>
@@ -8099,6 +8123,7 @@ function filterApprovedDocs() {
                 <td>${uploadDate}</td>
                 <td>${uploaderFullName}</td>
                 <td>${approverFullName}</td>
+                <td>${assignedToName}</td>
                 <td>${approvedDate}</td>
                 <td>
                     <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">

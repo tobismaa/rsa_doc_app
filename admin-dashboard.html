@@ -291,6 +291,7 @@
                                     <th>Upload Date/Time</th>
                                     <th>Uploaded By</th>
                                     <th>Approved By</th>
+                                    <th>Assigned To</th>
                                     <th>Approved Date/Time</th>
                                     <th>Actions</th>
                                 </tr>
@@ -366,17 +367,20 @@
             <div id="sla-breachesTab" class="tab-content">
                 <div class="all-documents">
                     <h2>SLA Breach Monitor</h2>
-                    <p style="color:#666;margin-bottom:20px;">Applications not treated within the required RSA 48-hour or Payment 72-hour window.</p>
+                    <p style="color:#666;margin-bottom:20px;">Applications entering RSA or Payment from 14 Jul 2026 onward that are not treated within the required RSA 48-hour or Payment 72-hour window.</p>
                     <div class="filters-bar">
                         <div class="search-box">
                             <i class="fas fa-search"></i>
                             <input type="text" id="slaBreachSearch" placeholder="Search customer, uploader, or officer..." aria-label="Search SLA breaches">
                         </div>
-                        <select id="slaBreachStageFilter" aria-label="Filter SLA breach stage">
-                            <option value="all">All Stages</option>
-                            <option value="rsa">RSA - 48 Hours</option>
-                            <option value="payment">Payment - 72 Hours</option>
-                        </select>
+                    </div>
+                    <div class="admin-subtab-strip" id="slaBreachSubtabs" aria-label="SLA breach stage tabs">
+                        <button type="button" class="action-btn admin-subtab-btn active" data-sla-stage="rsa">
+                            RSA <span id="slaRsaCount">0</span>
+                        </button>
+                        <button type="button" class="action-btn admin-subtab-btn" data-sla-stage="payment">
+                            Payment <span id="slaPaymentCount">0</span>
+                        </button>
                     </div>
                     <div id="slaBreachSummary" class="backdate-report-summary" style="margin:12px 0;">No overdue applications</div>
                     <div class="table-container">
@@ -1435,7 +1439,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=20260714a"></script>
+    <script type="module" src="js/admin.js?v=20260714c"></script>
     <script src="js/table-enhancer.js?v=20260512b"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260705b"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260518a">

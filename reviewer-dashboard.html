@@ -207,12 +207,13 @@
                                     <th>Contact</th>
                                     <th>Uploaded By</th>
                                     <th>Approved By</th>
+                                    <th>Assigned To</th>
                                     <th>Approved Date/Time</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="approvedTableBody">
-                                <tr><td colspan="8" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
+                                <tr><td colspan="9" class="loading-row"><div class="loading-spinner"></div> Loading documents...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -400,6 +401,21 @@
             </div>
             <div class="modal-footer">
                 <button class="cancel-btn" id="closeReviewContextBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="reviewerTrackModal" class="modal">
+        <div class="modal-content" style="max-width:760px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-route"></i> Application Track</h2>
+                <button class="close-btn" id="closeReviewerTrackModal">&times;</button>
+            </div>
+            <div class="modal-body" id="reviewerTrackModalBody">
+                <!-- Track details will be inserted here -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="closeReviewerTrackFooterBtn">Close</button>
             </div>
         </div>
     </div>
@@ -714,7 +730,7 @@
 
     <script type="module" src="js/firebase-config.js?v=20260625c"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-    <script type="module" src="js/reviewer-dashboard.js?v=20260714a"></script>
+    <script type="module" src="js/reviewer-dashboard.js?v=20260714d"></script>
     
     <script>
         // Mobile sidebar functionality
