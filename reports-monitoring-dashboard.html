@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
     <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
-    <link rel="stylesheet" href="css/audit-dashboard.css?v=20260709a">
+    <link rel="stylesheet" href="css/audit-dashboard.css?v=20260714b">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -213,86 +213,18 @@
                         <div>
                             <h2>Paid</h2>
                             <div class="admin-subtab-strip audit-paid-scope-strip" id="auditPaidScopeStrip">
-                                <button type="button" class="admin-subtab-btn active" data-audit-paid-scope="mine">Approved by Me</button>
+                                <button type="button" class="admin-subtab-btn" data-audit-paid-scope="mine">Approved by Me</button>
                                 <button type="button" class="admin-subtab-btn" data-audit-paid-scope="others">Approved by Others</button>
-                                <button type="button" class="admin-subtab-btn" data-audit-paid-scope="all">Approved by Me + Others</button>
+                                <button type="button" class="admin-subtab-btn active" data-audit-paid-scope="all">Approved by Me + Others</button>
                             </div>
                         </div>
-                        <button type="button" class="action-btn audit-export-btn" id="exportAuditPaidReportBtn">
-                            <i class="fas fa-file-export"></i> Generate Report
-                        </button>
-                    </div>
-                    <section class="audit-reconciliation-panel" style="margin-bottom:16px;">
-                        <div class="audit-reconciliation-copy">
-                            <h2>Paid Reconciliation</h2>
-                            <p style="margin:0 0 6px;color:#64748b;line-height:1.6;">Upload the same Excel or CSV format used by Application Breakdown. The system will match the file against the paid applications in the currently selected scope so you can clear multiple records at once.</p>
-                            <div id="auditPaidReconciliationFileMeta" class="audit-reconciliation-meta">Upload the same Excel or CSV format used by Application Breakdown. Matching runs against Approved by Me.</div>
-                        </div>
-                        <input type="file" id="auditPaidReconciliationFileInput" accept=".xlsx,.csv" hidden>
-                        <div class="audit-reconciliation-actions">
-                            <button type="button" class="action-btn" id="auditPaidReconciliationSelectBtn">
-                                <i class="fas fa-file-upload"></i> Upload File
+                        <div class="audit-toolbar-actions">
+                            <button type="button" class="action-btn" id="openAuditPaidReconciliationBtn">
+                                <i class="fas fa-file-circle-check"></i> Paid Reconciliation
                             </button>
-                            <button type="button" class="action-btn audit-export-btn" id="auditPaidReconciliationRunBtn" disabled>
-                                <i class="fas fa-magnifying-glass"></i> Run Check
+                            <button type="button" class="action-btn audit-export-btn" id="exportAuditPaidReportBtn">
+                                <i class="fas fa-file-export"></i> Generate Report
                             </button>
-                            <button type="button" class="action-btn" id="auditPaidReconciliationSelectAllBtn" disabled>
-                                <i class="fas fa-check-double"></i> Select All Found
-                            </button>
-                            <button type="button" class="action-btn" id="auditPaidReconciliationClearSelectedBtn" style="background:#0f766e;color:#fff;border:none;" disabled>
-                                <i class="fas fa-circle-check"></i> Clear Selected
-                            </button>
-                            <button type="button" class="cancel-btn" id="auditPaidReconciliationResetBtn" disabled>
-                                Reset
-                            </button>
-                        </div>
-                    </section>
-
-                    <div id="auditPaidReconciliationSummary" class="audit-reconciliation-summary" style="display:none;margin-bottom:16px;"></div>
-
-                    <div class="table-section" id="auditPaidReconciliationMatchedWrap" style="display:none;">
-                        <div class="audit-table-toolbar">
-                            <h2>Matched Paid Applications</h2>
-                        </div>
-                        <div class="table-container">
-                            <table class="documents-table">
-                                <thead>
-                                    <tr>
-                                        <th>Select</th>
-                                        <th>Upload Row</th>
-                                        <th>Uploaded Name</th>
-                                        <th>Uploaded Account</th>
-                                        <th>Uploaded 25% RSA Balance</th>
-                                        <th>System Name</th>
-                                        <th>Uploader</th>
-                                        <th>System Account</th>
-                                        <th>Paid At</th>
-                                        <th>Result</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="auditPaidReconciliationMatchedBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="table-section" id="auditPaidReconciliationUnmatchedWrap" style="display:none;">
-                        <div class="audit-table-toolbar">
-                            <h2>Not Found in Paid</h2>
-                        </div>
-                        <div class="table-container">
-                            <table class="documents-table">
-                                <thead>
-                                    <tr>
-                                        <th>Upload Row</th>
-                                        <th>Name</th>
-                                        <th>Account Number</th>
-                                        <th>Uploaded 25% RSA Balance</th>
-                                        <th>Result</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="auditPaidReconciliationUnmatchedBody"></tbody>
-                            </table>
                         </div>
                     </div>
 
@@ -490,6 +422,114 @@
         </div>
     </div>
 
+    <div id="auditPaidReconciliationUploadModal" class="modal">
+        <div class="modal-content audit-paid-upload-modal">
+            <div class="modal-header">
+                <h2><i class="fas fa-file-circle-check"></i> Paid Reconciliation</h2>
+                <button class="close-btn" id="closeAuditPaidReconciliationUploadModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="audit-paid-upload-card">
+                    <div class="audit-paid-upload-icon"><i class="fas fa-file-excel"></i></div>
+                    <div>
+                        <h3>Upload Payment Excel</h3>
+                        <p>Use the Application Breakdown Excel generated from the app. The system will match paid and already-cleared applications against the current paid scope.</p>
+                    </div>
+                </div>
+                <input type="file" id="auditPaidReconciliationFileInput" accept=".xlsx,.csv" hidden>
+                <div id="auditPaidReconciliationFileMeta" class="audit-reconciliation-meta audit-paid-file-meta">No file selected. Matching runs against Approved by Me + Others.</div>
+                <div class="audit-paid-upload-actions">
+                    <button type="button" class="action-btn" id="auditPaidReconciliationSelectBtn">
+                        <i class="fas fa-file-upload"></i> Choose Excel
+                    </button>
+                    <button type="button" class="cancel-btn" id="auditPaidReconciliationResetBtn" disabled>
+                        Reset
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="cancelAuditPaidReconciliationUploadModalBtn">Cancel</button>
+                <button type="button" class="action-btn audit-export-btn" id="auditPaidReconciliationRunBtn" disabled>
+                    <i class="fas fa-magnifying-glass"></i> Run Check
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="auditPaidReconciliationResultsModal" class="modal">
+        <div class="modal-content large-modal audit-paid-results-modal">
+            <div class="modal-header">
+                <h2><i class="fas fa-table-list"></i> Paid Reconciliation Results</h2>
+                <button class="close-btn" id="closeAuditPaidReconciliationResultsModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="auditPaidReconciliationSummary" class="audit-reconciliation-summary audit-paid-results-summary" style="display:none;"></div>
+                <div class="audit-paid-results-tabs" role="tablist" aria-label="Paid reconciliation results">
+                    <button type="button" class="audit-paid-results-tab active" data-paid-reconciliation-view="matched" role="tab" aria-selected="true">
+                        <i class="fas fa-link"></i> Matched Records
+                    </button>
+                    <button type="button" class="audit-paid-results-tab" data-paid-reconciliation-view="unmatched" role="tab" aria-selected="false">
+                        <i class="fas fa-triangle-exclamation"></i> Unmatched Records
+                    </button>
+                </div>
+                <div class="table-section audit-paid-results-view" id="auditPaidReconciliationMatchedWrap" style="display:none;">
+                    <div class="audit-table-toolbar">
+                        <h2>Matched Records</h2>
+                        <button type="button" class="action-btn" id="auditPaidReconciliationSelectAllBtn" disabled>
+                            <i class="fas fa-check-double"></i> Select All Clearable
+                        </button>
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Select</th>
+                                    <th>Upload Row</th>
+                                    <th>Uploaded Name</th>
+                                    <th>Uploaded Account</th>
+                                    <th>Uploaded 25% RSA Balance</th>
+                                    <th>Uploaded Status</th>
+                                    <th>System Name</th>
+                                    <th>Uploader</th>
+                                    <th>System Account</th>
+                                    <th>Paid At</th>
+                                    <th>Result</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditPaidReconciliationMatchedBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="table-section audit-paid-results-view" id="auditPaidReconciliationUnmatchedWrap" style="display:none;">
+                    <div class="audit-table-toolbar">
+                        <h2>Unmatched Records</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Upload Row</th>
+                                    <th>Name</th>
+                                    <th>Account Number</th>
+                                    <th>Uploaded 25% RSA Balance</th>
+                                    <th>Result</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditPaidReconciliationUnmatchedBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="closeAuditPaidReconciliationResultsFooterBtn">Close</button>
+                <button type="button" class="action-btn" id="auditPaidReconciliationClearSelectedBtn" style="background:#0f766e;color:#fff;border:none;" disabled>
+                    <i class="fas fa-circle-check"></i> Clear Selected
+                </button>
+            </div>
+        </div>
+    </div>
+
     <div id="paymentReportRangeModal" class="modal">
         <div class="modal-content" style="max-width:540px;">
             <div class="modal-header">
@@ -590,7 +630,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/reports-monitoring.js?v=20260709c"></script>
+    <script type="module" src="js/reports-monitoring.js?v=20260714d"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260705b"></script>
 </body>
 </html>

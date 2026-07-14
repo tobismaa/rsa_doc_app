@@ -189,6 +189,14 @@
   margin: 0;
 }
 
+.audit-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .audit-paid-scope-strip {
   margin-top: 10px;
   width: fit-content;
@@ -413,6 +421,109 @@
   flex-wrap: wrap;
 }
 
+.audit-paid-upload-modal {
+  max-width: 620px !important;
+}
+
+.audit-paid-upload-card {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 14px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid #dbe5f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.audit-paid-upload-icon {
+  width: 54px;
+  height: 54px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 24px;
+}
+
+.audit-paid-upload-card h3 {
+  margin: 0 0 6px;
+  color: #0f3b67;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.audit-paid-upload-card p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.audit-paid-file-meta {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px dashed #94a3b8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.audit-paid-upload-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.audit-paid-results-modal {
+  max-width: 1320px !important;
+}
+
+.audit-paid-results-summary {
+  margin-bottom: 14px;
+}
+
+.audit-paid-results-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.audit-paid-results-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 1px solid #dbe5f0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.audit-paid-results-tab:hover {
+  border-color: #0f3b67;
+  color: #0f3b67;
+}
+
+.audit-paid-results-tab.active {
+  border-color: #0f3b67;
+  background: #0f3b67;
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(15, 59, 103, 0.18);
+}
+
+.audit-paid-results-view {
+  margin-bottom: 0;
+}
+
 .audit-reconciliation-summary {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
@@ -521,5 +632,20 @@
   .audit-reconciliation-actions > * {
     flex: 1 1 150px;
     justify-content: center;
+  }
+
+  .audit-toolbar-actions,
+  .audit-paid-upload-actions {
+    width: 100%;
+  }
+
+  .audit-toolbar-actions > *,
+  .audit-paid-upload-actions > * {
+    flex: 1 1 170px;
+    justify-content: center;
+  }
+
+  .audit-paid-upload-card {
+    grid-template-columns: 1fr;
   }
 }

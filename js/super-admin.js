@@ -2636,7 +2636,7 @@ function getUsersByRole(role) {
 }
 
 function getRoutingUploaderUsers() {
-    const uploadCapableRoles = new Set(['uploader', 'reviewer', 'rsa']);
+    const uploadCapableRoles = new Set(['uploader', 'reviewer', 'rsa', 'reports_monitoring']);
     return allUsers
         .filter((u) => {
             const role = String(u.role || '').trim().toLowerCase();

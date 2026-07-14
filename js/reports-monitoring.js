@@ -48,7 +48,7 @@ function forceHardRefresh() {
     url.searchParams.set('_', Date.now().toString());
     window.location.replace(url.toString());
 }
-let currentAuditPaidScope = 'mine';
+let currentAuditPaidScope = 'all';
 let currentPaymentReport = null;
 let pendingPaymentReportRequest = { kind: 'paid' };
 let currentPaymentPdfPreviewUrl = '';
@@ -61,6 +61,7 @@ let auditPaidReconciliationSourceRows = [];
 let auditPaidReconciliationResult = null;
 let auditPaidReconciliationFileName = '';
 let auditPaidReconciliationSelectedSubmissionIds = [];
+let auditPaidReconciliationActiveResultsTab = 'matched';
 let usersListenerStarted = false;
 let submissionsListenerMode = '';
 let submissionListenerUnsubs = [];
@@ -98,6 +99,9 @@ const auditReconciliationMatchedWrap = document.getElementById('auditReconciliat
 const auditReconciliationMatchedBody = document.getElementById('auditReconciliationMatchedBody');
 const auditReconciliationUnmatchedWrap = document.getElementById('auditReconciliationUnmatchedWrap');
 const auditReconciliationUnmatchedBody = document.getElementById('auditReconciliationUnmatchedBody');
+const openAuditPaidReconciliationBtn = document.getElementById('openAuditPaidReconciliationBtn');
+const auditPaidReconciliationUploadModal = document.getElementById('auditPaidReconciliationUploadModal');
+const auditPaidReconciliationResultsModal = document.getElementById('auditPaidReconciliationResultsModal');
 const auditPaidReconciliationFileInput = document.getElementById('auditPaidReconciliationFileInput');
 const auditPaidReconciliationSelectBtn = document.getElementById('auditPaidReconciliationSelectBtn');
 const auditPaidReconciliationRunBtn = document.getElementById('auditPaidReconciliationRunBtn');
@@ -325,7 +329,14 @@ function getAuditReconciliationColumns(headerMap) {
     return {
         nameColumn: resolveImportColumn(headerMap, ['customername', 'customer', 'name', 'fullname', 'customerfullname', 'accountname', 'membername', 'clientname']),
         accountColumn: resolveImportColumn(headerMap, ['accountnumber', 'accountno', 'acctnumber', 'acctno', 'bankaccountnumber', 'customeraccountnumber', 'customeraccountno']),
-        rsaColumn: resolveImportColumn(headerMap, ['25rsabalance', 'rsabalance', 'rsabal', 'retirementsavingsaccountbalance', 'balance', 'amount', 'rsavalue', 'pensionbalance'])
+        rsaColumn: resolveImportColumn(headerMap, ['25rsabalance', '25percentrsabalance', '25rsabalance', 'twentyfiversabalance', 'rsabalance', 'rsabal', 'retirementsavingsaccountbalance', 'balance', 'amount', 'rsavalue', 'pensionbalance']),
+        commissionColumn: resolveImportColumn(headerMap, ['commission', 'commissionamount', 'totalcommissionpayable']),
+        rateColumn: resolveImportColumn(headerMap, ['rate', 'commissionrate']),
+        uploaderColumn: resolveImportColumn(headerMap, ['uploadername', 'uploader', 'submittedby']),
+        agentColumn: resolveImportColumn(headerMap, ['agentname', 'agent']),
+        agentAccountColumn: resolveImportColumn(headerMap, ['agentaccountnumber', 'agentaccountno', 'agentacctnumber', 'agentacctno']),
+        agentBankColumn: resolveImportColumn(headerMap, ['agentbank', 'agentaccountbank', 'bank']),
+        statusColumn: resolveImportColumn(headerMap, ['status', 'paymentstatus', 'auditstatus'])
     };
 }
 
@@ -333,16 +344,24 @@ function normalizeAuditReconciliationRow(row = {}) {
     const customerName = String(row.customerName || '').trim();
     const accountNumber = String(row.accountNumber || '').trim();
     const rawRsaBalance = String(row.rawRsaBalance || '').trim();
+    const sourceStatus = String(row.sourceStatus || '').trim();
     return {
         ...row,
         customerName,
         accountNumber,
         rawRsaBalance,
+        sourceStatus,
         normalizedName: normalizeCustomerName(customerName),
         normalizedAccountNumber: normalizeAccountNumber(accountNumber),
         normalizedRsaBalance: normalizeRsaAmount(rawRsaBalance),
-        hasRsaBalance: hasRsaAmount(rawRsaBalance)
+        hasRsaBalance: hasRsaAmount(rawRsaBalance),
+        normalizedSourceStatus: sourceStatus.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
     };
+}
+
+function isClearableImportStatus(row = {}) {
+    const status = String(row.normalizedSourceStatus || '').trim();
+    return !status || status === 'paid' || status === 'cleared';
 }
 
 function parseCsvRows(text = '') {
@@ -391,14 +410,32 @@ function parseAuditReconciliationCsv(text = '') {
         const normalized = normalizeImportHeader(header);
         if (normalized) headerMap.set(index + 1, normalized);
     });
-    const { nameColumn, accountColumn, rsaColumn } = getAuditReconciliationColumns(headerMap);
+    const {
+        nameColumn,
+        accountColumn,
+        rsaColumn,
+        commissionColumn,
+        rateColumn,
+        uploaderColumn,
+        agentColumn,
+        agentAccountColumn,
+        agentBankColumn,
+        statusColumn
+    } = getAuditReconciliationColumns(headerMap);
     if (!nameColumn && !accountColumn) throw new Error('File must contain a name or account number column.');
 
     const parsedRows = rows.slice(1).map((row, index) => normalizeAuditReconciliationRow({
         rowNumber: index + 2,
         customerName: nameColumn ? getCellText(row[nameColumn - 1]) : '',
         accountNumber: accountColumn ? getCellText(row[accountColumn - 1]) : '',
-        rawRsaBalance: rsaColumn ? getCellText(row[rsaColumn - 1]) : ''
+        rawRsaBalance: rsaColumn ? getCellText(row[rsaColumn - 1]) : '',
+        sourceCommission: commissionColumn ? getCellText(row[commissionColumn - 1]) : '',
+        sourceRate: rateColumn ? getCellText(row[rateColumn - 1]) : '',
+        sourceUploaderName: uploaderColumn ? getCellText(row[uploaderColumn - 1]) : '',
+        sourceAgentName: agentColumn ? getCellText(row[agentColumn - 1]) : '',
+        sourceAgentAccountNumber: agentAccountColumn ? getCellText(row[agentAccountColumn - 1]) : '',
+        sourceAgentBank: agentBankColumn ? getCellText(row[agentBankColumn - 1]) : '',
+        sourceStatus: statusColumn ? getCellText(row[statusColumn - 1]) : ''
     })).filter((row) => row.customerName || row.accountNumber || row.rawRsaBalance);
 
     if (!parsedRows.length) throw new Error('The CSV file does not contain any usable rows.');
@@ -417,7 +454,18 @@ async function parseAuditReconciliationExcel(file) {
         const normalized = normalizeImportHeader(getCellText(cell.value));
         if (normalized) headerMap.set(colNumber, normalized);
     });
-    const { nameColumn, accountColumn, rsaColumn } = getAuditReconciliationColumns(headerMap);
+    const {
+        nameColumn,
+        accountColumn,
+        rsaColumn,
+        commissionColumn,
+        rateColumn,
+        uploaderColumn,
+        agentColumn,
+        agentAccountColumn,
+        agentBankColumn,
+        statusColumn
+    } = getAuditReconciliationColumns(headerMap);
     if (!nameColumn && !accountColumn) throw new Error('File must contain a name or account number column.');
 
     const rows = [];
@@ -427,7 +475,14 @@ async function parseAuditReconciliationExcel(file) {
             rowNumber,
             customerName: nameColumn ? getCellText(row.getCell(nameColumn).value) : '',
             accountNumber: accountColumn ? getCellText(row.getCell(accountColumn).value) : '',
-            rawRsaBalance: rsaColumn ? getCellText(row.getCell(rsaColumn).value) : ''
+            rawRsaBalance: rsaColumn ? getCellText(row.getCell(rsaColumn).value) : '',
+            sourceCommission: commissionColumn ? getCellText(row.getCell(commissionColumn).value) : '',
+            sourceRate: rateColumn ? getCellText(row.getCell(rateColumn).value) : '',
+            sourceUploaderName: uploaderColumn ? getCellText(row.getCell(uploaderColumn).value) : '',
+            sourceAgentName: agentColumn ? getCellText(row.getCell(agentColumn).value) : '',
+            sourceAgentAccountNumber: agentAccountColumn ? getCellText(row.getCell(agentAccountColumn).value) : '',
+            sourceAgentBank: agentBankColumn ? getCellText(row.getCell(agentBankColumn).value) : '',
+            sourceStatus: statusColumn ? getCellText(row.getCell(statusColumn).value) : ''
         });
         if (parsed.customerName || parsed.accountNumber || parsed.rawRsaBalance) rows.push(parsed);
     }
@@ -444,9 +499,11 @@ async function parseAuditReconciliationFile(file) {
     return parseAuditReconciliationExcel(file);
 }
 
-function mapSubmissionsToAuditReconciliationCandidates(submissions = []) {
+function mapSubmissionsToAuditReconciliationCandidates(submissions = [], options = {}) {
+    const balanceField = options.balanceField === 'twentyFive' ? 'twentyFive' : 'rsaBalance';
     return submissions.map((sub) => {
         const financials = getSubmissionFinancials(sub);
+        const matchBalance = balanceField === 'twentyFive' ? financials.twentyFive : financials.rsaBalance;
         const accountNumber = getCustomerAccountNumber(sub);
         const customerName = String(sub.customerName || sub?.customerDetails?.name || '').trim();
         return {
@@ -455,8 +512,10 @@ function mapSubmissionsToAuditReconciliationCandidates(submissions = []) {
             normalizedName: normalizeCustomerName(customerName),
             accountNumber,
             normalizedAccountNumber: normalizeAccountNumber(accountNumber),
-            rsaBalance: financials.rsaBalance,
-            normalizedRsaBalance: normalizeRsaAmount(financials.rsaBalance)
+            rsaBalance: matchBalance,
+            fullRsaBalance: financials.rsaBalance,
+            twentyFiveRsaBalance: financials.twentyFive,
+            normalizedRsaBalance: normalizeRsaAmount(matchBalance)
         };
     });
 }
@@ -466,7 +525,21 @@ function getAuditReconciliationCandidates() {
 }
 
 function getAuditPaidReconciliationCandidates(scope = currentAuditPaidScope) {
-    return mapSubmissionsToAuditReconciliationCandidates(getAuditPaidRows(scope));
+    const resolvedScope = normalizeAuditPaidScope(scope);
+    const currentEmail = normalizeEmail(currentUser?.email);
+    const rows = allSubmissions
+        .filter((sub) => ['paid', 'cleared'].includes(String(sub.status || '').toLowerCase()))
+        .filter((sub) => {
+            if (resolvedScope === 'all') return true;
+            const approvedBy = getAuditApprovalEmail(sub);
+            if (!currentEmail) return resolvedScope !== 'mine';
+            return resolvedScope === 'mine' ? approvedBy === currentEmail : approvedBy !== currentEmail;
+        });
+    return mapSubmissionsToAuditReconciliationCandidates(rows, { balanceField: 'twentyFive' });
+}
+
+function isSystemPaidForClearing(row = {}) {
+    return String(row?.submission?.status || '').toLowerCase() === 'paid';
 }
 
 function getLatestSubmissionMillis(sub = {}) {
@@ -554,7 +627,7 @@ function recomputeAuditPaidReconciliationResult() {
         auditPaidReconciliationSourceRows,
         getAuditPaidReconciliationCandidates(currentAuditPaidScope)
     );
-    const validSubmissionIds = new Set((auditPaidReconciliationResult?.matchedRows || []).map((row) => row.submissionId).filter(Boolean));
+    const validSubmissionIds = new Set((auditPaidReconciliationResult?.matchedRows || []).filter((row) => isSystemPaidForClearing(row)).map((row) => row.submissionId).filter(Boolean));
     auditPaidReconciliationSelectedSubmissionIds = auditPaidReconciliationSelectedSubmissionIds.filter((submissionId) => validSubmissionIds.has(submissionId));
 }
 
@@ -563,7 +636,37 @@ function resetAuditPaidReconciliationState() {
     auditPaidReconciliationResult = null;
     auditPaidReconciliationFileName = '';
     auditPaidReconciliationSelectedSubmissionIds = [];
+    auditPaidReconciliationActiveResultsTab = 'matched';
     if (auditPaidReconciliationFileInput) auditPaidReconciliationFileInput.value = '';
+}
+
+function openAuditPaidReconciliationUploadModal() {
+    renderAuditPaidReconciliation();
+    auditPaidReconciliationUploadModal?.classList.add('active');
+}
+
+function closeAuditPaidReconciliationUploadModal() {
+    auditPaidReconciliationUploadModal?.classList.remove('active');
+}
+
+function openAuditPaidReconciliationResultsModal() {
+    if (!auditPaidReconciliationResult) return;
+    renderAuditPaidReconciliation();
+    auditPaidReconciliationResultsModal?.classList.add('active');
+}
+
+function closeAuditPaidReconciliationResultsModal() {
+    auditPaidReconciliationResultsModal?.classList.remove('active');
+}
+
+function showAuditPaidReconciliationResultsTab(tabName = 'matched') {
+    auditPaidReconciliationActiveResultsTab = tabName === 'unmatched' ? 'unmatched' : 'matched';
+    document.querySelectorAll('[data-paid-reconciliation-view]').forEach((button) => {
+        const isActive = button.dataset.paidReconciliationView === auditPaidReconciliationActiveResultsTab;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    renderAuditPaidReconciliation();
 }
 
 function resetAuditReconciliationState() {
@@ -585,11 +688,11 @@ function renderAuditPaidReconciliation() {
     if (auditPaidReconciliationFileMeta) {
         auditPaidReconciliationFileMeta.textContent = auditPaidReconciliationFileName
             ? `Selected file: ${auditPaidReconciliationFileName}. Matching against ${scopeLabel}.`
-            : `Upload the same Excel or CSV format used by Application Breakdown. Matching runs against ${scopeLabel}.`;
+            : `No file selected. Matching runs against ${scopeLabel}.`;
     }
     if (auditPaidReconciliationRunBtn) auditPaidReconciliationRunBtn.disabled = !selectedFile;
     if (auditPaidReconciliationResetBtn) auditPaidReconciliationResetBtn.disabled = !selectedFile && !auditPaidReconciliationResult && !auditPaidReconciliationFileName;
-    if (auditPaidReconciliationSelectAllBtn) auditPaidReconciliationSelectAllBtn.disabled = !matchedRows.length;
+    if (auditPaidReconciliationSelectAllBtn) auditPaidReconciliationSelectAllBtn.disabled = !matchedRows.some((row) => isSystemPaidForClearing(row));
     if (auditPaidReconciliationClearSelectedBtn) auditPaidReconciliationClearSelectedBtn.disabled = !selectedCount;
 
     if (!auditPaidReconciliationResult) {
@@ -608,7 +711,7 @@ function renderAuditPaidReconciliation() {
         auditPaidReconciliationSummary.style.display = 'grid';
         auditPaidReconciliationSummary.innerHTML = [
             { label: 'Uploaded Rows', value: auditPaidReconciliationResult.totalRows },
-            { label: 'Found in Paid', value: matchedRows.length },
+            { label: 'Found in System', value: matchedRows.length },
             { label: 'Exact Balance', value: auditPaidReconciliationResult.exactCount },
             { label: 'Balance Differs', value: auditPaidReconciliationResult.balanceDifferenceCount },
             { label: 'Not Found', value: unmatchedRows.length },
@@ -621,34 +724,44 @@ function renderAuditPaidReconciliation() {
         `).join('');
     }
 
-    if (auditPaidReconciliationMatchedWrap) auditPaidReconciliationMatchedWrap.style.display = matchedRows.length ? 'block' : 'none';
+    document.querySelectorAll('[data-paid-reconciliation-view]').forEach((button) => {
+        const isActive = button.dataset.paidReconciliationView === auditPaidReconciliationActiveResultsTab;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+
+    if (auditPaidReconciliationMatchedWrap) auditPaidReconciliationMatchedWrap.style.display = auditPaidReconciliationActiveResultsTab === 'matched' ? 'block' : 'none';
     if (auditPaidReconciliationMatchedBody) {
         const selectedSet = new Set(selectedSubmissionIds);
         auditPaidReconciliationMatchedBody.innerHTML = matchedRows.length
             ? matchedRows.map((row) => {
-                const statusClass = row.balanceMatches ? 'audit-recon-status exact' : 'audit-recon-status partial';
-                const matchText = row.balanceMatches ? `Exact match (${row.matchMethod})` : `Balance differs (${row.matchMethod})`;
+                const isPaid = isSystemPaidForClearing(row);
+                const statusClass = isPaid && row.balanceMatches ? 'audit-recon-status exact' : 'audit-recon-status partial';
+                const matchText = !isPaid
+                    ? `Found but ${row.systemStatus || 'not paid'}`
+                    : (row.balanceMatches ? `Exact match (${row.matchMethod})` : `Balance differs (${row.matchMethod})`);
                 const isChecked = selectedSet.has(row.submissionId) ? 'checked' : '';
                 return `
                     <tr>
-                        <td><input type="checkbox" data-paid-recon-select="${escapeHtml(row.submissionId)}" ${isChecked}></td>
+                        <td><input type="checkbox" data-paid-recon-select="${escapeHtml(row.submissionId)}" ${isChecked} ${isPaid ? '' : 'disabled'}></td>
                         <td>${escapeHtml(row.rowNumber)}</td>
                         <td>${escapeHtml(row.customerName || '-')}</td>
                         <td>${escapeHtml(row.accountNumber || '-')}</td>
                         <td>${row.hasRsaBalance ? formatCurrency(row.normalizedRsaBalance) : '-'}</td>
+                        <td>${escapeHtml(row.sourceStatus || '-')}</td>
                         <td><strong>${escapeHtml(row.systemName || '-')}</strong></td>
                         <td>${escapeHtml(row.uploaderName || '-')}</td>
                         <td>${escapeHtml(row.systemAccountNumber || '-')}</td>
                         <td>${escapeHtml(formatDate(row.submission?.paidAt || row.submission?.updatedAt || ''))}</td>
-                        <td><span class="${statusClass}">${escapeHtml(matchText)}</span></td>
+                        <td><span class="${isPaid ? statusClass : 'audit-recon-status partial'}">${escapeHtml(matchText)}</span></td>
                         <td><button type="button" class="action-btn" onclick="window.openMonitoringApplicationDetails('${row.submissionId}')"><i class="fas fa-eye"></i> View</button></td>
                     </tr>
                 `;
             }).join('')
-            : '<tr><td colspan="11" class="no-data">No paid applications matched this file</td></tr>';
+            : '<tr><td colspan="12" class="no-data">No paid applications matched this file</td></tr>';
     }
 
-    if (auditPaidReconciliationUnmatchedWrap) auditPaidReconciliationUnmatchedWrap.style.display = unmatchedRows.length ? 'block' : 'none';
+    if (auditPaidReconciliationUnmatchedWrap) auditPaidReconciliationUnmatchedWrap.style.display = auditPaidReconciliationActiveResultsTab === 'unmatched' ? 'block' : 'none';
     if (auditPaidReconciliationUnmatchedBody) {
         auditPaidReconciliationUnmatchedBody.innerHTML = unmatchedRows.length
             ? unmatchedRows.map((row) => `
@@ -1553,6 +1666,8 @@ async function exportPaymentReportExcel(report) {
         { header: 'Status', key: 'statusLabel', width: 16 },
     ];
     report.details.forEach((row) => detailsSheet.addRow(row));
+    detailsSheet.getColumn(2).numFmt = '@';
+    detailsSheet.getColumn(8).numFmt = '@';
     detailsSheet.getRow(1).font = { bold: true };
 
     const buffer = await workbook.xlsx.writeBuffer();
@@ -2372,6 +2487,20 @@ function bindEvents() {
         resetAuditReconciliationState();
         showNotification('Reconciliation cleared.', 'info');
     });
+    openAuditPaidReconciliationBtn?.addEventListener('click', openAuditPaidReconciliationUploadModal);
+    document.getElementById('closeAuditPaidReconciliationUploadModalBtn')?.addEventListener('click', closeAuditPaidReconciliationUploadModal);
+    document.getElementById('cancelAuditPaidReconciliationUploadModalBtn')?.addEventListener('click', closeAuditPaidReconciliationUploadModal);
+    document.getElementById('closeAuditPaidReconciliationResultsModalBtn')?.addEventListener('click', closeAuditPaidReconciliationResultsModal);
+    document.getElementById('closeAuditPaidReconciliationResultsFooterBtn')?.addEventListener('click', closeAuditPaidReconciliationResultsModal);
+    auditPaidReconciliationUploadModal?.addEventListener('click', (event) => {
+        if (event.target === auditPaidReconciliationUploadModal) closeAuditPaidReconciliationUploadModal();
+    });
+    auditPaidReconciliationResultsModal?.addEventListener('click', (event) => {
+        if (event.target === auditPaidReconciliationResultsModal) closeAuditPaidReconciliationResultsModal();
+    });
+    document.querySelectorAll('[data-paid-reconciliation-view]').forEach((button) => {
+        button.addEventListener('click', () => showAuditPaidReconciliationResultsTab(button.dataset.paidReconciliationView || 'matched'));
+    });
     auditPaidReconciliationSelectBtn?.addEventListener('click', () => {
         if (auditPaidReconciliationFileInput) auditPaidReconciliationFileInput.value = '';
         auditPaidReconciliationFileInput?.click();
@@ -2399,8 +2528,18 @@ function bindEvents() {
             auditPaidReconciliationSourceRows = await parseAuditReconciliationFile(file);
             auditPaidReconciliationSelectedSubmissionIds = [];
             recomputeAuditPaidReconciliationResult();
+            auditPaidReconciliationSelectedSubmissionIds = Array.from(new Set(
+                (auditPaidReconciliationResult?.matchedRows || [])
+                    .filter((row) => isClearableImportStatus(row))
+                    .filter((row) => isSystemPaidForClearing(row))
+                    .map((row) => row.submissionId)
+                    .filter(Boolean)
+            ));
+            auditPaidReconciliationActiveResultsTab = (auditPaidReconciliationResult?.matchedRows || []).length ? 'matched' : 'unmatched';
             renderAuditPaidReconciliation();
-            showNotification(`Reconciliation complete. ${auditPaidReconciliationResult?.matchedRows?.length || 0} paid application(s) found.`, 'success');
+            closeAuditPaidReconciliationUploadModal();
+            openAuditPaidReconciliationResultsModal();
+            showNotification(`Reconciliation complete. ${auditPaidReconciliationResult?.matchedRows?.length || 0} application(s) found in the system, ${auditPaidReconciliationSelectedSubmissionIds.length} selected for clearing.`, 'success');
         } catch (error) {
             auditPaidReconciliationSourceRows = [];
             auditPaidReconciliationResult = null;
@@ -2413,7 +2552,12 @@ function bindEvents() {
         }
     });
     auditPaidReconciliationSelectAllBtn?.addEventListener('click', () => {
-        auditPaidReconciliationSelectedSubmissionIds = Array.from(new Set((auditPaidReconciliationResult?.matchedRows || []).map((row) => row.submissionId).filter(Boolean)));
+        auditPaidReconciliationSelectedSubmissionIds = Array.from(new Set(
+            (auditPaidReconciliationResult?.matchedRows || [])
+                .filter((row) => isSystemPaidForClearing(row))
+                .map((row) => row.submissionId)
+                .filter(Boolean)
+        ));
         renderAuditPaidReconciliation();
     });
     auditPaidReconciliationMatchedBody?.addEventListener('change', (event) => {
@@ -2480,6 +2624,7 @@ function bindEvents() {
     auditPaidReconciliationResetBtn?.addEventListener('click', () => {
         resetAuditPaidReconciliationState();
         renderAuditPaidReconciliation();
+        closeAuditPaidReconciliationResultsModal();
         showNotification('Paid reconciliation cleared.', 'info');
     });
     document.getElementById('closePaymentReportRangeModalBtn')?.addEventListener('click', closePaymentReportRangeModal);
