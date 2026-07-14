@@ -2708,7 +2708,7 @@ function renderRedirectTable() {
             <td><select id="rd-reviewer-${s.id}" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;width:100%;">${optionsForUsers(reviewerUsers, s.assignedTo)}</select></td>
             <td><select id="rd-rsa-${s.id}" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;width:100%;">${optionsForUsers(rsaUsers, s.assignedToRSA)}</select></td>
             <td><select id="rd-payment-${s.id}" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;width:100%;">${optionsForUsers(paymentUsers, s.assignedToPayment)}</select></td>
-            <td><input id="rd-reason-${s.id}" placeholder="Reason (required)" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;width:100%;"></td>
+            <td><input id="rd-reason-${s.id}" placeholder="Reason (optional)" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;width:100%;"></td>
             <td><button class="action-btn" style="background:#003366;color:#fff;border:none;" onclick="window.redirectSubmission('${s.id}')"><i class="fas fa-random"></i> Apply</button></td>
         </tr>
     `).join('');
@@ -3214,7 +3214,6 @@ async function saveBackdateChanges() {
     const submission = allSubmissions.find((sub) => sub.id === submissionId) || currentBackdateSubmission || {};
     if (!submissionId) return showNotification('No application is open for backdating.', 'warning');
     const reason = String(document.getElementById('backdateReasonInput')?.value || '').trim();
-    if (!reason) return showNotification('Reason is required for backdate changes.', 'warning');
 
     const updates = {
         backdatedAt: serverTimestamp(),
@@ -6243,7 +6242,6 @@ window.redirectSubmission = async (submissionId) => {
     const rsa = String(document.getElementById(`rd-rsa-${submissionId}`)?.value || '').trim().toLowerCase();
     const payment = String(document.getElementById(`rd-payment-${submissionId}`)?.value || '').trim().toLowerCase();
     const reason = String(document.getElementById(`rd-reason-${submissionId}`)?.value || '').trim();
-    if (!reason) return showNotification('Reason is required for redirect', 'warning');
 
     const prev = allSubmissions.find((s) => s.id === submissionId) || {};
     try {
