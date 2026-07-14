@@ -1288,6 +1288,75 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function showNewSubmissionConfirmModal({ customerName = '', agentPayload = {}, documentsCount = 0 } = {}) {
+  return new Promise((resolve) => {
+    const existingModal = document.getElementById('newSubmissionConfirmModal');
+    if (existingModal) existingModal.remove();
+
+    const hasAgent = Boolean(agentPayload?.agentName);
+    const rows = [
+      ['Customer', customerName || '-'],
+      ['Agent', hasAgent ? agentPayload.agentName : 'No Agent'],
+      ['Agent Account Number', hasAgent ? (agentPayload.agentAccountNumber || '-') : '-'],
+      ['Documents Ready', String(documentsCount || 0)]
+    ];
+
+    const modal = document.createElement('div');
+    modal.id = 'newSubmissionConfirmModal';
+    modal.className = 'modal active';
+    modal.style.zIndex = '4000';
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width:520px;border-radius:14px;overflow:hidden;">
+        <div class="modal-header" style="background:#003366;color:#fff;">
+          <h2 style="color:#fff;margin:0;display:flex;align-items:center;gap:10px;font-size:20px;">
+            <i class="fas fa-circle-check"></i> Confirm Submission
+          </h2>
+          <button class="close-btn" type="button" data-submit-confirm="cancel" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body" style="padding:22px;">
+          <p style="margin:0 0 16px;color:#475569;line-height:1.5;">
+            Review these details before sending this application for processing.
+          </p>
+          <div style="display:grid;gap:10px;">
+            ${rows.map(([label, value]) => `
+              <div style="display:flex;justify-content:space-between;gap:16px;padding:12px 14px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;">
+                <span style="color:#64748b;font-size:13px;font-weight:700;">${escapeHtml(label)}</span>
+                <strong style="color:#0f172a;text-align:right;font-size:14px;">${escapeHtml(value)}</strong>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;background:#f8fafc;border-top:1px solid #e2e8f0;">
+          <button class="cancel-btn" type="button" data-submit-confirm="cancel">
+            Cancel
+          </button>
+          <button class="submit-btn" type="button" data-submit-confirm="submit">
+            <i class="fas fa-paper-plane"></i> Submit Application
+          </button>
+        </div>
+      </div>
+    `;
+
+    const close = (value) => {
+      modal.remove();
+      document.removeEventListener('keydown', onKeyDown);
+      resolve(value);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') close(false);
+    };
+
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) close(false);
+      const action = event.target?.closest?.('[data-submit-confirm]')?.dataset?.submitConfirm;
+      if (action === 'cancel') close(false);
+      if (action === 'submit') close(true);
+    });
+    document.addEventListener('keydown', onKeyDown);
+    (document.body || document.documentElement).appendChild(modal);
+  });
+}
+
 function getUploadModalMode() {
   if (currentEditId) return 'fix';
   if (currentDraftId) return 'draft';
@@ -4399,12 +4468,11 @@ async function submitCustomer() {
     const customerDetails = collectDraftableCustomerDetails();
     customerDetails.name = customerName;
     const agentPayload = getSelectedAgentPayload();
-    const agentSummary = agentPayload.agentName
-      ? `Selected agent:\n- Name: ${agentPayload.agentName || '-'}\n- Phone: ${agentPayload.agentContactNumber || '-'}`
-      : 'Selected agent: No Agent';
-    const proceed = confirm(
-      `Please confirm submission details:\n\nCustomer: ${customerName || '-'}\n${agentSummary}\n\nProceed with submission?`
-    );
+    const proceed = await showNewSubmissionConfirmModal({
+      customerName,
+      agentPayload,
+      documentsCount: documents.length
+    });
     if (!proceed) {
       submitCustomerBtn.disabled = false;
       syncUploadRequirementUi();
@@ -6528,7 +6596,7 @@ function populateApprovedAgentSelect() {
   if (!customerAgentSelect) return;
   const current = String(customerAgentSelect.value || '');
   customerAgentSelect.innerHTML = '<option value="">No Agent</option>' + approvedAgents.map((agent) => (
-    `<option value="${agent.id}">${agent.fullName || 'Unnamed'} - ${agent.contactNumber || '-'}</option>`
+    `<option value="${agent.id}">${agent.fullName || 'Unnamed'} - ${agent.accountNumber || '-'}</option>`
   )).join('');
   if (current && approvedAgents.some((a) => a.id === current)) {
     customerAgentSelect.value = current;
@@ -6536,10 +6604,10 @@ function populateApprovedAgentSelect() {
   }
   if (currentSubmissionAgentFallback && !approvedAgents.some((a) => a.id === currentSubmissionAgentFallback.value)) {
     const labelName = currentSubmissionAgentFallback.fullName || 'Linked Agent';
-    const labelPhone = currentSubmissionAgentFallback.contactNumber || '-';
+    const labelAccountNumber = currentSubmissionAgentFallback.accountNumber || '-';
     const opt = document.createElement('option');
     opt.value = currentSubmissionAgentFallback.value;
-    opt.textContent = `${labelName} - ${labelPhone} (linked)`;
+    opt.textContent = `${labelName} - ${labelAccountNumber} (linked)`;
     customerAgentSelect.appendChild(opt);
     if (current === currentSubmissionAgentFallback.value) {
       customerAgentSelect.value = currentSubmissionAgentFallback.value;
