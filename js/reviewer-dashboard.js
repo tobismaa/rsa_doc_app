@@ -1542,12 +1542,20 @@ async function getRSAEmails() {
 
 function pickFallbackRSAUser(rsaUsers, seed = '') {
     if (!rsaUsers.length) return null;
-    const text = String(seed || Date.now());
-    let hash = 0;
-    for (let i = 0; i < text.length; i += 1) {
-        hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+    const storageKey = 'rsaRoundRobinFallbackIndex';
+    try {
+        const lastIndex = Number(window.localStorage?.getItem(storageKey) ?? -1);
+        const nextIndex = (Number.isFinite(lastIndex) ? lastIndex + 1 : 0) % rsaUsers.length;
+        window.localStorage?.setItem(storageKey, String(nextIndex));
+        return rsaUsers[nextIndex] || rsaUsers[0] || null;
+    } catch (_) {
+        const text = String(seed || Date.now());
+        let hash = 0;
+        for (let i = 0; i < text.length; i += 1) {
+            hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+        }
+        return rsaUsers[Math.abs(hash) % rsaUsers.length] || rsaUsers[0] || null;
     }
-    return rsaUsers[Math.abs(hash) % rsaUsers.length] || rsaUsers[0] || null;
 }
 
 async function assignRoundRobinRSA(submissionRef) {

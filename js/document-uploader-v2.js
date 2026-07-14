@@ -969,12 +969,20 @@ async function getRSAEmails() {
 
 function pickFallbackRSAUser(rsaUsers, seed = '') {
   if (!rsaUsers.length) return '';
-  const text = String(seed || Date.now());
-  let hash = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+  const storageKey = 'rsaRoundRobinFallbackIndex';
+  try {
+    const lastIndex = Number(window.localStorage?.getItem(storageKey) ?? -1);
+    const nextIndex = (Number.isFinite(lastIndex) ? lastIndex + 1 : 0) % rsaUsers.length;
+    window.localStorage?.setItem(storageKey, String(nextIndex));
+    return rsaUsers[nextIndex] || rsaUsers[0] || '';
+  } catch (_) {
+    const text = String(seed || Date.now());
+    let hash = 0;
+    for (let i = 0; i < text.length; i += 1) {
+      hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+    }
+    return rsaUsers[Math.abs(hash) % rsaUsers.length] || rsaUsers[0] || '';
   }
-  return rsaUsers[Math.abs(hash) % rsaUsers.length] || rsaUsers[0] || '';
 }
 
 async function assignDirectToRSA(subRef, uploaderEmail = '') {
@@ -1022,7 +1030,7 @@ async function assignDirectToRSA(subRef, uploaderEmail = '') {
         reviewerSkipped: true
       });
     });
-  } catch (_) {
+  } catch (error) {
     assigned = pickFallbackRSAUser(rsaUsers, subRef?.id || trustedDateKey);
     if (assigned) {
       await updateDoc(subRef, {
@@ -1036,6 +1044,12 @@ async function assignDirectToRSA(subRef, uploaderEmail = '') {
         reviewerSkipped: true
       });
     }
+    console.error('Direct RSA round-robin transaction failed; using rotating fallback assignment.', {
+      submissionId: subRef?.id || '',
+      fallbackAssignedTo: assigned,
+      rsaUsers,
+      error
+    });
   }
   return assigned;
 }
