@@ -444,7 +444,7 @@ async function resolveCustomerAccountName({ silent = false } = {}) {
     if (customerNameInput) {
       customerNameInput.value = accountName;
       updateSubmitButton();
-      scheduleInlineDuplicateValidation(150);
+      scheduleDuplicateFieldValidation('accountNo', 150);
     }
     setAccountLookupStatus(accountName ? `Verified: ${accountName}` : 'Account verified.', 'success');
     return true;
@@ -1458,87 +1458,6 @@ function getSubmissionCustomerPenNo(submission) {
   return normalizePenNumber(submission?.customerDetails?.penNoNormalized || submission?.penNoNormalized || submission?.customerDetails?.penNo || submission?.penNo || '');
 }
 
-function getSubmissionCustomerNameKey(submission) {
-  return normalizeCustomerNameKey(submission?.customerName || submission?.customerDetails?.name || '');
-}
-
-function submissionUniqueKeyDocId(type, value) {
-  return encodeURIComponent(`${String(type || '').trim().toLowerCase()}:${String(value || '').trim()}`);
-}
-
-function buildSubmissionUniqueKeysFromDetails(customerDetails = {}, customerName = '') {
-  const keys = [
-    { type: 'account_number', label: 'account number', value: normalizeDigitsOnly(customerDetails.accountNo) },
-    { type: 'nin', label: 'NIN', value: normalizeDigitsOnly(customerDetails.nin) },
-    { type: 'pen', label: 'PEN', value: normalizePenNumber(customerDetails.penNoNormalized || customerDetails.penNo) },
-    { type: 'phone', label: 'phone number', value: normalizeCustomerPhone(customerDetails.phone) },
-    { type: 'customer_name', label: 'customer name', value: normalizeCustomerNameKey(customerName || customerDetails.name) }
-  ];
-  return keys
-    .filter((item) => item.value)
-    .filter((item) => {
-      if (item.type === 'account_number') return item.value.length === 10;
-      if (item.type === 'nin') return item.value.length === 11;
-      if (item.type === 'phone') return item.value.length >= 10;
-      if (item.type === 'customer_name') return item.value.length >= 3;
-      return true;
-    });
-}
-
-function getSubmissionUniqueKeyConflicts(existingDoc, submissionId = '') {
-  if (!existingDoc?.exists()) return null;
-  const data = existingDoc.data() || {};
-  const existingSubmissionId = String(data.submissionId || '').trim();
-  if (existingSubmissionId && existingSubmissionId === String(submissionId || '').trim()) return null;
-  return data;
-}
-
-function formatSubmissionDuplicateLockMessage(conflicts = []) {
-  const labels = [...new Set(conflicts.map((item) => item.label).filter(Boolean))];
-  const first = conflicts[0]?.data || {};
-  const customerName = String(first.customerName || '').trim();
-  const suffix = customerName ? `\nExisting customer: ${customerName}` : '';
-  return `Duplicate application blocked. Existing ${labels.join(', ')} already found in the database.${suffix}`;
-}
-
-async function saveSubmissionWithUniqueLocks(subRef, submissionPayload = {}, { mode = 'set' } = {}) {
-  const submissionId = subRef?.id || '';
-  const keys = buildSubmissionUniqueKeysFromDetails(submissionPayload.customerDetails || {}, submissionPayload.customerName || '');
-  await runTransaction(db, async (tx) => {
-    const keyRefs = keys.map((item) => ({
-      ...item,
-      ref: doc(db, 'submissionUniqueKeys', submissionUniqueKeyDocId(item.type, item.value))
-    }));
-    const keySnaps = await Promise.all(keyRefs.map((item) => tx.get(item.ref)));
-    const conflicts = keySnaps
-      .map((snap, index) => ({ ...keyRefs[index], data: getSubmissionUniqueKeyConflicts(snap, submissionId) }))
-      .filter((item) => item.data);
-    if (conflicts.length) {
-      const error = new Error(formatSubmissionDuplicateLockMessage(conflicts));
-      error.code = 'duplicate-submission-lock';
-      throw error;
-    }
-
-    if (mode === 'update') {
-      tx.update(subRef, submissionPayload);
-    } else {
-      tx.set(subRef, submissionPayload, { merge: mode === 'merge' });
-    }
-
-    keyRefs.forEach((item) => {
-      tx.set(item.ref, {
-        type: item.type,
-        label: item.label,
-        value: item.value,
-        submissionId,
-        customerName: submissionPayload.customerName || submissionPayload.customerDetails?.name || '',
-        uploadedBy: normalizeEmail(submissionPayload.uploadedBy || currentUser?.email || ''),
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    });
-  });
-}
-
 function getPenNumberQueryVariants(penNo = '') {
   const raw = String(penNo || '').trim();
   const normalized = normalizePenNumber(raw);
@@ -1602,51 +1521,12 @@ async function findExistingPenNumberSubmissions({ penNo = '', excludeSubmissionI
   return Array.from(matches.values());
 }
 
-async function findExistingSubmissionFieldMatches({ phone = '', accountNo = '', nin = '', customerName = '', excludeSubmissionId = '' } = {}) {
-  const specs = [
-    { value: normalizeCustomerPhone(phone), compare: getSubmissionCustomerPhone, fields: ['customerDetails.phone', 'customerPhone', 'phone'] },
-    { value: normalizeDigitsOnly(accountNo), compare: getSubmissionCustomerAccountNo, fields: ['customerDetails.accountNo', 'accountNo'] },
-    { value: normalizeDigitsOnly(nin), compare: getSubmissionCustomerNin, fields: ['customerDetails.nin', 'customerNIN', 'nin'] },
-    { value: String(customerName || '').trim(), compare: (sub) => String(sub?.customerName || sub?.customerDetails?.name || '').trim(), fields: ['customerName', 'customerDetails.name'] }
-  ].filter((spec) => spec.value);
-  const matches = new Map();
-  await Promise.all(specs.flatMap((spec) => spec.fields.map(async (field) => {
-    try {
-      const snap = await getDocs(query(collection(db, 'submissions'), where(field, '==', spec.value)));
-      snap.forEach((docSnap) => {
-        if (excludeSubmissionId && docSnap.id === excludeSubmissionId) return;
-        const submission = { id: docSnap.id, ...(docSnap.data() || {}) };
-        const left = field.includes('name') || field === 'customerName'
-          ? normalizeCustomerNameKey(spec.compare(submission))
-          : String(spec.compare(submission) || '');
-        const right = field.includes('name') || field === 'customerName'
-          ? normalizeCustomerNameKey(spec.value)
-          : String(spec.value || '');
-        if (left && left === right) matches.set(docSnap.id, submission);
-      });
-    } catch (_) {}
-  })));
-  return Array.from(matches.values());
-}
-
-async function findSubmissionUniqueLockConflicts(customerDetails = {}, customerName = '', excludeSubmissionId = '') {
-  const keys = buildSubmissionUniqueKeysFromDetails(customerDetails, customerName);
-  if (!keys.length) return [];
-  const docs = await Promise.all(keys.map(async (item) => {
-    const snap = await getDoc(doc(db, 'submissionUniqueKeys', submissionUniqueKeyDocId(item.type, item.value))).catch(() => null);
-    const data = getSubmissionUniqueKeyConflicts(snap, excludeSubmissionId);
-    return data ? { ...item, data } : null;
-  }));
-  return docs.filter(Boolean);
-}
-
-function findDuplicateCustomerContacts({ email = '', phone = '', accountNo = '', nin = '', penNo = '', customerName = '', excludeSubmissionId = '' } = {}) {
+function findDuplicateCustomerContacts({ email = '', phone = '', accountNo = '', nin = '', penNo = '', excludeSubmissionId = '' } = {}) {
   const normalizedEmail = normalizeEmail(email);
   const normalizedPhone = normalizeCustomerPhone(phone);
   const normalizedAccountNo = normalizeDigitsOnly(accountNo);
   const normalizedNin = normalizeDigitsOnly(nin);
   const normalizedPenNo = normalizePenNumber(penNo);
-  const normalizedCustomerName = normalizeCustomerNameKey(customerName);
   return allSubmissions.filter((submission) => {
     if (excludeSubmissionId && submission.id === excludeSubmissionId) return false;
     if (isCurrentEditableSubmission(submission.id) && submission.id === excludeSubmissionId) return false;
@@ -1655,53 +1535,43 @@ function findDuplicateCustomerContacts({ email = '', phone = '', accountNo = '',
     const accountMatch = normalizedAccountNo && getSubmissionCustomerAccountNo(submission) === normalizedAccountNo;
     const ninMatch = normalizedNin && getSubmissionCustomerNin(submission) === normalizedNin;
     const penMatch = normalizedPenNo && getSubmissionCustomerPenNo(submission) === normalizedPenNo;
-    const nameMatch = normalizedCustomerName && getSubmissionCustomerNameKey(submission) === normalizedCustomerName;
-    return emailMatch || phoneMatch || accountMatch || ninMatch || penMatch || nameMatch;
+    return emailMatch || phoneMatch || accountMatch || ninMatch || penMatch;
   });
 }
 
-function formatDuplicateCustomerSummary(submission, { email = '', phone = '', accountNo = '', nin = '', penNo = '', customerName = '' } = {}) {
+function formatDuplicateCustomerSummary(submission, { email = '', phone = '', accountNo = '', nin = '', penNo = '' } = {}) {
   const emailMatch = normalizeEmail(email) && getSubmissionCustomerEmail(submission) === normalizeEmail(email);
   const phoneMatch = normalizeCustomerPhone(phone) && getSubmissionCustomerPhone(submission) === normalizeCustomerPhone(phone);
   const accountMatch = normalizeDigitsOnly(accountNo) && getSubmissionCustomerAccountNo(submission) === normalizeDigitsOnly(accountNo);
   const ninMatch = normalizeDigitsOnly(nin) && getSubmissionCustomerNin(submission) === normalizeDigitsOnly(nin);
   const penMatch = normalizePenNumber(penNo) && getSubmissionCustomerPenNo(submission) === normalizePenNumber(penNo);
-  const nameMatch = normalizeCustomerNameKey(customerName) && getSubmissionCustomerNameKey(submission) === normalizeCustomerNameKey(customerName);
   const reasons = [];
   if (emailMatch) reasons.push('email');
   if (phoneMatch) reasons.push('phone');
   if (accountMatch) reasons.push('account number');
   if (ninMatch) reasons.push('NIN');
   if (penMatch) reasons.push('PEN number');
-  if (nameMatch) reasons.push('customer name');
   const duplicateCustomerName = String(submission?.customerName || submission?.customerDetails?.name || 'Unknown Customer').trim() || 'Unknown Customer';
   const status = String(submission?.status || 'the system').replace(/_/g, ' ');
   return `- ${duplicateCustomerName} (${reasons.join(' and ')}) [${status}]`;
 }
 
-async function validateCustomerDuplicateContact({ email = '', phone = '', accountNo = '', nin = '', penNo = '', customerName = '', excludeSubmissionId = '' } = {}) {
-  const localMatches = findDuplicateCustomerContacts({ email, phone, accountNo, nin, penNo, customerName, excludeSubmissionId });
+async function validateCustomerDuplicateContact({ email = '', phone = '', accountNo = '', nin = '', penNo = '', excludeSubmissionId = '' } = {}) {
+  const localMatches = findDuplicateCustomerContacts({ email, phone, accountNo, nin, penNo, excludeSubmissionId });
   const remotePenMatches = await findExistingPenNumberSubmissions({ penNo, excludeSubmissionId });
-  const remoteFieldMatches = await findExistingSubmissionFieldMatches({ phone, accountNo, nin, customerName, excludeSubmissionId });
-  const lockConflicts = await findSubmissionUniqueLockConflicts({ phone, accountNo, nin, penNo }, customerName, excludeSubmissionId);
-  const existingMatches = Array.from(new Map([...localMatches, ...remotePenMatches, ...remoteFieldMatches].map((submission) => [submission.id, submission])).values());
-  if (!existingMatches.length && !lockConflicts.length) return null;
+  const existingMatches = Array.from(new Map([...localMatches, ...remotePenMatches].map((submission) => [submission.id, submission])).values());
+  if (!existingMatches.length) return null;
 
   const reasons = [];
   if (normalizeEmail(email) && existingMatches.some((submission) => getSubmissionCustomerEmail(submission) === normalizeEmail(email))) reasons.push('email address');
-  if ((normalizeCustomerPhone(phone) && existingMatches.some((submission) => getSubmissionCustomerPhone(submission) === normalizeCustomerPhone(phone))) || lockConflicts.some((item) => item.type === 'phone')) reasons.push('phone number');
-  if ((normalizeDigitsOnly(accountNo) && existingMatches.some((submission) => getSubmissionCustomerAccountNo(submission) === normalizeDigitsOnly(accountNo))) || lockConflicts.some((item) => item.type === 'account_number')) reasons.push('account number');
-  if ((normalizeDigitsOnly(nin) && existingMatches.some((submission) => getSubmissionCustomerNin(submission) === normalizeDigitsOnly(nin))) || lockConflicts.some((item) => item.type === 'nin')) reasons.push('NIN');
-  if ((normalizePenNumber(penNo) && existingMatches.some((submission) => getSubmissionCustomerPenNo(submission) === normalizePenNumber(penNo))) || lockConflicts.some((item) => item.type === 'pen')) reasons.push('PEN number');
-  if ((normalizeCustomerNameKey(customerName) && existingMatches.some((submission) => getSubmissionCustomerNameKey(submission) === normalizeCustomerNameKey(customerName))) || lockConflicts.some((item) => item.type === 'customer_name')) reasons.push('customer name');
-  const duplicateLines = existingMatches.map((submission) => formatDuplicateCustomerSummary(submission, { email, phone, accountNo, nin, penNo, customerName }));
-  lockConflicts.forEach((item) => {
-    const lockedName = String(item.data?.customerName || 'Existing application').trim();
-    duplicateLines.push(`- ${lockedName} (${item.label}) [existing application]`);
-  });
+  if (normalizeCustomerPhone(phone) && existingMatches.some((submission) => getSubmissionCustomerPhone(submission) === normalizeCustomerPhone(phone))) reasons.push('phone number');
+  if (normalizeDigitsOnly(accountNo) && existingMatches.some((submission) => getSubmissionCustomerAccountNo(submission) === normalizeDigitsOnly(accountNo))) reasons.push('account number');
+  if (normalizeDigitsOnly(nin) && existingMatches.some((submission) => getSubmissionCustomerNin(submission) === normalizeDigitsOnly(nin))) reasons.push('NIN');
+  if (normalizePenNumber(penNo) && existingMatches.some((submission) => getSubmissionCustomerPenNo(submission) === normalizePenNumber(penNo))) reasons.push('PEN number');
+  const duplicateLines = existingMatches.map((submission) => formatDuplicateCustomerSummary(submission, { email, phone, accountNo, nin, penNo }));
   return {
     submissions: existingMatches,
-    message: `Duplicate application blocked. Existing ${[...new Set(reasons)].join(' and ')} already found in the database.\n\nMatching record(s):\n${duplicateLines.join('\n')}`
+    message: `Duplicate customer details found for this ${reasons.join(' and ')}.\n\nExisting matching record(s):\n${duplicateLines.join('\n')}`
   };
 }
 
@@ -1715,6 +1585,7 @@ function clearPenNoError() {
     penNoInput.style.boxShadow = '';
     penNoInput.removeAttribute('aria-invalid');
   }
+  setDuplicateFieldState('penNo', { blocked: false, checking: false, message: '' });
 }
 
 function showPenNoError(message = 'PEN No already existed.') {
@@ -1727,42 +1598,262 @@ function showPenNoError(message = 'PEN No already existed.') {
     penNoInput.style.boxShadow = '0 0 0 3px rgba(220, 38, 38, 0.12)';
     penNoInput.setAttribute('aria-invalid', 'true');
   }
+  setDuplicateFieldState('penNo', { blocked: true, checking: false, message });
 }
 
-function getDuplicateFieldInputs() {
-  return [accountNoInput, document.getElementById('customerPhone'), document.getElementById('customerNIN'), penNoInput, customerNameInput].filter(Boolean);
+function getDuplicateFieldConfigs() {
+  return {
+    accountNo: {
+      input: accountNoInput,
+      label: 'Account number',
+      message: 'Account number already exists.',
+      normalize: normalizeDigitsOnly,
+      isReady: (value) => value.length === 10,
+      queries: (value) => [
+        query(collection(db, 'submissions'), where('customerDetails.accountNo', '==', value)),
+        query(collection(db, 'submissions'), where('accountNo', '==', value))
+      ],
+      matches: (submission, value) => getSubmissionCustomerAccountNo(submission) === value
+    },
+    customerPhone: {
+      input: document.getElementById('customerPhone'),
+      label: 'Phone number',
+      message: 'Phone number already exists.',
+      normalize: normalizeCustomerPhone,
+      isReady: (value) => value.length >= 10,
+      queries: (value) => [
+        query(collection(db, 'submissions'), where('customerDetails.phone', '==', value)),
+        query(collection(db, 'submissions'), where('customerPhone', '==', value)),
+        query(collection(db, 'submissions'), where('phone', '==', value))
+      ],
+      matches: (submission, value) => getSubmissionCustomerPhone(submission) === value
+    },
+    customerNIN: {
+      input: document.getElementById('customerNIN'),
+      label: 'NIN',
+      message: 'NIN already exists.',
+      normalize: normalizeDigitsOnly,
+      isReady: (value) => value.length === 11,
+      queries: (value) => [
+        query(collection(db, 'submissions'), where('customerDetails.nin', '==', value)),
+        query(collection(db, 'submissions'), where('customerNIN', '==', value)),
+        query(collection(db, 'submissions'), where('nin', '==', value))
+      ],
+      matches: (submission, value) => getSubmissionCustomerNin(submission) === value
+    },
+    penNo: {
+      input: penNoInput,
+      label: 'PEN',
+      message: 'PEN No already existed.',
+      normalize: normalizePenNumber,
+      isReady: (value) => value.length > 0,
+      queries: () => [],
+      matches: (submission, value) => getSubmissionCustomerPenNo(submission) === value
+    }
+  };
 }
 
-function clearInlineDuplicateError() {
-  inlineDuplicateBlocked = false;
-  inlineDuplicateChecking = false;
-  clearInlineDuplicateError();
-  getDuplicateFieldInputs().forEach((input) => {
-    if (input === penNoInput) return;
+function syncDuplicateFieldState() {
+  const states = Object.values(duplicateFieldStates || {});
+  duplicateFieldBlocked = states.some((state) => state?.blocked);
+  duplicateFieldChecking = states.some((state) => state?.checking);
+}
+
+function getDuplicateFieldErrorEl(fieldId) {
+  if (fieldId === 'penNo') return penNoError;
+  const config = getDuplicateFieldConfigs()[fieldId];
+  if (!config?.input) return null;
+  const errorId = `${fieldId}DuplicateError`;
+  let errorEl = document.getElementById(errorId);
+  if (!errorEl) {
+    errorEl = document.createElement('div');
+    errorEl.id = errorId;
+    errorEl.style.display = 'none';
+    errorEl.style.marginTop = '6px';
+    errorEl.style.color = '#dc2626';
+    errorEl.style.fontSize = '12px';
+    errorEl.style.fontWeight = '700';
+    config.input.insertAdjacentElement('afterend', errorEl);
+  }
+  return errorEl;
+}
+
+function setDuplicateFieldState(fieldId, state = {}) {
+  duplicateFieldStates[fieldId] = {
+    ...(duplicateFieldStates[fieldId] || {}),
+    ...state
+  };
+  syncDuplicateFieldState();
+  updateSubmitButton();
+}
+
+function clearDuplicateFieldError(fieldId) {
+  const config = getDuplicateFieldConfigs()[fieldId];
+  const input = config?.input;
+  const errorEl = getDuplicateFieldErrorEl(fieldId);
+  if (errorEl) {
+    errorEl.textContent = '';
+    errorEl.style.display = 'none';
+  }
+  if (input) {
     input.style.borderColor = '';
     input.style.boxShadow = '';
     input.removeAttribute('aria-invalid');
-  });
+  }
+  setDuplicateFieldState(fieldId, { blocked: false, checking: false, message: '' });
 }
 
-function showInlineDuplicateError(duplicate) {
-  clearInlineDuplicateError();
-  inlineDuplicateBlocked = true;
-  const message = duplicate?.message || 'Duplicate application already exists.';
-  showPenNoError(message);
-  const lowerMessage = message.toLowerCase();
-  const fieldMap = [
-    { input: accountNoInput, needles: ['account number'] },
-    { input: document.getElementById('customerPhone'), needles: ['phone number'] },
-    { input: document.getElementById('customerNIN'), needles: ['nin'] },
-    { input: penNoInput, needles: ['pen'] },
-    { input: customerNameInput, needles: ['customer name'] }
-  ];
-  fieldMap.forEach(({ input, needles }) => {
-    if (!input || !needles.some((needle) => lowerMessage.includes(needle))) return;
+function showDuplicateFieldError(fieldId, message = '') {
+  const config = getDuplicateFieldConfigs()[fieldId];
+  const input = config?.input;
+  const errorEl = getDuplicateFieldErrorEl(fieldId);
+  const text = message || config?.message || 'Record already exists.';
+  if (errorEl) {
+    errorEl.textContent = text;
+    errorEl.style.display = 'block';
+  }
+  if (input) {
     input.style.borderColor = '#dc2626';
     input.style.boxShadow = '0 0 0 3px rgba(220, 38, 38, 0.12)';
     input.setAttribute('aria-invalid', 'true');
+  }
+  setDuplicateFieldState(fieldId, { blocked: true, checking: false, message: text });
+}
+
+function clearAllDuplicateFieldErrors() {
+  Object.values(duplicateFieldTimers || {}).forEach((timer) => clearTimeout(timer));
+  duplicateFieldTimers = {};
+  duplicateFieldStates = {};
+  duplicateFieldBlocked = false;
+  duplicateFieldChecking = false;
+  Object.keys(getDuplicateFieldConfigs()).forEach((fieldId) => {
+    const config = getDuplicateFieldConfigs()[fieldId];
+    const errorEl = getDuplicateFieldErrorEl(fieldId);
+    if (errorEl) {
+      errorEl.textContent = '';
+      errorEl.style.display = 'none';
+    }
+    if (config?.input) {
+      config.input.style.borderColor = '';
+      config.input.style.boxShadow = '';
+      config.input.removeAttribute('aria-invalid');
+    }
+  });
+  updateSubmitButton();
+}
+
+function getDuplicateFieldValue(fieldId) {
+  const config = getDuplicateFieldConfigs()[fieldId];
+  return config ? config.normalize(config.input?.value || '') : '';
+}
+
+function getDuplicateFieldSignature(fieldId, value, excludeSubmissionId = '') {
+  return `${fieldId}:${value}:${String(excludeSubmissionId || '').trim()}`;
+}
+
+async function findExistingDuplicateFieldRecord(fieldId, value, excludeSubmissionId = '') {
+  const config = getDuplicateFieldConfigs()[fieldId];
+  if (!config || !value) return null;
+  const local = allSubmissions.find((submission) => {
+    if (excludeSubmissionId && submission.id === excludeSubmissionId) return false;
+    return config.matches(submission, value);
+  });
+  if (local) return local;
+  if (fieldId === 'penNo') {
+    const matches = await findExistingPenNumberSubmissions({ penNo: value, excludeSubmissionId });
+    return matches[0] || null;
+  }
+  const remoteMatches = new Map();
+  const snapshots = await Promise.all((config.queries(value) || []).map((q) => getDocs(q).catch(() => null)));
+  snapshots.filter(Boolean).forEach((snapshot) => {
+    snapshot.forEach((docSnap) => {
+      if (excludeSubmissionId && docSnap.id === excludeSubmissionId) return;
+      const submission = { id: docSnap.id, ...(docSnap.data() || {}) };
+      if (config.matches(submission, value)) remoteMatches.set(docSnap.id, submission);
+    });
+  });
+  return Array.from(remoteMatches.values())[0] || null;
+}
+
+async function validateDuplicateField(fieldId, { force = false } = {}) {
+  const config = getDuplicateFieldConfigs()[fieldId];
+  if (!config?.input) return true;
+  clearTimeout(duplicateFieldTimers[fieldId]);
+  const excludeSubmissionId = currentEditId || currentDraftId || '';
+  const value = getDuplicateFieldValue(fieldId);
+  if (!config.isReady(value) || (fieldId === 'penNo' && isUnchangedEditablePenNumber(value, excludeSubmissionId))) {
+    clearDuplicateFieldError(fieldId);
+    return true;
+  }
+  const signature = getDuplicateFieldSignature(fieldId, value, excludeSubmissionId);
+  if (!force && duplicateFieldCache.has(signature)) {
+    const exists = duplicateFieldCache.get(signature);
+    if (exists) {
+      showDuplicateFieldError(fieldId, config.message);
+      return false;
+    }
+    clearDuplicateFieldError(fieldId);
+    return true;
+  }
+
+  const currentSequence = (duplicateFieldValidationSequence[fieldId] || 0) + 1;
+  duplicateFieldValidationSequence[fieldId] = currentSequence;
+  setDuplicateFieldState(fieldId, { checking: true, blocked: false });
+  let duplicate = null;
+  try {
+    duplicate = await findExistingDuplicateFieldRecord(fieldId, value, excludeSubmissionId);
+  } catch (_) {
+    duplicate = null;
+  }
+  if (currentSequence !== duplicateFieldValidationSequence[fieldId] || getDuplicateFieldValue(fieldId) !== value) return true;
+  const exists = Boolean(duplicate);
+  duplicateFieldCache.set(signature, exists);
+  if (exists) {
+    showDuplicateFieldError(fieldId, config.message);
+    return false;
+  }
+  clearDuplicateFieldError(fieldId);
+  return true;
+}
+
+function scheduleDuplicateFieldValidation(fieldId, delay = 250) {
+  const config = getDuplicateFieldConfigs()[fieldId];
+  if (!config?.input) return;
+  clearTimeout(duplicateFieldTimers[fieldId]);
+  const excludeSubmissionId = currentEditId || currentDraftId || '';
+  const value = getDuplicateFieldValue(fieldId);
+  if (!config.isReady(value) || (fieldId === 'penNo' && isUnchangedEditablePenNumber(value, excludeSubmissionId))) {
+    clearDuplicateFieldError(fieldId);
+    return;
+  }
+  const signature = getDuplicateFieldSignature(fieldId, value, excludeSubmissionId);
+  if (duplicateFieldCache.has(signature)) {
+    const exists = duplicateFieldCache.get(signature);
+    if (exists) showDuplicateFieldError(fieldId, config.message);
+    else clearDuplicateFieldError(fieldId);
+    return;
+  }
+  setDuplicateFieldState(fieldId, { checking: true, blocked: false });
+  duplicateFieldTimers[fieldId] = setTimeout(() => {
+    void validateDuplicateField(fieldId);
+  }, delay);
+}
+
+function waitForDuplicateFieldChecks(timeoutMs = 3000) {
+  const startedAt = Date.now();
+  return new Promise((resolve) => {
+    const check = () => {
+      if (!duplicateFieldChecking) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        resolve(false);
+        return;
+      }
+      setTimeout(check, 50);
+    };
+    check();
   });
 }
 
@@ -1772,8 +1863,7 @@ function getDuplicateCustomerDisplayName(duplicate) {
 }
 
 function formatPenNoDuplicateMessage(duplicate) {
-  const customerName = getDuplicateCustomerDisplayName(duplicate);
-  return customerName ? `PEN No already existed.\n"${customerName}"` : 'PEN No already existed.';
+  return 'PEN No already existed.';
 }
 
 async function validatePenNumberAvailable(penNo = '', excludeSubmissionId = '', options = {}) {
@@ -1796,87 +1886,7 @@ async function validatePenNumberAvailable(penNo = '', excludeSubmissionId = '', 
 }
 
 async function validatePenNoFieldInline() {
-  return validateSubmissionDuplicateFieldsInline();
-}
-
-function collectInlineDuplicateCheckDetails() {
-  const details = collectDraftableCustomerDetails();
-  return {
-    phone: details.phone,
-    accountNo: details.accountNo,
-    nin: details.nin,
-    penNo: details.penNo,
-    customerName: String(customerNameInput?.value || details.name || '').trim()
-  };
-}
-
-function hasEnoughInlineDuplicateValue(details = {}) {
-  return (
-    normalizeCustomerPhone(details.phone).length >= 10 ||
-    normalizeDigitsOnly(details.accountNo).length === 10 ||
-    normalizeDigitsOnly(details.nin).length === 11 ||
-    normalizePenNumber(details.penNo).length > 0 ||
-    normalizeCustomerNameKey(details.customerName).length >= 3
-  );
-}
-
-async function validateSubmissionDuplicateFieldsInline() {
-  const currentSequence = ++duplicateValidationSequence;
-  inlineDuplicateChecking = true;
-  updateSubmitButton();
-  const excludeSubmissionId = currentEditId || currentDraftId || '';
-  const details = collectInlineDuplicateCheckDetails();
-  if (!hasEnoughInlineDuplicateValue(details)) {
-    if (currentSequence !== duplicateValidationSequence) return true;
-    clearInlineDuplicateError();
-    updateSubmitButton();
-    return true;
-  }
-  if (details.penNo && isUnchangedEditablePenNumber(details.penNo, excludeSubmissionId)) {
-    details.penNo = '';
-  }
-  let duplicate = null;
-  try {
-    duplicate = await validateCustomerDuplicateContact({ ...details, excludeSubmissionId });
-  } catch (_) {
-    if (currentSequence === duplicateValidationSequence) {
-      inlineDuplicateChecking = false;
-      updateSubmitButton();
-    }
-    return true;
-  }
-  if (currentSequence !== duplicateValidationSequence) return true;
-  inlineDuplicateChecking = false;
-  if (duplicate) {
-    if (details.penNo && duplicate.message.toLowerCase().includes('pen')) {
-      clearInlineDuplicateError();
-      showPenNoError(formatPenNoDuplicateMessage(duplicate));
-      inlineDuplicateBlocked = true;
-    } else {
-      showInlineDuplicateError(duplicate);
-    }
-    updateSubmitButton();
-    return false;
-  }
-  clearInlineDuplicateError();
-  updateSubmitButton();
-  return true;
-}
-
-function scheduleInlineDuplicateValidation(delay = 350) {
-  duplicateValidationSequence += 1;
-  clearTimeout(inlineDuplicateValidationDebounce);
-  const details = collectInlineDuplicateCheckDetails();
-  if (!hasEnoughInlineDuplicateValue(details)) {
-    clearInlineDuplicateError();
-    updateSubmitButton();
-    return;
-  }
-  inlineDuplicateChecking = true;
-  updateSubmitButton();
-  inlineDuplicateValidationDebounce = setTimeout(() => {
-    void validateSubmissionDuplicateFieldsInline();
-  }, delay);
+  return validateDuplicateField('penNo');
 }
 
 function collectDraftableCustomerDetails() {
@@ -2518,6 +2528,11 @@ function syncUploadRequirementUi() {
     uploadProgressText.textContent = canCurrentUserSubmitWithoutDocuments() ? ' optional for this role' : '';
   }
   if (submitCustomerBtn) {
+    if (submissionInProgress) {
+      submitCustomerBtn.disabled = true;
+      submitCustomerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+      return;
+    }
     submitCustomerBtn.innerHTML = canCurrentUserSubmitWithoutDocuments()
       ? '<i class="fas fa-check-circle"></i> Submit Application'
       : '<i class="fas fa-check-circle"></i> Submit All Documents';
@@ -2602,10 +2617,12 @@ const DEFAULT_HOUSE_NUMBER_RULES = {
 let PROPERTY_RULES = [...DEFAULT_PROPERTY_RULES];
 let HOUSE_NUMBER_RULES = { ...DEFAULT_HOUSE_NUMBER_RULES };
 let penNoValidationSequence = 0;
-let duplicateValidationSequence = 0;
-let inlineDuplicateBlocked = false;
-let inlineDuplicateChecking = false;
-let inlineDuplicateValidationDebounce = null;
+let duplicateFieldValidationSequence = {};
+let duplicateFieldBlocked = false;
+let duplicateFieldChecking = false;
+let duplicateFieldStates = {};
+let duplicateFieldTimers = {};
+const duplicateFieldCache = new Map();
 let accountLookupSequence = 0;
 let accountLookupDebounce = null;
 let accountLookupBanks = [];
@@ -2960,7 +2977,7 @@ function calculateAndDisplayCustomerInfo() {
 // ==================== SAVE CUSTOMER DETAILS ====================
 async function saveCustomerDetails() {
   // Define requiredFields INSIDE the function
-  const allowOptionalCustomerFields = isCurrentUserUploaderLevel2();
+  const allowOptionalCustomerFields = false;
   const requiredFields = [
     'customerName', 'customerDob', 'customerEmail', 'customerPhone',
     'customerNIN', 'customerAddress', 'accountNo', 'employer',
@@ -3000,9 +3017,8 @@ async function saveCustomerDetails() {
     return false;
   }
 
-  const penNo = document.getElementById('penNo')?.value?.trim() || '';
-  const duplicateExcludeId = currentEditId || currentDraftId || '';
-  if (penNo && !(await validatePenNumberAvailable(penNo, duplicateExcludeId, { inline: true, notify: false }))) {
+  const duplicateChecks = await Promise.all(['accountNo', 'customerPhone', 'customerNIN', 'penNo'].map((fieldId) => validateDuplicateField(fieldId)));
+  if (!duplicateChecks.every(Boolean)) {
     return false;
   }
 
@@ -3099,7 +3115,7 @@ function resetCustomerDetails() {
     if (el) el.value = '';
   });
   if (accountBankSelect) accountBankSelect.value = DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME;
-  clearPenNoError();
+  clearAllDuplicateFieldErrors();
   clearVerifiedAccountLookup();
   setAccountLookupStatus('', 'info');
 
@@ -3237,7 +3253,10 @@ function setupEventListeners() {
   if (closeUploaderRejectionReasonModal) closeUploaderRejectionReasonModal.addEventListener('click', () => closeModal(uploaderRejectionReasonModal));
   if (closeUploaderRejectionReasonBtn) closeUploaderRejectionReasonBtn.addEventListener('click', () => closeModal(uploaderRejectionReasonModal));
   if (cancelSingleBtn) cancelSingleBtn.addEventListener('click', () => closeModal(singleUploadModal));
-  if (submitCustomerBtn) submitCustomerBtn.addEventListener('click', submitCustomer);
+  if (submitCustomerBtn) {
+    submitCustomerBtn.addEventListener('pointerdown', handleSubmitCustomerTrigger);
+    submitCustomerBtn.addEventListener('click', handleSubmitCustomerTrigger);
+  }
   if (saveDraftBtn) saveDraftBtn.addEventListener('click', async () => {
     if (saveDraftBtn.disabled) return;
     saveDraftBtn.disabled = true;
@@ -3293,12 +3312,7 @@ function setupEventListeners() {
       if (input) input.click();
     });
   });
-  if (customerNameInput) {
-    customerNameInput.addEventListener('input', () => {
-      updateSubmitButton();
-      scheduleInlineDuplicateValidation();
-    });
-  }
+  if (customerNameInput) customerNameInput.addEventListener('input', updateSubmitButton);
   if (accountNoInput) {
     accountNoInput.addEventListener('input', () => {
       const digits = String(accountNoInput.value || '').replace(/\D/g, '').slice(0, 10);
@@ -3306,11 +3320,11 @@ function setupEventListeners() {
       clearVerifiedAccountLookup();
       setAccountLookupStatus('', 'info');
       scheduleCustomerAccountLookup();
-      scheduleInlineDuplicateValidation();
+      scheduleDuplicateFieldValidation('accountNo');
     });
     accountNoInput.addEventListener('blur', () => {
       void resolveCustomerAccountName();
-      void validateSubmissionDuplicateFieldsInline();
+      void validateDuplicateField('accountNo');
     });
   }
   if (accountBankSelect) {
@@ -3323,7 +3337,7 @@ function setupEventListeners() {
   if (penNoInput) {
     penNoInput.addEventListener('input', () => {
       penNoValidationSequence += 1;
-      scheduleInlineDuplicateValidation();
+      scheduleDuplicateFieldValidation('penNo');
     });
     penNoInput.addEventListener('blur', () => {
       void validatePenNoFieldInline();
@@ -3333,14 +3347,12 @@ function setupEventListeners() {
     const input = document.getElementById(fieldId);
     if (!input) return;
     input.addEventListener('input', () => {
-      if (fieldId === 'customerPhone' || fieldId === 'customerNIN') {
-        input.value = String(input.value || '').replace(/\D/g, '').slice(0, 11);
-      }
+      input.value = String(input.value || '').replace(/\D/g, '').slice(0, 11);
       updateSubmitButton();
-      scheduleInlineDuplicateValidation();
+      scheduleDuplicateFieldValidation(fieldId);
     });
     input.addEventListener('blur', () => {
-      void validateSubmissionDuplicateFieldsInline();
+      void validateDuplicateField(fieldId);
     });
   });
   if (saveDetailsBtn) saveDetailsBtn.addEventListener('click', saveCustomerDetails);
@@ -3587,7 +3599,7 @@ function openUploadModal() {
     if (el) el.value = '';
   });
   if (accountBankSelect) accountBankSelect.value = DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME;
-  clearInlineDuplicateError();
+  clearAllDuplicateFieldErrors();
   clearVerifiedAccountLookup();
   setAccountLookupStatus('', 'info');
 
@@ -4489,19 +4501,26 @@ function getStageIcon(stage) {
 // ==================== SUBMIT CUSTOMER ====================
 function updateSubmitButton() {
   if (!submitCustomerBtn) return;
+  if (submissionInProgress) {
+    submitCustomerBtn.disabled = true;
+    submitCustomerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+    return;
+  }
   const customerName = customerNameInput.value.trim();
   const allowWithoutDocuments = canCurrentUserSubmitWithoutDocuments();
   const hasAnyDoc = Object.keys(currentCustomerUploads || {}).some(id => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0);
+  const requiredFieldsReady = getMissingRequiredSubmissionFields().length === 0;
+  const duplicateReady = !duplicateFieldBlocked;
   if (currentEditId) {
     uploadedCountSpan.textContent = Object.keys(currentCustomerUploads || {}).filter((id) => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0).length;
-    submitCustomerBtn.disabled = inlineDuplicateBlocked || inlineDuplicateChecking || !(customerName && (hasAnyDoc || allowWithoutDocuments));
+    submitCustomerBtn.disabled = !(customerName && requiredFieldsReady && duplicateReady && (hasAnyDoc || allowWithoutDocuments));
     syncUploadRequirementUi();
     return;
   }
   const requiredDocs = DOCUMENT_TYPES.filter(d => d.required !== false).map(d => d.id);
   const uploadedRequired = requiredDocs.filter(id => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0).length;
   uploadedCountSpan.textContent = Object.keys(currentCustomerUploads || {}).filter((id) => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0).length;
-  submitCustomerBtn.disabled = inlineDuplicateBlocked || inlineDuplicateChecking || !(customerName && customerDetailsSaved && (allowWithoutDocuments || uploadedRequired === requiredDocs.length));
+  submitCustomerBtn.disabled = !(customerName && requiredFieldsReady && duplicateReady && customerDetailsSaved && (allowWithoutDocuments || uploadedRequired === requiredDocs.length));
   syncUploadRequirementUi();
 }
 
@@ -4596,7 +4615,7 @@ function getRequiredSubmissionFieldValue(fieldId = '') {
 
 function getMissingRequiredSubmissionFields() {
   hydrateEditableSubmissionRequiredFields();
-  const allowOptionalCustomerFields = isCurrentUserUploaderLevel2();
+  const allowOptionalCustomerFields = false;
   const requiredFields = [
     { id: 'customerName', label: 'Customer Name' }, { id: 'customerDob', label: 'Date of Birth' },
     { id: 'customerEmail', label: 'Email' }, { id: 'customerPhone', label: 'Phone' },
@@ -4624,21 +4643,28 @@ function getMissingRequiredSubmissionFields() {
   return invalidLabels.length > 0 ? [...missingLabels, ...invalidLabels] : missingLabels;
 }
 
+function handleSubmitCustomerTrigger(event) {
+  if (event?.type === 'pointerdown' && event.button !== undefined && event.button !== 0) return;
+  event?.preventDefault?.();
+  if (submissionInProgress || submitCustomerBtn?.disabled) return;
+  void submitCustomer();
+}
+
 async function submitCustomer() {
   if (submissionInProgress) {
     showNotification('Submission is already in progress. Please wait.', 'info');
     return;
   }
   if (!assertWritable('Submission')) return;
-  const customerName = customerNameInput.value.trim();
-  const allowWithoutDocuments = canCurrentUserSubmitWithoutDocuments();
-  const allowOptionalCustomerFields = isCurrentUserUploaderLevel2();
-  if (!customerName) return;
-  if (!customerDetailsSaved) { showNotification('Please save customer details before submitting', 'error'); return; }
   submissionInProgress = true;
   submitCustomerBtn.disabled = true;
   submitCustomerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
   try {
+    const customerName = customerNameInput.value.trim();
+    const allowWithoutDocuments = canCurrentUserSubmitWithoutDocuments();
+    const allowOptionalCustomerFields = false;
+    if (!customerName) return;
+    if (!customerDetailsSaved) { showNotification('Please save customer details before submitting', 'error'); return; }
     const rolePermissions = (await getSystemSettings(db, { force: true })).rolePermissions || {};
     const currentRole = String(currentUserProfile?.role || 'uploader').trim().toLowerCase();
     if (currentRole === 'uploader' && rolePermissions.uploaderCanUpload === false) {
@@ -4647,45 +4673,20 @@ async function submitCustomer() {
     }
     const missingFields = getMissingRequiredSubmissionFields();
     if (missingFields.length > 0) {
-      submitCustomerBtn.disabled = false;
-      syncUploadRequirementUi();
       return showNotification('All fields are compulsory. Missing or invalid: ' + missingFields.join(', '), 'error');
     }
-    if (!(await resolveCustomerAccountName({ silent: false }))) {
-      submitCustomerBtn.disabled = false;
-      syncUploadRequirementUi();
-      return;
+    if (duplicateFieldChecking && !(await waitForDuplicateFieldChecks())) {
+      return showNotification('Please wait for duplicate check to finish.', 'error');
     }
-    const duplicateExcludeId = currentEditId || currentDraftId || '';
-    const duplicateCheckDetails = collectDraftableCustomerDetails();
-    duplicateCheckDetails.name = customerName;
-    const duplicate = await validateCustomerDuplicateContact({
-      phone: duplicateCheckDetails.phone,
-      accountNo: duplicateCheckDetails.accountNo,
-      nin: duplicateCheckDetails.nin,
-      penNo: duplicateCheckDetails.penNo,
-      customerName,
-      excludeSubmissionId: duplicateExcludeId
-    });
-    if (duplicate) {
-      if (duplicate.message.toLowerCase().includes('pen')) {
-        clearInlineDuplicateError();
-        showPenNoError(formatPenNoDuplicateMessage(duplicate));
-        inlineDuplicateBlocked = true;
-      } else {
-        showInlineDuplicateError(duplicate);
-      }
-      showNotification(duplicate.message, 'error');
-      submitCustomerBtn.disabled = false;
-      syncUploadRequirementUi();
-      updateSubmitButton();
+    if (duplicateFieldBlocked) {
+      return showNotification('Duplicate record exists. Correct the highlighted field before submitting.', 'error');
+    }
+    if (!(await resolveCustomerAccountName({ silent: false }))) {
       return;
     }
     if (currentEditId) {
       const hasAnyDoc = Object.keys(currentCustomerUploads || {}).some(id => currentCustomerUploads[id] && currentCustomerUploads[id].length > 0);
       if (!hasAnyDoc && !allowWithoutDocuments) {
-        submitCustomerBtn.disabled = false;
-        syncUploadRequirementUi();
         return showNotification('Please upload at least one document before submitting fix.', 'error');
       }
       const documents = collectSubmissionDocuments();
@@ -4702,8 +4703,6 @@ async function submitCustomer() {
         }
       }
       if (!customerDetails.houseNumber && !allowOptionalCustomerFields) {
-        submitCustomerBtn.disabled = false;
-        syncUploadRequirementUi();
         return showNotification('Unable to generate house number for this property type.', 'error');
       }
       const submissionRef = doc(db, 'submissions', currentEditId);
@@ -4752,7 +4751,7 @@ async function submitCustomer() {
         commissionRatePercent: Number((preservedCommissionRate * 100).toFixed(4)),
         commissionRateLabel: formatCommissionRateLabel(preservedCommissionRate)
       };
-      await saveSubmissionWithUniqueLocks(submissionRef, correctionPayload, { mode: 'update' });
+      await updateDoc(submissionRef, correctionPayload);
       if (!rsaRejectFlow && !reviewerToReassign) {
         await assignRoundRobin(submissionRef);
       }
@@ -4772,14 +4771,11 @@ async function submitCustomer() {
             : '✅ Fix submitted successfully!'), 'success');
       closeModal(uploadModal);
       currentEditId = null;
-      updateSubmitButton();
       return;
     }
     const requiredDocs = DOCUMENT_TYPES.filter(d => d.required !== false).map(d => d.id);
     const missing = requiredDocs.filter(id => !(currentCustomerUploads[id] && currentCustomerUploads[id].length > 0));
     if (!allowWithoutDocuments && missing.length > 0) {
-      submitCustomerBtn.disabled = false;
-      syncUploadRequirementUi();
       return showNotification('Please upload required documents: ' + missing.join(', '), 'error');
     }
     const documents = collectSubmissionDocuments();
@@ -4792,14 +4788,10 @@ async function submitCustomer() {
       documentsCount: documents.length
     });
     if (!proceed) {
-      submitCustomerBtn.disabled = false;
-      syncUploadRequirementUi();
       return;
     }
     const allocatedHouseNumber = customerDetails.houseNumber || (customerDetails.propertyType ? await reserveHouseNumber(customerDetails.propertyType) : '');
     if (!allocatedHouseNumber && !allowOptionalCustomerFields) {
-      submitCustomerBtn.disabled = false;
-      syncUploadRequirementUi();
       return showNotification('Unable to generate house number for this property type.', 'error');
     }
     customerDetails.houseNumber = allocatedHouseNumber || customerDetails.houseNumber || '';
@@ -4831,16 +4823,15 @@ async function submitCustomer() {
     let subRef;
     if (currentDraftId) {
       subRef = doc(db, 'submissions', currentDraftId);
-      await saveSubmissionWithUniqueLocks(subRef, {
+      await updateDoc(subRef, {
         ...submissionPayload,
         uploadedAt: serverTimestamp()
-      }, { mode: 'update' });
+      });
     } else {
-      subRef = doc(collection(db, 'submissions'));
-      await saveSubmissionWithUniqueLocks(subRef, {
+      subRef = await addDoc(collection(db, 'submissions'), {
         ...submissionPayload,
         uploadedAt: serverTimestamp()
-      }, { mode: 'set' });
+      });
     }
     const routingRule = await getUploaderRoutingRule(uploaderEmail);
     const systemSettings = await getSystemSettings(db);
@@ -4893,11 +4884,7 @@ async function submitCustomer() {
     closeModal(uploadModal);
     currentDraftId = null;
   } catch (error) {
-    if (error?.code === 'duplicate-submission-lock') {
-      showNotification(error.message || 'Duplicate application blocked.', 'error');
-    } else {
-      showNotification('Submission failed: ' + error.message, 'error');
-    }
+    showNotification('Submission failed: ' + error.message, 'error');
   } finally {
     submissionInProgress = false;
     syncUploadRequirementUi();
