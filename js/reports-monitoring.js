@@ -354,6 +354,9 @@ function getCustomerNin(sub = {}) {
     return String(
         sub?.customerDetails?.nin ||
         sub?.customerDetails?.nationalId ||
+        sub?.customerDetails?.nationalIdentificationNumber ||
+        sub?.customerDetails?.customerNIN ||
+        sub?.customerNIN ||
         sub?.nin ||
         ''
     ).replace(/\D/g, '');
@@ -1118,7 +1121,8 @@ function renderAuditDuplicateScan() {
                         <span class="${signalClass} audit-duplicate-group-badge">${escapeHtml(group.strength === 'strong' ? 'Strong duplicate signal' : 'Possible duplicate signal')}</span>
                         <span class="audit-duplicate-group-count">${escapeHtml(`${group.rows.length} applications`)}</span>
                         <strong>Group ${groupIndex + 1}</strong>
-                        <span>${escapeHtml(group.key || group.signal || 'Duplicate match')}</span>
+                        <span class="audit-duplicate-group-signal">${escapeHtml(group.key || group.signal || 'Duplicate match')}</span>
+                        <button type="button" class="action-btn audit-duplicate-reject-btn audit-duplicate-group-reject-btn" onclick="window.rejectAuditDuplicateGroup(${groupIndex})"><i class="fas fa-ban"></i> Reject Group</button>
                     </div>
                 </td>
             </tr>
@@ -2532,8 +2536,78 @@ function getSubmissionUniqueKeyRefs(sub = {}) {
     return keys.map(([type, value]) => doc(db, 'submissionUniqueKeys', getSubmissionUniqueKeyDocId(type, value)));
 }
 
-function showAuditDuplicateRejectModal(submission = {}) {
+function getAuditDuplicateCustomerName(sub = {}) {
+    return String(sub?.customerName || sub?.customerDetails?.name || 'Unknown application').trim();
+}
+
+function formatAuditDuplicateNameList(names = []) {
+    const uniqueNames = Array.from(new Set(names.map((name) => String(name || '').trim()).filter(Boolean)));
+    if (!uniqueNames.length) return '';
+    if (uniqueNames.length === 1) return uniqueNames[0];
+    if (uniqueNames.length === 2) return `${uniqueNames[0]} and ${uniqueNames[1]}`;
+    return `${uniqueNames.slice(0, -1).join(', ')}, and ${uniqueNames[uniqueNames.length - 1]}`;
+}
+
+function getAuditDuplicateGroupBySubmissionId(submissionId = '') {
+    const id = String(submissionId || '').trim();
+    if (!id) return null;
+    if (!auditDuplicateScanResult) auditDuplicateScanResult = buildAuditDuplicateScanResult();
+    return (auditDuplicateScanResult?.groups || []).find((group) =>
+        (group.rows || []).some((row) => String(row.id || '') === id)
+    ) || null;
+}
+
+function getAuditDuplicateGroupByIndex(groupIndex) {
+    const index = Number(groupIndex);
+    if (!Number.isInteger(index) || index < 0) return null;
+    if (!auditDuplicateScanResult) auditDuplicateScanResult = buildAuditDuplicateScanResult();
+    return auditDuplicateScanResult?.groups?.[index] || null;
+}
+
+function getAuditDuplicateNinSignal(group = {}) {
+    const signal = (group.signals || []).find((item) => String(item.signal || '').toLowerCase() === 'nin');
+    if (signal?.key) return String(signal.key || '').trim();
+    const rows = group.rows || [];
+    const ninValues = rows.map(getCustomerNin).filter(Boolean);
+    return ninValues.length && ninValues.every((value) => value === ninValues[0]) ? ninValues[0] : '';
+}
+
+function getAuditDuplicateSharedNames(sub = {}, group = {}) {
+    const submissionId = String(sub?.id || '').trim();
+    return (group.rows || [])
+        .filter((row) => String(row.id || '').trim() !== submissionId)
+        .map(getAuditDuplicateCustomerName)
+        .filter(Boolean);
+}
+
+function buildAuditDuplicateRejectionReason(sub = {}, group = null, enteredReason = '') {
+    const duplicateGroup = group || getAuditDuplicateGroupBySubmissionId(sub.id) || { rows: [sub], signals: [] };
+    const sharedNamesText = formatAuditDuplicateNameList(getAuditDuplicateSharedNames(sub, duplicateGroup));
+    const ninSignal = getAuditDuplicateNinSignal(duplicateGroup);
+    const defaultSpecificReason = sharedNamesText && ninSignal
+        ? `Duplicate application found. Please correct the duplicated NIN shared with ${sharedNamesText}.`
+        : sharedNamesText
+            ? `Duplicate application found. Please correct the duplicated customer/account details shared with ${sharedNamesText}.`
+            : 'Duplicate application found. Please correct the duplicated customer/account details and resubmit.';
+    const reason = String(enteredReason || '').trim();
+    if (!reason || reason === defaultSpecificReason) return defaultSpecificReason;
+    if (!sharedNamesText) return reason;
+    if (reason.toLowerCase().includes(sharedNamesText.toLowerCase())) return reason;
+    return ninSignal
+        ? `${reason} Duplicated NIN shared with ${sharedNamesText}.`
+        : `${reason} Shared with ${sharedNamesText}.`;
+}
+
+function showAuditDuplicateRejectModal({ submission = {}, group = null } = {}) {
     return new Promise((resolve) => {
+        const rows = group?.rows || [submission];
+        const isGroup = !submission?.id && rows.length > 1;
+        const primarySubmission = submission?.id ? submission : rows[0] || {};
+        const defaultReason = buildAuditDuplicateRejectionReason(primarySubmission, group);
+        const title = isGroup ? 'Reject Duplicate Group' : 'Reject Duplicate Application';
+        const targetText = isGroup
+            ? `${rows.length} duplicate applications`
+            : `<strong>${escapeHtml(getAuditDuplicateCustomerName(primarySubmission) || 'this application')}</strong>`;
         const modal = document.createElement('div');
         modal.className = 'modal active audit-action-modal';
         modal.innerHTML = `
@@ -2541,9 +2615,9 @@ function showAuditDuplicateRejectModal(submission = {}) {
                 <div class="audit-action-icon">
                     <i class="fas fa-ban"></i>
                 </div>
-                <h2>Reject Duplicate Application</h2>
-                <p>Send <strong>${escapeHtml(submission.customerName || 'this application')}</strong> back to the uploader for correction.</p>
-                <textarea id="auditDuplicateRejectReasonInput" rows="4" placeholder="Reason for rejection">Duplicate application found. Please correct the duplicated customer/account details and resubmit.</textarea>
+                <h2>${escapeHtml(title)}</h2>
+                <p>Send ${targetText} back to the uploader for correction.</p>
+                <textarea id="auditDuplicateRejectReasonInput" rows="4" placeholder="Reason for rejection">${escapeHtml(defaultReason)}</textarea>
                 <div class="audit-action-actions">
                     <button type="button" class="cancel-btn" data-audit-duplicate-reject="cancel">Cancel</button>
                     <button type="button" class="submit-btn danger" data-audit-duplicate-reject="confirm">
@@ -2573,6 +2647,111 @@ function showAuditDuplicateRejectModal(submission = {}) {
         document.body.appendChild(modal);
         setTimeout(() => modal.querySelector('#auditDuplicateRejectReasonInput')?.focus(), 0);
     });
+}
+
+async function rejectAuditDuplicateSubmissions(submissions = [], enteredReason = '', group = null) {
+    const rows = Array.from(new Map(
+        submissions
+            .filter((sub) => sub?.id)
+            .map((sub) => [sub.id, sub])
+    ).values());
+    if (!rows.length) return 0;
+    const rejectedBy = currentUser?.email || '';
+    const batch = writeBatch(db);
+    const auditEntries = [];
+
+    rows.forEach((sub) => {
+        const submissionId = String(sub.id || '').trim();
+        if (!submissionId) return;
+        const reason = buildAuditDuplicateRejectionReason(sub, group, enteredReason);
+        const customerName = getAuditDuplicateCustomerName(sub) || 'this application';
+        const previousStatus = String(sub.status || '').trim();
+        const previousStage = getApplicationStage(sub);
+        batch.update(doc(db, 'submissions', submissionId), {
+            status: 'rejected',
+            comment: reason,
+            rejectionHistory: arrayUnion({
+                reason,
+                rejectedAt: new Date().toISOString(),
+                rejectedBy,
+                source: 'audit_duplicate_scan'
+            }),
+            latestRejectionReason: reason,
+            latestRejectedBy: rejectedBy,
+            latestRejectedAt: serverTimestamp(),
+            previousRejectionReason: reason,
+            previousRejectedBy: rejectedBy,
+            previousRejectedAt: serverTimestamp(),
+            resubmittedAfterRejection: false,
+            latestRejectedStage: 'audit',
+            auditDuplicateRejected: true,
+            auditDuplicateRejectedBy: rejectedBy,
+            auditDuplicateRejectedAt: serverTimestamp(),
+            auditDuplicateRejectionReason: reason,
+            auditDuplicatePreviousStatus: previousStatus,
+            auditDuplicatePreviousStage: previousStage,
+            updatedAt: serverTimestamp()
+        });
+        auditEntries.push({
+            action: rows.length > 1 ? 'audit_duplicate_group_application_rejected' : 'audit_duplicate_application_rejected',
+            submissionId,
+            customerName,
+            accountNumber: getCustomerAccountNumber(sub),
+            nin: getCustomerNin(sub),
+            penNo: getCustomerPenNumber(sub),
+            reason,
+            previousStatus,
+            previousStage,
+            duplicateGroupSize: rows.length,
+            performedBy: rejectedBy,
+            timestamp: serverTimestamp()
+        });
+    });
+
+    await batch.commit();
+    await Promise.all(auditEntries.map((entry) => addDoc(collection(db, 'audit'), entry).catch(() => {})));
+
+    await Promise.all(rows.map((sub) => {
+        const submissionId = String(sub.id || '').trim();
+        const reason = buildAuditDuplicateRejectionReason(sub, group, enteredReason);
+        const customerName = getAuditDuplicateCustomerName(sub) || 'this application';
+        return notifyUserPushEvent({
+            currentUser,
+            recipientEmail: String(sub.uploadedBy || '').trim(),
+            eventType: 'audit_duplicate_application_rejected',
+            title: 'Application Needs Correction',
+            body: `${customerName} was rejected by Audit because it appears duplicated.`,
+            clickUrl: '/dashboard.html#rejected',
+            meta: {
+                submissionId,
+                customerName,
+                reason,
+                rejectedBy
+            }
+        }).catch(() => {});
+    }));
+
+    rows.forEach((sub) => {
+        const localSub = allSubmissions.find((item) => item.id === sub.id);
+        if (!localSub) return;
+        const reason = buildAuditDuplicateRejectionReason(sub, group, enteredReason);
+        localSub.status = 'rejected';
+        localSub.comment = reason;
+        localSub.latestRejectionReason = reason;
+        localSub.latestRejectedBy = rejectedBy;
+        localSub.previousRejectionReason = reason;
+        localSub.previousRejectedBy = rejectedBy;
+        localSub.resubmittedAfterRejection = false;
+        localSub.latestRejectedStage = 'audit';
+        localSub.auditDuplicateRejected = true;
+        localSub.auditDuplicateRejectedAt = new Date().toISOString();
+        localSub.auditDuplicateRejectedBy = rejectedBy;
+        localSub.auditDuplicateRejectionReason = reason;
+        localSub.auditDuplicatePreviousStatus = String(sub.status || '').trim();
+        localSub.auditDuplicatePreviousStage = getApplicationStage(sub);
+    });
+
+    return rows.length;
 }
 
 function showAuditConfirmModal({ title = 'Confirm Action', message = '', confirmLabel = 'Confirm', icon = 'fa-check', danger = false } = {}) {
@@ -2616,83 +2795,41 @@ async function rejectAuditDuplicateApplication(submissionId) {
         return;
     }
 
-    const reason = await showAuditDuplicateRejectModal(sub);
+    const group = getAuditDuplicateGroupBySubmissionId(submissionId);
+    const reason = await showAuditDuplicateRejectModal({ submission: sub, group });
     if (!reason) return;
 
-    const rejectedBy = currentUser?.email || '';
-    const customerName = sub.customerName || sub?.customerDetails?.name || 'this application';
     try {
-        await updateDoc(doc(db, 'submissions', submissionId), {
-            status: 'rejected',
-            comment: reason,
-            rejectionHistory: arrayUnion({
-                reason,
-                rejectedAt: new Date().toISOString(),
-                rejectedBy,
-                source: 'audit_duplicate_scan'
-            }),
-            latestRejectionReason: reason,
-            latestRejectedBy: rejectedBy,
-            latestRejectedAt: serverTimestamp(),
-            previousRejectionReason: reason,
-            previousRejectedBy: rejectedBy,
-            previousRejectedAt: serverTimestamp(),
-            resubmittedAfterRejection: false,
-            latestRejectedStage: 'audit',
-            auditDuplicateRejected: true,
-            auditDuplicateRejectedBy: rejectedBy,
-            auditDuplicateRejectedAt: serverTimestamp(),
-            auditDuplicateRejectionReason: reason,
-            updatedAt: serverTimestamp()
-        });
-
-        await addDoc(collection(db, 'audit'), {
-            action: 'audit_duplicate_application_rejected',
-            submissionId,
-            customerName,
-            accountNumber: getCustomerAccountNumber(sub),
-            penNo: getCustomerPenNumber(sub),
-            reason,
-            performedBy: rejectedBy,
-            timestamp: serverTimestamp()
-        }).catch(() => {});
-
-        notifyUserPushEvent({
-            currentUser,
-            recipientEmail: String(sub.uploadedBy || '').trim(),
-            eventType: 'audit_duplicate_application_rejected',
-            title: 'Application Needs Correction',
-            body: `${customerName} was rejected by Audit because it appears duplicated.`,
-            clickUrl: '/dashboard.html#rejected',
-            meta: {
-                submissionId,
-                customerName,
-                reason,
-                rejectedBy
-            }
-        }).catch(() => {});
-
-        const localSub = allSubmissions.find((item) => item.id === submissionId);
-        if (localSub) {
-            localSub.status = 'rejected';
-            localSub.comment = reason;
-            localSub.latestRejectionReason = reason;
-            localSub.latestRejectedBy = rejectedBy;
-            localSub.previousRejectionReason = reason;
-            localSub.previousRejectedBy = rejectedBy;
-            localSub.resubmittedAfterRejection = false;
-            localSub.latestRejectedStage = 'audit';
-            localSub.auditDuplicateRejected = true;
-            localSub.auditDuplicateRejectedAt = new Date().toISOString();
-            localSub.auditDuplicateRejectedBy = rejectedBy;
-            localSub.auditDuplicateRejectionReason = reason;
-        }
+        await rejectAuditDuplicateSubmissions([sub], reason, group);
 
         auditDuplicateScanResult = buildAuditDuplicateScanResult();
         showAuditReconciliationView('duplicates');
         showNotification('Duplicate application rejected for uploader correction.', 'success');
     } catch (error) {
         showNotification(`Failed to reject duplicate application: ${error.message || error}`, 'error');
+    }
+}
+
+async function rejectAuditDuplicateGroup(groupIndex) {
+    const group = getAuditDuplicateGroupByIndex(groupIndex);
+    const rows = (group?.rows || []).filter((sub) => sub?.id);
+    if (!rows.length) {
+        showNotification('Duplicate group not found', 'warning');
+        return;
+    }
+
+    const reason = await showAuditDuplicateRejectModal({ group });
+    if (!reason) return;
+
+    try {
+        const defaultGroupReason = buildAuditDuplicateRejectionReason(rows[0], group);
+        const enteredReason = reason === defaultGroupReason ? '' : reason;
+        const rejectedCount = await rejectAuditDuplicateSubmissions(rows, enteredReason, group);
+        auditDuplicateScanResult = buildAuditDuplicateScanResult();
+        showAuditReconciliationView('duplicates');
+        showNotification(`${rejectedCount} duplicate application(s) rejected for uploader correction.`, 'success');
+    } catch (error) {
+        showNotification(`Failed to reject duplicate group: ${error.message || error}`, 'error');
     }
 }
 
@@ -2981,6 +3118,7 @@ window.openMonitoringApplicationDetails = openApplicationDetailsModal;
 window.openMonitoringApplicationTrack = openApplicationTrackModal;
 window.ignoreAuditDuplicateApplication = ignoreAuditDuplicateApplication;
 window.rejectAuditDuplicateApplication = rejectAuditDuplicateApplication;
+window.rejectAuditDuplicateGroup = rejectAuditDuplicateGroup;
 window.deleteAuditDuplicateApplication = deleteAuditDuplicateApplication;
 
 function getAuditPaymentClearPayload(sub = {}) {

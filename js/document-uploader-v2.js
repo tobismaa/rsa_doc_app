@@ -1406,7 +1406,7 @@ function setUploadModalHeading(mode = getUploadModalMode()) {
     return;
   }
   if (mode === 'fix') {
-    uploadModalHeading.innerHTML = '<i class="fas fa-edit"></i> Correct & Re-upload';
+    uploadModalHeading.innerHTML = '<i class="fas fa-edit"></i> Correct & Resubmit';
     return;
   }
   uploadModalHeading.innerHTML = '<i class="fas fa-user-plus"></i> New Customer Submission';
@@ -4498,6 +4498,60 @@ function getStageIcon(stage) {
   return 'fa-clock';
 }
 
+const AUDIT_DUPLICATE_RESTORE_STATUSES = new Set([
+  'pending',
+  'submitted',
+  'resubmitted',
+  'approved',
+  'processing_to_pfa',
+  'sent_to_pfa',
+  'rsa_submitted',
+  'paid',
+  'cleared'
+]);
+
+function getAuditDuplicateRestoreStatus(existingSub = {}) {
+  const currentStatus = String(existingSub.status || '').trim().toLowerCase();
+  const rejectedStage = String(existingSub.latestRejectedStage || '').trim().toLowerCase();
+  const wasAuditDuplicateRejection = currentStatus === 'rejected'
+    && (rejectedStage === 'audit' || existingSub.auditDuplicateRejected === true || existingSub.auditDuplicateRejectionReason);
+  if (!wasAuditDuplicateRejection) return '';
+
+  const previousStatus = String(existingSub.auditDuplicatePreviousStatus || '').trim().toLowerCase();
+  return AUDIT_DUPLICATE_RESTORE_STATUSES.has(previousStatus) ? previousStatus : '';
+}
+
+function getResubmissionStatusLabel(status = '') {
+  const normalized = String(status || '').trim().toLowerCase();
+  const labels = {
+    pending: 'Pending Review',
+    submitted: 'Pending Review',
+    resubmitted: 'Pending Review',
+    approved: 'Processing to PFA',
+    processing_to_pfa: 'Processing to PFA',
+    sent_to_pfa: 'Sent to PFA',
+    rsa_submitted: 'Sent to PFA',
+    paid: 'Paid',
+    cleared: 'Cleared'
+  };
+  return labels[normalized] || 'Pending Review';
+}
+
+function getResubmissionPushMessage(customerName = '', status = '') {
+  const name = customerName || 'this customer';
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'sent_to_pfa' || normalized === 'rsa_submitted') {
+    return `Application for ${name} was resubmitted and restored to Sent to PFA.`;
+  }
+  if (normalized === 'processing_to_pfa' || normalized === 'approved') {
+    return `Application for ${name} was resubmitted and restored to Processing to PFA.`;
+  }
+  if (normalized === 'paid' || normalized === 'cleared') {
+    return `Application for ${name} was resubmitted and restored to ${getResubmissionStatusLabel(normalized)}.`;
+  }
+  return `Application for ${name} was re-submitted and is back in pending review.`;
+}
+
 // ==================== SUBMIT CUSTOMER ====================
 function updateSubmitButton() {
   if (!submitCustomerBtn) return;
@@ -4711,6 +4765,10 @@ async function submitCustomer() {
       const reviewerToReassign = await isActiveUserWithRole(reviewerCandidate, ['reviewer']) ? reviewerCandidate : '';
       const latestRejectedStage = String(existingSub.latestRejectedStage || '').trim().toLowerCase();
       const rsaRejectFlow = String(existingSub.status || '').toLowerCase() === 'rejected_by_rsa' || latestRejectedStage === 'rsa';
+      const auditDuplicateRestoreStatus = getAuditDuplicateRestoreStatus(existingSub);
+      const nextStatus = auditDuplicateRestoreStatus || (rsaRejectFlow ? 'processing_to_pfa' : 'pending');
+      const returnsToReviewer = !rsaRejectFlow && !auditDuplicateRestoreStatus;
+      const keepsReviewState = rsaRejectFlow || Boolean(auditDuplicateRestoreStatus);
       const rsaOfficerCandidate = String(existingSub.latestRejectedBy || existingSub.assignedToRSA || '').trim();
       const rsaToReassign = await isActiveUserWithRole(rsaOfficerCandidate, ['rsa']) ? rsaOfficerCandidate : String(existingSub.assignedToRSA || '').trim();
       const nextFixCount = Number(existingSub.fixCount || 0) + 1;
@@ -4722,7 +4780,7 @@ async function submitCustomer() {
       const previousRejectedAt = existingSub.latestRejectedAt || existingSub.previousRejectedAt || existingSub.reviewedAt || null;
       const preservedCommissionRate = resolveSubmissionCommissionRate(existingSub);
       const correctionPayload = {
-        customerName, customerDetails, status: rsaRejectFlow ? 'processing_to_pfa' : 'pending', documents,
+        customerName, customerDetails, status: nextStatus, documents,
         documentTypes: getUploadedDocumentTypes(), reuploadedAt: serverTimestamp(),
         houseNumber: customerDetails.houseNumber || '',
         penNoNormalized: normalizePenNumber(customerDetails.penNo),
@@ -4732,13 +4790,13 @@ async function submitCustomer() {
         agentAccountNumber: agentPayload.agentAccountNumber,
         agentAccountBank: agentPayload.agentAccountBank,
         fixSubmitted: true, fixLocked: false, fixSubmittedAt: serverTimestamp(), fixCount: nextFixCount,
-        assignedTo: rsaRejectFlow ? '' : (reviewerToReassign || existingSub.assignedTo || ''),
+        assignedTo: rsaRejectFlow ? '' : (auditDuplicateRestoreStatus ? (existingSub.assignedTo || '') : (reviewerToReassign || existingSub.assignedTo || '')),
         assignedToRSA: rsaRejectFlow ? (rsaToReassign || existingSub.assignedToRSA || '') : (existingSub.assignedToRSA || ''),
         rsaAssignedAt: rsaRejectFlow ? serverTimestamp() : (existingSub.rsaAssignedAt || null),
-        reviewedAt: rsaRejectFlow ? (existingSub.reviewedAt || null) : null,
-        reviewerDecision: rsaRejectFlow ? String(existingSub.reviewerDecision || '').trim() : '',
-        reviewerDecisionBy: rsaRejectFlow ? String(existingSub.reviewerDecisionBy || '').trim() : '',
-        reviewerDecisionAt: rsaRejectFlow ? (existingSub.reviewerDecisionAt || null) : null,
+        reviewedAt: keepsReviewState ? (existingSub.reviewedAt || null) : null,
+        reviewerDecision: keepsReviewState ? String(existingSub.reviewerDecision || '').trim() : '',
+        reviewerDecisionBy: keepsReviewState ? String(existingSub.reviewerDecisionBy || '').trim() : '',
+        reviewerDecisionAt: keepsReviewState ? (existingSub.reviewerDecisionAt || null) : null,
         rsaReady: rsaRejectFlow ? true : Boolean(existingSub.rsaReady),
         comment: previousReason,
         rejectionHistory,
@@ -4752,21 +4810,23 @@ async function submitCustomer() {
         commissionRateLabel: formatCommissionRateLabel(preservedCommissionRate)
       };
       await updateDoc(submissionRef, correctionPayload);
-      if (!rsaRejectFlow && !reviewerToReassign) {
+      if (returnsToReviewer && !reviewerToReassign) {
         await assignRoundRobin(submissionRef);
       }
       notifyStatusChangePush({
         currentUser,
         submissionId: currentEditId,
         customerName,
-        newStatus: 'pending',
-        statusLabel: 'Pending Review',
+        newStatus: nextStatus,
+        statusLabel: getResubmissionStatusLabel(nextStatus),
         actionLabel: 'Application Re-Submitted',
-        message: `Application for ${customerName} was re-submitted and is back in pending review.`
+        message: getResubmissionPushMessage(customerName, nextStatus)
       }).catch(() => {});
       showNotification(rsaRejectFlow
         ? '✅ Fix submitted and returned directly to RSA.'
-        : (reviewerToReassign
+        : (auditDuplicateRestoreStatus
+            ? `✅ Correction resubmitted and restored to ${getResubmissionStatusLabel(nextStatus)}.`
+            : reviewerToReassign
             ? '✅ Fix submitted and reassigned to the same reviewer for another review.'
             : '✅ Fix submitted successfully!'), 'success');
       closeModal(uploadModal);
@@ -4947,6 +5007,10 @@ async function submitEdit() {
       const reviewerToReassign = await isActiveUserWithRole(reviewerCandidate, ['reviewer']) ? reviewerCandidate : '';
       const latestRejectedStage = String(existingSub.latestRejectedStage || '').trim().toLowerCase();
       const rsaRejectFlow = String(existingSub.status || '').toLowerCase() === 'rejected_by_rsa' || latestRejectedStage === 'rsa';
+      const auditDuplicateRestoreStatus = getAuditDuplicateRestoreStatus(existingSub);
+      const nextStatus = auditDuplicateRestoreStatus || (rsaRejectFlow ? 'processing_to_pfa' : 'pending');
+      const returnsToReviewer = !rsaRejectFlow && !auditDuplicateRestoreStatus;
+      const keepsReviewState = rsaRejectFlow || Boolean(auditDuplicateRestoreStatus);
       const rsaOfficerCandidate = String(existingSub.latestRejectedBy || existingSub.assignedToRSA || '').trim();
       const rsaToReassign = await isActiveUserWithRole(rsaOfficerCandidate, ['rsa']) ? rsaOfficerCandidate : String(existingSub.assignedToRSA || '').trim();
       const nextFixCount = Number(existingSub.fixCount || 0) + 1;
@@ -4958,7 +5022,7 @@ async function submitEdit() {
       const previousRejectedAt = existingSub.latestRejectedAt || existingSub.previousRejectedAt || existingSub.reviewedAt || null;
       const preservedCommissionRate = resolveSubmissionCommissionRate(existingSub);
       await updateDoc(submissionRef, {
-        status: rsaRejectFlow ? 'processing_to_pfa' : 'pending',
+        status: nextStatus,
         documents,
         documentTypes: getUploadedDocumentTypes(),
         reuploadedAt: serverTimestamp(),
@@ -4966,13 +5030,13 @@ async function submitEdit() {
         fixLocked: false,
         fixSubmittedAt: serverTimestamp(),
         fixCount: nextFixCount,
-        assignedTo: rsaRejectFlow ? '' : (reviewerToReassign || existingSub.assignedTo || ''),
+        assignedTo: rsaRejectFlow ? '' : (auditDuplicateRestoreStatus ? (existingSub.assignedTo || '') : (reviewerToReassign || existingSub.assignedTo || '')),
         assignedToRSA: rsaRejectFlow ? (rsaToReassign || existingSub.assignedToRSA || '') : (existingSub.assignedToRSA || ''),
         rsaAssignedAt: rsaRejectFlow ? serverTimestamp() : (existingSub.rsaAssignedAt || null),
-        reviewedAt: rsaRejectFlow ? (existingSub.reviewedAt || null) : null,
-        reviewerDecision: rsaRejectFlow ? String(existingSub.reviewerDecision || '').trim() : '',
-        reviewerDecisionBy: rsaRejectFlow ? String(existingSub.reviewerDecisionBy || '').trim() : '',
-        reviewerDecisionAt: rsaRejectFlow ? (existingSub.reviewerDecisionAt || null) : null,
+        reviewedAt: keepsReviewState ? (existingSub.reviewedAt || null) : null,
+        reviewerDecision: keepsReviewState ? String(existingSub.reviewerDecision || '').trim() : '',
+        reviewerDecisionBy: keepsReviewState ? String(existingSub.reviewerDecisionBy || '').trim() : '',
+        reviewerDecisionAt: keepsReviewState ? (existingSub.reviewerDecisionAt || null) : null,
         rsaReady: rsaRejectFlow ? true : Boolean(existingSub.rsaReady),
         comment: previousReason,
         rejectionHistory,
@@ -4985,30 +5049,30 @@ async function submitEdit() {
         commissionRatePercent: Number((preservedCommissionRate * 100).toFixed(4)),
         commissionRateLabel: formatCommissionRateLabel(preservedCommissionRate)
       });
-      if (!rsaRejectFlow && !reviewerToReassign) {
+      if (returnsToReviewer && !reviewerToReassign) {
         await assignRoundRobin(submissionRef);
       }
       notifyStatusChangePush({
         currentUser,
         submissionId: currentEditId,
         customerName: existingSub.customerName || '',
-        newStatus: 'pending',
-        statusLabel: 'Pending Review',
+        newStatus: nextStatus,
+        statusLabel: getResubmissionStatusLabel(nextStatus),
         actionLabel: 'Application Re-Submitted',
-        message: `Application for ${existingSub.customerName || 'this customer'} was re-submitted and is back in pending review.`
+        message: getResubmissionPushMessage(existingSub.customerName || 'this customer', nextStatus)
       }).catch(() => {});
     }
     showNotification(
       (String((allSubmissions.find((s) => s.id === currentEditId)?.status || '')).toLowerCase() === 'rejected_by_rsa')
-        ? '✅ Documents re-uploaded and returned to RSA.'
-        : '✅ Documents re-uploaded and sent back for reviewer action.',
+        ? '✅ Correction resubmitted and returned to RSA.'
+        : '✅ Correction resubmitted successfully.',
       'success'
     );
     closeModal(editModal);
   } catch (error) {
     showNotification('Update failed: ' + error.message, 'error');
   } finally {
-    submitEditBtn.innerHTML = '<i class="fas fa-upload"></i> Re-upload Documents';
+    submitEditBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Resubmit Documents';
     updateSubmitButton();
   }
 }
@@ -5768,7 +5832,7 @@ async function renderUploaderApplicationsTable() {
   }
 
   if (currentUploaderApplicationTab === 'rejected') {
-    setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Chat', 'Re-upload Count', 'Assigned To', 'Upload Date/Time', 'Rejection Details', 'Action', 'View', 'Track']);
+    setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Chat', 'Resubmit Count', 'Assigned To', 'Upload Date/Time', 'Rejection Details', 'Action', 'View', 'Track']);
     if (!rows.length) {
       renderUploaderApplicationsEmpty('rejected');
       return;
@@ -5794,7 +5858,7 @@ async function renderUploaderApplicationsTable() {
             <button class="action-btn edit-btn" onclick="window.openAuditPaymentResubmitModal('${sub.id}')" title="Submit correction to Audit"><i class="fas fa-paper-plane"></i> Resubmit</button>
             <button class="action-btn dissolve-btn" onclick="window.dissolveAuditPaymentRequest('${sub.id}')" title="Return to Sent to PFA"><i class="fas fa-rotate-left"></i> Dissolve</button>
           </div>`
-        : `<button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-edit"></i> Re-upload</button>`;
+        : `<button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-paper-plane"></i> Resubmit</button>`;
       html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${reasonBtn}</td><td>${actionCell}</td><td>${getUploaderSubmissionDetailsButtonHtml(sub.id)} ${getUploaderSubmissionDocsButtonHtml(sub.id)}</td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
     }
     applicationsTableBody.innerHTML = html;
@@ -6257,7 +6321,7 @@ async function renderRejectedTable() {
     const reasonBtn = hasRejectionHistory(sub)
       ? `<button class="action-btn reason-btn" onclick="window.openUploaderRejectionReasonModal('${sub.id}')"><i class="fas fa-eye"></i> View Details</button>`
       : 'No reason provided';
-    html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${reasonBtn}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-edit"></i> Re-upload</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${reasonBtn}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-paper-plane"></i> Resubmit</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   rejectedTableBody.innerHTML = html;
 }

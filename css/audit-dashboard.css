@@ -683,6 +683,15 @@
   flex: 0 0 auto;
 }
 
+.audit-duplicate-group-signal {
+  flex: 1 1 auto;
+  min-width: 180px;
+}
+
+.audit-duplicate-group-reject-btn {
+  margin-left: auto;
+}
+
 .audit-duplicate-member-row td {
   background: #ffffff;
 }
