@@ -53,7 +53,10 @@ let currentPaymentPdfPreviewBlob = null;
 let currentPaymentPdfPreviewFileName = 'payment-report.pdf';
 let paymentCustomerSearchAutoOpened = false;
 let currentPaymentCustomerSearchMatches = [];
+let currentPaymentCustomerSelectedId = '';
+let paymentLookupCountdownTimer = null;
 const PAYMENT_RATE_CUTOFF_MS = new Date('2026-05-07T00:00:00+01:00').getTime();
+const PAYMENT_LOOKUP_SLA_MS = 72 * 60 * 60 * 1000;
 const PAYMENT_DASHBOARD_TABS = ['dashboard', 'sent-to-pfa', 'paid-customers', 'leave', 'profile', 'help'];
 
 function getInitialPaymentTab() {
@@ -386,6 +389,14 @@ function getCommissionRateLabel(sub) {
     return `${Number(percent.toFixed(2)).toLocaleString()}%`;
 }
 
+function formatPaymentLookupDuration(ms = 0) {
+    const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 function isPaymentSubmissionAttended(sub) {
     const status = String(sub?.status || '').toLowerCase();
     return status === 'paid' || status === 'cleared';
@@ -404,6 +415,42 @@ function getPaymentStatusLabel(sub) {
         .filter(Boolean)
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
         .join(' ');
+}
+
+function getPaymentLookupCountdownInfo(sub = {}) {
+    const status = String(sub?.status || '').toLowerCase();
+    if (!['sent_to_pfa', 'rsa_submitted'].includes(status)) {
+        return {
+            label: 'Only for Sent to PFA',
+            meta: 'Countdown starts when application is sent to PFA',
+            tone: 'neutral'
+        };
+    }
+
+    const startMs = getTimestampMillis(getSubmissionPaymentEntryAt(sub));
+    if (!startMs) {
+        return {
+            label: 'Not started',
+            meta: 'No payment entry time yet',
+            tone: 'neutral'
+        };
+    }
+
+    const dueMs = startMs + PAYMENT_LOOKUP_SLA_MS;
+    const remainingMs = dueMs - Date.now();
+    if (remainingMs <= 0) {
+        return {
+            label: `Overdue by ${formatPaymentLookupDuration(Math.abs(remainingMs))}`,
+            meta: `Deadline: ${formatDateValue(new Date(dueMs))}`,
+            tone: 'overdue'
+        };
+    }
+
+    return {
+        label: `${formatPaymentLookupDuration(remainingMs)} remaining`,
+        meta: `Deadline: ${formatDateValue(new Date(dueMs))}`,
+        tone: remainingMs <= (12 * 60 * 60 * 1000) ? 'warning' : 'safe'
+    };
 }
 
 function getPaymentLookupRecords() {
@@ -434,10 +481,12 @@ function renderPaymentCustomerEmpty(message = 'Search and select a customer to s
 function renderPaymentCustomerDetail(sub = null) {
     if (!paymentCustomerDetailCard) return;
     if (!sub) {
+        currentPaymentCustomerSelectedId = '';
         renderPaymentCustomerEmpty();
         return;
     }
 
+    currentPaymentCustomerSelectedId = String(sub.id || '');
     const { twentyFive, commission2 } = getSubmissionFinancials(sub);
     const rsaBalance = getSubmissionRsaBalance(sub);
     const accountNumber = getPaymentLookupAccountNumber(sub);
@@ -446,6 +495,7 @@ function renderPaymentCustomerDetail(sub = null) {
     const statusLabel = getPaymentStatusLabel(sub);
     const applicationRate = getSubmissionRateLabel(sub);
     const commissionRate = getCommissionRateLabel(sub);
+    const countdownInfo = getPaymentLookupCountdownInfo(sub);
 
     paymentCustomerDetailCard.innerHTML = `
         <div class="payment-customer-detail-hero">
@@ -467,6 +517,11 @@ function renderPaymentCustomerDetail(sub = null) {
             <div class="payment-customer-detail-item"><span>Uploaded Date</span><strong>${escapeHtml(uploadedDate)}</strong></div>
             <div class="payment-customer-detail-item"><span>Uploader Name</span><strong>${escapeHtml(uploaderName || '-')}</strong></div>
             <div class="payment-customer-detail-item"><span>Status</span><strong>${escapeHtml(statusLabel)}</strong></div>
+            <div class="payment-customer-detail-item payment-countdown-item ${escapeHtml(countdownInfo.tone)}">
+                <span>72hrs Payment Countdown</span>
+                <strong class="payment-countdown-clock">${escapeHtml(countdownInfo.label)}</strong>
+                <small>${escapeHtml(countdownInfo.meta)}</small>
+            </div>
         </div>
     `;
 }
@@ -521,11 +576,22 @@ function openPaymentCustomerSearchModal() {
     } else {
         searchPaymentCustomers(paymentCustomerNameSearchInput.value);
     }
+    if (!paymentLookupCountdownTimer) {
+        paymentLookupCountdownTimer = setInterval(() => {
+            if (!paymentCustomerSearchModal?.classList.contains('active') || !currentPaymentCustomerSelectedId) return;
+            const selected = allSubmissions.find((sub) => String(sub.id || '') === currentPaymentCustomerSelectedId);
+            if (selected) renderPaymentCustomerDetail(selected);
+        }, 1000);
+    }
     setTimeout(() => paymentCustomerNameSearchInput?.focus(), 0);
 }
 
 function closePaymentCustomerSearchModal() {
     paymentCustomerSearchModal?.classList.remove('active');
+    if (paymentLookupCountdownTimer) {
+        clearInterval(paymentLookupCountdownTimer);
+        paymentLookupCountdownTimer = null;
+    }
 }
 
 function hasCommissionEligibleAgent(sub) {
