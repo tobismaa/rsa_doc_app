@@ -223,6 +223,42 @@ function isPendingForCurrentReviewer(submission = {}) {
     return String(submission?.status || '').toLowerCase().trim() === 'pending' && isAssignedToCurrentReviewer(submission);
 }
 
+function getAuditDuplicatePreviousStatus(submission = {}) {
+    return String(submission.auditDuplicatePreviousStatus || '').trim().toLowerCase();
+}
+
+function shouldRestoreAuditDuplicateCorrection(submission = {}) {
+    const previousStatus = getAuditDuplicatePreviousStatus(submission);
+    if (!previousStatus) return false;
+    if (submission.auditDuplicateRejected !== true && !submission.auditDuplicateRejectionReason) return false;
+    const currentStatus = String(submission.status || '').trim().toLowerCase();
+    const correctionStatus = String(submission.auditDuplicateCorrectionStatus || '').trim().toLowerCase();
+    if (currentStatus === 'audit_pending') return true;
+    if (correctionStatus === 'pending') return true;
+    if (currentStatus === 'pending' && !['pending', 'submitted', 'resubmitted'].includes(previousStatus)) return true;
+    return false;
+}
+
+async function restoreAuditDuplicateCorrectionIfNeeded(docSnap) {
+    const data = docSnap?.data?.() || {};
+    if (!shouldRestoreAuditDuplicateCorrection(data)) return false;
+    const restoredStatus = getAuditDuplicatePreviousStatus(data);
+    if (!restoredStatus) return false;
+    try {
+        await updateDoc(doc(db, 'submissions', docSnap.id), {
+            status: restoredStatus,
+            auditDuplicateCorrectionStatus: 'corrected',
+            auditDuplicateRestoredStatus: restoredStatus,
+            auditDuplicateAutoRestoredAt: serverTimestamp(),
+            latestRejectedStage: '',
+            updatedAt: serverTimestamp()
+        });
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
 function isApprovedByCurrentReviewer(submission = {}) {
     return isReviewedByCurrentReviewer(submission) && getReviewerDecisionState(submission) === 'approved';
 }
@@ -1079,6 +1115,7 @@ async function loadSubmissions() {
     );
 
     const processSnapshot = async (snapshot) => {
+        await Promise.all(snapshot.docs.map((docSnap) => restoreAuditDuplicateCorrectionIfNeeded(docSnap)));
         const relevantDocs = snapshot.docs.filter((docSnap) => {
             const data = docSnap.data() || {};
             return normalizeEmail(data.assignedTo) === reviewerEmail
@@ -1132,6 +1169,7 @@ async function loadSubmissionsFallback() {
             orderBy('uploadedAt', 'desc')
         );
         const snapshot = await getDocs(fallbackQuery);
+        await Promise.all(snapshot.docs.map((docSnap) => restoreAuditDuplicateCorrectionIfNeeded(docSnap)));
         const docsSorted = snapshot.docs.filter((docSnap) => {
             const data = docSnap.data() || {};
             return normalizeEmail(data.assignedTo) === reviewerEmail

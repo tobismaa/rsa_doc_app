@@ -172,6 +172,7 @@ let MAX_IMAGE_UPLOAD_BYTES = 1024 * 1024; // 1MB
 let MAX_PDF_SIZE_BYTES = 1.5 * 1024 * 1024; // 1.5MB
 const userFullNames = new Map();
 let customerDetailsSaved = false;
+const auditDuplicateRestoreInFlight = new Set();
 const RR_COUNTER_DOC = doc(db, 'counters', 'roundRobin');
 const DEFAULT_CUSTOMER_ACCOUNT_BANK_CODE = '90089';
 const DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME = 'Coop Savings and Loans / Cooperative Mortgage Bank';
@@ -1673,7 +1674,8 @@ function getDuplicateFieldErrorEl(fieldId) {
     errorEl.style.color = '#dc2626';
     errorEl.style.fontSize = '12px';
     errorEl.style.fontWeight = '700';
-    config.input.insertAdjacentElement('afterend', errorEl);
+    const completionEl = document.getElementById(`${fieldId}CompletionStatus`);
+    (completionEl || config.input).insertAdjacentElement('afterend', errorEl);
   }
   return errorEl;
 }
@@ -2976,13 +2978,8 @@ function calculateAndDisplayCustomerInfo() {
 
 // ==================== SAVE CUSTOMER DETAILS ====================
 async function saveCustomerDetails() {
-  // Define requiredFields INSIDE the function
   const allowOptionalCustomerFields = false;
-  const requiredFields = [
-    'customerName', 'customerDob', 'customerEmail', 'customerPhone',
-    'customerNIN', 'customerAddress', 'accountNo', 'employer',
-    'originatingTP', 'mortgageLoanApplicationFormDate', 'pfa', 'penNo', 'rsaStatementDate', 'rsaBalance'
-  ];
+  const requiredFields = CUSTOMER_DETAIL_REQUIRED_FIELDS.map((field) => field.id);
 
   if (String(document.getElementById('accountNo')?.value || '').trim()) {
     if (!(await resolveCustomerAccountName({ silent: false }))) {
@@ -3177,6 +3174,7 @@ function resetCustomerDetails() {
     optionalDocumentGrid.style.opacity = '0.5';
   }
 
+  updateSubmitButton();
   showNotification('Form reset', 'info');
 }
 
@@ -3313,6 +3311,7 @@ function setupEventListeners() {
     });
   });
   if (customerNameInput) customerNameInput.addEventListener('input', updateSubmitButton);
+  bindCustomerCompletionFieldListeners();
   if (accountNoInput) {
     accountNoInput.addEventListener('input', () => {
       const digits = String(accountNoInput.value || '').replace(/\D/g, '').slice(0, 10);
@@ -3678,11 +3677,11 @@ function renderDocumentGrid(container, documentTypes, uploadedDocs, mode) {
   if (!container) return;
   container.innerHTML = documentTypes.map(doc => {
     const isUploaded = uploadedDocs[doc.id] && uploadedDocs[doc.id].length > 0;
-    const statusEmoji = isUploaded ? '✅' : '⬜';
+    const statusLabel = isUploaded ? 'Complete' : 'Incomplete';
     const statusClass = isUploaded ? 'uploaded' : 'pending';
     return `
       <div class="document-grid-item ${statusClass}" data-doc-type="${doc.id}">
-        <div class="doc-status"><span class="status-emoji">${statusEmoji}</span></div>
+        <div class="doc-status"><span class="status-label">${statusLabel}</span></div>
         <div class="doc-icon"><i class="fas ${doc.icon}"></i></div>
         <div class="doc-name">${doc.name}</div>
         ${isUploaded ? `
@@ -4498,27 +4497,46 @@ function getStageIcon(stage) {
   return 'fa-clock';
 }
 
-const AUDIT_DUPLICATE_RESTORE_STATUSES = new Set([
-  'pending',
-  'submitted',
-  'resubmitted',
-  'approved',
-  'processing_to_pfa',
-  'sent_to_pfa',
-  'rsa_submitted',
-  'paid',
-  'cleared'
-]);
-
-function getAuditDuplicateRestoreStatus(existingSub = {}) {
+function isAuditDuplicateRejectedSubmission(existingSub = {}) {
   const currentStatus = String(existingSub.status || '').trim().toLowerCase();
   const rejectedStage = String(existingSub.latestRejectedStage || '').trim().toLowerCase();
-  const wasAuditDuplicateRejection = currentStatus === 'rejected'
+  return currentStatus === 'rejected'
     && (rejectedStage === 'audit' || existingSub.auditDuplicateRejected === true || existingSub.auditDuplicateRejectionReason);
-  if (!wasAuditDuplicateRejection) return '';
+}
 
+function getAuditDuplicateRestoreStatus(existingSub = {}) {
+  if (!isAuditDuplicateRejectedSubmission(existingSub)) return '';
   const previousStatus = String(existingSub.auditDuplicatePreviousStatus || '').trim().toLowerCase();
-  return AUDIT_DUPLICATE_RESTORE_STATUSES.has(previousStatus) ? previousStatus : '';
+  return previousStatus || 'pending';
+}
+
+function shouldRestoreMisroutedAuditDuplicateCorrection(submission = {}) {
+  const previousStatus = String(submission.auditDuplicatePreviousStatus || '').trim().toLowerCase();
+  if (!previousStatus) return false;
+  if (submission.auditDuplicateRejected !== true && !submission.auditDuplicateRejectionReason) return false;
+  const currentStatus = String(submission.status || '').trim().toLowerCase();
+  const correctionStatus = String(submission.auditDuplicateCorrectionStatus || '').trim().toLowerCase();
+  if (currentStatus === 'audit_pending' || correctionStatus === 'pending') return true;
+  return currentStatus === 'pending' && !['pending', 'submitted', 'resubmitted'].includes(previousStatus);
+}
+
+function restoreMisroutedAuditDuplicateCorrections(rows = []) {
+  rows.filter(shouldRestoreMisroutedAuditDuplicateCorrection).forEach((submission) => {
+    const submissionId = String(submission.id || '').trim();
+    const restoredStatus = String(submission.auditDuplicatePreviousStatus || '').trim().toLowerCase();
+    if (!submissionId || !restoredStatus || auditDuplicateRestoreInFlight.has(submissionId)) return;
+    auditDuplicateRestoreInFlight.add(submissionId);
+    updateDoc(doc(db, 'submissions', submissionId), {
+      status: restoredStatus,
+      auditDuplicateCorrectionStatus: 'corrected',
+      auditDuplicateRestoredStatus: restoredStatus,
+      auditDuplicateAutoRestoredAt: serverTimestamp(),
+      latestRejectedStage: '',
+      updatedAt: serverTimestamp()
+    }).catch(() => {}).finally(() => {
+      auditDuplicateRestoreInFlight.delete(submissionId);
+    });
+  });
 }
 
 function getResubmissionStatusLabel(status = '') {
@@ -4527,6 +4545,7 @@ function getResubmissionStatusLabel(status = '') {
     pending: 'Pending Review',
     submitted: 'Pending Review',
     resubmitted: 'Pending Review',
+    audit_pending: 'Audit Review',
     approved: 'Processing to PFA',
     processing_to_pfa: 'Processing to PFA',
     sent_to_pfa: 'Sent to PFA',
@@ -4549,12 +4568,88 @@ function getResubmissionPushMessage(customerName = '', status = '') {
   if (normalized === 'paid' || normalized === 'cleared') {
     return `Application for ${name} was resubmitted and restored to ${getResubmissionStatusLabel(normalized)}.`;
   }
+  if (normalized === 'audit_pending') {
+    return `Application for ${name} was resubmitted and returned to Audit.`;
+  }
   return `Application for ${name} was re-submitted and is back in pending review.`;
+}
+
+const CUSTOMER_DETAIL_REQUIRED_FIELDS = [
+  { id: 'customerName', label: 'Customer Name' },
+  { id: 'customerDob', label: 'Date of Birth' },
+  { id: 'customerEmail', label: 'Email' },
+  { id: 'customerPhone', label: 'Phone' },
+  { id: 'customerNIN', label: 'NIN' },
+  { id: 'customerAddress', label: 'Address' },
+  { id: 'accountNo', label: 'Account Number' },
+  { id: 'employer', label: 'Employer' },
+  { id: 'originatingTP', label: 'Originating Transfer Pin' },
+  { id: 'mortgageLoanApplicationFormDate', label: 'Mortgage Loan Application Form Date' },
+  { id: 'pfa', label: 'PFA' },
+  { id: 'penNo', label: 'PEN Number' },
+  { id: 'rsaStatementDate', label: 'RSA Statement Date' },
+  { id: 'rsaBalance', label: 'RSA Balance' }
+];
+
+function getCustomerDetailCompletionStatusEl(fieldId = '') {
+  const input = document.getElementById(fieldId);
+  if (!input) return null;
+  const statusId = `${fieldId}CompletionStatus`;
+  let statusEl = document.getElementById(statusId);
+  if (!statusEl) {
+    statusEl = document.createElement('div');
+    statusEl.id = statusId;
+    statusEl.className = 'customer-field-status';
+    input.insertAdjacentElement('afterend', statusEl);
+  }
+  return statusEl;
+}
+
+function isCustomerDetailFieldComplete(fieldId = '') {
+  const input = document.getElementById(fieldId);
+  if (!input) return true;
+  const value = getRequiredSubmissionFieldValue(fieldId);
+  if (!String(value || '').trim()) return false;
+  if (fieldId === 'accountNo') return /^\d{10}$/.test(String(value || '').replace(/\D/g, ''));
+  if (fieldId === 'customerPhone') return /^\d{11}$/.test(String(value || '').replace(/\D/g, ''));
+  if (fieldId === 'customerNIN') return /^\d{11}$/.test(String(value || '').replace(/\D/g, ''));
+  if (fieldId === 'customerEmail') return input.checkValidity ? input.checkValidity() : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ''));
+  return true;
+}
+
+function syncCustomerDetailCompletionStatuses() {
+  CUSTOMER_DETAIL_REQUIRED_FIELDS.forEach((field) => {
+    const input = document.getElementById(field.id);
+    const statusEl = getCustomerDetailCompletionStatusEl(field.id);
+    if (!input || !statusEl) return;
+    const isComplete = isCustomerDetailFieldComplete(field.id);
+    statusEl.textContent = isComplete ? '' : 'Incomplete';
+    statusEl.classList.toggle('incomplete', !isComplete);
+    input.classList.toggle('customer-field-incomplete', !isComplete);
+  });
+}
+
+function bindCustomerCompletionFieldListeners() {
+  CUSTOMER_DETAIL_REQUIRED_FIELDS.forEach((field) => {
+    const input = document.getElementById(field.id);
+    if (!input) return;
+    input.addEventListener('input', () => {
+      customerDetailsSaved = false;
+      if (saveDetailsBtn) saveDetailsBtn.innerHTML = '<i class="fas fa-arrow-right"></i> Next: Upload Documents';
+      updateSubmitButton();
+    });
+    input.addEventListener('change', () => {
+      customerDetailsSaved = false;
+      if (saveDetailsBtn) saveDetailsBtn.innerHTML = '<i class="fas fa-arrow-right"></i> Next: Upload Documents';
+      updateSubmitButton();
+    });
+  });
 }
 
 // ==================== SUBMIT CUSTOMER ====================
 function updateSubmitButton() {
   if (!submitCustomerBtn) return;
+  syncCustomerDetailCompletionStatuses();
   if (submissionInProgress) {
     submitCustomerBtn.disabled = true;
     submitCustomerBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
@@ -4671,14 +4766,10 @@ function getMissingRequiredSubmissionFields() {
   hydrateEditableSubmissionRequiredFields();
   const allowOptionalCustomerFields = false;
   const requiredFields = [
-    { id: 'customerName', label: 'Customer Name' }, { id: 'customerDob', label: 'Date of Birth' },
-    { id: 'customerEmail', label: 'Email' }, { id: 'customerPhone', label: 'Phone' },
-    { id: 'customerNIN', label: 'NIN' }, { id: 'customerAddress', label: 'Address' },
-    { id: 'accountNo', label: 'Account Number' }, { id: 'employer', label: 'Employer' },
-    { id: 'originatingTP', label: 'Originating Transfer Pin' }, { id: 'mortgageLoanApplicationFormDate', label: 'Mortgage Loan Application Form Date' }, { id: 'pfa', label: 'PFA' },
-    { id: 'penNo', label: 'PEN Number' }, { id: 'rsaStatementDate', label: 'RSA Statement Date' },
-    { id: 'rsaBalance', label: 'RSA Balance' }, { id: 'propertyType', label: 'Property Type' },
-    { id: 'propertyValue', label: 'Property Value' }, { id: 'loanAmount', label: 'Loan Amount' },
+    ...CUSTOMER_DETAIL_REQUIRED_FIELDS,
+    { id: 'propertyType', label: 'Property Type' },
+    { id: 'propertyValue', label: 'Property Value' },
+    { id: 'loanAmount', label: 'Loan Amount' },
   ];
   const missingLabels = [], invalidLabels = [];
   requiredFields.forEach(field => {
@@ -4766,6 +4857,7 @@ async function submitCustomer() {
       const latestRejectedStage = String(existingSub.latestRejectedStage || '').trim().toLowerCase();
       const rsaRejectFlow = String(existingSub.status || '').toLowerCase() === 'rejected_by_rsa' || latestRejectedStage === 'rsa';
       const auditDuplicateRestoreStatus = getAuditDuplicateRestoreStatus(existingSub);
+      const auditDuplicateCorrectionFlow = Boolean(auditDuplicateRestoreStatus);
       const nextStatus = auditDuplicateRestoreStatus || (rsaRejectFlow ? 'processing_to_pfa' : 'pending');
       const returnsToReviewer = !rsaRejectFlow && !auditDuplicateRestoreStatus;
       const keepsReviewState = rsaRejectFlow || Boolean(auditDuplicateRestoreStatus);
@@ -4809,6 +4901,12 @@ async function submitCustomer() {
         commissionRatePercent: Number((preservedCommissionRate * 100).toFixed(4)),
         commissionRateLabel: formatCommissionRateLabel(preservedCommissionRate)
       };
+      if (auditDuplicateCorrectionFlow) {
+        correctionPayload.auditDuplicateCorrectionStatus = 'corrected';
+        correctionPayload.auditDuplicateResubmittedAt = serverTimestamp();
+        correctionPayload.auditDuplicateResubmittedBy = currentUser?.email || '';
+        correctionPayload.auditDuplicateRestoredStatus = nextStatus;
+      }
       await updateDoc(submissionRef, correctionPayload);
       if (returnsToReviewer && !reviewerToReassign) {
         await assignRoundRobin(submissionRef);
@@ -4998,6 +5096,7 @@ async function submitEdit() {
   if (!currentEditId) return;
   submitEditBtn.disabled = true;
   submitEditBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
+  let resubmissionSuccessMessage = '✅ Correction resubmitted successfully.';
   try {
     const documents = collectSubmissionDocuments();
     if (documents.length > 0 || canCurrentUserSubmitWithoutDocuments()) {
@@ -5008,6 +5107,7 @@ async function submitEdit() {
       const latestRejectedStage = String(existingSub.latestRejectedStage || '').trim().toLowerCase();
       const rsaRejectFlow = String(existingSub.status || '').toLowerCase() === 'rejected_by_rsa' || latestRejectedStage === 'rsa';
       const auditDuplicateRestoreStatus = getAuditDuplicateRestoreStatus(existingSub);
+      const auditDuplicateCorrectionFlow = Boolean(auditDuplicateRestoreStatus);
       const nextStatus = auditDuplicateRestoreStatus || (rsaRejectFlow ? 'processing_to_pfa' : 'pending');
       const returnsToReviewer = !rsaRejectFlow && !auditDuplicateRestoreStatus;
       const keepsReviewState = rsaRejectFlow || Boolean(auditDuplicateRestoreStatus);
@@ -5021,7 +5121,7 @@ async function submitEdit() {
       const previousRejectedBy = String(existingSub.latestRejectedBy || existingSub.previousRejectedBy || existingSub.reviewedBy || '').trim();
       const previousRejectedAt = existingSub.latestRejectedAt || existingSub.previousRejectedAt || existingSub.reviewedAt || null;
       const preservedCommissionRate = resolveSubmissionCommissionRate(existingSub);
-      await updateDoc(submissionRef, {
+      const editPayload = {
         status: nextStatus,
         documents,
         documentTypes: getUploadedDocumentTypes(),
@@ -5048,7 +5148,19 @@ async function submitEdit() {
         commissionRate: preservedCommissionRate,
         commissionRatePercent: Number((preservedCommissionRate * 100).toFixed(4)),
         commissionRateLabel: formatCommissionRateLabel(preservedCommissionRate)
-      });
+      };
+      if (auditDuplicateCorrectionFlow) {
+        editPayload.auditDuplicateCorrectionStatus = 'corrected';
+        editPayload.auditDuplicateResubmittedAt = serverTimestamp();
+        editPayload.auditDuplicateResubmittedBy = currentUser?.email || '';
+        editPayload.auditDuplicateRestoredStatus = nextStatus;
+      }
+      await updateDoc(submissionRef, editPayload);
+      resubmissionSuccessMessage = auditDuplicateCorrectionFlow
+        ? `✅ Correction resubmitted and restored to ${getResubmissionStatusLabel(nextStatus)}.`
+        : (rsaRejectFlow
+            ? '✅ Correction resubmitted and returned to RSA.'
+            : '✅ Correction resubmitted successfully.');
       if (returnsToReviewer && !reviewerToReassign) {
         await assignRoundRobin(submissionRef);
       }
@@ -5062,12 +5174,7 @@ async function submitEdit() {
         message: getResubmissionPushMessage(existingSub.customerName || 'this customer', nextStatus)
       }).catch(() => {});
     }
-    showNotification(
-      (String((allSubmissions.find((s) => s.id === currentEditId)?.status || '')).toLowerCase() === 'rejected_by_rsa')
-        ? '✅ Correction resubmitted and returned to RSA.'
-        : '✅ Correction resubmitted successfully.',
-      'success'
-    );
+    showNotification(resubmissionSuccessMessage, 'success');
     closeModal(editModal);
   } catch (error) {
     showNotification('Update failed: ' + error.message, 'error');
@@ -5328,6 +5435,7 @@ async function loadSubmissions() {
       rows.forEach((row) => merged.set(row.id, row));
     });
     allSubmissions = Array.from(merged.values()).sort((a, b) => getSubmissionSortMillis(b) - getSubmissionSortMillis(a));
+    restoreMisroutedAuditDuplicateCorrections(allSubmissions);
     const emails = new Set();
     allSubmissions.forEach((data) => {
       if (data.uploadedBy) emails.add(data.uploadedBy);
@@ -5585,8 +5693,10 @@ function isUploaderSentToPfaStatus(submission = {}) {
 function getUploaderApplicationBucket(submission = {}) {
   const status = String(submission.status || '').toLowerCase();
   const auditStatus = String(submission.auditCommissionStatus || '').toLowerCase();
+  const auditDuplicateCorrectionStatus = String(submission.auditDuplicateCorrectionStatus || '').toLowerCase();
   if (status === 'deleted') return 'deleted';
   if (status === 'draft') return 'draft';
+  if (status === 'audit_pending' || auditDuplicateCorrectionStatus === 'pending') return 'audit';
   if (status === 'pending') return 'pending';
   if (auditStatus === 'rejected') return 'rejected';
   if (status === 'rejected' || status === 'rejected_by_rsa') return 'rejected';
@@ -5649,6 +5759,10 @@ function getSubmissionPfaName(submission = {}) {
 
 function getUploaderAuditNote(submission = {}) {
   const auditStatus = String(submission.auditCommissionStatus || '').toLowerCase();
+  const auditDuplicateCorrectionStatus = String(submission.auditDuplicateCorrectionStatus || '').toLowerCase();
+  if (String(submission.status || '').toLowerCase() === 'audit_pending' || auditDuplicateCorrectionStatus === 'pending') {
+    return 'Correction resubmitted to Audit';
+  }
   if (auditStatus === 'pending') return 'Payment made submitted to Audit';
   if (auditStatus === 'accepted') return 'Accepted by Audit';
   if (auditStatus === 'rejected') {
@@ -5661,7 +5775,13 @@ function getUploaderPaymentStageEntryAt(submission = {}) {
   const bucket = getUploaderApplicationBucket(submission);
   if (bucket === 'paid') return getSubmissionPaidEntryAt(submission);
   if (bucket === 'cleared') return getSubmissionClearedEntryAt(submission);
-  if (bucket === 'audit') return submission.auditCommissionResubmittedAt || submission.auditCommissionSubmittedAt || submission.paymentMadeAt || getSubmissionPaymentEntryAt(submission);
+  if (bucket === 'audit') {
+    return submission.auditDuplicateResubmittedAt ||
+      submission.auditCommissionResubmittedAt ||
+      submission.auditCommissionSubmittedAt ||
+      submission.paymentMadeAt ||
+      getSubmissionPaymentEntryAt(submission);
+  }
   if (bucket === 'sent_to_pfa') return getSubmissionPaymentEntryAt(submission);
   return getSubmissionCurrentStageEntryAt(submission);
 }
@@ -5996,13 +6116,13 @@ function showAuditPaymentResubmitDialog(submission = {}) {
           <i class="fas fa-file-circle-plus"></i>
         </div>
         <h2>Resubmit Payment Request</h2>
-        <p>Add a correction comment and upload the supporting document for <strong>${escapeHtml(submission.customerName || 'this application')}</strong>.</p>
+        <p>Add a correction comment for <strong>${escapeHtml(submission.customerName || 'this application')}</strong>. You may attach a supporting document if needed.</p>
         <label class="audit-resubmit-field">
           <span>Correction Comment</span>
           <textarea id="auditPaymentResubmitComment" rows="4" placeholder="Enter correction comment"></textarea>
         </label>
         <label class="audit-resubmit-field">
-          <span>Correction Document</span>
+          <span>Correction Document <small>(optional)</small></span>
           <input id="auditPaymentResubmitFile" type="file" accept=".pdf,image/*">
         </label>
         <div class="payment-made-confirm-actions">
@@ -6033,8 +6153,8 @@ function showAuditPaymentResubmitDialog(submission = {}) {
       const comment = String(commentEl?.value || '').trim();
       const file = fileEl?.files?.[0] || null;
       commentEl?.classList.toggle('invalid', !comment);
-      fileEl?.classList.toggle('invalid', !file);
-      if (!comment || !file) return;
+      fileEl?.classList.remove('invalid');
+      if (!comment) return;
       close({ comment, file });
     });
     document.body.appendChild(modal);
@@ -6154,23 +6274,26 @@ window.openAuditPaymentResubmitModal = async (submissionId) => {
   if (!result) return;
 
   try {
-    const storage = new BackblazeStorage();
-    showNotification('Uploading correction document...', 'info');
-    const uploadResult = await storage.uploadFile(result.file, sub.customerName || 'application', 'audit_payment_correction');
-    const uploadedAt = await getTrustedNowIso();
-    const correctionDocument = {
-      name: result.file.name,
-      fileName: uploadResult.fileName || result.file.name,
-      fileId: uploadResult.fileId || '',
-      fileUrl: uploadResult.fileUrl || '',
-      documentType: 'audit_payment_correction',
-      comment: result.comment,
-      uploadedAt,
-      uploadedBy: currentUser?.email || ''
-    };
+    let correctionDocument = null;
+    if (result.file) {
+      const storage = new BackblazeStorage();
+      showNotification('Uploading correction document...', 'info');
+      const uploadResult = await storage.uploadFile(result.file, sub.customerName || 'application', 'audit_payment_correction');
+      const uploadedAt = await getTrustedNowIso();
+      correctionDocument = {
+        name: result.file.name,
+        fileName: uploadResult.fileName || result.file.name,
+        fileId: uploadResult.fileId || '',
+        fileUrl: uploadResult.fileUrl || '',
+        documentType: 'audit_payment_correction',
+        comment: result.comment,
+        uploadedAt,
+        uploadedBy: currentUser?.email || ''
+      };
+    }
     const nextCount = Number(sub.auditCommissionResubmitCount || 0) + 1;
 
-    await updateDoc(doc(db, 'submissions', submissionId), {
+    const resubmitPayload = {
       paymentMadeByUploader: true,
       paymentMadeAt: serverTimestamp(),
       paymentMadeBy: currentUser?.email || '',
@@ -6182,19 +6305,24 @@ window.openAuditPaymentResubmitModal = async (submissionId) => {
       auditCommissionResubmittedBy: currentUser?.email || '',
       auditCommissionResubmitComment: result.comment,
       auditCommissionResubmitCount: nextCount,
-      auditCommissionCorrectionDocuments: arrayUnion(correctionDocument),
       updatedAt: serverTimestamp()
-    });
+    };
+    if (correctionDocument) {
+      resubmitPayload.auditCommissionCorrectionDocuments = arrayUnion(correctionDocument);
+    }
 
-    await addDoc(collection(db, 'audit'), {
+    await updateDoc(doc(db, 'submissions', submissionId), resubmitPayload);
+
+    const auditPayload = {
       action: 'uploader_payment_request_resubmitted',
       submissionId,
       customerName: sub.customerName || '',
       comment: result.comment,
-      correctionDocumentName: result.file.name,
       performedBy: currentUser?.email || '',
       timestamp: serverTimestamp()
-    }).catch(() => {});
+    };
+    if (result.file) auditPayload.correctionDocumentName = result.file.name;
+    await addDoc(collection(db, 'audit'), auditPayload).catch(() => {});
 
     await notifyAdminPushEvent({
       currentUser,
@@ -6206,8 +6334,7 @@ window.openAuditPaymentResubmitModal = async (submissionId) => {
         submissionId,
         customerName: sub.customerName || '',
         uploadedBy: sub.uploadedBy || '',
-        submittedBy: currentUser?.email || '',
-        correctionDocumentName: result.file.name
+        submittedBy: currentUser?.email || ''
       }
     }).catch(() => {});
 
@@ -6787,6 +6914,7 @@ function formatSubmissionStatusLabel(status) {
   const normalized = String(status || '').toLowerCase().trim();
   if (!normalized) return '-';
   if (normalized === 'processing_to_pfa' || normalized === 'approved') return 'Processing to PFA';
+  if (normalized === 'audit_pending') return 'Audit Review';
   if (normalized === 'sent_to_pfa' || normalized === 'rsa_submitted') return 'Sent to PFA';
   if (normalized === 'rejected_by_rsa') return 'Rejected by RSA';
   if (normalized === 'deleted') return 'Deleted';

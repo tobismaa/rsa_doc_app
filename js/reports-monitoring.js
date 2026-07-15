@@ -63,6 +63,7 @@ let auditReconciliationSourceRows = [];
 let auditReconciliationResult = null;
 let auditReconciliationFileName = '';
 let auditDuplicateScanResult = null;
+const auditDuplicateRestoreInFlight = new Set();
 let auditReconciliationActiveView = 'excel';
 let auditPaidReconciliationSourceRows = [];
 let auditPaidReconciliationResult = null;
@@ -694,6 +695,44 @@ function getAuditableDuplicateSubmissions() {
     });
 }
 
+function isAuditDuplicateCorrectionPending(sub = {}) {
+    return String(sub.status || '').trim().toLowerCase() === 'audit_pending'
+        || String(sub.auditDuplicateCorrectionStatus || '').trim().toLowerCase() === 'pending';
+}
+
+function getAuditDuplicatePreviousStatus(sub = {}) {
+    return String(sub.auditDuplicatePreviousStatus || '').trim().toLowerCase();
+}
+
+function shouldRestoreAuditDuplicateCorrection(sub = {}) {
+    const previousStatus = getAuditDuplicatePreviousStatus(sub);
+    if (!previousStatus) return false;
+    if (sub.auditDuplicateRejected !== true && !sub.auditDuplicateRejectionReason) return false;
+    const currentStatus = String(sub.status || '').trim().toLowerCase();
+    if (isAuditDuplicateCorrectionPending(sub)) return true;
+    if (currentStatus === 'pending' && !['pending', 'submitted', 'resubmitted'].includes(previousStatus)) return true;
+    return false;
+}
+
+function restoreAuditDuplicateCorrections(rows = []) {
+    rows.filter(shouldRestoreAuditDuplicateCorrection).forEach((sub) => {
+        const submissionId = String(sub.id || '').trim();
+        const restoredStatus = getAuditDuplicatePreviousStatus(sub);
+        if (!submissionId || !restoredStatus || auditDuplicateRestoreInFlight.has(submissionId)) return;
+        auditDuplicateRestoreInFlight.add(submissionId);
+        updateDoc(doc(db, 'submissions', submissionId), {
+            status: restoredStatus,
+            auditDuplicateCorrectionStatus: 'corrected',
+            auditDuplicateRestoredStatus: restoredStatus,
+            auditDuplicateAutoRestoredAt: serverTimestamp(),
+            latestRejectedStage: '',
+            updatedAt: serverTimestamp()
+        }).catch(() => {}).finally(() => {
+            auditDuplicateRestoreInFlight.delete(submissionId);
+        });
+    });
+}
+
 function isAuditDuplicateIgnoredCorrectionCopy(sub = {}) {
     const status = String(sub.status || '').trim().toLowerCase();
     return ['rejected', 'rejected_by_reviewer', 'rejected_by_rsa'].includes(status);
@@ -1155,6 +1194,24 @@ function getAuditDuplicateRejectedRows() {
         .sort((a, b) => getTimestampMillis(b.auditDuplicateRejectedAt || b.latestRejectedAt || b.updatedAt) - getTimestampMillis(a.auditDuplicateRejectedAt || a.latestRejectedAt || a.updatedAt));
 }
 
+function getAuditDuplicateCorrectionLabel(sub = {}) {
+    const correctionStatus = String(sub.auditDuplicateCorrectionStatus || '').trim().toLowerCase();
+    const correctedAt = sub.auditDuplicateResubmittedAt || sub.auditDuplicateAutoRestoredAt || null;
+    if (correctionStatus === 'corrected' || correctedAt) {
+        const correctedBy = getUserDisplayName(sub.auditDuplicateResubmittedBy || sub.uploadedBy || '');
+        const correctedAtText = correctedAt ? formatDate(correctedAt) : '-';
+        return `Corrected by ${correctedBy || '-'} at ${correctedAtText}`;
+    }
+    return 'Awaiting uploader correction';
+}
+
+function getAuditDuplicateReturnedToLabel(sub = {}) {
+    const restoredStatus = String(sub.auditDuplicateRestoredStatus || '').trim()
+        || String(sub.auditDuplicatePreviousStatus || '').trim()
+        || String(sub.status || '').trim();
+    return statusLabel(restoredStatus || '-');
+}
+
 function renderAuditDuplicateIgnoredTable() {
     if (!auditDuplicateIgnoredWrap || !auditDuplicateIgnoredBody) return;
     const rows = getAuditDuplicateIgnoredRows();
@@ -1193,6 +1250,8 @@ function renderAuditDuplicateRejectedTable() {
                 <td>${escapeHtml(getUserDisplayName(sub.uploadedBy || ''))}</td>
                 <td>${escapeHtml(getUserDisplayName(sub.auditDuplicateRejectedBy || sub.latestRejectedBy || ''))}</td>
                 <td>${escapeHtml(formatDate(sub.auditDuplicateRejectedAt || sub.latestRejectedAt || sub.updatedAt))}</td>
+                <td>${escapeHtml(getAuditDuplicateCorrectionLabel(sub))}</td>
+                <td>${escapeHtml(getAuditDuplicateReturnedToLabel(sub))}</td>
                 <td>${escapeHtml(sub.auditDuplicateRejectionReason || sub.latestRejectionReason || sub.comment || '-')}</td>
                 <td>
                     <div class="audit-duplicate-actions">
@@ -1202,7 +1261,7 @@ function renderAuditDuplicateRejectedTable() {
                 </td>
             </tr>
         `).join('')
-        : '<tr><td colspan="8" class="no-data">No rejected duplicate applications</td></tr>';
+        : '<tr><td colspan="10" class="no-data">No duplicate correction history</td></tr>';
     syncAuditReconciliationViewVisibility();
 }
 
@@ -1262,6 +1321,7 @@ function roleLabel(role) {
 function statusLabel(status) {
     const normalized = String(status || '').trim().toLowerCase();
     if (!normalized) return 'Unknown';
+    if (normalized === 'audit_pending') return 'Audit Review';
     return normalized.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
@@ -4161,6 +4221,7 @@ function loadSubmissions({ full = false } = {}) {
             rows.forEach((row) => merged.set(row.id, row));
         });
         allSubmissions = Array.from(merged.values());
+        restoreAuditDuplicateCorrections(allSubmissions);
         if (auditReconciliationSourceRows.length && auditReconciliationResult) {
             auditReconciliationResult = computeAuditReconciliationResult(auditReconciliationSourceRows);
         }
