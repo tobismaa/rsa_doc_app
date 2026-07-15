@@ -51,6 +51,8 @@ const paymentActionLocks = new Set();
 let currentPaymentPdfPreviewUrl = '';
 let currentPaymentPdfPreviewBlob = null;
 let currentPaymentPdfPreviewFileName = 'payment-report.pdf';
+let paymentCustomerSearchAutoOpened = false;
+let currentPaymentCustomerSearchMatches = [];
 const PAYMENT_RATE_CUTOFF_MS = new Date('2026-05-07T00:00:00+01:00').getTime();
 const PAYMENT_DASHBOARD_TABS = ['dashboard', 'sent-to-pfa', 'paid-customers', 'leave', 'profile', 'help'];
 
@@ -132,6 +134,15 @@ const paymentStageReportSummaryBody = document.getElementById('paymentStageRepor
 const paymentStageReportDetailsBody = document.getElementById('paymentStageReportDetailsBody');
 const generatePaymentStageReportBtn = document.getElementById('generatePaymentStageReportBtn');
 const exportPaymentStageReportBtn = document.getElementById('exportPaymentStageReportBtn');
+const openPaymentCustomerSearchBtn = document.getElementById('openPaymentCustomerSearchBtn');
+const paymentCustomerSearchModal = document.getElementById('paymentCustomerSearchModal');
+const closePaymentCustomerSearchBtn = document.getElementById('closePaymentCustomerSearchBtn');
+const closePaymentCustomerSearchFooterBtn = document.getElementById('closePaymentCustomerSearchFooterBtn');
+const paymentCustomerNameSearchInput = document.getElementById('paymentCustomerNameSearchInput');
+const paymentCustomerNameSearchBtn = document.getElementById('paymentCustomerNameSearchBtn');
+const paymentCustomerSearchStatus = document.getElementById('paymentCustomerSearchStatus');
+const paymentCustomerSearchResults = document.getElementById('paymentCustomerSearchResults');
+const paymentCustomerDetailCard = document.getElementById('paymentCustomerDetailCard');
 
 function showNotification(message, type = 'info') {
     if (!notification) return;
@@ -338,6 +349,11 @@ function getSubmissionFinancials(sub) {
     return { pfa, twentyFive, commission2, commissionRate };
 }
 
+function getSubmissionRsaBalance(sub) {
+    const details = sub?.customerDetails || {};
+    return parseMoney(details.rsaBalance || sub?.rsaBalance || 0);
+}
+
 function getSubmissionUploadedAtMillis(sub) {
     return getTimestampMillis(getSubmissionOriginalUploadAt(sub));
 }
@@ -363,6 +379,13 @@ function getSubmissionRateLabel(sub) {
     return `${getSubmissionRatePercent(sub)}%`;
 }
 
+function getCommissionRateLabel(sub) {
+    const rate = Number(resolveSubmissionCommissionRate(sub) || 0);
+    if (!Number.isFinite(rate) || rate <= 0) return '-';
+    const percent = rate * 100;
+    return `${Number(percent.toFixed(2)).toLocaleString()}%`;
+}
+
 function isPaymentSubmissionAttended(sub) {
     const status = String(sub?.status || '').toLowerCase();
     return status === 'paid' || status === 'cleared';
@@ -370,9 +393,139 @@ function isPaymentSubmissionAttended(sub) {
 
 function getPaymentStatusLabel(sub) {
     const status = String(sub?.status || '').toLowerCase();
+    if (status === 'pending') return 'Pending';
+    if (status === 'approved') return 'Approved';
     if (status === 'cleared') return 'Cleared';
     if (status === 'paid') return 'Paid';
-    return 'Sent to PFA';
+    if (status === 'sent_to_pfa' || status === 'rsa_submitted') return 'Sent to PFA';
+    if (!status) return '-';
+    return status
+        .split(/[_\s-]+/)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+}
+
+function getPaymentLookupRecords() {
+    return allSubmissions
+        .slice()
+        .sort((a, b) => getPaymentTableEntryMillis(b) - getPaymentTableEntryMillis(a));
+}
+
+function getPaymentLookupAccountNumber(sub = {}) {
+    return getSubmissionCustomerAccountNumber(sub) || '-';
+}
+
+function getPaymentLookupUploaderName(sub = {}) {
+    return getUploaderDisplayName(sub?.uploadedBy || sub?.auditCommissionSubmittedBy || '');
+}
+
+function renderPaymentCustomerEmpty(message = 'Search and select a customer to see payment details.') {
+    if (!paymentCustomerDetailCard) return;
+    paymentCustomerDetailCard.innerHTML = `
+        <div class="payment-customer-empty">
+            <i class="fas fa-user-magnifying-glass"></i>
+            <strong>No customer selected</strong>
+            <span>${escapeHtml(message)}</span>
+        </div>
+    `;
+}
+
+function renderPaymentCustomerDetail(sub = null) {
+    if (!paymentCustomerDetailCard) return;
+    if (!sub) {
+        renderPaymentCustomerEmpty();
+        return;
+    }
+
+    const { twentyFive, commission2 } = getSubmissionFinancials(sub);
+    const rsaBalance = getSubmissionRsaBalance(sub);
+    const accountNumber = getPaymentLookupAccountNumber(sub);
+    const uploadedDate = formatDateValue(getSubmissionOriginalUploadAt(sub));
+    const uploaderName = getPaymentLookupUploaderName(sub);
+    const statusLabel = getPaymentStatusLabel(sub);
+    const applicationRate = getSubmissionRateLabel(sub);
+    const commissionRate = getCommissionRateLabel(sub);
+
+    paymentCustomerDetailCard.innerHTML = `
+        <div class="payment-customer-detail-hero">
+            <div>
+                <span>Customer Payment Details</span>
+                <h3>${escapeHtml(sub.customerName || 'Unknown Customer')}</h3>
+                <p>Account ${escapeHtml(accountNumber)} | Uploaded ${escapeHtml(uploadedDate)}</p>
+            </div>
+            <strong class="payment-customer-status-pill">${escapeHtml(statusLabel)}</strong>
+        </div>
+        <div class="payment-customer-detail-grid">
+            <div class="payment-customer-detail-item"><span>Customer Name</span><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></div>
+            <div class="payment-customer-detail-item"><span>Account Number</span><strong>${escapeHtml(accountNumber)}</strong></div>
+            <div class="payment-customer-detail-item"><span>RSA Balance</span><strong>${formatCurrency(rsaBalance)}</strong></div>
+            <div class="payment-customer-detail-item"><span>25%</span><strong>${formatCurrency(twentyFive)}</strong></div>
+            <div class="payment-customer-detail-item"><span>Commission Rate</span><strong>${escapeHtml(commissionRate)}</strong></div>
+            <div class="payment-customer-detail-item"><span>Application Rate</span><strong>${escapeHtml(applicationRate)}</strong></div>
+            <div class="payment-customer-detail-item"><span>Commission</span><strong>${formatCurrency(commission2)}</strong></div>
+            <div class="payment-customer-detail-item"><span>Uploaded Date</span><strong>${escapeHtml(uploadedDate)}</strong></div>
+            <div class="payment-customer-detail-item"><span>Uploader Name</span><strong>${escapeHtml(uploaderName || '-')}</strong></div>
+            <div class="payment-customer-detail-item"><span>Status</span><strong>${escapeHtml(statusLabel)}</strong></div>
+        </div>
+    `;
+}
+
+function renderPaymentCustomerSearchResults(matches = []) {
+    if (!paymentCustomerSearchResults) return;
+    if (!matches.length) {
+        paymentCustomerSearchResults.innerHTML = '<div class="payment-customer-empty" style="min-height:220px;"><i class="fas fa-search"></i><strong>No match found</strong><span>Try another customer name.</span></div>';
+        renderPaymentCustomerEmpty('No customer matched this search.');
+        return;
+    }
+
+    paymentCustomerSearchResults.innerHTML = matches.map((sub, index) => {
+        const statusLabel = getPaymentStatusLabel(sub);
+        const accountNumber = getPaymentLookupAccountNumber(sub);
+        return `
+            <button type="button" class="payment-customer-result-btn ${index === 0 ? 'active' : ''}" data-payment-customer-result="${escapeHtml(sub.id)}">
+                <strong>${escapeHtml(sub.customerName || 'Unknown Customer')}</strong>
+                <span>${escapeHtml(accountNumber)} | ${escapeHtml(statusLabel)} | ${escapeHtml(getPaymentLookupUploaderName(sub))}</span>
+            </button>
+        `;
+    }).join('');
+    renderPaymentCustomerDetail(matches[0]);
+}
+
+function searchPaymentCustomers(query = '') {
+    const normalized = normalizeCustomerName(query);
+    if (!normalized) {
+        currentPaymentCustomerSearchMatches = [];
+        if (paymentCustomerSearchStatus) paymentCustomerSearchStatus.textContent = 'Type a customer name to begin.';
+        if (paymentCustomerSearchResults) paymentCustomerSearchResults.innerHTML = '';
+        renderPaymentCustomerEmpty();
+        return;
+    }
+
+    currentPaymentCustomerSearchMatches = getPaymentLookupRecords()
+        .filter((sub) => normalizeCustomerName(sub.customerName || sub?.customerDetails?.name || '').includes(normalized))
+        .slice(0, 6);
+
+    if (paymentCustomerSearchStatus) {
+        paymentCustomerSearchStatus.textContent = currentPaymentCustomerSearchMatches.length
+            ? `${currentPaymentCustomerSearchMatches.length} matching application${currentPaymentCustomerSearchMatches.length === 1 ? '' : 's'} found.`
+            : 'No customer matched this search.';
+    }
+    renderPaymentCustomerSearchResults(currentPaymentCustomerSearchMatches);
+}
+
+function openPaymentCustomerSearchModal() {
+    paymentCustomerSearchModal?.classList.add('active');
+    if (!paymentCustomerNameSearchInput?.value) {
+        renderPaymentCustomerEmpty();
+    } else {
+        searchPaymentCustomers(paymentCustomerNameSearchInput.value);
+    }
+    setTimeout(() => paymentCustomerNameSearchInput?.focus(), 0);
+}
+
+function closePaymentCustomerSearchModal() {
+    paymentCustomerSearchModal?.classList.remove('active');
 }
 
 function hasCommissionEligibleAgent(sub) {
@@ -1988,6 +2141,13 @@ function loadSubmissions() {
         renderPaidCustomersSimpleTable();
         renderClearedCustomers();
         syncPaymentTableToolbars();
+        if (paymentCustomerSearchModal?.classList.contains('active') && paymentCustomerNameSearchInput?.value) {
+            searchPaymentCustomers(paymentCustomerNameSearchInput.value);
+        }
+        if (!paymentCustomerSearchAutoOpened) {
+            paymentCustomerSearchAutoOpened = true;
+            openPaymentCustomerSearchModal();
+        }
     }, () => {
         showNotification('Failed to load payment queue', 'error');
     });
@@ -2402,6 +2562,38 @@ document.getElementById('forceRefreshBtn')?.addEventListener('click', (e) => {
     e.preventDefault();
     forceHardRefresh();
 });
+openPaymentCustomerSearchBtn?.addEventListener('click', openPaymentCustomerSearchModal);
+closePaymentCustomerSearchBtn?.addEventListener('click', closePaymentCustomerSearchModal);
+closePaymentCustomerSearchFooterBtn?.addEventListener('click', closePaymentCustomerSearchModal);
+paymentCustomerSearchModal?.addEventListener('click', (event) => {
+    if (event.target === paymentCustomerSearchModal) closePaymentCustomerSearchModal();
+});
+paymentCustomerNameSearchBtn?.addEventListener('click', () => {
+    searchPaymentCustomers(paymentCustomerNameSearchInput?.value || '');
+});
+paymentCustomerNameSearchInput?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    searchPaymentCustomers(paymentCustomerNameSearchInput.value || '');
+});
+paymentCustomerNameSearchInput?.addEventListener('input', () => {
+    const queryText = String(paymentCustomerNameSearchInput.value || '').trim();
+    if (!queryText) {
+        searchPaymentCustomers('');
+        return;
+    }
+    searchPaymentCustomers(queryText);
+});
+paymentCustomerSearchResults?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-payment-customer-result]');
+    if (!button) return;
+    const submissionId = String(button.dataset.paymentCustomerResult || '').trim();
+    const selected = currentPaymentCustomerSearchMatches.find((sub) => String(sub.id || '') === submissionId);
+    if (!selected) return;
+    paymentCustomerSearchResults.querySelectorAll('.payment-customer-result-btn').forEach((item) => item.classList.remove('active'));
+    button.classList.add('active');
+    renderPaymentCustomerDetail(selected);
+});
 openPaymentReconciliationModalBtn?.addEventListener('click', () => {
     openPaymentReconciliationModal();
 });
@@ -2649,7 +2841,7 @@ auth.onAuthStateChanged(async (user) => {
         renderPaymentReconciliation();
         loadSubmissions();
         syncPaymentTableToolbars();
-        switchTab(getInitialPaymentTab());
+        switchTab('dashboard');
     } catch (error) {
         showNotification('Could not validate session', 'error');
         window.location.href = 'index.html';

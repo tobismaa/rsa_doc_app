@@ -14,12 +14,13 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
     <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
+    <link rel="stylesheet" href="css/payment-dashboard.css?v=20260715a">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 </head>
-<body>
+<body class="payment-lookup-page">
     <script src="js/security-utils.js?v=20260416f"></script>
 
     <div class="app-container">
@@ -40,7 +41,7 @@
                 </button>
             </div>
 
-            <nav class="nav-menu">
+            <nav class="nav-menu payment-hidden-tabs">
                 <a href="#" class="nav-item active" data-tab="dashboard">
                     <i class="fas fa-chart-pie"></i>
                     <span>Dashboard</span>
@@ -74,31 +75,35 @@
                 </button>
             </header>
 
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 16px;padding:12px 14px;border:1px solid #dbe2ea;border-radius:16px;background:linear-gradient(180deg,#f8fbff 0%,#eef6ff 100%);box-shadow:0 10px 24px rgba(15,59,103,0.08);">
-                <div>
-                    <div style="font-size:13px;font-weight:700;color:#0f172a;">Payment Search</div>
-                    <div style="font-size:12px;color:#64748b;">Search across both Sent to PFA and Paid applications.</div>
-                </div>
-                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                    <input type="search" id="paymentSystemSearchInput" placeholder="Search customer, agent, uploader, PFA..." aria-label="Search paid and pending payments" style="min-width:280px;max-width:420px;width:min(420px,80vw);padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;color:#0f172a;">
-                    <button type="button" class="action-btn" id="paymentSystemSearchBtn" style="background:linear-gradient(135deg,#0f3b67 0%,#1d4ed8 100%);color:#fff;border:none;padding:11px 16px;border-radius:12px;font-weight:700;box-shadow:0 8px 20px rgba(29,78,216,0.28);">
-                        <i class="fas fa-search"></i> Search
-                    </button>
-                </div>
-            </div>
-
             <div id="dashboardTab" class="tab-content active">
-                <div class="overview-cards" style="margin-bottom:16px;">
-                    <div class="stat-card pending">
-                        <div class="stat-content">
-                            <div>
-                                <div class="stat-label">Sent to PFA</div>
-                                <div class="stat-value" id="dashboardSentToPfaCount">0</div>
-                            </div>
-                            <i class="fas fa-paper-plane stat-icon"></i>
+                <section class="payment-lookup-hero">
+                    <div class="payment-lookup-copy">
+                        <span class="payment-lookup-kicker">Payment lookup</span>
+                        <h2>Search customer payment details</h2>
+                        <p>Type a customer name to search all application statuses with account number, RSA balance, 25%, commission rate, application rate, upload date, uploader and current status.</p>
+                        <button type="button" class="action-btn payment-lookup-open-btn" id="openPaymentCustomerSearchBtn">
+                            <i class="fas fa-search"></i> Search Customer
+                        </button>
+                    </div>
+                    <div class="payment-lookup-summary" aria-label="Payment dashboard summary">
+                        <div>
+                            <span>Sent to PFA</span>
+                            <strong id="dashboardSentToPfaCount">0</strong>
+                        </div>
+                        <div>
+                            <span>Paid</span>
+                            <strong id="dashboardPaidCount">0</strong>
+                        </div>
+                        <div>
+                            <span>Cleared</span>
+                            <strong id="dashboardClearedCount">0</strong>
+                        </div>
+                        <div>
+                            <span>Total Commission</span>
+                            <strong id="dashboardTotalCommission">NGN 0.00</strong>
                         </div>
                     </div>
-                </div>
+                </section>
             </div>
 
             <div id="sent-to-pfaTab" class="tab-content">
@@ -348,6 +353,40 @@
 
     <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
 
+    <div id="paymentCustomerSearchModal" class="modal payment-customer-search-modal">
+        <div class="modal-content large-modal payment-customer-search-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-magnifying-glass"></i> Customer Payment Lookup</h2>
+                <button class="close-btn" id="closePaymentCustomerSearchBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="payment-customer-search-bar">
+                    <label for="paymentCustomerNameSearchInput">
+                        <span>Customer Name</span>
+                        <input type="search" id="paymentCustomerNameSearchInput" placeholder="Search all application statuses..." autocomplete="off">
+                    </label>
+                    <button type="button" class="action-btn" id="paymentCustomerNameSearchBtn">
+                        <i class="fas fa-search"></i> Search
+                    </button>
+                </div>
+                <div id="paymentCustomerSearchStatus" class="payment-customer-search-status">Type a customer name to begin.</div>
+                <div class="payment-customer-search-layout">
+                    <div id="paymentCustomerSearchResults" class="payment-customer-results"></div>
+                    <div id="paymentCustomerDetailCard" class="payment-customer-detail-card">
+                        <div id="paymentCustomerDetailEmpty" class="payment-customer-empty">
+                            <i class="fas fa-user-magnifying-glass"></i>
+                            <strong>No customer selected</strong>
+                            <span>Search and select a customer to see payment details.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="closePaymentCustomerSearchFooterBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
     <div id="paymentLeaveApplicationsModal" class="modal">
         <div class="modal-content" style="max-width:900px;">
             <div class="modal-header">
@@ -487,7 +526,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/payment-dashboard.js?v=20260714a"></script>
+    <script type="module" src="js/payment-dashboard.js?v=20260715a"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260715a"></script>
     <link rel="stylesheet" href="css/app-chat.css?v=20260518a">
     <script type="module" src="js/app-chat.js?v=20260617a"></script>
