@@ -36,7 +36,7 @@ import {
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt
 } from './shared/submission-stage.js?v=20260610b';
-import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260705a';
+import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260715a';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 
 let currentUser = null;
@@ -132,52 +132,10 @@ const ANNOUNCEMENT_TEXT_COLORS = {
     warning: '#9a3412',
     success: '#065f46'
 };
-const SYSTEM_THEME_PRESETS = {
-    default: { primaryColor: '#003366', secondaryColor: '#0066b3', accentColor: '#b8860b' },
-    emerald: { primaryColor: '#065f46', secondaryColor: '#0f766e', accentColor: '#d97706' },
-    royal: { primaryColor: '#4c1d95', secondaryColor: '#7c3aed', accentColor: '#f59e0b' },
-    crimson: { primaryColor: '#991b1b', secondaryColor: '#dc2626', accentColor: '#f59e0b' },
-    slate: { primaryColor: '#1e293b', secondaryColor: '#475569', accentColor: '#0ea5e9' }
-};
-
 function normalizeAnnouncementTarget(value = '') {
     const text = String(value || '').trim().toLowerCase();
     if (['reports_monitoring', 'reports-monitoring', 'reporting_monitoring', 'reporting-monitoring'].includes(text)) return 'audit';
     return text;
-}
-
-function normalizeThemePreset(value = '') {
-    const preset = String(value || '').trim().toLowerCase();
-    return preset === 'custom' || Object.prototype.hasOwnProperty.call(SYSTEM_THEME_PRESETS, preset) ? preset : 'default';
-}
-
-function getThemePresetColors(preset = 'default') {
-    return SYSTEM_THEME_PRESETS[normalizeThemePreset(preset)] || SYSTEM_THEME_PRESETS.default;
-}
-
-function isValidHexColor(value = '') {
-    return /^#[0-9a-f]{6}$/i.test(String(value || '').trim());
-}
-
-function applySelectedThemePresetToInputs() {
-    const presetInput = document.getElementById('settingThemePreset');
-    const preset = normalizeThemePreset(presetInput?.value || 'default');
-    if (preset === 'custom') return;
-    const colors = getThemePresetColors(preset);
-    const primaryInput = document.getElementById('settingThemePrimaryColor');
-    const secondaryInput = document.getElementById('settingThemeSecondaryColor');
-    const accentInput = document.getElementById('settingThemeAccentColor');
-    if (primaryInput) primaryInput.value = colors.primaryColor;
-    if (secondaryInput) secondaryInput.value = colors.secondaryColor;
-    if (accentInput) accentInput.value = colors.accentColor;
-}
-
-function resetThemeToDefaultInputs() {
-    const presetInput = document.getElementById('settingThemePreset');
-    if (presetInput) presetInput.value = 'default';
-    applySelectedThemePresetToInputs();
-    if (settingsFormLoaded) settingsFormDirty = true;
-    showNotification('Theme colors reset to CMBank default. Save settings to apply.', 'info');
 }
 const REPORT_INCEPTION_START_DATE = '1900-01-01';
 const REPORT_INCEPTION_LABEL = 'From Inception';
@@ -4689,10 +4647,6 @@ async function loadSettings() {
     const commissionEffectiveFrom = document.getElementById('settingCommissionEffectiveFrom');
     const maxImageUploadMb = document.getElementById('settingMaxImageUploadMb');
     const maxPdfUploadMb = document.getElementById('settingMaxPdfUploadMb');
-    const themePreset = document.getElementById('settingThemePreset');
-    const themePrimaryColor = document.getElementById('settingThemePrimaryColor');
-    const themeSecondaryColor = document.getElementById('settingThemeSecondaryColor');
-    const themeAccentColor = document.getElementById('settingThemeAccentColor');
     const reviewerRoundRobinEnabled = document.getElementById('settingReviewerRoundRobinEnabled');
     const rsaRoundRobinEnabled = document.getElementById('settingRsaRoundRobinEnabled');
     const paymentRoundRobinEnabled = document.getElementById('settingPaymentRoundRobinEnabled');
@@ -4738,10 +4692,6 @@ async function loadSettings() {
     }
     if (maxImageUploadMb) maxImageUploadMb.value = String(Number(data.maxImageUploadMb ?? defaultSystemSettings.maxImageUploadMb));
     if (maxPdfUploadMb) maxPdfUploadMb.value = String(Number(data.maxPdfUploadMb ?? defaultSystemSettings.maxPdfUploadMb));
-    if (themePreset) themePreset.value = normalizeThemePreset(systemSettings.theme?.preset || defaultSystemSettings.theme.preset);
-    if (themePrimaryColor) themePrimaryColor.value = String(systemSettings.theme?.primaryColor || defaultSystemSettings.theme.primaryColor);
-    if (themeSecondaryColor) themeSecondaryColor.value = String(systemSettings.theme?.secondaryColor || defaultSystemSettings.theme.secondaryColor);
-    if (themeAccentColor) themeAccentColor.value = String(systemSettings.theme?.accentColor || defaultSystemSettings.theme.accentColor);
     if (reviewerRoundRobinEnabled) reviewerRoundRobinEnabled.value = String((data.reviewerRoundRobinEnabled ?? defaultSystemSettings.reviewerRoundRobinEnabled) ? 'true' : 'false');
     if (rsaRoundRobinEnabled) rsaRoundRobinEnabled.value = String((data.rsaRoundRobinEnabled ?? defaultSystemSettings.rsaRoundRobinEnabled) ? 'true' : 'false');
     if (paymentRoundRobinEnabled) paymentRoundRobinEnabled.value = String((data.paymentRoundRobinEnabled ?? defaultSystemSettings.paymentRoundRobinEnabled) ? 'true' : 'false');
@@ -6328,10 +6278,6 @@ window.saveSuperSettings = async (triggerButton = null) => {
     const commissionEffectiveFromValue = String(document.getElementById('settingCommissionEffectiveFrom')?.value || '').trim() || '2026-05-07';
     const maxImageUploadMb = Number(document.getElementById('settingMaxImageUploadMb')?.value || getDefaultSystemSettings().maxImageUploadMb);
     const maxPdfUploadMb = Number(document.getElementById('settingMaxPdfUploadMb')?.value || getDefaultSystemSettings().maxPdfUploadMb);
-    const themePreset = normalizeThemePreset(document.getElementById('settingThemePreset')?.value || getDefaultSystemSettings().theme.preset || 'default');
-    const themePrimaryColor = String(document.getElementById('settingThemePrimaryColor')?.value || getDefaultSystemSettings().theme.primaryColor || '#003366').trim();
-    const themeSecondaryColor = String(document.getElementById('settingThemeSecondaryColor')?.value || getDefaultSystemSettings().theme.secondaryColor || '#0066b3').trim();
-    const themeAccentColor = String(document.getElementById('settingThemeAccentColor')?.value || getDefaultSystemSettings().theme.accentColor || '#b8860b').trim();
     const reviewerRoundRobinEnabled = String(document.getElementById('settingReviewerRoundRobinEnabled')?.value || 'true') === 'true';
     const rsaRoundRobinEnabled = String(document.getElementById('settingRsaRoundRobinEnabled')?.value || 'true') === 'true';
     const paymentRoundRobinEnabled = String(document.getElementById('settingPaymentRoundRobinEnabled')?.value || 'true') === 'true';
@@ -6373,10 +6319,6 @@ window.saveSuperSettings = async (triggerButton = null) => {
     }
     if (!Number.isFinite(maxImageUploadMb) || maxImageUploadMb <= 0 || !Number.isFinite(maxPdfUploadMb) || maxPdfUploadMb <= 0) {
         showNotification('Upload size limits must be greater than 0', 'warning');
-        return false;
-    }
-    if (![themePrimaryColor, themeSecondaryColor, themeAccentColor].every(isValidHexColor)) {
-        showNotification('Choose valid theme colors', 'warning');
         return false;
     }
     if (!Number.isFinite(sessionTimeoutMinutes) || sessionTimeoutMinutes <= 0) {
@@ -6537,12 +6479,6 @@ window.saveSuperSettings = async (triggerButton = null) => {
             commissionRateEffectiveFrom,
             maxImageUploadMb,
             maxPdfUploadMb,
-            theme: {
-                preset: themePreset,
-                primaryColor: themePrimaryColor,
-                secondaryColor: themeSecondaryColor,
-                accentColor: themeAccentColor
-            },
             reviewerRoundRobinEnabled,
             rsaRoundRobinEnabled,
             paymentRoundRobinEnabled,
@@ -6627,10 +6563,6 @@ window.saveSuperSettings = async (triggerButton = null) => {
             globalReadOnlyMessage,
             maxImageUploadMb,
             maxPdfUploadMb,
-            themePreset,
-            themePrimaryColor,
-            themeSecondaryColor,
-            themeAccentColor,
             reviewerRoundRobinEnabled,
             rsaRoundRobinEnabled,
             paymentRoundRobinEnabled,
@@ -7008,18 +6940,6 @@ document.getElementById('settingsTab')?.addEventListener('input', () => {
 });
 document.getElementById('settingsTab')?.addEventListener('change', () => {
     if (settingsFormLoaded) settingsFormDirty = true;
-});
-document.getElementById('settingThemePreset')?.addEventListener('change', applySelectedThemePresetToInputs);
-document.getElementById('resetThemeColorsBtn')?.addEventListener('click', resetThemeToDefaultInputs);
-['settingThemePrimaryColor', 'settingThemeSecondaryColor', 'settingThemeAccentColor'].forEach((id) => {
-    document.getElementById(id)?.addEventListener('input', (event) => {
-        event.stopPropagation();
-    });
-    document.getElementById(id)?.addEventListener('change', () => {
-        const preset = document.getElementById('settingThemePreset');
-        if (preset) preset.value = 'custom';
-        if (settingsFormLoaded) settingsFormDirty = true;
-    });
 });
 settingsSectionModal?.addEventListener('input', () => {
     if (settingsFormLoaded) settingsFormDirty = true;

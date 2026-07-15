@@ -1432,6 +1432,10 @@ function isReachedPfaLifecycle(sub = {}) {
     );
 }
 
+function isCurrentSentToPfaStatus(sub = {}) {
+    return String(sub.status || '').toLowerCase() === 'sent_to_pfa';
+}
+
 function isClearedLifecycle(sub = {}) {
     return String(sub.status || '').toLowerCase() === 'cleared' || !!sub.clearedAt || !!sub.auditClearedAt;
 }
@@ -1502,7 +1506,7 @@ function getAuditUserReportRows() {
         if (!row.userName || row.userName === 'Unknown User') {
             row.userName = email ? getUserDisplayName(email) : 'Unknown User';
         }
-        if (isReachedPfaLifecycle(sub)) {
+        if (isCurrentSentToPfaStatus(sub)) {
             row.sentToPfaCount += 1;
             row.sentToPfaAmount += getAuditUserReportSentAmount(sub);
             row.agentNames.add(getSubmissionReportAgentName(sub));
@@ -1517,8 +1521,8 @@ function getAuditUserReportRows() {
             row.clearedAmount += getAuditUserReportClearedAmount(sub);
             row.agentNames.add(getSubmissionReportAgentName(sub));
         }
-        row.totalCommissionCount = row.payableCommissionCount + row.clearedCount;
-        row.totalCommissionAmount = row.payableCommissionAmount + row.clearedAmount;
+        row.totalCommissionCount = row.sentToPfaCount + row.payableCommissionCount + row.clearedCount;
+        row.totalCommissionAmount = row.sentToPfaAmount + row.payableCommissionAmount + row.clearedAmount;
         rowsByUser.set(key, row);
     });
 
@@ -1538,9 +1542,10 @@ function getAuditAgentSummaryRowsForUser(emailKey = '') {
     allSubmissions.forEach((sub) => {
         const userKey = getSubmissionReportUserEmail(sub) || '__unknown__';
         if (userKey !== key) return;
-        const reachedPfa = isReachedPfaLifecycle(sub);
+        const reachedPfa = isCurrentSentToPfaStatus(sub);
+        const payable = isPayableCommissionLifecycle(sub);
         const cleared = isClearedLifecycle(sub);
-        if (!reachedPfa && !cleared) return;
+        if (!reachedPfa && !payable && !cleared) return;
 
         const agentName = getSubmissionReportAgentName(sub);
         const agentKey = String(sub.agentId || '').trim() || agentName.toLowerCase();
@@ -1559,7 +1564,7 @@ function getAuditAgentSummaryRowsForUser(emailKey = '') {
             row.sentToPfaCount += 1;
             row.sentToPfaAmount += getAuditUserReportSentAmount(sub);
         }
-        if (isPayableCommissionLifecycle(sub)) {
+        if (payable) {
             row.payableCommissionCount += 1;
             row.payableCommissionAmount += getAuditUserReportPayableAmount(sub);
         }
@@ -1567,8 +1572,8 @@ function getAuditAgentSummaryRowsForUser(emailKey = '') {
             row.clearedCount += 1;
             row.clearedAmount += getAuditUserReportClearedAmount(sub);
         }
-        row.totalCommissionCount = row.payableCommissionCount + row.clearedCount;
-        row.totalCommissionAmount = row.payableCommissionAmount + row.clearedAmount;
+        row.totalCommissionCount = row.sentToPfaCount + row.payableCommissionCount + row.clearedCount;
+        row.totalCommissionAmount = row.sentToPfaAmount + row.payableCommissionAmount + row.clearedAmount;
         rowsByAgent.set(agentKey, row);
     });
 
@@ -1919,8 +1924,10 @@ function renderAuditMoneyRows(body, rows, mode) {
             ? `<button class="action-btn" onclick="window.acceptAuditCommission('${sub.id}')"><i class="fas fa-check"></i> Accept</button>
                <button class="action-btn" style="background:#b91c1c;color:#fff;border:none;" onclick="window.rejectAuditCommission('${sub.id}')"><i class="fas fa-times"></i> Reject</button>`
             : mode === 'paid'
-                ? `<button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>
-                   <button class="action-btn audit-clear-btn" onclick="window.clearAuditPayment('${sub.id}')"><i class="fas fa-circle-check"></i> Clear</button>`
+                ? `<div class="audit-paid-actions">
+                       <button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>
+                       <button class="action-btn audit-clear-btn" onclick="window.clearAuditPayment('${sub.id}')"><i class="fas fa-circle-check"></i> Clear</button>
+                   </div>`
                 : `<button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>`;
         const officerEmail = mode === 'paid'
             ? (sub.auditCommissionAcceptedBy || sub.paidBy || sub.commissionPaidBy || '')
@@ -2015,7 +2022,7 @@ function renderCommissionSummaryMetric(count = 0, amount = 0) {
 
 function renderAuditUserReport() {
     const rows = getAuditUserReportRows();
-    const activeRows = rows.filter((row) => row.sentToPfaCount > 0 || row.clearedCount > 0);
+    const activeRows = rows.filter((row) => row.sentToPfaCount > 0 || row.payableCommissionCount > 0 || row.clearedCount > 0);
     const totalSentAmount = rows.reduce((sum, row) => sum + row.sentToPfaAmount, 0);
     const totalClearedAmount = rows.reduce((sum, row) => sum + row.clearedAmount, 0);
 

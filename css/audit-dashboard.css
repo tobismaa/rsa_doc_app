@@ -203,6 +203,22 @@
   max-width: 100%;
 }
 
+#paidTab .audit-toolbar-actions {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+#paidTab .documents-table th:last-child,
+#paidTab .documents-table td:last-child {
+  width: 178px;
+  min-width: 178px;
+  white-space: nowrap;
+}
+
+#paidTab .documents-table td:last-child {
+  text-align: left;
+}
+
 .audit-rejected-scope-strip {
   margin-top: 10px;
   width: fit-content;
@@ -219,6 +235,26 @@
   background: #0f766e !important;
   color: #fff !important;
   border: none !important;
+}
+
+.audit-paid-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  width: max-content;
+  max-width: none;
+}
+
+.audit-paid-actions .action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .audit-rejected-actions {

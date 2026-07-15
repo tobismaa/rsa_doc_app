@@ -205,21 +205,6 @@ function parseAnnouncementTargets(value, fallback = []) {
   ));
 }
 
-const THEME_PRESET_KEYS = ['default', 'emerald', 'royal', 'crimson', 'slate', 'custom'];
-
-function normalizeSystemTheme(value, fallback = {}) {
-  const source = parseObject(value, {});
-  const preset = THEME_PRESET_KEYS.includes(String(source.preset || '').trim().toLowerCase())
-    ? String(source.preset).trim().toLowerCase()
-    : (THEME_PRESET_KEYS.includes(String(fallback.preset || '').trim().toLowerCase()) ? String(fallback.preset).trim().toLowerCase() : 'default');
-  return {
-    preset,
-    primaryColor: parseHexColor(source.primaryColor, fallback.primaryColor || '#003366'),
-    secondaryColor: parseHexColor(source.secondaryColor, fallback.secondaryColor || '#0066b3'),
-    accentColor: parseHexColor(source.accentColor, fallback.accentColor || '#b8860b')
-  };
-}
-
 function parseObject(value, fallback = {}) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
 }
@@ -335,12 +320,6 @@ export function getDefaultSystemSettings() {
     commissionRateEffectiveFrom: '2026-05-07T00:00:00+01:00',
     maxImageUploadMb: 1,
     maxPdfUploadMb: 1.5,
-    theme: {
-      preset: 'default',
-      primaryColor: '#003366',
-      secondaryColor: '#0066b3',
-      accentColor: '#b8860b'
-    },
     reviewerRoundRobinEnabled: true,
     rsaRoundRobinEnabled: true,
     paymentRoundRobinEnabled: true,
@@ -432,7 +411,6 @@ function normalizeSystemSettings(data = {}) {
     commissionRateEffectiveFrom: parseText(data.commissionRateEffectiveFrom, defaults.commissionRateEffectiveFrom),
     maxImageUploadMb: Math.max(0.1, parseNumber(data.maxImageUploadMb, defaults.maxImageUploadMb)),
     maxPdfUploadMb: Math.max(0.1, parseNumber(data.maxPdfUploadMb, defaults.maxPdfUploadMb)),
-    theme: normalizeSystemTheme(data.theme, defaults.theme),
     reviewerRoundRobinEnabled: parseBoolean(data.reviewerRoundRobinEnabled, defaults.reviewerRoundRobinEnabled),
     rsaRoundRobinEnabled: parseBoolean(data.rsaRoundRobinEnabled, defaults.rsaRoundRobinEnabled),
     paymentRoundRobinEnabled: parseBoolean(data.paymentRoundRobinEnabled, defaults.paymentRoundRobinEnabled),

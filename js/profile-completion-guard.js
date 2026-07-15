@@ -2,7 +2,7 @@ import { auth, db } from './firebase-config.js?v=20260625c';
 import { onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js';
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
 import { getMaintenanceSettings, isMaintenanceExemptRole, showMaintenanceOverlay } from './shared/maintenance-mode.js?v=20260507a';
-import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260705a';
+import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260715a';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
 import { registerPushTokenForCurrentUser } from './push-alerts.js';
 
@@ -39,13 +39,6 @@ const ANNOUNCEMENT_FONT_FAMILIES = {
   verdana: 'Verdana, Geneva, sans-serif',
   tahoma: 'Tahoma, Geneva, sans-serif'
 };
-const SYSTEM_THEME_PRESETS = {
-  default: { primaryColor: '#003366', secondaryColor: '#0066b3', accentColor: '#b8860b' },
-  emerald: { primaryColor: '#065f46', secondaryColor: '#0f766e', accentColor: '#d97706' },
-  royal: { primaryColor: '#4c1d95', secondaryColor: '#7c3aed', accentColor: '#f59e0b' },
-  crimson: { primaryColor: '#991b1b', secondaryColor: '#dc2626', accentColor: '#f59e0b' },
-  slate: { primaryColor: '#1e293b', secondaryColor: '#475569', accentColor: '#0ea5e9' }
-};
 let cacheClearInProgress = false;
 let securityWatchStarted = false;
 let sessionTimeoutTimer = null;
@@ -73,237 +66,6 @@ function normalizeAnnouncementTarget(value = '') {
   const text = String(value || '').trim().toLowerCase();
   if (['reports_monitoring', 'reports-monitoring', 'reporting_monitoring', 'reporting-monitoring'].includes(text)) return 'audit';
   return text;
-}
-
-function normalizeThemePreset(value = '') {
-  const preset = String(value || '').trim().toLowerCase();
-  return preset === 'custom' || Object.prototype.hasOwnProperty.call(SYSTEM_THEME_PRESETS, preset) ? preset : 'default';
-}
-
-function normalizeThemeColor(value = '', fallback = '#003366') {
-  const text = String(value || '').trim();
-  return /^#[0-9a-f]{6}$/i.test(text) ? text : fallback;
-}
-
-function hexToRgb(hex = '#000000') {
-  const clean = normalizeThemeColor(hex, '#000000').slice(1);
-  return {
-    r: parseInt(clean.slice(0, 2), 16),
-    g: parseInt(clean.slice(2, 4), 16),
-    b: parseInt(clean.slice(4, 6), 16)
-  };
-}
-
-function rgbToHex({ r = 0, g = 0, b = 0 } = {}) {
-  return `#${[r, g, b].map((value) => {
-    const bounded = Math.max(0, Math.min(255, Math.round(Number(value) || 0)));
-    return bounded.toString(16).padStart(2, '0');
-  }).join('')}`;
-}
-
-function mixThemeColor(left = '#000000', right = '#ffffff', weight = 0.5) {
-  const a = hexToRgb(left);
-  const b = hexToRgb(right);
-  const ratio = Math.max(0, Math.min(1, Number(weight) || 0));
-  return rgbToHex({
-    r: a.r + (b.r - a.r) * ratio,
-    g: a.g + (b.g - a.g) * ratio,
-    b: a.b + (b.b - a.b) * ratio
-  });
-}
-
-function resolveSystemTheme(theme = {}) {
-  const preset = normalizeThemePreset(theme?.preset);
-  const presetColors = SYSTEM_THEME_PRESETS[preset] || SYSTEM_THEME_PRESETS.default;
-  const primaryColor = normalizeThemeColor(theme?.primaryColor, presetColors.primaryColor);
-  const secondaryColor = normalizeThemeColor(theme?.secondaryColor, presetColors.secondaryColor);
-  const accentColor = normalizeThemeColor(theme?.accentColor, presetColors.accentColor);
-  return {
-    preset,
-    primaryColor,
-    primaryDarkColor: mixThemeColor(primaryColor, '#000000', 0.28),
-    primaryLightColor: mixThemeColor(primaryColor, '#ffffff', 0.16),
-    secondaryColor,
-    accentColor,
-    accentLightColor: mixThemeColor(accentColor, '#ffffff', 0.18)
-  };
-}
-
-function applySystemTheme(theme = {}) {
-  const palette = resolveSystemTheme(theme);
-  const root = document.documentElement;
-  root.dataset.systemTheme = palette.preset;
-  root.style.setProperty('--cm-primary', palette.primaryColor);
-  root.style.setProperty('--cm-primary-dark', palette.primaryDarkColor);
-  root.style.setProperty('--cm-primary-light', palette.primaryLightColor);
-  root.style.setProperty('--cm-secondary', palette.secondaryColor);
-  root.style.setProperty('--cm-gold', palette.accentColor);
-  root.style.setProperty('--cm-gold-light', palette.accentLightColor);
-  root.style.setProperty('--system-theme-primary', palette.primaryColor);
-  root.style.setProperty('--system-theme-primary-dark', palette.primaryDarkColor);
-  root.style.setProperty('--system-theme-primary-light', palette.primaryLightColor);
-  root.style.setProperty('--system-theme-secondary', palette.secondaryColor);
-  root.style.setProperty('--system-theme-accent', palette.accentColor);
-  root.style.setProperty('--system-theme-accent-light', palette.accentLightColor);
-
-  if (!document.getElementById('systemThemeRuntimeStyles')) {
-    const style = document.createElement('style');
-    style.id = 'systemThemeRuntimeStyles';
-    style.textContent = `
-      .sidebar,
-      .admin-sidebar {
-        background: linear-gradient(180deg, var(--cm-primary) 0%, var(--cm-primary-dark) 100%) !important;
-      }
-      .logo i,
-      .sidebar .logo i,
-      .sidebar .logo span,
-      .admin-sidebar .logo i,
-      .admin-sidebar .logo span {
-        color: var(--cm-gold) !important;
-      }
-      .nav-item.active,
-      .admin-subtab-btn.active,
-      .subtab-btn.active,
-      .settings-dropdown-trigger.active,
-      .tab-btn.active,
-      .filter-btn.active,
-      .status-filter.active {
-        background: var(--cm-secondary) !important;
-        color: #fff !important;
-        border-color: var(--cm-secondary) !important;
-      }
-      .nav-item:hover,
-      .admin-subtab-btn:hover,
-      .subtab-btn:hover {
-        border-color: var(--cm-secondary) !important;
-      }
-      .action-btn[style*="#003366"],
-      .action-btn[style*="003366"],
-      .action-btn[style*="#0f3b67"],
-      .action-btn[style*="0f3b67"],
-      .action-btn[style*="#1e6cb9"],
-      .action-btn[style*="1e6cb9"],
-      .confirm-btn,
-      .view-btn-small,
-      button[style*="#003366"],
-      button[style*="003366"],
-      button[style*="#0f3b67"],
-      button[style*="0f3b67"],
-      button[style*="#1e6cb9"],
-      button[style*="1e6cb9"],
-      .doc-btn.view-btn,
-      .customers-table td .action-btn:not(.track-btn):not(.edit-btn),
-      .documents-table td .action-btn:not(.edit-btn):not(.delete-btn) {
-        background: var(--cm-primary) !important;
-        color: #fff !important;
-        border-color: var(--cm-primary) !important;
-      }
-      .action-btn[style*="#0f766e"],
-      .action-btn[style*="0f766e"],
-      button[style*="#0f766e"],
-      button[style*="0f766e"] {
-        background: var(--cm-secondary) !important;
-        color: #fff !important;
-        border-color: var(--cm-secondary) !important;
-      }
-      [style*="background:#003366"],
-      [style*="background: #003366"],
-      [style*="background:#0f3b67"],
-      [style*="background: #0f3b67"],
-      [style*="background:#0f4d8a"],
-      [style*="background: #0f4d8a"],
-      [style*="background:#1e6cb9"],
-      [style*="background: #1e6cb9"] {
-        background: var(--cm-primary) !important;
-      }
-      [style*="linear-gradient"][style*="#0f3b67"],
-      [style*="linear-gradient"][style*="#003366"],
-      [style*="linear-gradient"][style*="#1e6cb9"],
-      .hero-section,
-      .dashboard-hero,
-      .report-hero,
-      .sop-hero,
-      .modal-header.calculator-header,
-      .settings-section-modal-icon,
-      .document-requirement-modal-icon {
-        background: linear-gradient(135deg, var(--cm-primary), var(--cm-secondary)) !important;
-        color: #fff !important;
-        border-color: var(--cm-primary) !important;
-      }
-      [style*="color:#003366"],
-      [style*="color: #003366"],
-      [style*="color:#0f3b67"],
-      [style*="color: #0f3b67"],
-      [style*="color:#0f4d8a"],
-      [style*="color: #0f4d8a"],
-      [style*="color:#1e6cb9"],
-      [style*="color: #1e6cb9"],
-      [style*="color:#1d4ed8"],
-      [style*="color: #1d4ed8"] {
-        color: var(--cm-primary) !important;
-      }
-      [style*="border-color:#003366"],
-      [style*="border-color: #003366"],
-      [style*="border-color:#0f3b67"],
-      [style*="border-color: #0f3b67"],
-      [style*="border-color:#0f4d8a"],
-      [style*="border-color: #0f4d8a"],
-      [style*="border-top: 5px solid #0f3b67"],
-      [style*="border-top:5px solid #0f3b67"] {
-        border-color: var(--cm-primary) !important;
-      }
-      .stat-icon,
-      .summary-icon,
-      .dashboard-card-icon {
-        color: var(--cm-gold) !important;
-        background: color-mix(in srgb, var(--cm-gold) 14%, #ffffff) !important;
-      }
-      .page-header h1,
-      .main-content h1,
-      .content-header h1,
-      .table-section h2,
-      .table-section h3,
-      .modal-header h2,
-      .profile-card h2,
-      .settings-section-modal-header h2,
-      .document-requirement-modal-content h2 {
-        color: var(--cm-primary) !important;
-      }
-      .stat-card::after,
-      .summary-card::after,
-      .card::after {
-        background: var(--cm-primary) !important;
-      }
-      .stat-card,
-      .summary-card,
-      .table-section,
-      .profile-card,
-      .modal-content {
-        border-top-color: var(--cm-primary) !important;
-      }
-      .documents-table thead,
-      .customers-table thead,
-      table thead tr {
-        background: color-mix(in srgb, var(--cm-primary) 9%, #ffffff) !important;
-      }
-      .documents-table th,
-      .customers-table th,
-      table th {
-        color: var(--cm-primary) !important;
-      }
-      input:focus,
-      select:focus,
-      textarea:focus {
-        border-color: var(--cm-secondary) !important;
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--cm-secondary) 18%, transparent) !important;
-      }
-      a,
-      .text-primary {
-        color: var(--cm-secondary) !important;
-      }
-    `;
-    document.head.appendChild(style);
-  }
 }
 
 const WHATSAPP_COUNTRY_CODES = [
@@ -1094,7 +856,6 @@ function buildLiveSecuritySettings(source = {}, fallback = {}) {
   const forceLogoutToken = String(sourceSecurity.forceLogoutToken ?? fallbackSecurity.forceLogoutToken ?? '').trim();
 
   return {
-    theme: source?.theme ?? fallback?.theme ?? {},
     dashboardAnnouncement: source?.dashboardAnnouncement ?? fallback?.dashboardAnnouncement ?? {},
     globalReadOnlyMode: source?.globalReadOnlyMode ?? fallback?.globalReadOnlyMode ?? false,
     globalReadOnlyMessage: String(source?.globalReadOnlyMessage ?? fallback?.globalReadOnlyMessage ?? '').trim(),
@@ -1169,7 +930,6 @@ function watchForSecuritySignals(userData = {}) {
   securityWatchStarted = true;
 
   const evaluateSecurityState = async (systemSettings) => {
-    applySystemTheme(systemSettings.theme);
     showDashboardAnnouncement(systemSettings.dashboardAnnouncement);
     bindInactivityHandlers(systemSettings.securityControls.sessionTimeoutMinutes);
     applyGlobalReadOnlyState({
@@ -1400,7 +1160,6 @@ onAuthStateChanged(auth, async (user) => {
 
   try {
     const systemSettings = await getSystemSettings(db, { force: true });
-    applySystemTheme(systemSettings.theme);
     showDashboardAnnouncement(systemSettings.dashboardAnnouncement);
     bindInactivityHandlers(systemSettings.securityControls.sessionTimeoutMinutes);
     applyGlobalReadOnlyState({
@@ -1421,7 +1180,6 @@ onAuthStateChanged(auth, async (user) => {
 
     try {
       const systemSettings = await getSystemSettings(db);
-      applySystemTheme(systemSettings.theme);
       showDashboardAnnouncement(systemSettings.dashboardAnnouncement);
       bindInactivityHandlers(systemSettings.securityControls.sessionTimeoutMinutes);
       applyGlobalReadOnlyState({
