@@ -1585,10 +1585,24 @@ function handleRsaBalanceChangeForCustomerEdit() {
     const rsaBalanceInput = document.getElementById('customer-edit-rsaBalance') || document.getElementById('customerEditRsaBalance');
     const rsa25PercentInput = document.getElementById('customer-edit-rsa25') || document.getElementById('customerEditRsa25Percent');
     if (!rsaBalanceInput || !rsa25PercentInput) return;
-    const rsaBalance = parseFloat(String(rsaBalanceInput.value || '0').replace(/,/g, ''));
-    if (!Number.isNaN(rsaBalance)) {
+    const rsaBalance = parseMoneyValue(rsaBalanceInput.value);
+    if (rsaBalance > 0) {
         const rsa25Percent = roundDownToNearestThousand(rsaBalance * 0.25);
         rsa25PercentInput.value = String(rsa25Percent);
+    } else if (!String(rsaBalanceInput.value || '').trim()) {
+        rsa25PercentInput.value = '';
+    }
+}
+
+function handleRsaTwentyFiveChangeForCustomerEdit() {
+    const rsaBalanceInput = document.getElementById('customer-edit-rsaBalance') || document.getElementById('customerEditRsaBalance');
+    const rsa25PercentInput = document.getElementById('customer-edit-rsa25') || document.getElementById('customerEditRsa25Percent');
+    if (!rsaBalanceInput || !rsa25PercentInput) return;
+    const rsa25Percent = parseMoneyValue(rsa25PercentInput.value);
+    if (rsa25Percent > 0) {
+        rsaBalanceInput.value = String(rsa25Percent * 4);
+    } else if (!String(rsa25PercentInput.value || '').trim()) {
+        rsaBalanceInput.value = '';
     }
 }
 
@@ -3533,6 +3547,10 @@ function renderCustomerEditModal(submission = {}) {
     if (rsaBalanceInput) {
         rsaBalanceInput.addEventListener('input', handleRsaBalanceChangeForCustomerEdit);
     }
+    const rsa25Input = document.getElementById('customer-edit-rsa25');
+    if (rsa25Input) {
+        rsa25Input.addEventListener('input', handleRsaTwentyFiveChangeForCustomerEdit);
+    }
 
     const reason = document.getElementById('customerEditReasonInput');
     if (reason) reason.value = '';
@@ -3623,6 +3641,10 @@ async function saveCustomerEditDetails() {
     if (!String(nextDetails.rsa25 || '').trim()) {
         const rsaBalance = parseMoneyValue(nextDetails.rsaBalance);
         nextDetails.rsa25 = rsaBalance ? String(roundDownToThousand(rsaBalance * 0.25)) : '';
+    }
+    if (!String(nextDetails.rsaBalance || '').trim()) {
+        const rsa25 = parseMoneyValue(nextDetails.rsa25);
+        nextDetails.rsaBalance = rsa25 ? String(rsa25 * 4) : '';
     }
     nextDetails.customerName = nextCustomerName;
     nextDetails.rsa25Percent = String(nextDetails.rsa25 || '').trim();
