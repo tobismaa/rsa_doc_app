@@ -33,7 +33,7 @@ let allSubmissions = [];
 let userDisplayNamesByEmail = new Map();
 let auditRenderTimer = null;
 let currentTab = 'overview';
-const AUDIT_DASHBOARD_TABS = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'reconciliation', 'profile', 'help'];
+const AUDIT_DASHBOARD_TABS = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'reconciliation', 'user-report', 'profile', 'help'];
 const AUDIT_BULK_CLEAR_BATCH_SIZE = 200;
 const AUDIT_RECONCILIATION_VIEWS = ['excel', 'duplicates', 'ignored', 'rejected'];
 
@@ -110,6 +110,16 @@ const auditDuplicateIgnoredWrap = document.getElementById('auditDuplicateIgnored
 const auditDuplicateIgnoredBody = document.getElementById('auditDuplicateIgnoredBody');
 const auditDuplicateRejectedWrap = document.getElementById('auditDuplicateRejectedWrap');
 const auditDuplicateRejectedBody = document.getElementById('auditDuplicateRejectedBody');
+const auditUserReportTableBody = document.getElementById('auditUserReportTableBody');
+const auditUserReportUserCount = document.getElementById('auditUserReportUserCount');
+const auditUserReportSentCount = document.getElementById('auditUserReportSentCount');
+const auditUserReportClearedCount = document.getElementById('auditUserReportClearedCount');
+const auditUserAgentSummaryModal = document.getElementById('auditUserAgentSummaryModal');
+const auditUserAgentSummaryTitle = document.getElementById('auditUserAgentSummaryTitle');
+const auditUserAgentSummaryName = document.getElementById('auditUserAgentSummaryName');
+const auditUserAgentSummaryMeta = document.getElementById('auditUserAgentSummaryMeta');
+const auditUserAgentSummaryCards = document.getElementById('auditUserAgentSummaryCards');
+const auditUserAgentSummaryBody = document.getElementById('auditUserAgentSummaryBody');
 const auditReconciliationMatchedWrap = document.getElementById('auditReconciliationMatchedWrap');
 const auditReconciliationMatchedBody = document.getElementById('auditReconciliationMatchedBody');
 const auditReconciliationUnmatchedWrap = document.getElementById('auditReconciliationUnmatchedWrap');
@@ -1406,6 +1416,166 @@ function isSentToPfaLifecycle(sub = {}) {
     );
 }
 
+function isReachedPfaLifecycle(sub = {}) {
+    const status = String(sub.status || '').toLowerCase();
+    return (
+        status === 'sent_to_pfa' ||
+        status === 'rsa_submitted' ||
+        status === 'paid' ||
+        status === 'cleared' ||
+        sub.finalSubmitted === true ||
+        sub.rsaSubmitted === true ||
+        !!sub.finalSubmittedAt ||
+        !!sub.rsaSubmittedAt ||
+        !!sub.paidAt ||
+        !!sub.clearedAt
+    );
+}
+
+function isClearedLifecycle(sub = {}) {
+    return String(sub.status || '').toLowerCase() === 'cleared' || !!sub.clearedAt || !!sub.auditClearedAt;
+}
+
+function getSubmissionReportUserEmail(sub = {}) {
+    return normalizeEmail(sub.uploadedBy || sub.auditCommissionSubmittedBy || sub.createdBy || sub.submittedBy || '');
+}
+
+function getSubmissionReportAgentName(sub = {}) {
+    return String(
+        sub.agentName ||
+        sub.agentFullName ||
+        sub.agent?.fullName ||
+        sub.customerDetails?.agentName ||
+        'No Agent'
+    ).trim() || 'No Agent';
+}
+
+function createEmptyAuditUserReportRow(emailKey = '', user = null) {
+    const email = normalizeEmail(emailKey || user?.email || '');
+    return {
+        emailKey: email || '__unknown__',
+        email: email || '-',
+        userName: String(user?.fullName || user?.name || (email ? getUserDisplayName(email) : 'Unknown User') || 'Unknown User').trim(),
+        sentToPfaCount: 0,
+        sentToPfaAmount: 0,
+        payableCommissionCount: 0,
+        payableCommissionAmount: 0,
+        clearedCount: 0,
+        clearedAmount: 0,
+        totalCommissionCount: 0,
+        totalCommissionAmount: 0,
+        agentNames: new Set()
+    };
+}
+
+function getAuditUserReportSentAmount(sub = {}) {
+    return getSubmissionFinancials(sub).commission;
+}
+
+function getAuditUserReportClearedAmount(sub = {}) {
+    return getAuditClearedCommissionAmount(sub);
+}
+
+function isPayableCommissionLifecycle(sub = {}) {
+    return String(sub.status || '').toLowerCase() === 'paid';
+}
+
+function getAuditUserReportPayableAmount(sub = {}) {
+    return getSubmissionFinancials(sub).commission;
+}
+
+function getAuditUserReportRows() {
+    const rowsByUser = new Map();
+
+    allUsers.forEach((user) => {
+        const role = String(user.role || '').trim().toLowerCase();
+        if (role && role !== 'uploader') return;
+        const email = normalizeEmail(user.email || '');
+        if (!email) return;
+        rowsByUser.set(email, createEmptyAuditUserReportRow(email, user));
+    });
+
+    allSubmissions.forEach((sub) => {
+        const email = getSubmissionReportUserEmail(sub);
+        const key = email || '__unknown__';
+        const row = rowsByUser.get(key) || createEmptyAuditUserReportRow(email);
+        if (!row.userName || row.userName === 'Unknown User') {
+            row.userName = email ? getUserDisplayName(email) : 'Unknown User';
+        }
+        if (isReachedPfaLifecycle(sub)) {
+            row.sentToPfaCount += 1;
+            row.sentToPfaAmount += getAuditUserReportSentAmount(sub);
+            row.agentNames.add(getSubmissionReportAgentName(sub));
+        }
+        if (isPayableCommissionLifecycle(sub)) {
+            row.payableCommissionCount += 1;
+            row.payableCommissionAmount += getAuditUserReportPayableAmount(sub);
+            row.agentNames.add(getSubmissionReportAgentName(sub));
+        }
+        if (isClearedLifecycle(sub)) {
+            row.clearedCount += 1;
+            row.clearedAmount += getAuditUserReportClearedAmount(sub);
+            row.agentNames.add(getSubmissionReportAgentName(sub));
+        }
+        row.totalCommissionCount = row.payableCommissionCount + row.clearedCount;
+        row.totalCommissionAmount = row.payableCommissionAmount + row.clearedAmount;
+        rowsByUser.set(key, row);
+    });
+
+    return Array.from(rowsByUser.values())
+        .map((row) => ({
+            ...row,
+            agentCount: row.agentNames.size
+        }))
+        .sort((a, b) => b.totalCommissionAmount - a.totalCommissionAmount || b.payableCommissionAmount - a.payableCommissionAmount || b.sentToPfaAmount - a.sentToPfaAmount || b.clearedAmount - a.clearedAmount || b.sentToPfaCount - a.sentToPfaCount || a.userName.localeCompare(b.userName));
+}
+
+function getAuditAgentSummaryRowsForUser(emailKey = '') {
+    const normalizedEmail = normalizeEmail(emailKey);
+    const key = normalizedEmail || '__unknown__';
+    const rowsByAgent = new Map();
+
+    allSubmissions.forEach((sub) => {
+        const userKey = getSubmissionReportUserEmail(sub) || '__unknown__';
+        if (userKey !== key) return;
+        const reachedPfa = isReachedPfaLifecycle(sub);
+        const cleared = isClearedLifecycle(sub);
+        if (!reachedPfa && !cleared) return;
+
+        const agentName = getSubmissionReportAgentName(sub);
+        const agentKey = String(sub.agentId || '').trim() || agentName.toLowerCase();
+        const row = rowsByAgent.get(agentKey) || {
+            agentName,
+            sentToPfaCount: 0,
+            sentToPfaAmount: 0,
+            payableCommissionCount: 0,
+            payableCommissionAmount: 0,
+            clearedCount: 0,
+            clearedAmount: 0,
+            totalCommissionCount: 0,
+            totalCommissionAmount: 0
+        };
+        if (reachedPfa) {
+            row.sentToPfaCount += 1;
+            row.sentToPfaAmount += getAuditUserReportSentAmount(sub);
+        }
+        if (isPayableCommissionLifecycle(sub)) {
+            row.payableCommissionCount += 1;
+            row.payableCommissionAmount += getAuditUserReportPayableAmount(sub);
+        }
+        if (cleared) {
+            row.clearedCount += 1;
+            row.clearedAmount += getAuditUserReportClearedAmount(sub);
+        }
+        row.totalCommissionCount = row.payableCommissionCount + row.clearedCount;
+        row.totalCommissionAmount = row.payableCommissionAmount + row.clearedAmount;
+        rowsByAgent.set(agentKey, row);
+    });
+
+    return Array.from(rowsByAgent.values())
+        .sort((a, b) => b.totalCommissionAmount - a.totalCommissionAmount || b.payableCommissionAmount - a.payableCommissionAmount || b.sentToPfaAmount - a.sentToPfaAmount || b.clearedAmount - a.clearedAmount || b.sentToPfaCount - a.sentToPfaCount || a.agentName.localeCompare(b.agentName));
+}
+
 function getAuditSentToPfaRows() {
     return allSubmissions
         .filter((sub) => isSentToPfaLifecycle(sub))
@@ -1832,6 +2002,102 @@ function renderAuditRejectedRows(body, rows) {
             </tr>
         `;
     }).join('');
+}
+
+function renderCommissionSummaryMetric(count = 0, amount = 0) {
+    return `
+        <div class="commission-summary-metric">
+            <strong>${formatCurrency(amount || 0)}</strong>
+            <span>${escapeHtml(String(count || 0))} application${Number(count || 0) === 1 ? '' : 's'}</span>
+        </div>
+    `;
+}
+
+function renderAuditUserReport() {
+    const rows = getAuditUserReportRows();
+    const activeRows = rows.filter((row) => row.sentToPfaCount > 0 || row.clearedCount > 0);
+    const totalSentAmount = rows.reduce((sum, row) => sum + row.sentToPfaAmount, 0);
+    const totalClearedAmount = rows.reduce((sum, row) => sum + row.clearedAmount, 0);
+
+    if (auditUserReportUserCount) auditUserReportUserCount.textContent = String(activeRows.length);
+    if (auditUserReportSentCount) auditUserReportSentCount.textContent = formatCurrency(totalSentAmount);
+    if (auditUserReportClearedCount) auditUserReportClearedCount.textContent = formatCurrency(totalClearedAmount);
+
+    if (!auditUserReportTableBody) return;
+    auditUserReportTableBody.innerHTML = rows.length
+        ? rows.map((row) => {
+            const encodedEmail = encodeURIComponent(row.emailKey || '');
+            return `
+                <tr>
+                    <td><strong>${escapeHtml(row.userName || 'Unknown User')}</strong></td>
+                    <td>${escapeHtml(row.email || '-')}</td>
+                    <td>${renderCommissionSummaryMetric(row.sentToPfaCount, row.sentToPfaAmount)}</td>
+                    <td>${renderCommissionSummaryMetric(row.payableCommissionCount, row.payableCommissionAmount)}</td>
+                    <td>${renderCommissionSummaryMetric(row.clearedCount, row.clearedAmount)}</td>
+                    <td>${renderCommissionSummaryMetric(row.totalCommissionCount, row.totalCommissionAmount)}</td>
+                    <td>${escapeHtml(String(row.agentCount || 0))}</td>
+                    <td><button type="button" class="action-btn" onclick="window.openAuditUserAgentSummary('${encodedEmail}')"><i class="fas fa-eye"></i> View</button></td>
+                </tr>
+            `;
+        }).join('')
+        : '<tr><td colspan="8" class="no-data">No user report data available</td></tr>';
+}
+
+function openAuditUserAgentSummary(encodedEmailKey = '') {
+    const emailKey = decodeURIComponent(String(encodedEmailKey || ''));
+    const rows = getAuditAgentSummaryRowsForUser(emailKey);
+    const userRow = getAuditUserReportRows().find((row) => row.emailKey === emailKey) || createEmptyAuditUserReportRow(emailKey);
+    const totalSentCount = rows.reduce((sum, row) => sum + row.sentToPfaCount, 0);
+    const totalSentAmount = rows.reduce((sum, row) => sum + row.sentToPfaAmount, 0);
+    const totalPayableCount = rows.reduce((sum, row) => sum + row.payableCommissionCount, 0);
+    const totalPayableAmount = rows.reduce((sum, row) => sum + row.payableCommissionAmount, 0);
+    const totalClearedCount = rows.reduce((sum, row) => sum + row.clearedCount, 0);
+    const totalClearedAmount = rows.reduce((sum, row) => sum + row.clearedAmount, 0);
+    const totalCommissionCount = rows.reduce((sum, row) => sum + row.totalCommissionCount, 0);
+    const totalCommissionAmount = rows.reduce((sum, row) => sum + row.totalCommissionAmount, 0);
+
+    if (auditUserAgentSummaryTitle) {
+        auditUserAgentSummaryTitle.innerHTML = '<i class="fas fa-chart-column"></i> Agent Summary';
+    }
+    if (auditUserAgentSummaryName) {
+        auditUserAgentSummaryName.textContent = userRow.userName || 'User';
+    }
+    if (auditUserAgentSummaryMeta) {
+        auditUserAgentSummaryMeta.textContent = `${userRow.email || '-'} | ${rows.length} agent${rows.length === 1 ? '' : 's'} covered`;
+    }
+    if (auditUserAgentSummaryCards) {
+        auditUserAgentSummaryCards.innerHTML = [
+            { label: 'Sent to PFA', amount: formatCurrency(totalSentAmount), count: totalSentCount, tone: 'sent', icon: 'fa-paper-plane' },
+            { label: 'Payable Commission', amount: formatCurrency(totalPayableAmount), count: totalPayableCount, tone: 'payable', icon: 'fa-money-check-dollar' },
+            { label: 'Cleared', amount: formatCurrency(totalClearedAmount), count: totalClearedCount, tone: 'cleared', icon: 'fa-circle-check' },
+            { label: 'Total Commission', amount: formatCurrency(totalCommissionAmount), count: totalCommissionCount, tone: 'total', icon: 'fa-coins' }
+        ].map((chip) => `
+            <div class="commission-summary-card ${escapeHtml(chip.tone)}">
+                <div class="commission-summary-card-icon"><i class="fas ${escapeHtml(chip.icon)}"></i></div>
+                <span>${escapeHtml(chip.label)}</span>
+                <strong>${escapeHtml(chip.amount)}</strong>
+                <small>${escapeHtml(String(chip.count))} application${Number(chip.count) === 1 ? '' : 's'}</small>
+            </div>
+        `).join('');
+    }
+    if (auditUserAgentSummaryBody) {
+        auditUserAgentSummaryBody.innerHTML = rows.length
+            ? rows.map((row) => `
+                <tr>
+                    <td><strong>${escapeHtml(row.agentName || 'No Agent')}</strong></td>
+                    <td>${renderCommissionSummaryMetric(row.sentToPfaCount, row.sentToPfaAmount)}</td>
+                    <td>${renderCommissionSummaryMetric(row.payableCommissionCount, row.payableCommissionAmount)}</td>
+                    <td>${renderCommissionSummaryMetric(row.clearedCount, row.clearedAmount)}</td>
+                    <td>${renderCommissionSummaryMetric(row.totalCommissionCount, row.totalCommissionAmount)}</td>
+                </tr>
+            `).join('')
+            : '<tr><td colspan="5" class="no-data">No agent summary available for this user</td></tr>';
+    }
+    auditUserAgentSummaryModal?.classList.add('active');
+}
+
+function closeAuditUserAgentSummaryModal() {
+    auditUserAgentSummaryModal?.classList.remove('active');
 }
 
 function renderAuditWorkflowTabs() {
@@ -2394,6 +2660,10 @@ function renderCurrentTab() {
         renderAuditDuplicateIgnoredTable();
         renderAuditDuplicateRejectedTable();
         renderAuditPaidReconciliation();
+        return;
+    }
+    if (currentTab === 'user-report') {
+        renderAuditUserReport();
     }
 }
 
@@ -2420,6 +2690,7 @@ function switchTab(tabId) {
         cleared: 'Cleared',
         rejected: 'Rejected',
         reconciliation: 'Reconciliation',
+        'user-report': 'Commission Summary',
         profile: 'My Profile',
         help: 'Help & SOP'
     };
@@ -2427,9 +2698,9 @@ function switchTab(tabId) {
 }
 
 function ensureDataForTab(tabId) {
-    const dataTabs = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'reconciliation'];
+    const dataTabs = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'reconciliation', 'user-report'];
     if (dataTabs.includes(tabId)) loadUsers();
-    if (dataTabs.includes(tabId)) loadSubmissions({ full: tabId === 'reconciliation' });
+    if (dataTabs.includes(tabId)) loadSubmissions({ full: tabId === 'reconciliation' || tabId === 'user-report' });
 }
 
 function toggleSidebar(open) {
@@ -3840,10 +4111,15 @@ function bindEvents() {
 
     document.getElementById('closeApplicationDetailsModalBtn')?.addEventListener('click', closeApplicationDetailsModal);
     document.getElementById('closeApplicationDetailsModalFooterBtn')?.addEventListener('click', closeApplicationDetailsModal);
+    document.getElementById('closeAuditUserAgentSummaryModalBtn')?.addEventListener('click', closeAuditUserAgentSummaryModal);
+    document.getElementById('closeAuditUserAgentSummaryModalFooterBtn')?.addEventListener('click', closeAuditUserAgentSummaryModal);
     window.addEventListener('click', (e) => {
         if (e.target === applicationDetailsModal) closeApplicationDetailsModal();
+        if (e.target === auditUserAgentSummaryModal) closeAuditUserAgentSummaryModal();
     });
 }
+
+window.openAuditUserAgentSummary = openAuditUserAgentSummary;
 
 function loadUsers() {
     if (usersListenerStarted) return;

@@ -92,6 +92,10 @@
                     <i class="fas fa-scale-balanced"></i>
                     <span>Reconciliation</span>
                 </a>
+                <a href="#" class="nav-item" data-tab="user-report">
+                    <i class="fas fa-users-viewfinder"></i>
+                    <span>Commission Summary</span>
+                </a>
                 <a href="dashboard.html?view=uploader" class="nav-item">
                     <i class="fas fa-upload"></i>
                     <span>Switch to Uploader</span>
@@ -479,6 +483,54 @@
                 </div>
             </div>
 
+            <div id="user-reportTab" class="tab-content">
+                <div class="dashboard-grid">
+                    <div class="stat-card">
+                        <div>
+                            <div class="stat-label">Users Reported</div>
+                            <div class="stat-value" id="auditUserReportUserCount">0</div>
+                        </div>
+                        <i class="fas fa-users stat-icon"></i>
+                    </div>
+                    <div class="stat-card">
+                        <div>
+                            <div class="stat-label">Total Sent to PFA Amount</div>
+                            <div class="stat-value" id="auditUserReportSentCount">NGN 0.00</div>
+                        </div>
+                        <i class="fas fa-paper-plane stat-icon"></i>
+                    </div>
+                    <div class="stat-card">
+                        <div>
+                            <div class="stat-label">Total Cleared Amount</div>
+                            <div class="stat-value" id="auditUserReportClearedCount">NGN 0.00</div>
+                        </div>
+                        <i class="fas fa-circle-check stat-icon"></i>
+                    </div>
+                </div>
+                <div class="table-section">
+                    <div class="audit-table-toolbar">
+                        <h2>Commission Summary</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>Email</th>
+                                    <th>Sent to PFA</th>
+                                    <th>Payable Commission</th>
+                                    <th>Cleared</th>
+                                    <th>Total Commission</th>
+                                    <th>Agents</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditUserReportTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
         </main>
     </div>
 
@@ -499,6 +551,43 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="cancel-btn" id="closeApplicationDetailsModalFooterBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="auditUserAgentSummaryModal" class="modal">
+        <div class="modal-content large-modal commission-summary-modal-content">
+            <div class="modal-header">
+                <h2 id="auditUserAgentSummaryTitle"><i class="fas fa-chart-column"></i> Agent Summary</h2>
+                <button class="close-btn" id="closeAuditUserAgentSummaryModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <section class="commission-summary-view-hero">
+                    <div>
+                        <span>Commission Summary</span>
+                        <h3 id="auditUserAgentSummaryName">-</h3>
+                        <p id="auditUserAgentSummaryMeta"></p>
+                    </div>
+                    <i class="fas fa-coins"></i>
+                </section>
+                <div id="auditUserAgentSummaryCards" class="commission-summary-card-grid"></div>
+                <div class="table-container">
+                    <table class="documents-table">
+                        <thead>
+                            <tr>
+                                <th>Agent</th>
+                                <th>Sent to PFA</th>
+                                <th>Payable Commission</th>
+                                <th>Cleared</th>
+                                <th>Total Commission</th>
+                            </tr>
+                        </thead>
+                        <tbody id="auditUserAgentSummaryBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="closeAuditUserAgentSummaryModalFooterBtn">Close</button>
             </div>
         </div>
     </div>
