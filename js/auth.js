@@ -46,6 +46,9 @@ const loginForm = document.getElementById('loginForm');
 const signupForm = document.getElementById('signupForm');
 const loginFormElement = document.getElementById('loginFormElement');
 const signupFormElement = document.getElementById('signupFormElement');
+const loginSubmitBtn = loginFormElement?.querySelector('.auth-submit-btn');
+const loginEmailInput = document.getElementById('loginEmail');
+const loginPasswordInput = document.getElementById('loginPassword');
 const forgotPasswordBtn = document.getElementById('forgotPasswordBtn');
 const forgotPasswordModal = document.getElementById('forgotPasswordModal');
 const forgotPasswordEmail = document.getElementById('forgotPasswordEmail');
@@ -117,6 +120,25 @@ function showError(message) {
 function hideModal() {
     if (messageModal) {
         messageModal.classList.remove('active');
+    }
+}
+
+function setLoginButtonLoading(isLoading) {
+    if (!loginSubmitBtn) return;
+
+    if (!loginSubmitBtn.dataset.originalHtml) {
+        loginSubmitBtn.dataset.originalHtml = loginSubmitBtn.innerHTML;
+    }
+
+    loginSubmitBtn.disabled = isLoading;
+    loginSubmitBtn.classList.toggle('loading', isLoading);
+    loginSubmitBtn.setAttribute('aria-busy', isLoading ? 'true' : 'false');
+    [loginEmailInput, loginPasswordInput].forEach((input) => {
+        if (input) input.disabled = isLoading;
+    });
+
+    if (!isLoading) {
+        loginSubmitBtn.innerHTML = loginSubmitBtn.dataset.originalHtml || 'Sign In';
     }
 }
 
@@ -744,7 +766,8 @@ if (loginFormElement) {
             return;
         }
 
-        showSpinner('Signing in...');
+        let keepLoginButtonSpinning = false;
+        setLoginButtonLoading(true);
 
         try {
             // Sign in with Firebase
@@ -789,6 +812,7 @@ if (loginFormElement) {
                 }
 
                 // Keep the sign-in spinner visible and route straight to the dashboard.
+                keepLoginButtonSpinning = true;
                 if (userData.role === 'super_admin') {
                     window.location.href = 'super-admin-dashboard.html';
                 } else if (userData.role === 'admin') {
@@ -817,6 +841,10 @@ if (loginFormElement) {
         } catch (error) {
             const emailExists = await checkIfAuthEmailExists(email);
             showError(getReadableLoginErrorMessage(error, emailExists));
+        } finally {
+            if (!keepLoginButtonSpinning) {
+                setLoginButtonLoading(false);
+            }
         }
     });
 }
