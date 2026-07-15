@@ -704,20 +704,41 @@ function getAuditDuplicatePreviousStatus(sub = {}) {
     return String(sub.auditDuplicatePreviousStatus || '').trim().toLowerCase();
 }
 
+function inferAuditDuplicateRestoreStatus(sub = {}) {
+    const status = String(sub.status || '').trim().toLowerCase();
+    if (status === 'cleared' || sub.clearedAt || sub.auditClearedAt || sub.clearedBy) return 'cleared';
+    if (status === 'paid' || sub.paidAt || sub.paidBy || sub.auditCommissionAcceptedAt || sub.auditCommissionAcceptedBy) return 'paid';
+    if (
+        status === 'sent_to_pfa' ||
+        status === 'rsa_submitted' ||
+        sub.finalSubmitted === true ||
+        sub.rsaSubmitted === true ||
+        sub.finalSubmittedAt ||
+        sub.rsaSubmittedAt ||
+        sub.paymentAssignedAt ||
+        sub.assignedToPayment
+    ) {
+        return 'sent_to_pfa';
+    }
+    if (status === 'processing_to_pfa' || status === 'approved' || sub.rsaReady === true || sub.assignedToRSA) {
+        return 'processing_to_pfa';
+    }
+    return '';
+}
+
 function shouldRestoreAuditDuplicateCorrection(sub = {}) {
-    const previousStatus = getAuditDuplicatePreviousStatus(sub);
-    if (!previousStatus) return false;
+    const restoredStatus = inferAuditDuplicateRestoreStatus(sub) || getAuditDuplicatePreviousStatus(sub);
+    if (!restoredStatus) return false;
     if (sub.auditDuplicateRejected !== true && !sub.auditDuplicateRejectionReason) return false;
     const currentStatus = String(sub.status || '').trim().toLowerCase();
     if (isAuditDuplicateCorrectionPending(sub)) return true;
-    if (currentStatus === 'pending' && !['pending', 'submitted', 'resubmitted'].includes(previousStatus)) return true;
-    return false;
+    return currentStatus !== restoredStatus && ['pending', 'rejected'].includes(currentStatus);
 }
 
 function restoreAuditDuplicateCorrections(rows = []) {
     rows.filter(shouldRestoreAuditDuplicateCorrection).forEach((sub) => {
         const submissionId = String(sub.id || '').trim();
-        const restoredStatus = getAuditDuplicatePreviousStatus(sub);
+        const restoredStatus = inferAuditDuplicateRestoreStatus(sub) || getAuditDuplicatePreviousStatus(sub);
         if (!submissionId || !restoredStatus || auditDuplicateRestoreInFlight.has(submissionId)) return;
         auditDuplicateRestoreInFlight.add(submissionId);
         updateDoc(doc(db, 'submissions', submissionId), {
@@ -1206,7 +1227,8 @@ function getAuditDuplicateCorrectionLabel(sub = {}) {
 }
 
 function getAuditDuplicateReturnedToLabel(sub = {}) {
-    const restoredStatus = String(sub.auditDuplicateRestoredStatus || '').trim()
+    const restoredStatus = inferAuditDuplicateRestoreStatus(sub)
+        || String(sub.auditDuplicateRestoredStatus || '').trim()
         || String(sub.auditDuplicatePreviousStatus || '').trim()
         || String(sub.status || '').trim();
     return statusLabel(restoredStatus || '-');

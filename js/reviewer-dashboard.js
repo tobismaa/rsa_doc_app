@@ -227,22 +227,43 @@ function getAuditDuplicatePreviousStatus(submission = {}) {
     return String(submission.auditDuplicatePreviousStatus || '').trim().toLowerCase();
 }
 
+function inferAuditDuplicateRestoreStatus(submission = {}) {
+    const status = String(submission.status || '').trim().toLowerCase();
+    if (status === 'cleared' || submission.clearedAt || submission.auditClearedAt || submission.clearedBy) return 'cleared';
+    if (status === 'paid' || submission.paidAt || submission.paidBy || submission.auditCommissionAcceptedAt || submission.auditCommissionAcceptedBy) return 'paid';
+    if (
+        status === 'sent_to_pfa' ||
+        status === 'rsa_submitted' ||
+        submission.finalSubmitted === true ||
+        submission.rsaSubmitted === true ||
+        submission.finalSubmittedAt ||
+        submission.rsaSubmittedAt ||
+        submission.paymentAssignedAt ||
+        submission.assignedToPayment
+    ) {
+        return 'sent_to_pfa';
+    }
+    if (status === 'processing_to_pfa' || status === 'approved' || submission.rsaReady === true || submission.assignedToRSA) {
+        return 'processing_to_pfa';
+    }
+    return '';
+}
+
 function shouldRestoreAuditDuplicateCorrection(submission = {}) {
-    const previousStatus = getAuditDuplicatePreviousStatus(submission);
-    if (!previousStatus) return false;
+    const restoredStatus = inferAuditDuplicateRestoreStatus(submission) || getAuditDuplicatePreviousStatus(submission);
+    if (!restoredStatus) return false;
     if (submission.auditDuplicateRejected !== true && !submission.auditDuplicateRejectionReason) return false;
     const currentStatus = String(submission.status || '').trim().toLowerCase();
     const correctionStatus = String(submission.auditDuplicateCorrectionStatus || '').trim().toLowerCase();
     if (currentStatus === 'audit_pending') return true;
     if (correctionStatus === 'pending') return true;
-    if (currentStatus === 'pending' && !['pending', 'submitted', 'resubmitted'].includes(previousStatus)) return true;
-    return false;
+    return currentStatus !== restoredStatus && ['pending', 'rejected'].includes(currentStatus);
 }
 
 async function restoreAuditDuplicateCorrectionIfNeeded(docSnap) {
     const data = docSnap?.data?.() || {};
     if (!shouldRestoreAuditDuplicateCorrection(data)) return false;
-    const restoredStatus = getAuditDuplicatePreviousStatus(data);
+    const restoredStatus = inferAuditDuplicateRestoreStatus(data) || getAuditDuplicatePreviousStatus(data);
     if (!restoredStatus) return false;
     try {
         await updateDoc(doc(db, 'submissions', docSnap.id), {

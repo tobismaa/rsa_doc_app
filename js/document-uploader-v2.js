@@ -4504,26 +4504,51 @@ function isAuditDuplicateRejectedSubmission(existingSub = {}) {
     && (rejectedStage === 'audit' || existingSub.auditDuplicateRejected === true || existingSub.auditDuplicateRejectionReason);
 }
 
+function inferAuditDuplicateRestoreStatus(submission = {}) {
+  const status = String(submission.status || '').trim().toLowerCase();
+  if (status === 'cleared' || submission.clearedAt || submission.auditClearedAt || submission.clearedBy) return 'cleared';
+  if (status === 'paid' || submission.paidAt || submission.paidBy || submission.auditCommissionAcceptedAt || submission.auditCommissionAcceptedBy) return 'paid';
+  if (
+    status === 'sent_to_pfa' ||
+    status === 'rsa_submitted' ||
+    submission.finalSubmitted === true ||
+    submission.rsaSubmitted === true ||
+    submission.finalSubmittedAt ||
+    submission.rsaSubmittedAt ||
+    submission.paymentAssignedAt ||
+    submission.assignedToPayment
+  ) {
+    return 'sent_to_pfa';
+  }
+  if (status === 'processing_to_pfa' || status === 'approved' || submission.rsaReady === true || submission.assignedToRSA) {
+    return 'processing_to_pfa';
+  }
+  return '';
+}
+
+function getAuditDuplicateStoredPreviousStatus(submission = {}) {
+  return String(submission.auditDuplicatePreviousStatus || '').trim().toLowerCase();
+}
+
 function getAuditDuplicateRestoreStatus(existingSub = {}) {
   if (!isAuditDuplicateRejectedSubmission(existingSub)) return '';
-  const previousStatus = String(existingSub.auditDuplicatePreviousStatus || '').trim().toLowerCase();
-  return previousStatus || 'pending';
+  return inferAuditDuplicateRestoreStatus(existingSub) || getAuditDuplicateStoredPreviousStatus(existingSub) || 'pending';
 }
 
 function shouldRestoreMisroutedAuditDuplicateCorrection(submission = {}) {
-  const previousStatus = String(submission.auditDuplicatePreviousStatus || '').trim().toLowerCase();
-  if (!previousStatus) return false;
+  const restoredStatus = inferAuditDuplicateRestoreStatus(submission) || getAuditDuplicateStoredPreviousStatus(submission);
+  if (!restoredStatus) return false;
   if (submission.auditDuplicateRejected !== true && !submission.auditDuplicateRejectionReason) return false;
   const currentStatus = String(submission.status || '').trim().toLowerCase();
   const correctionStatus = String(submission.auditDuplicateCorrectionStatus || '').trim().toLowerCase();
   if (currentStatus === 'audit_pending' || correctionStatus === 'pending') return true;
-  return currentStatus === 'pending' && !['pending', 'submitted', 'resubmitted'].includes(previousStatus);
+  return currentStatus !== restoredStatus && ['pending', 'rejected'].includes(currentStatus);
 }
 
 function restoreMisroutedAuditDuplicateCorrections(rows = []) {
   rows.filter(shouldRestoreMisroutedAuditDuplicateCorrection).forEach((submission) => {
     const submissionId = String(submission.id || '').trim();
-    const restoredStatus = String(submission.auditDuplicatePreviousStatus || '').trim().toLowerCase();
+    const restoredStatus = inferAuditDuplicateRestoreStatus(submission) || getAuditDuplicateStoredPreviousStatus(submission);
     if (!submissionId || !restoredStatus || auditDuplicateRestoreInFlight.has(submissionId)) return;
     auditDuplicateRestoreInFlight.add(submissionId);
     updateDoc(doc(db, 'submissions', submissionId), {
