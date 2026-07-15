@@ -255,9 +255,11 @@ function shouldRestoreAuditDuplicateCorrection(submission = {}) {
     if (submission.auditDuplicateRejected !== true && !submission.auditDuplicateRejectionReason) return false;
     const currentStatus = String(submission.status || '').trim().toLowerCase();
     const correctionStatus = String(submission.auditDuplicateCorrectionStatus || '').trim().toLowerCase();
+    const hasCorrectionSignal = currentStatus === 'audit_pending' || correctionStatus === 'pending' || Boolean(submission.auditDuplicateResubmittedAt);
+    if (!hasCorrectionSignal) return false;
     if (currentStatus === 'audit_pending') return true;
     if (correctionStatus === 'pending') return true;
-    return currentStatus !== restoredStatus && ['pending', 'rejected'].includes(currentStatus);
+    return currentStatus !== restoredStatus && currentStatus === 'pending';
 }
 
 async function restoreAuditDuplicateCorrectionIfNeeded(docSnap) {

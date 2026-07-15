@@ -71,6 +71,7 @@ let auditPaidReconciliationFileName = '';
 let auditPaidReconciliationSelectedSubmissionIds = [];
 let auditPaidReconciliationActiveResultsTab = 'matched';
 let currentAuditRejectedScope = 'rejected';
+let currentAuditDuplicateHistoryFilter = 'all';
 let usersListenerStarted = false;
 let submissionsListenerMode = '';
 let submissionListenerUnsubs = [];
@@ -111,6 +112,7 @@ const auditDuplicateIgnoredWrap = document.getElementById('auditDuplicateIgnored
 const auditDuplicateIgnoredBody = document.getElementById('auditDuplicateIgnoredBody');
 const auditDuplicateRejectedWrap = document.getElementById('auditDuplicateRejectedWrap');
 const auditDuplicateRejectedBody = document.getElementById('auditDuplicateRejectedBody');
+const auditDuplicateHistoryFilter = document.getElementById('auditDuplicateHistoryFilter');
 const auditUserReportTableBody = document.getElementById('auditUserReportTableBody');
 const auditUserReportUserCount = document.getElementById('auditUserReportUserCount');
 const auditUserReportSentCount = document.getElementById('auditUserReportSentCount');
@@ -691,8 +693,16 @@ function getAuditableDuplicateSubmissions() {
     return allSubmissions.filter((sub) => {
         const status = String(sub.status || '').toLowerCase();
         if (sub.auditDuplicateIgnored === true) return false;
+        if (sub.auditDuplicateRejected === true || sub.auditDuplicateDeleted === true || sub.auditDuplicateCorrectionStatus === 'corrected') return false;
         return !ignoredStatuses.has(status);
     });
+}
+
+function isAuditDuplicateHandled(sub = {}) {
+    return sub.auditDuplicateIgnored === true ||
+        sub.auditDuplicateRejected === true ||
+        sub.auditDuplicateDeleted === true ||
+        String(sub.auditDuplicateCorrectionStatus || '').trim().toLowerCase() === 'corrected';
 }
 
 function isAuditDuplicateCorrectionPending(sub = {}) {
@@ -731,8 +741,10 @@ function shouldRestoreAuditDuplicateCorrection(sub = {}) {
     if (!restoredStatus) return false;
     if (sub.auditDuplicateRejected !== true && !sub.auditDuplicateRejectionReason) return false;
     const currentStatus = String(sub.status || '').trim().toLowerCase();
+    const hasCorrectionSignal = isAuditDuplicateCorrectionPending(sub) || Boolean(sub.auditDuplicateResubmittedAt);
+    if (!hasCorrectionSignal) return false;
     if (isAuditDuplicateCorrectionPending(sub)) return true;
-    return currentStatus !== restoredStatus && ['pending', 'rejected'].includes(currentStatus);
+    return currentStatus !== restoredStatus && currentStatus === 'pending';
 }
 
 function restoreAuditDuplicateCorrections(rows = []) {
@@ -813,6 +825,7 @@ function buildAuditDuplicateScanResult() {
     };
 
     const ignoredCorrectionCount = allSubmissions.filter(isAuditDuplicateIgnoredCorrectionCopy).length;
+    const handledDuplicateCount = allSubmissions.filter(isAuditDuplicateHandled).length;
     const auditableRows = getAuditableDuplicateSubmissions();
     auditableRows.forEach((sub) => {
         const accountKey = normalizeAccountNumber(getCustomerAccountNumber(sub));
@@ -868,6 +881,7 @@ function buildAuditDuplicateScanResult() {
     return {
         scannedCount: auditableRows.length,
         ignoredCorrectionCount,
+        handledDuplicateCount,
         groups,
         duplicateCount: duplicateApplicationIds.size,
         strongGroupCount: groups.filter((group) => group.strength === 'strong').length,
@@ -1138,6 +1152,7 @@ function renderAuditDuplicateScan() {
         auditDuplicateScanSummary.innerHTML = [
             { label: 'System Records Scanned', value: auditDuplicateScanResult.scannedCount },
             { label: 'Rejected Corrections Ignored', value: auditDuplicateScanResult.ignoredCorrectionCount || 0 },
+            { label: 'Handled History', value: auditDuplicateScanResult.handledDuplicateCount || 0 },
             { label: 'Duplicate Groups', value: groups.length },
             { label: 'Applications Affected', value: auditDuplicateScanResult.duplicateCount },
             { label: 'Strong Signals', value: auditDuplicateScanResult.strongGroupCount },
@@ -1209,16 +1224,29 @@ function getAuditDuplicateIgnoredRows() {
         .sort((a, b) => getTimestampMillis(b.auditDuplicateIgnoredAt || b.updatedAt) - getTimestampMillis(a.auditDuplicateIgnoredAt || a.updatedAt));
 }
 
+function normalizeAuditDuplicateHistoryFilter(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return ['corrected', 'awaiting'].includes(normalized) ? normalized : 'all';
+}
+
+function getAuditDuplicateCorrectionState(sub = {}) {
+    const correctionStatus = String(sub.auditDuplicateCorrectionStatus || '').trim().toLowerCase();
+    const correctedAt = sub.auditDuplicateResubmittedAt || null;
+    return correctedAt || (correctionStatus === 'corrected' && sub.auditDuplicateResubmittedBy) ? 'corrected' : 'awaiting';
+}
+
 function getAuditDuplicateRejectedRows() {
+    const filter = normalizeAuditDuplicateHistoryFilter(currentAuditDuplicateHistoryFilter);
     return allSubmissions
         .filter((sub) => sub.auditDuplicateRejected === true)
+        .filter((sub) => filter === 'all' || getAuditDuplicateCorrectionState(sub) === filter)
         .sort((a, b) => getTimestampMillis(b.auditDuplicateRejectedAt || b.latestRejectedAt || b.updatedAt) - getTimestampMillis(a.auditDuplicateRejectedAt || a.latestRejectedAt || a.updatedAt));
 }
 
 function getAuditDuplicateCorrectionLabel(sub = {}) {
     const correctionStatus = String(sub.auditDuplicateCorrectionStatus || '').trim().toLowerCase();
-    const correctedAt = sub.auditDuplicateResubmittedAt || sub.auditDuplicateAutoRestoredAt || null;
-    if (correctionStatus === 'corrected' || correctedAt) {
+    const correctedAt = sub.auditDuplicateResubmittedAt || null;
+    if (correctedAt || (correctionStatus === 'corrected' && sub.auditDuplicateResubmittedBy)) {
         const correctedBy = getUserDisplayName(sub.auditDuplicateResubmittedBy || sub.uploadedBy || '');
         const correctedAtText = correctedAt ? formatDate(correctedAt) : '-';
         return `Corrected by ${correctedBy || '-'} at ${correctedAtText}`;
@@ -1261,7 +1289,14 @@ function renderAuditDuplicateIgnoredTable() {
 
 function renderAuditDuplicateRejectedTable() {
     if (!auditDuplicateRejectedWrap || !auditDuplicateRejectedBody) return;
+    currentAuditDuplicateHistoryFilter = normalizeAuditDuplicateHistoryFilter(currentAuditDuplicateHistoryFilter);
+    if (auditDuplicateHistoryFilter) auditDuplicateHistoryFilter.value = currentAuditDuplicateHistoryFilter;
     const rows = getAuditDuplicateRejectedRows();
+    const emptyMessage = currentAuditDuplicateHistoryFilter === 'corrected'
+        ? 'No corrected duplicate correction history'
+        : currentAuditDuplicateHistoryFilter === 'awaiting'
+            ? 'No duplicate applications awaiting correction'
+            : 'No duplicate correction history';
     auditDuplicateRejectedWrap.style.display = 'block';
     auditDuplicateRejectedBody.innerHTML = rows.length
         ? rows.map((sub) => `
@@ -1283,7 +1318,7 @@ function renderAuditDuplicateRejectedTable() {
                 </td>
             </tr>
         `).join('')
-        : '<tr><td colspan="10" class="no-data">No duplicate correction history</td></tr>';
+        : `<tr><td colspan="10" class="no-data">${emptyMessage}</td></tr>`;
     syncAuditReconciliationViewVisibility();
 }
 
@@ -3889,6 +3924,10 @@ function bindEvents() {
     });
     document.querySelectorAll('[data-audit-reconciliation-view]').forEach((button) => {
         button.addEventListener('click', () => showAuditReconciliationView(button.dataset.auditReconciliationView || 'excel'));
+    });
+    auditDuplicateHistoryFilter?.addEventListener('change', () => {
+        currentAuditDuplicateHistoryFilter = normalizeAuditDuplicateHistoryFilter(auditDuplicateHistoryFilter.value);
+        renderAuditDuplicateRejectedTable();
     });
     auditReconciliationTemplateBtn?.addEventListener('click', async () => {
         const originalHtml = auditReconciliationTemplateBtn.innerHTML;
