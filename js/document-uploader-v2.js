@@ -1256,9 +1256,10 @@ let __batchFilesBuffer = [];
 let currentCommissionTab = 'sent_to_pfa';
 let currentUploaderApplicationTab = 'draft';
 let currentUploaderPaidScope = 'mine';
+let uploaderApplicationsRenderId = 0;
 let submissionInProgress = false;
 const UPLOADER_DASHBOARD_TABS = ['overview', 'draft', 'applications', 'pending', 'approved', 'rejected', 'paid', 'register-agent', 'profile', 'help'];
-const UPLOADER_APPLICATION_TABS = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'audit', 'paid', 'cleared', 'deleted'];
+const UPLOADER_APPLICATION_TABS = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'audit', 'paid', 'cleared'];
 let registeredAgents = [];
 let agentAccountLookupSequence = 0;
 let agentAccountLookupDebounce = null;
@@ -5782,7 +5783,7 @@ function getUploaderApplicationCounts() {
     const bucket = getUploaderApplicationBucket(sub);
     if (bucket && Object.prototype.hasOwnProperty.call(acc, bucket) && isVisibleUploaderApplicationForTab(sub, bucket)) acc[bucket] += 1;
     return acc;
-  }, { draft: 0, pending: 0, approved: 0, rejected: 0, sent_to_pfa: 0, audit: 0, paid: 0, cleared: 0, deleted: 0 });
+  }, { draft: 0, pending: 0, approved: 0, rejected: 0, sent_to_pfa: 0, audit: 0, paid: 0, cleared: 0 });
 }
 
 function getUploaderDeletedReason(submission = {}) {
@@ -5881,8 +5882,7 @@ function renderUploaderApplicationBadges() {
     appSentToPfaCount: counts.sent_to_pfa,
     appAuditCount: counts.audit,
     appPaidCount: counts.paid,
-    appClearedCount: counts.cleared,
-    appDeletedCount: counts.deleted
+    appClearedCount: counts.cleared
   };
   Object.entries(badgeMap).forEach(([id, value]) => {
     const badge = document.getElementById(id);
@@ -5916,26 +5916,46 @@ function getUploaderSubmissionDocsButtonHtml(submissionId, label = 'Docs') {
 }
 
 async function renderUploaderApplicationsTable() {
+  const renderId = ++uploaderApplicationsRenderId;
+  const renderTab = currentUploaderApplicationTab;
+  const renderPaidScope = currentUploaderPaidScope;
+  const isCurrentRender = () => (
+    renderId === uploaderApplicationsRenderId &&
+    currentUploaderApplicationTab === renderTab &&
+    (renderTab !== 'paid' || currentUploaderPaidScope === renderPaidScope)
+  );
+  const writeRows = (html) => {
+    if (!isCurrentRender() || !applicationsTableBody) return false;
+    applicationsTableBody.innerHTML = html;
+    return true;
+  };
+  const writeEmptyRows = (label) => {
+    const text = renderTab === 'paid'
+      ? `No ${label}`
+      : `No ${label} applications`;
+    return writeRows(`<tr><td colspan="${getUploaderApplicationColumnCount()}" class="no-data">${escapeHtml(text)}</td></tr>`);
+  };
+
   renderUploaderApplicationBadges();
   if (!applicationsTableBody) return;
 
   const activeCommissionScopeStrip = document.getElementById('activeCommissionScopeStrip');
   if (activeCommissionScopeStrip) {
-    activeCommissionScopeStrip.style.display = currentUploaderApplicationTab === 'paid' ? 'flex' : 'none';
+    activeCommissionScopeStrip.style.display = renderTab === 'paid' ? 'flex' : 'none';
     activeCommissionScopeStrip.querySelectorAll('[data-active-commission-scope]').forEach((button) => {
-      button.classList.toggle('active', button.dataset.activeCommissionScope === currentUploaderPaidScope);
+      button.classList.toggle('active', button.dataset.activeCommissionScope === renderPaidScope);
     });
   }
 
-  const rows = getUploaderApplicationRows();
+  const rows = getUploaderApplicationRows(renderTab);
 
-  if (currentUploaderApplicationTab === 'draft') {
+  if (renderTab === 'draft') {
     setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Documents', 'Last Saved', 'Action']);
     if (!rows.length) {
-      renderUploaderApplicationsEmpty('draft');
+      writeEmptyRows('draft');
       return;
     }
-    applicationsTableBody.innerHTML = rows.map((sub) => {
+    writeRows(rows.map((sub) => {
       const docCount = Array.isArray(sub.documents) ? sub.documents.length : 0;
       return `
         <tr data-submission-id="${sub.id}">
@@ -5950,14 +5970,14 @@ async function renderUploaderApplicationsTable() {
           </td>
         </tr>
       `;
-    }).join('');
+    }).join(''));
     return;
   }
 
-  if (currentUploaderApplicationTab === 'pending') {
+  if (renderTab === 'pending') {
     setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Contact (WhatsApp)', 'Current Handler', 'Current Stage Entry', 'Comment', 'View', 'Track']);
     if (!rows.length) {
-      renderUploaderApplicationsEmpty('pending');
+      writeEmptyRows('pending');
       return;
     }
     let html = '';
@@ -5968,14 +5988,14 @@ async function renderUploaderApplicationsTable() {
       const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
       html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${escapeHtml(sub.comment || '-')}</td><td>${getUploaderSubmissionDetailsButtonHtml(sub.id)} ${getUploaderSubmissionDocsButtonHtml(sub.id)} <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
     }
-    applicationsTableBody.innerHTML = html;
+    writeRows(html);
     return;
   }
 
-  if (currentUploaderApplicationTab === 'approved') {
+  if (renderTab === 'approved') {
     setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Contact (WhatsApp)', 'Assigned To', 'Upload Date/Time', 'Approved By', 'Approved Date/Time', 'View', 'Track']);
     if (!rows.length) {
-      renderUploaderApplicationsEmpty('approved');
+      writeEmptyRows('approved');
       return;
     }
     let html = '';
@@ -5989,14 +6009,14 @@ async function renderUploaderApplicationsTable() {
       const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
       html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${whatsapp}</td><td>${escapeHtml(assignedName || '-')}</td><td>${uploadDate}</td><td>${escapeHtml(approvedBy || '-')}</td><td>${approvedDate}</td><td>${getUploaderSubmissionDetailsButtonHtml(sub.id)} ${getUploaderSubmissionDocsButtonHtml(sub.id)} <button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
     }
-    applicationsTableBody.innerHTML = html;
+    writeRows(html);
     return;
   }
 
-  if (currentUploaderApplicationTab === 'rejected') {
+  if (renderTab === 'rejected') {
     setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Chat', 'Resubmit Count', 'Assigned To', 'Upload Date/Time', 'Rejection Details', 'Action', 'View', 'Track']);
     if (!rows.length) {
-      renderUploaderApplicationsEmpty('rejected');
+      writeEmptyRows('rejected');
       return;
     }
     let html = '';
@@ -6023,14 +6043,14 @@ async function renderUploaderApplicationsTable() {
         : `<button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-paper-plane"></i> Resubmit</button>`;
       html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${reasonBtn}</td><td>${actionCell}</td><td>${getUploaderSubmissionDetailsButtonHtml(sub.id)} ${getUploaderSubmissionDocsButtonHtml(sub.id)}</td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
     }
-    applicationsTableBody.innerHTML = html;
+    writeRows(html);
     return;
   }
 
-  if (currentUploaderApplicationTab === 'deleted') {
+  if (renderTab === 'deleted') {
     setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Deleted By', 'Deleted Date/Time', 'Uploaded Date/Time', 'Reason']);
     if (!rows.length) {
-      renderUploaderApplicationsEmpty('deleted');
+      writeEmptyRows('deleted');
       return;
     }
     let html = '';
@@ -6052,20 +6072,20 @@ async function renderUploaderApplicationsTable() {
         </tr>
       `;
     }
-    applicationsTableBody.innerHTML = html;
+    writeRows(html);
     return;
   }
 
   setUploaderApplicationsColumns(
-    currentUploaderApplicationTab === 'paid'
+    renderTab === 'paid'
       ? ['Customer Name', 'Agent', 'PFA', 'Uploaded By', 'Time Entered', 'Current Officer', 'Action']
       : ['Customer Name', 'Agent', 'PFA', 'Time Entered', 'Current Officer', 'Action']
   );
   if (!rows.length) {
-    const label = currentUploaderApplicationTab === 'paid'
-      ? getActiveCommissionScopeLabel()
-      : currentUploaderApplicationTab.replace(/_/g, ' ');
-    renderUploaderApplicationsEmpty(label);
+    const label = renderTab === 'paid'
+      ? getActiveCommissionScopeLabel(renderPaidScope)
+      : renderTab.replace(/_/g, ' ');
+    writeEmptyRows(label);
     return;
   }
 
@@ -6073,15 +6093,15 @@ async function renderUploaderApplicationsTable() {
   for (const sub of rows) {
     const status = String(sub.status || '').toLowerCase();
     const auditStatus = String(sub.auditCommissionStatus || '').toLowerCase();
-    const canReportPayment = currentUploaderApplicationTab === 'sent_to_pfa' && auditStatus !== 'pending';
-    const paymentButton = currentUploaderApplicationTab === 'sent_to_pfa'
+    const canReportPayment = renderTab === 'sent_to_pfa' && auditStatus !== 'pending';
+    const paymentButton = renderTab === 'sent_to_pfa'
       ? `<button class="action-btn view-btn-small" ${canReportPayment ? '' : 'disabled'} onclick="window.markUploaderPaymentMade('${sub.id}')"><i class="fas fa-money-bill-wave"></i> ${auditStatus === 'pending' ? 'Reported' : 'Payment Made'}</button>`
       : '';
-    const auditLabel = currentUploaderApplicationTab === 'audit'
+    const auditLabel = renderTab === 'audit'
       ? '<span class="audit-pending-pill"><i class="fas fa-hourglass-half"></i> Pending Audit</span>'
       : '';
     const residentOfficer = await getUploaderPaymentResidentOfficer(sub);
-    const uploadedByCell = currentUploaderApplicationTab === 'paid'
+    const uploadedByCell = renderTab === 'paid'
       ? `<td>${escapeHtml(isOwnUploaderSubmission(sub) ? 'Me' : (sub.uploadedBy || '-'))}</td>`
       : '';
     html += `
@@ -6102,7 +6122,7 @@ async function renderUploaderApplicationsTable() {
       </tr>
     `;
   }
-  applicationsTableBody.innerHTML = html;
+  writeRows(html);
 }
 
 function switchUploaderApplicationTab(tab = 'pending') {
