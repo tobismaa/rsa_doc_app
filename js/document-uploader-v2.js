@@ -5663,11 +5663,10 @@ window.deleteDraftSubmission = async (id) => {
 };
 
 function updateDashboardCards() {
-  const ownSubmissions = allSubmissions.filter(isOwnUploaderSubmission);
-  const draft = ownSubmissions.filter(s => String(s.status || '').toLowerCase() === 'draft').length;
-  const pending = ownSubmissions.filter(s => s.status === 'pending').length;
-  const approved = ownSubmissions.filter((s) => getUploaderApplicationBucket(s) === 'approved').length;
   const applicationCounts = getUploaderApplicationCounts();
+  const draft = applicationCounts.draft;
+  const pending = applicationCounts.pending;
+  const approved = applicationCounts.approved;
   const rejected = applicationCounts.rejected;
   const paid = applicationCounts.paid;
   const applicationsTotal = Object.values(applicationCounts).reduce((sum, value) => sum + value, 0);
@@ -5721,9 +5720,11 @@ function getUploaderApplicationBucket(submission = {}) {
   const status = String(submission.status || '').toLowerCase();
   const auditStatus = String(submission.auditCommissionStatus || '').toLowerCase();
   const auditDuplicateCorrectionStatus = String(submission.auditDuplicateCorrectionStatus || '').toLowerCase();
+  const isAwaitingAuditDuplicateCorrection = auditDuplicateCorrectionStatus === 'pending';
   if (status === 'deleted') return 'deleted';
   if (status === 'draft') return 'draft';
-  if (status === 'audit_pending' || auditDuplicateCorrectionStatus === 'pending') return 'audit';
+  if (isAwaitingAuditDuplicateCorrection && status !== 'audit_pending') return 'rejected';
+  if (status === 'audit_pending') return 'audit';
   if (status === 'pending') return 'pending';
   if (auditStatus === 'rejected') return 'rejected';
   if (status === 'rejected' || status === 'rejected_by_rsa') return 'rejected';
@@ -5787,9 +5788,10 @@ function getSubmissionPfaName(submission = {}) {
 function getUploaderAuditNote(submission = {}) {
   const auditStatus = String(submission.auditCommissionStatus || '').toLowerCase();
   const auditDuplicateCorrectionStatus = String(submission.auditDuplicateCorrectionStatus || '').toLowerCase();
-  if (String(submission.status || '').toLowerCase() === 'audit_pending' || auditDuplicateCorrectionStatus === 'pending') {
+  if (String(submission.status || '').toLowerCase() === 'audit_pending') {
     return 'Correction resubmitted to Audit';
   }
+  if (auditDuplicateCorrectionStatus === 'pending') return 'Awaiting uploader correction';
   if (auditStatus === 'pending') return 'Payment made submitted to Audit';
   if (auditStatus === 'accepted') return 'Accepted by Audit';
   if (auditStatus === 'rejected') {
