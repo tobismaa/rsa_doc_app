@@ -5716,12 +5716,26 @@ function isUploaderSentToPfaStatus(submission = {}) {
   );
 }
 
+function isUploaderDeletedApplication(submission = {}) {
+  const status = String(submission.status || '').trim().toLowerCase();
+  const hasDeleteEvidence = submission.auditDuplicateDeleted === true ||
+    Boolean(
+      submission.deletedAt ||
+      submission.deletedBy ||
+      submission.deletedReason ||
+      submission.auditDuplicateDeletedAt ||
+      submission.auditDuplicateDeletedBy ||
+      submission.auditDuplicateDeleteReason
+    );
+  return status === 'deleted' && hasDeleteEvidence;
+}
+
 function getUploaderApplicationBucket(submission = {}) {
-  const status = String(submission.status || '').toLowerCase();
-  const auditStatus = String(submission.auditCommissionStatus || '').toLowerCase();
-  const auditDuplicateCorrectionStatus = String(submission.auditDuplicateCorrectionStatus || '').toLowerCase();
+  const status = String(submission.status || '').trim().toLowerCase();
+  const auditStatus = String(submission.auditCommissionStatus || '').trim().toLowerCase();
+  const auditDuplicateCorrectionStatus = String(submission.auditDuplicateCorrectionStatus || '').trim().toLowerCase();
   const isAwaitingAuditDuplicateCorrection = auditDuplicateCorrectionStatus === 'pending';
-  if (status === 'deleted') return 'deleted';
+  if (isUploaderDeletedApplication(submission)) return 'deleted';
   if (status === 'draft') return 'draft';
   if (isAwaitingAuditDuplicateCorrection && status !== 'audit_pending') return 'rejected';
   if (status === 'audit_pending') return 'audit';
@@ -5776,7 +5790,6 @@ function getUploaderDeletedReason(submission = {}) {
     submission.deletedReason ||
     submission.auditDuplicateDeleteReason ||
     submission.deleteReason ||
-    submission.comment ||
     ''
   ).trim() || 'No reason provided';
 }
@@ -6024,7 +6037,9 @@ async function renderUploaderApplicationsTable() {
     for (const sub of rows) {
       const deletedByKey = normalizeEmail(sub.deletedBy || sub.auditDuplicateDeletedBy || '');
       const deletedBy = deletedByKey ? await getUserFullName(deletedByKey) : '-';
-      const deletedAt = safeFormatDate(sub.deletedAt || sub.auditDuplicateDeletedAt || sub.updatedAt);
+      const deletedAt = sub.deletedAt || sub.auditDuplicateDeletedAt
+        ? safeFormatDate(sub.deletedAt || sub.auditDuplicateDeletedAt)
+        : 'N/A';
       const uploadedAt = safeFormatDate(getSubmissionOriginalUploadAt(sub));
       html += `
         <tr data-submission-id="${sub.id}">

@@ -343,6 +343,7 @@
                             <button type="button" class="admin-subtab-btn active" data-audit-reconciliation-view="excel" role="tab" aria-selected="true">Excel Match</button>
                             <button type="button" class="admin-subtab-btn" data-audit-reconciliation-view="duplicates" role="tab" aria-selected="false">Duplicates</button>
                             <button type="button" class="admin-subtab-btn" data-audit-reconciliation-view="ignored" role="tab" aria-selected="false">Ignored</button>
+                            <button type="button" class="admin-subtab-btn" data-audit-reconciliation-view="deleted" role="tab" aria-selected="false">Deleted</button>
                             <button type="button" class="admin-subtab-btn" data-audit-reconciliation-view="rejected" role="tab" aria-selected="false">History</button>
                         </div>
                     </div>
@@ -410,6 +411,29 @@
                                 </tr>
                             </thead>
                             <tbody id="auditDuplicateIgnoredBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="table-section audit-reconciliation-view" id="auditDuplicateDeletedWrap" data-audit-reconciliation-panel="deleted" style="display:none;">
+                    <div class="audit-table-toolbar">
+                        <h2>Deleted Duplicate Applications</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Customer</th>
+                                    <th>Account</th>
+                                    <th>PEN</th>
+                                    <th>Uploader</th>
+                                    <th>Deleted By</th>
+                                    <th>Deleted At</th>
+                                    <th>Reason</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditDuplicateDeletedBody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -834,7 +858,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/reports-monitoring.js?v=20260715g"></script>
+    <script type="module" src="js/reports-monitoring.js?v=20260716a"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260715a"></script>
 </body>
 </html>

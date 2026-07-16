@@ -35,7 +35,7 @@ let auditRenderTimer = null;
 let currentTab = 'overview';
 const AUDIT_DASHBOARD_TABS = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'reconciliation', 'user-report', 'profile', 'help'];
 const AUDIT_BULK_CLEAR_BATCH_SIZE = 200;
-const AUDIT_RECONCILIATION_VIEWS = ['excel', 'duplicates', 'ignored', 'rejected'];
+const AUDIT_RECONCILIATION_VIEWS = ['excel', 'duplicates', 'ignored', 'deleted', 'rejected'];
 
 function getInitialAuditTab() {
     const hashTab = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).trim();
@@ -110,6 +110,8 @@ const auditDuplicateScanWrap = document.getElementById('auditDuplicateScanWrap')
 const auditDuplicateScanBody = document.getElementById('auditDuplicateScanBody');
 const auditDuplicateIgnoredWrap = document.getElementById('auditDuplicateIgnoredWrap');
 const auditDuplicateIgnoredBody = document.getElementById('auditDuplicateIgnoredBody');
+const auditDuplicateDeletedWrap = document.getElementById('auditDuplicateDeletedWrap');
+const auditDuplicateDeletedBody = document.getElementById('auditDuplicateDeletedBody');
 const auditDuplicateRejectedWrap = document.getElementById('auditDuplicateRejectedWrap');
 const auditDuplicateRejectedBody = document.getElementById('auditDuplicateRejectedBody');
 const auditDuplicateHistoryFilter = document.getElementById('auditDuplicateHistoryFilter');
@@ -971,6 +973,7 @@ function showAuditReconciliationView(viewName = 'excel') {
     renderAuditReconciliation();
     renderAuditDuplicateScan();
     renderAuditDuplicateIgnoredTable();
+    renderAuditDuplicateDeletedTable();
     renderAuditDuplicateRejectedTable();
     syncAuditReconciliationViewVisibility();
 }
@@ -1224,6 +1227,12 @@ function getAuditDuplicateIgnoredRows() {
         .sort((a, b) => getTimestampMillis(b.auditDuplicateIgnoredAt || b.updatedAt) - getTimestampMillis(a.auditDuplicateIgnoredAt || a.updatedAt));
 }
 
+function getAuditDuplicateDeletedRows() {
+    return allSubmissions
+        .filter((sub) => sub.auditDuplicateDeleted === true)
+        .sort((a, b) => getTimestampMillis(b.auditDuplicateDeletedAt || b.deletedAt || b.updatedAt) - getTimestampMillis(a.auditDuplicateDeletedAt || a.deletedAt || a.updatedAt));
+}
+
 function normalizeAuditDuplicateHistoryFilter(value) {
     const normalized = String(value || '').trim().toLowerCase();
     return ['corrected', 'awaiting'].includes(normalized) ? normalized : 'all';
@@ -1284,6 +1293,32 @@ function renderAuditDuplicateIgnoredTable() {
             </tr>
         `).join('')
         : '<tr><td colspan="7" class="no-data">No ignored duplicate applications</td></tr>';
+    syncAuditReconciliationViewVisibility();
+}
+
+function renderAuditDuplicateDeletedTable() {
+    if (!auditDuplicateDeletedWrap || !auditDuplicateDeletedBody) return;
+    const rows = getAuditDuplicateDeletedRows();
+    auditDuplicateDeletedWrap.style.display = 'block';
+    auditDuplicateDeletedBody.innerHTML = rows.length
+        ? rows.map((sub) => `
+            <tr>
+                <td><strong>${escapeHtml(sub.customerName || sub?.customerDetails?.name || 'Unknown')}</strong></td>
+                <td>${escapeHtml(getCustomerAccountNumber(sub) || '-')}</td>
+                <td>${escapeHtml(getCustomerPenNumber(sub) || '-')}</td>
+                <td>${escapeHtml(getUserDisplayName(sub.uploadedBy || ''))}</td>
+                <td>${escapeHtml(getUserDisplayName(sub.auditDuplicateDeletedBy || sub.deletedBy || ''))}</td>
+                <td>${escapeHtml(formatDate(sub.auditDuplicateDeletedAt || sub.deletedAt || sub.updatedAt))}</td>
+                <td>${escapeHtml(sub.auditDuplicateDeleteReason || sub.deletedReason || '-')}</td>
+                <td>
+                    <div class="audit-duplicate-actions">
+                        <button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>
+                        <button type="button" class="action-btn audit-duplicate-view-btn" onclick="window.openMonitoringApplicationTrack('${sub.id}')"><i class="fas fa-route"></i> Track</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('')
+        : '<tr><td colspan="8" class="no-data">No deleted duplicate applications</td></tr>';
     syncAuditReconciliationViewVisibility();
 }
 
@@ -2782,6 +2817,7 @@ function renderCurrentTab() {
         renderAuditReconciliation();
         renderAuditDuplicateScan();
         renderAuditDuplicateIgnoredTable();
+        renderAuditDuplicateDeletedTable();
         renderAuditDuplicateRejectedTable();
         renderAuditPaidReconciliation();
         return;
@@ -3386,7 +3422,7 @@ async function deleteAuditDuplicateApplication(submissionId) {
             localSub.auditDuplicateDeleteReason = reason;
         }
         auditDuplicateScanResult = buildAuditDuplicateScanResult();
-        showAuditReconciliationView('duplicates');
+        showAuditReconciliationView('deleted');
         showNotification('Duplicate application moved to uploader Deleted records.', 'success');
     } catch (error) {
         showNotification(`Failed to delete duplicate application: ${error.message || error}`, 'error');
