@@ -19,7 +19,7 @@ import {
     getTimestampMillis as getStageTimestampMillis,
     getSubmissionOriginalUploadAt,
     getSubmissionCurrentStageEntryAt
-} from './shared/submission-stage.js?v=20260714a';
+} from './shared/submission-stage.js?v=20260716a';
 import {
     getSubmissionCommissionAmount,
     resolveSubmissionCommissionRate

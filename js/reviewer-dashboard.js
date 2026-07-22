@@ -2,7 +2,7 @@
 import { auth, db } from './firebase-config.js?v=20260625c';
 import { queueUploaderApprovedEmail, queueUploaderRejectedEmail, queueRsaApprovalEmail } from './email-alerts.js';
 import { notifyStatusChangePush } from './status-push.js';
-import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
+import { getSystemSettings } from './shared/system-settings.js?v=20260722a';
 import { formatAppDate, formatAppDateTime, getTrustedDateKey, getTrustedNowIso } from './shared/app-time.js';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
 import {
@@ -16,8 +16,9 @@ import {
     getTimestampMillis as getStageTimestampMillis,
     getSubmissionReviewEntryAt,
     getSubmissionApprovalEntryAt,
-    getSubmissionRejectionEntryAt
-} from './shared/submission-stage.js?v=20260609a';
+    getSubmissionRejectionEntryAt,
+    getSubmissionOriginalUploadAt
+} from './shared/submission-stage.js?v=20260716a';
 import {
     buildDashboardStageReport,
     renderDashboardStageReport,
@@ -66,6 +67,7 @@ let currentViewerIndex = 0;
 let downloadInProgress = false;
 let submissionsLoadVersion = 0;
 let currentReviewerStageReport = null;
+let reviewerReviewAccessEnabled = true;
 const REVIEWER_DASHBOARD_TABS = ['pending', 'approved', 'rejected', 'report', 'leave', 'profile', 'help'];
 
 function getInitialReviewerTab() {
@@ -1138,6 +1140,8 @@ async function loadSubmissions() {
     );
 
     const processSnapshot = async (snapshot) => {
+        const systemSettings = await getSystemSettings(db);
+        reviewerReviewAccessEnabled = systemSettings.rolePermissions?.reviewerReviewAccessEnabled !== false;
         await Promise.all(snapshot.docs.map((docSnap) => restoreAuditDuplicateCorrectionIfNeeded(docSnap)));
         const relevantDocs = snapshot.docs.filter((docSnap) => {
             const data = docSnap.data() || {};
@@ -1192,6 +1196,8 @@ async function loadSubmissionsFallback() {
             orderBy('uploadedAt', 'desc')
         );
         const snapshot = await getDocs(fallbackQuery);
+        const systemSettings = await getSystemSettings(db);
+        reviewerReviewAccessEnabled = systemSettings.rolePermissions?.reviewerReviewAccessEnabled !== false;
         await Promise.all(snapshot.docs.map((docSnap) => restoreAuditDuplicateCorrectionIfNeeded(docSnap)));
         const docsSorted = snapshot.docs.filter((docSnap) => {
             const data = docSnap.data() || {};
@@ -1237,7 +1243,7 @@ function updatePendingCount() {
 }
 
 function updateNavCounts() {
-    const pendingSubmissions = allSubmissions.filter(isPendingForCurrentReviewer).length;
+    const pendingSubmissions = reviewerReviewAccessEnabled ? allSubmissions.filter(isPendingForCurrentReviewer).length : 0;
     const approvedSubmissions = allSubmissions.filter(isApprovedByCurrentReviewer).length;
     const rejectedSubmissions = allSubmissions.filter(isRejectedByCurrentReviewer).length;
     [
@@ -1255,7 +1261,7 @@ function updateNavCounts() {
 // --- DASHBOARD HELPERS ---
 function updateDashboardCards() {
     const approved = allSubmissions.filter(isApprovedByCurrentReviewer).length;
-    const pending = allSubmissions.filter(isPendingForCurrentReviewer).length;
+    const pending = reviewerReviewAccessEnabled ? allSubmissions.filter(isPendingForCurrentReviewer).length : 0;
     const rejected = allSubmissions.filter(isRejectedByCurrentReviewer).length;
     document.getElementById('vCardApprovedCount') && (document.getElementById('vCardApprovedCount').textContent = approved);
     document.getElementById('vCardPendingCount') && (document.getElementById('vCardPendingCount').textContent = pending);
@@ -1298,14 +1304,14 @@ function renderRecentReviews() {
 
 // ==================== RENDER TABLES ====================
 function renderAllTables() {
-    const pendingSubs = allSubmissions
+    const pendingSubs = reviewerReviewAccessEnabled ? allSubmissions
         .filter(isPendingForCurrentReviewer)
         .slice()
         .sort((a, b) => {
             const aTime = getStageTimestampMillis(getSubmissionReviewEntryAt(a));
             const bTime = getStageTimestampMillis(getSubmissionReviewEntryAt(b));
             return bTime - aTime;
-        });
+        }) : [];
     renderPendingTable(pendingSubs);
 
     // Viewer should only see approved/rejected items they reviewed
@@ -1324,6 +1330,11 @@ function renderAllTables() {
 
 function renderPendingTable(submissions) {
     if (!pendingTableBody) return;
+
+    if (!reviewerReviewAccessEnabled) {
+        pendingTableBody.innerHTML = '<tr><td colspan="9" class="no-data">Reviewer review access is disabled by Super Admin.</td></tr>';
+        return;
+    }
 
     if (submissions.length === 0) {
         pendingTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No pending documents found</td></tr>';
@@ -1401,7 +1412,7 @@ window.openReviewerTrackModal = (submissionId) => {
     if (!sub || !reviewerTrackModal || !reviewerTrackModalBody) return;
 
     const status = formatReviewerStatusLabel(sub.status || '');
-    const uploadedAt = formatTimestamp(sub.uploadedAt) || 'N/A';
+    const uploadedAt = formatTimestamp(getSubmissionOriginalUploadAt(sub)) || 'N/A';
     const approvedAt = formatTimestamp(getSubmissionApprovalEntryAt(sub)) || 'N/A';
     const rsaAssignedAt = formatTimestamp(sub.rsaAssignedAt || getSubmissionApprovalEntryAt(sub)) || 'Pending';
     const sentToPaymentAt = formatTimestamp(sub.finalSubmittedAt || sub.rsaSubmittedAt || sub.paymentAssignedAt) || 'Pending';
@@ -1441,8 +1452,8 @@ function renderApprovedTable(submissions) {
 
     approvedTableBody.innerHTML = submissions.map(sub => {
         let uploadDate = 'N/A';
-        if (sub.uploadedAt) {
-            uploadDate = formatTimestamp(sub.uploadedAt);
+        if (getSubmissionOriginalUploadAt(sub)) {
+            uploadDate = formatTimestamp(getSubmissionOriginalUploadAt(sub));
         }
         
         const approvedDate = formatTimestamp(getSubmissionApprovalEntryAt(sub)) || 'N/A';
@@ -1882,6 +1893,10 @@ async function reviewDocument(action) {
     const rejectionRules = systemSettings.rejectionRules || {};
     const rolePermissions = systemSettings.rolePermissions || {};
     const minRejectLength = Number(rejectionRules.minLength || 0);
+    if (rolePermissions.reviewerReviewAccessEnabled === false) {
+        showNotification('Reviewer review access is currently disabled by Super Admin.', 'error');
+        return;
+    }
     if (action === 'approved' && rolePermissions.reviewerCanApprove === false) {
         showNotification('Reviewer approvals are currently disabled by Super Admin.', 'error');
         return;

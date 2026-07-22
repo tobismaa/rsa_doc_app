@@ -655,6 +655,13 @@
                                     <option value="skip_reviewer">Skip Reviewer</option>
                                 </select>
                             </label>
+                            <div style="padding:14px;border:1px solid #cbd5e1;border-radius:12px;background:#ffffff;">
+                                <div style="font-weight:700;color:#0f172a;margin-bottom:6px;">Reviewer Review Access</div>
+                                <div id="reviewerAccessStatus" style="font-size:13px;color:#64748b;margin-bottom:12px;">Loading reviewer access status...</div>
+                                <button id="toggleReviewerAccessBtn" class="action-btn" type="button" style="width:100%;justify-content:center;background:#b91c1c;color:#fff;border:none;">
+                                    <i class="fas fa-user-slash"></i> Disable Reviewer Review
+                                </button>
+                            </div>
                             <label>Fallback Assignment Mode
                                 <select id="settingFallbackAssignmentMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
                                     <option value="round_robin">Round Robin</option>
@@ -1769,7 +1776,7 @@
 <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="js/table-enhancer.js?v=20260512b"></script>
-<script type="module" src="js/super-admin.js?v=20260715a"></script>
+<script type="module" src="js/super-admin.js?v=20260722a"></script>
 <script type="module" src="js/profile-completion-guard.js?v=20260715a"></script>
 <link rel="stylesheet" href="css/pwa-install.css">
     <script src="js/pwa-install.js?v=20260625b"></script>

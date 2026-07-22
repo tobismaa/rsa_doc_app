@@ -29,8 +29,9 @@ import {
     getTimestampMillis as getStageTimestampMillis,
     getSubmissionRsaEntryAt,
     getSubmissionRejectionEntryAt,
-    getSubmissionFinalSubmissionEntryAt
-} from './shared/submission-stage.js?v=20260609a';
+    getSubmissionFinalSubmissionEntryAt,
+    getSubmissionOriginalUploadAt
+} from './shared/submission-stage.js?v=20260716a';
 import {
     buildDashboardStageReport,
     renderDashboardStageReport,
@@ -936,7 +937,7 @@ function renderRsaExcelResultsModal() {
                 <td>${sub.agentName || 'No Agent'}</td>
                 <td>${uploader}</td>
                 <td>${reviewer}</td>
-                <td>${formatTimestamp(sub.uploadedAt)}</td>
+                <td>${formatTimestamp(getSubmissionOriginalUploadAt(sub))}</td>
                 <td>${formatTimestamp(getApprovedTimestamp(sub))}</td>
                 <td>${statusLabel}</td>
             </tr>
@@ -1510,7 +1511,7 @@ function renderRows(submissions) {
         return `<tr>
             <td>${sub.customerName || '-'}</td>
             <td>${viewer}</td>
-            <td>${formatTimestamp(sub.uploadedAt)}</td>
+            <td>${formatTimestamp(getSubmissionOriginalUploadAt(sub))}</td>
             <td>${status.charAt(0).toUpperCase()+status.slice(1)}</td>
             <td>${docs}</td>
         </tr>`;
@@ -1780,7 +1781,7 @@ function renderRejectedRsaTab() {
             <td><strong>${sub.customerName || '-'}</strong></td>
             <td>${sub.agentName || 'No Agent'}</td>
             <td>${sub.uploadedByName || sub.uploadedBy || '-'}</td>
-            <td>${formatTimestamp(sub.uploadedAt)}</td>
+            <td>${formatTimestamp(getSubmissionOriginalUploadAt(sub))}</td>
             <td>${formatTimestamp(sub.latestRejectedAt || sub.reviewedAt)}</td>
             <td>${sub.latestRejectedBy || currentUser?.email || '-'}</td>
             <td>${sub.latestRejectionReason || sub.comment || '-'}</td>
@@ -1843,7 +1844,7 @@ function renderFinallySubmittedTab() {
         const uploader = sub.uploadedByName || sub.uploadedBy || '-';
         // Support both old (rsaSubmittedBy) and new (finalSubmittedBy) structure
         const rsaOfficer = sub.finalSubmittedBy || sub.rsaSubmittedBy || currentUser?.email || '-';
-        const uploadedAt = formatTimestamp(sub.uploadedAt);
+        const uploadedAt = formatTimestamp(getSubmissionOriginalUploadAt(sub));
         const approvedAt = formatTimestamp(sub.reviewedAt);
         const submittedAt = formatTimestamp(sub.finalSubmittedAt || sub.rsaSubmittedAt || sub.uploadedAt);
 
@@ -1916,7 +1917,7 @@ function renderRsaRows(submissions) {
             <td>${sub.agentName || 'No Agent'}</td>
             <td>${uploader}</td>
             <td>${reviewer}</td>
-            <td>${formatTimestamp(sub.uploadedAt)}</td>
+            <td>${formatTimestamp(getSubmissionOriginalUploadAt(sub))}</td>
             <td>${approvedAt}</td>
             <td>${statusLabel}</td>
             <td>${docs}</td>
@@ -2279,7 +2280,7 @@ window.openCustomerDetails = async (submissionId) => {
     
     // Populate submission information
     doc.getElementById('detailUploadedBy').textContent = sub.uploadedBy || '-';
-    doc.getElementById('detailUploadedAt').textContent = formatTimestamp(sub.uploadedAt);
+    doc.getElementById('detailUploadedAt').textContent = formatTimestamp(getSubmissionOriginalUploadAt(sub));
     doc.getElementById('detailStatus').textContent = (sub.status || '-').toUpperCase();
     doc.getElementById('detailReviewedBy').textContent = sub.reviewedBy || '-';
     

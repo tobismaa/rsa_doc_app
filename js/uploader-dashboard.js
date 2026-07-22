@@ -13,8 +13,9 @@ import {
     getSubmissionReviewEntryAt,
     getSubmissionApprovalEntryAt,
     getSubmissionPaymentEntryAt,
-    getSubmissionClearedEntryAt
-} from './shared/submission-stage.js?v=20260609a';
+    getSubmissionClearedEntryAt,
+    getSubmissionOriginalUploadAt
+} from './shared/submission-stage.js?v=20260716a';
 import {
     collection, query, where, orderBy, onSnapshot, getDocs, getDoc, doc, limit, serverTimestamp, updateDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
@@ -478,7 +479,7 @@ async function displayTrackResults(results) {
             </div>
             <div style="display: flex; gap: 15px; font-size: 12px; color: #64748b; margin-bottom: 8px; flex-wrap: wrap;">
                 <span><i class="fas fa-id-card"></i> ID: ${escapeHtml(sub.id.substring(0, 8))}...</span>
-                <span><i class="fas fa-calendar"></i> ${safeFormatDate(sub.uploadedAt)}</span>
+                <span><i class="fas fa-calendar"></i> ${safeFormatDate(getSubmissionOriginalUploadAt(sub))}</span>
                 ${sub.uploadedBy ? `<span><i class="fas fa-user"></i> Uploader: ${escapeHtml(uploadedByName)}</span>` : ''}
             </div>
         `;
@@ -602,7 +603,7 @@ function getApplicationCurrentStage(submission = {}) {
 
 function getTrackStageTimestamp(submission = {}, stageKey) {
     if (stageKey === 'upload') {
-        return submission.reuploadedAt || submission.uploadedAt || submission.submittedAt || submission.createdAt || null;
+        return getSubmissionOriginalUploadAt(submission);
     }
     if (stageKey === 'reviewer') {
         return submission.reviewedAt || getSubmissionReviewEntryAt(submission) || null;

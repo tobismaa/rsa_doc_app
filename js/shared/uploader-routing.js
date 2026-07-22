@@ -9,8 +9,8 @@ import {
   setDoc,
   updateDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
-import { isActiveUserWithRole, normalizeEmail } from "./user-directory.js?v=20260427c";
-import { getSystemSettings } from "./system-settings.js?v=20260617a";
+import { getUserProfileByEmail, isActiveUserWithRole, normalizeEmail } from "./user-directory.js?v=20260427c";
+import { getSystemSettings } from "./system-settings.js?v=20260722a";
 import { getTrustedDateKey } from "./app-time.js";
 
 export function routingRuleDocId(uploaderEmail) {
@@ -55,6 +55,176 @@ export async function getViewerEmails(db) {
     .map((data) => data.email)
     .filter(Boolean)
     .sort();
+}
+
+async function isActiveRSAUser(db, email, { allowRoundRobinSkipped = false } = {}) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return false;
+  try {
+    const data = await getUserProfileByEmail(db, normalized);
+    if (!data) return false;
+    const role = String(data.role || '').trim().toLowerCase();
+    const status = String(data.status || 'active').toLowerCase();
+    const leaveStatus = String(data.leaveStatus || '').toLowerCase();
+    return role === 'rsa'
+      && status !== 'deactivated'
+      && leaveStatus !== 'on_leave'
+      && (allowRoundRobinSkipped || data?.skipRsaRoundRobin !== true);
+  } catch (_) {
+    return false;
+  }
+}
+
+async function getRSAEmails(db) {
+  return (await getUsersByRoles(db, ['rsa']))
+    .filter((data) => data?.skipRsaRoundRobin !== true)
+    .map((data) => normalizeEmail(data.email))
+    .filter(Boolean)
+    .sort();
+}
+
+function pickFallbackRSAUser(rsaUsers, seed = '') {
+  if (!rsaUsers.length) return '';
+  const text = String(seed || Date.now());
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+  }
+  return rsaUsers[Math.abs(hash) % rsaUsers.length] || rsaUsers[0] || '';
+}
+
+async function writeRsaAssignmentHistory({ db, currentUser, subRef, assigned, assignmentMethod }) {
+  if (!assigned) return;
+  try {
+    const subSnap = await getDoc(subRef);
+    if (!subSnap.exists()) return;
+    const subData = subSnap.data() || {};
+    await addDoc(collection(db, 'roundRobinAssignmentsRSA'), {
+      submissionId: subRef.id,
+      customerName: subData.customerName || 'N/A',
+      assignedToRSA: assigned,
+      assignedBy: currentUser?.email || 'System',
+      assignedAt: serverTimestamp(),
+      reviewedBy: subData.reviewedBy || subData.reviewerSkippedBy || currentUser?.email || 'N/A',
+      assignmentMethod
+    });
+  } catch (_) {}
+}
+
+function buildDirectRsaPayload({
+  assigned = '',
+  rsaAssignmentMode = '',
+  assignmentMode = 'skip_reviewer_routing',
+  reviewerSkipped = true,
+  currentUser = null
+} = {}) {
+  const actorEmail = normalizeEmail(currentUser?.email);
+  return {
+    assignedTo: '',
+    assignedToRSA: normalizeEmail(assigned),
+    rsaAssignedAt: assigned ? serverTimestamp() : null,
+    status: 'processing_to_pfa',
+    statusUpdatedAt: serverTimestamp(),
+    rsaReady: true,
+    assignmentMode,
+    rsaAssignmentMode,
+    reviewerSkipped: reviewerSkipped === true,
+    reviewerSkippedBy: actorEmail || 'System',
+    reviewerSkippedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    updatedBy: actorEmail || ''
+  };
+}
+
+export async function assignDirectToRSA({
+  db,
+  currentUser,
+  subRef,
+  uploaderEmail = '',
+  counterDoc = doc(db, 'counters', 'roundRobinRSA'),
+  assignmentMode = 'skip_reviewer_routing',
+  reviewerSkipped = true
+} = {}) {
+  let normalizedUploader = normalizeEmail(uploaderEmail);
+  if (!normalizedUploader) {
+    try {
+      const subSnap = await getDoc(subRef);
+      normalizedUploader = normalizeEmail(subSnap.exists() ? subSnap.data()?.uploadedBy : '');
+    } catch (_) {}
+  }
+
+  const routingRule = await getUploaderRoutingRule(db, normalizedUploader);
+  const mappedRsa = routingRule?.rsaEmail || '';
+  if (mappedRsa && await isActiveRSAUser(db, mappedRsa, { allowRoundRobinSkipped: true })) {
+    await updateDoc(subRef, buildDirectRsaPayload({
+      assigned: mappedRsa,
+      rsaAssignmentMode: 'uploader_routing',
+      assignmentMode,
+      reviewerSkipped,
+      currentUser
+    }));
+    await writeRsaAssignmentHistory({ db, currentUser, subRef, assigned: mappedRsa, assignmentMethod: 'uploader_routing' });
+    return mappedRsa;
+  }
+
+  const systemSettings = await getSystemSettings(db);
+  const fallbackMode = String(systemSettings.routingPolicies?.fallbackAssignmentMode || 'round_robin').trim().toLowerCase();
+  const rsaUsers = await getRSAEmails(db);
+  if (!rsaUsers.length) {
+    await updateDoc(subRef, buildDirectRsaPayload({
+      rsaAssignmentMode: 'no_rsa_available',
+      assignmentMode,
+      reviewerSkipped,
+      currentUser
+    }));
+    return '';
+  }
+  if (!systemSettings.rsaRoundRobinEnabled || fallbackMode === 'manual_review') {
+    await updateDoc(subRef, buildDirectRsaPayload({
+      rsaAssignmentMode: fallbackMode === 'manual_review' ? 'manual_review' : 'round_robin_disabled',
+      assignmentMode,
+      reviewerSkipped,
+      currentUser
+    }));
+    return '';
+  }
+
+  let assigned = '';
+  let assignmentMethod = 'round_robin';
+  const trustedDateKey = await getTrustedDateKey();
+  try {
+    await runTransaction(db, async (tx) => {
+      let lastIndex = -1;
+      const counterSnap = await tx.get(counterDoc);
+      if (counterSnap.exists()) {
+        const data = counterSnap.data() || {};
+        lastIndex = typeof data.lastIndex === 'number' ? data.lastIndex : -1;
+      }
+      const newIndex = (lastIndex + 1) % rsaUsers.length;
+      assigned = rsaUsers[newIndex];
+      tx.set(counterDoc, { lastIndex: newIndex, lastDate: trustedDateKey }, { merge: true });
+      tx.update(subRef, buildDirectRsaPayload({
+        assigned,
+        rsaAssignmentMode: assignmentMethod,
+        assignmentMode,
+        reviewerSkipped,
+        currentUser
+      }));
+    });
+  } catch (_) {
+    assigned = pickFallbackRSAUser(rsaUsers, subRef?.id || trustedDateKey);
+    assignmentMethod = assigned ? 'round_robin_fallback' : 'round_robin_fallback_unavailable';
+    await updateDoc(subRef, buildDirectRsaPayload({
+      assigned,
+      rsaAssignmentMode: assignmentMethod,
+      assignmentMode,
+      reviewerSkipped,
+      currentUser
+    }));
+  }
+
+  await writeRsaAssignmentHistory({ db, currentUser, subRef, assigned, assignmentMethod });
+  return assigned;
 }
 
 export async function assignRoundRobin({ db, currentUser, subRef, counterDoc }) {

@@ -22,8 +22,8 @@ function getSubmissionOriginalUploadAt(submission = {}) {
         submission?.firstUploadedAt,
         submission?.initialUploadedAt,
         submission?.submittedAt,
-        submission?.createdAt,
-        submission?.uploadedAt
+        submission?.uploadedAt,
+        submission?.createdAt
     );
 }
 

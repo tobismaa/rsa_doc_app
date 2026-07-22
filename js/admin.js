@@ -28,7 +28,8 @@ import {
     getSubmissionCommissionAmount,
     resolveSubmissionCommissionRate
 } from './shared/commission-config.js?v=20260507a';
-import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
+import { getSystemSettings } from './shared/system-settings.js?v=20260722a';
+import { assignDirectToRSA as assignDirectToRSAShared } from './shared/uploader-routing.js?v=20260722a';
 import {
     getTimestampMillis as getStageTimestampMillis,
     getSubmissionCurrentStageEntryAt,
@@ -42,7 +43,7 @@ import {
     getSubmissionPaymentEntryAt,
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt
-} from './shared/submission-stage.js?v=20260714a';
+} from './shared/submission-stage.js?v=20260716a';
 
 // Security: suppress console output in admin dashboard.
 (() => {
@@ -752,7 +753,7 @@ function isResubmittedSubmission(submission) {
 }
 
 function renderRejectedDocRow(sub) {
-    const uploadDate = formatDate(sub.uploadedAt);
+    const uploadDate = formatDate(getSubmissionOriginalUploadAt(sub));
     const rejectionTime = formatDate(sub.latestRejectedAt || sub.rejectedAt || sub.reviewedAt || sub.uploadedAt);
     const uploaderFullName = uploaderNames[sub.uploadedBy] || sub.uploadedBy?.split('@')[0] || 'Unknown';
     const assignedToName = sub.assignedTo ? getDisplayNameByEmail(sub.assignedTo) : '-';
@@ -1334,6 +1335,9 @@ function setupEventListeners() {
     document.getElementById('draftDocDate')?.addEventListener('change', filterDraftDocs);
     document.getElementById('pendingDocSearch')?.addEventListener('input', filterPendingDocs);
     document.getElementById('pendingDocDate')?.addEventListener('change', filterPendingDocs);
+    document.getElementById('moveAllPendingToRsaBtn')?.addEventListener('click', (event) => {
+        window.moveAllPendingToRSA?.(event.currentTarget);
+    });
     document.getElementById('approvedDocSearch')?.addEventListener('input', filterApprovedDocs);
     document.getElementById('approvedDocDate')?.addEventListener('change', filterApprovedDocs);
     document.getElementById('rejectedDocSearch')?.addEventListener('input', filterRejectedDocs);
@@ -2598,7 +2602,7 @@ function renderFinallySubmitted() {
         const paymentEmail = sub.assignedToPayment || '';
         const paymentName = paymentEmail ? getDisplayNameByEmail(paymentEmail) : '-';
 
-        const uploadedAt = formatDate(sub.uploadedAt);
+        const uploadedAt = formatDate(getSubmissionOriginalUploadAt(sub));
         const approvedAt = formatDate(sub.reviewedAt);
         const submittedAt = formatDate(sub.finalSubmittedAt || sub.rsaSubmittedAt || sub.uploadedAt);
         const currentStatus = String(sub.status || '').toLowerCase();
@@ -4209,7 +4213,7 @@ function getApplicationCurrentStage(submission = {}) {
 
 function getTrackStageTimestamp(submission = {}, stageKey) {
     if (stageKey === 'upload') {
-        return submission.reuploadedAt || submission.uploadedAt || submission.submittedAt || submission.createdAt || null;
+        return getSubmissionOriginalUploadAt(submission);
     }
     if (stageKey === 'reviewer') {
         return submission.reviewedAt || getSubmissionReviewEntryAt(submission) || null;
@@ -7300,7 +7304,7 @@ function renderTrackApplications() {
     trackAppsTableBody.innerHTML = pageItems.map((s) => {
         const uploaderEmail = String(s.uploadedBy || '').toLowerCase();
         const uploaderLabel = uploaderEmail ? `${getDisplayNameByEmail(uploaderEmail)}` : 'Unknown';
-        const uploadedAt = formatDate(s.uploadedAt || s.createdAt);
+        const uploadedAt = formatDate(getSubmissionOriginalUploadAt(s));
         const currentStage = getApplicationCurrentStage(s);
         const lastStageTime = formatDate(getSubmissionCurrentStageEntryAt(s));
         const status = String(s.status || '').trim() || '-';
@@ -8042,7 +8046,7 @@ function filterPendingDocs() {
 
     pendingDocsTableBody.innerHTML = filtered.map(sub => {
         const isResubmitted = isResubmittedSubmission(sub);
-        const preferredDate = isResubmitted ? (sub.reuploadedAt || sub.uploadedAt) : sub.uploadedAt;
+        const preferredDate = getSubmissionOriginalUploadAt(sub);
         const uploadDate = preferredDate ?
             (preferredDate.toDate ? preferredDate.toDate() : new Date(preferredDate)).toLocaleString() : 'N/A';
         const uploaderFullName = uploaderNames[sub.uploadedBy] || sub.uploadedBy?.split('@')[0] || 'Unknown';
@@ -8076,11 +8080,132 @@ function filterPendingDocs() {
                     <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')">
                         <i class="fas fa-comments"></i> Chat
                     </button>
+                    <button class="action-btn" onclick="window.movePendingSubmissionToRSA('${sub.id}', this)" style="background:#0f766e;color:#fff;border:none;">
+                        <i class="fas fa-share"></i> Move to RSA
+                    </button>
                 </td>
             </tr>
         `;
     }).join('');
 }
+
+async function syncAdminRsaRoutingChatMeta(submissionId, submission, assignedRsa = '') {
+    const uploadedBy = normalizeEmailValue(submission?.uploadedBy || '');
+    const assignedTo = '';
+    const reviewedBy = normalizeEmailValue(submission?.reviewedBy || '');
+    const assignedToRSA = normalizeEmailValue(assignedRsa || submission?.assignedToRSA || '');
+    const assignedToPayment = normalizeEmailValue(submission?.assignedToPayment || '');
+    const participants = Array.from(new Set([uploadedBy, reviewedBy, assignedToRSA, assignedToPayment].filter(Boolean)));
+
+    await setDoc(doc(db, 'applicationChats', submissionId), {
+        submissionId,
+        customerName: submission?.customerName || submission?.customerDetails?.name || '',
+        uploadedBy,
+        assignedTo,
+        reviewedBy,
+        assignedToRSA,
+        assignedToPayment,
+        participants,
+        stageSummaries: {
+            review: { handlerEmail: reviewedBy },
+            rsa: { handlerEmail: assignedToRSA },
+            payment: { handlerEmail: assignedToPayment }
+        },
+        updatedAt: serverTimestamp()
+    }, { merge: true });
+}
+
+async function movePendingSubmissionToRSAInternal(submission) {
+    if (!submission?.id) throw new Error('Submission not found');
+    const status = String(submission.status || '').trim().toLowerCase();
+    if (status !== 'pending') throw new Error(`${submission.customerName || 'Application'} is no longer pending`);
+
+    const submissionRef = doc(db, 'submissions', submission.id);
+    const assignedRsa = await assignDirectToRSAShared({
+        db,
+        currentUser: currentAdmin,
+        subRef: submissionRef,
+        uploaderEmail: submission.uploadedBy || '',
+        assignmentMode: 'admin_pending_to_rsa',
+        reviewerSkipped: true
+    });
+
+    await syncAdminRsaRoutingChatMeta(submission.id, submission, assignedRsa).catch(() => {});
+    await addDoc(collection(db, 'audit'), {
+        action: 'admin_pending_application_moved_to_rsa',
+        submissionId: submission.id,
+        customerName: submission.customerName || '',
+        previousStatus: 'pending',
+        newStatus: 'processing_to_pfa',
+        assignedToRSA: assignedRsa || '',
+        performedBy: currentAdmin?.email || '',
+        timestamp: serverTimestamp()
+    });
+
+    return assignedRsa || '';
+}
+
+window.movePendingSubmissionToRSA = async (submissionId, button = null) => {
+    const submission = allSubmissions.find((item) => item.id === submissionId);
+    if (!submission) return showNotification('Application not found', 'error');
+    if (!confirm(`Move ${submission.customerName || 'this application'} from Pending directly to RSA?`)) return;
+
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Moving';
+        }
+        const assignedRsa = await movePendingSubmissionToRSAInternal(submission);
+        showNotification(assignedRsa ? `Moved to RSA and assigned to ${assignedRsa}.` : 'Moved to RSA queue for manual assignment.', 'success');
+        filterPendingDocs();
+        filterApprovedDocs();
+    } catch (error) {
+        showNotification(error?.message || 'Failed to move application to RSA', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+};
+
+window.moveAllPendingToRSA = async (button = null) => {
+    const pending = allSubmissions.filter((sub) => String(sub.status || '').trim().toLowerCase() === 'pending');
+    if (!pending.length) return showNotification('No pending applications to move.', 'info');
+    if (!confirm(`Move all ${pending.length} pending application(s) directly to RSA?`)) return;
+
+    const originalHtml = button?.innerHTML || '';
+    let moved = 0;
+    let failed = 0;
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Moving Pending';
+        }
+        for (const submission of pending) {
+            try {
+                await movePendingSubmissionToRSAInternal(submission);
+                moved += 1;
+            } catch (_) {
+                failed += 1;
+            }
+        }
+        showNotification(
+            failed
+                ? `Moved ${moved} pending application(s) to RSA. ${failed} failed.`
+                : `Moved ${moved} pending application(s) to RSA.`,
+            failed ? 'warning' : 'success'
+        );
+        filterPendingDocs();
+        filterApprovedDocs();
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+};
 
 function filterApprovedDocs() {
     const searchTerm = document.getElementById('approvedDocSearch')?.value.toLowerCase() || '';

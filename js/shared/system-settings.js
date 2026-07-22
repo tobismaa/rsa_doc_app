@@ -341,6 +341,7 @@ export function getDefaultSystemSettings() {
     documentRequirementRoles: normalizeDocumentRequirementRoles(),
     rolePermissions: {
       uploaderCanUpload: true,
+      reviewerReviewAccessEnabled: true,
       reviewerCanApprove: true,
       reviewerCanReject: true,
       rsaCanApprove: true,

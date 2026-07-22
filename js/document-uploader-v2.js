@@ -19,7 +19,7 @@ import {
   getUploaderRoutingRule as getUploaderRoutingRuleShared,
   getViewerEmails as getViewerEmailsShared,
   routingRuleDocId as routingRuleDocIdShared
-} from './shared/uploader-routing.js?v=20260427e';
+} from './shared/uploader-routing.js?v=20260722a';
 import {
   buildSubmissionCommissionFields,
   formatCommissionRateLabel,
@@ -35,9 +35,10 @@ import {
   getSubmissionRejectionEntryAt,
   getSubmissionPaymentEntryAt,
   getSubmissionPaidEntryAt,
-  getSubmissionClearedEntryAt
-} from './shared/submission-stage.js?v=20260609a';
-import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260617a';
+  getSubmissionClearedEntryAt,
+  getSubmissionOriginalUploadAt
+} from './shared/submission-stage.js?v=20260716a';
+import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260722a';
 import {
   collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, doc,
   serverTimestamp, arrayUnion, getDocs, getDoc, setDoc, runTransaction, deleteDoc
@@ -4462,7 +4463,7 @@ window.showApplicationTrack = async (submissionId) => {
               </div>
               <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
                 <span style="color: var(--gray-600);">Uploaded:</span>
-                <span>${safeFormatDate(sub.uploadedAt)}</span>
+                <span>${safeFormatDate(getSubmissionOriginalUploadAt(sub))}</span>
               </div>
               ${sub.assignedTo ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="color: var(--gray-600);">Assigned To:</span><span>${sub.assignedTo}</span></div>` : ''}
               ${sub.reviewedAt ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="color: var(--gray-600);">Reviewed:</span><span>${safeFormatDate(sub.reviewedAt)}</span></div>` : ''}
@@ -4886,8 +4887,16 @@ async function submitCustomer() {
       const rsaRejectFlow = String(existingSub.status || '').toLowerCase() === 'rejected_by_rsa' || latestRejectedStage === 'rsa';
       const auditDuplicateRestoreStatus = getAuditDuplicateRestoreStatus(existingSub);
       const auditDuplicateCorrectionFlow = Boolean(auditDuplicateRestoreStatus);
-      const nextStatus = auditDuplicateRestoreStatus || (rsaRejectFlow ? 'processing_to_pfa' : 'pending');
-      const returnsToReviewer = !rsaRejectFlow && !auditDuplicateRestoreStatus;
+      const uploaderEmail = normalizeEmail(currentUser?.email);
+      const systemSettings = await getSystemSettings(db);
+      const routingRule = await getUploaderRoutingRule(uploaderEmail);
+      const defaultRouteMode = String(systemSettings.routingPolicies?.defaultRouteMode || 'normal').trim().toLowerCase();
+      const reviewerBypassActive = systemSettings.rolePermissions?.reviewerReviewAccessEnabled === false
+        || routingRule?.routeMode === 'skip_reviewer'
+        || defaultRouteMode === 'skip_reviewer';
+      const directToRsaAfterCorrection = reviewerBypassActive && !rsaRejectFlow && !auditDuplicateRestoreStatus;
+      const nextStatus = auditDuplicateRestoreStatus || ((rsaRejectFlow || reviewerBypassActive) ? 'processing_to_pfa' : 'pending');
+      const returnsToReviewer = !rsaRejectFlow && !auditDuplicateRestoreStatus && !reviewerBypassActive;
       const keepsReviewState = rsaRejectFlow || Boolean(auditDuplicateRestoreStatus);
       const rsaOfficerCandidate = String(existingSub.latestRejectedBy || existingSub.assignedToRSA || '').trim();
       const rsaToReassign = await isActiveUserWithRole(rsaOfficerCandidate, ['rsa']) ? rsaOfficerCandidate : String(existingSub.assignedToRSA || '').trim();
@@ -4910,9 +4919,9 @@ async function submitCustomer() {
         agentAccountNumber: agentPayload.agentAccountNumber,
         agentAccountBank: agentPayload.agentAccountBank,
         fixSubmitted: true, fixLocked: false, fixSubmittedAt: serverTimestamp(), fixCount: nextFixCount,
-        assignedTo: rsaRejectFlow ? '' : (auditDuplicateRestoreStatus ? (existingSub.assignedTo || '') : (reviewerToReassign || existingSub.assignedTo || '')),
-        assignedToRSA: rsaRejectFlow ? (rsaToReassign || existingSub.assignedToRSA || '') : (existingSub.assignedToRSA || ''),
-        rsaAssignedAt: rsaRejectFlow ? serverTimestamp() : (existingSub.rsaAssignedAt || null),
+        assignedTo: (rsaRejectFlow || reviewerBypassActive) ? '' : (auditDuplicateRestoreStatus ? (existingSub.assignedTo || '') : (reviewerToReassign || existingSub.assignedTo || '')),
+        assignedToRSA: rsaRejectFlow ? (rsaToReassign || existingSub.assignedToRSA || '') : (reviewerBypassActive ? (existingSub.assignedToRSA || '') : (existingSub.assignedToRSA || '')),
+        rsaAssignedAt: rsaRejectFlow ? serverTimestamp() : (reviewerBypassActive ? (existingSub.rsaAssignedAt || null) : (existingSub.rsaAssignedAt || null)),
         reviewedAt: keepsReviewState ? (existingSub.reviewedAt || null) : null,
         reviewerDecision: keepsReviewState ? String(existingSub.reviewerDecision || '').trim() : '',
         reviewerDecisionBy: keepsReviewState ? String(existingSub.reviewerDecisionBy || '').trim() : '',
@@ -4936,7 +4945,9 @@ async function submitCustomer() {
         correctionPayload.auditDuplicateRestoredStatus = nextStatus;
       }
       await updateDoc(submissionRef, correctionPayload);
-      if (returnsToReviewer && !reviewerToReassign) {
+      if (directToRsaAfterCorrection) {
+        await assignDirectToRSA(submissionRef, uploaderEmail);
+      } else if (returnsToReviewer && !reviewerToReassign) {
         await assignRoundRobin(submissionRef);
       }
       notifyStatusChangePush({
@@ -4952,6 +4963,8 @@ async function submitCustomer() {
         ? '✅ Fix submitted and returned directly to RSA.'
         : (auditDuplicateRestoreStatus
             ? `✅ Correction resubmitted and restored to ${getResubmissionStatusLabel(nextStatus)}.`
+            : directToRsaAfterCorrection
+            ? '✅ Fix submitted and routed directly to RSA.'
             : reviewerToReassign
             ? '✅ Fix submitted and reassigned to the same reviewer for another review.'
             : '✅ Fix submitted successfully!'), 'success');
@@ -5011,17 +5024,21 @@ async function submitCustomer() {
       subRef = doc(db, 'submissions', currentDraftId);
       await updateDoc(subRef, {
         ...submissionPayload,
-        uploadedAt: serverTimestamp()
+        uploadedAt: serverTimestamp(),
+        originalUploadedAt: serverTimestamp()
       });
     } else {
       subRef = await addDoc(collection(db, 'submissions'), {
         ...submissionPayload,
-        uploadedAt: serverTimestamp()
+        uploadedAt: serverTimestamp(),
+        originalUploadedAt: serverTimestamp()
       });
     }
-    const routingRule = await getUploaderRoutingRule(uploaderEmail);
     const systemSettings = await getSystemSettings(db);
-    const effectiveRouteMode = routingRule?.routeMode || String(systemSettings.routingPolicies?.defaultRouteMode || 'normal').trim().toLowerCase();
+    const routingRule = await getUploaderRoutingRule(uploaderEmail);
+    const reviewerReviewAccessEnabled = systemSettings.rolePermissions?.reviewerReviewAccessEnabled !== false;
+    const configuredRouteMode = routingRule?.routeMode || String(systemSettings.routingPolicies?.defaultRouteMode || 'normal').trim().toLowerCase();
+    const effectiveRouteMode = reviewerReviewAccessEnabled ? configuredRouteMode : 'skip_reviewer';
     if (effectiveRouteMode === 'skip_reviewer') {
       const assignedRsa = await assignDirectToRSA(subRef, uploaderEmail).catch(() => '');
       showNotification(assignedRsa ? `✅ Submitted and routed directly to RSA: ${assignedRsa}` : '✅ Submitted and routed directly to RSA queue.', 'success');
@@ -6000,7 +6017,7 @@ async function renderUploaderApplicationsTable() {
     }
     let html = '';
     for (const sub of rows) {
-      const uploadDate = safeFormatDate(sub.uploadedAt);
+      const uploadDate = safeFormatDate(getSubmissionOriginalUploadAt(sub));
       const approvedDate = safeFormatDate(getSubmissionApprovalEntryAt(sub));
       const approvedByKey = normalizeEmail(sub.reviewedBy);
       const approvedBy = (approvedByKey && userFullNames.get(approvedByKey)) ? userFullNames.get(approvedByKey) : (sub.reviewedBy || '-');
@@ -6482,7 +6499,7 @@ async function renderApprovedTable() {
   if (approved.length === 0) { approvedTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No approved documents</td></tr>'; return; }
   let html = '';
   for (const sub of approved) {
-    const uploadDate = safeFormatDate(sub.uploadedAt);
+    const uploadDate = safeFormatDate(getSubmissionOriginalUploadAt(sub));
     const approvedDate = safeFormatDate(getSubmissionApprovalEntryAt(sub));
     const approvedByKey = normalizeEmail(sub.reviewedBy);
     const approvedBy = (approvedByKey && userFullNames.get(approvedByKey)) ? userFullNames.get(approvedByKey) : (sub.reviewedBy || '-');

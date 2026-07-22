@@ -34,9 +34,10 @@ import {
     getSubmissionFinalSubmissionEntryAt,
     getSubmissionPaymentEntryAt,
     getSubmissionPaidEntryAt,
-    getSubmissionClearedEntryAt
-} from './shared/submission-stage.js?v=20260610b';
-import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260715a';
+    getSubmissionClearedEntryAt,
+    getSubmissionOriginalUploadAt
+} from './shared/submission-stage.js?v=20260716a';
+import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260722a';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 
 let currentUser = null;
@@ -1026,6 +1027,7 @@ async function renderScheduledReportLogs(forceRefresh = false) {
 
 const ROLE_PERMISSION_FIELDS = [
     { key: 'uploaderCanUpload', label: 'Uploader Can Upload' },
+    { key: 'reviewerReviewAccessEnabled', label: 'Reviewer Review Access' },
     { key: 'reviewerCanApprove', label: 'Reviewer Can Approve' },
     { key: 'reviewerCanReject', label: 'Reviewer Can Reject' },
     { key: 'rsaCanApprove', label: 'RSA Can Approve' },
@@ -1627,6 +1629,7 @@ const BACKDATE_STAGE_DEFINITIONS = [
         timestampField: 'finalSubmittedAt',
         timestampGetter: getSubmissionFinalSubmissionEntryAt,
         personField: 'assignedToRSA',
+        mirrorPersonFields: ['finalSubmittedBy', 'rsaSubmittedBy'],
         roles: ['rsa']
     },
     {
@@ -1645,6 +1648,7 @@ const BACKDATE_STAGE_DEFINITIONS = [
         timestampField: 'paidAt',
         timestampGetter: getSubmissionPaidEntryAt,
         personField: 'assignedToPayment',
+        mirrorPersonFields: ['paidBy'],
         roles: ['payment']
     },
     {
@@ -1654,6 +1658,7 @@ const BACKDATE_STAGE_DEFINITIONS = [
         timestampField: 'clearedAt',
         timestampGetter: getSubmissionClearedEntryAt,
         personField: 'assignedToPayment',
+        mirrorPersonFields: ['clearedBy'],
         roles: ['payment']
     }
 ];
@@ -1665,6 +1670,18 @@ const BACKDATE_RESTORABLE_FIELDS = new Set([
         ...(stage.mirrorPersonFields || [])
     ]),
     'commissionRate'
+]);
+
+const BACKDATE_ASSIGNMENT_FIELDS = new Set([
+    'uploadedBy',
+    'assignedTo',
+    'reviewedBy',
+    'assignedToRSA',
+    'finalSubmittedBy',
+    'rsaSubmittedBy',
+    'assignedToPayment',
+    'paidBy',
+    'clearedBy'
 ]);
 
 function createBackdateRestoreSnapshot(submission = {}, changes = []) {
@@ -3091,6 +3108,42 @@ function parseDateTimeLocalInput(value = '') {
     return Number.isFinite(parsed.getTime()) ? parsed : null;
 }
 
+function hasBackdateAssignmentChange(changes = []) {
+    return changes.some((change) => {
+        const field = String(change?.field || '').trim();
+        return BACKDATE_ASSIGNMENT_FIELDS.has(field);
+    });
+}
+
+async function syncBackdateChatAssignmentMeta(submissionId = '', submission = {}, updates = {}) {
+    if (!submissionId) return;
+    const nextSubmission = { ...submission, ...updates };
+    const uploadedBy = normalizeEmail(nextSubmission.uploadedBy || '');
+    const assignedTo = normalizeEmail(nextSubmission.assignedTo || '');
+    const reviewedBy = normalizeEmail(nextSubmission.reviewedBy || '');
+    const assignedToRSA = normalizeEmail(nextSubmission.assignedToRSA || '');
+    const assignedToPayment = normalizeEmail(nextSubmission.assignedToPayment || '');
+    const participants = [uploadedBy, assignedTo, reviewedBy, assignedToRSA, assignedToPayment].filter(Boolean);
+    const uniqueParticipants = Array.from(new Set(participants));
+
+    await setDoc(doc(db, 'applicationChats', submissionId), {
+        submissionId,
+        customerName: nextSubmission.customerName || nextSubmission.customerDetails?.customerName || '',
+        uploadedBy,
+        assignedTo,
+        reviewedBy,
+        assignedToRSA,
+        assignedToPayment,
+        participants: uniqueParticipants,
+        stageSummaries: {
+            review: { handlerEmail: assignedTo || reviewedBy },
+            rsa: { handlerEmail: assignedToRSA },
+            payment: { handlerEmail: assignedToPayment }
+        },
+        updatedAt: serverTimestamp()
+    }, { merge: true });
+}
+
 function getBackdateUsersForStage(stage = {}, currentEmail = '') {
     const users = getActiveUsersByRoles(stage.roles || []);
     const normalizedCurrent = normalizeEmail(currentEmail);
@@ -3275,6 +3328,13 @@ async function saveBackdateChanges() {
             button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
         }
         await updateDoc(doc(db, 'submissions', submissionId), updates);
+        if (hasBackdateAssignmentChange(changes)) {
+            try {
+                await syncBackdateChatAssignmentMeta(submissionId, submission, updates);
+            } catch (chatError) {
+                console.warn('Backdate chat assignment sync failed:', chatError);
+            }
+        }
         await addDoc(collection(db, 'audit'), {
             action: 'application_backdated',
             submissionId,
@@ -3367,6 +3427,23 @@ window.restoreBackdatedApplication = async (submissionId) => {
         restoreUpdates.updatedBy = currentUser?.email || '';
 
         await updateDoc(doc(db, 'submissions', submissionId), restoreUpdates);
+        const restoredAssignmentFields = restoredChanges.filter((change) => BACKDATE_ASSIGNMENT_FIELDS.has(String(change?.field || '').trim()));
+        if (restoredAssignmentFields.length) {
+            try {
+                const restoredSubmission = { ...submission };
+                restoredAssignmentFields.forEach((change) => {
+                    const field = String(change?.field || '').trim();
+                    if (change.restoredAsMissing) {
+                        delete restoredSubmission[field];
+                    } else {
+                        restoredSubmission[field] = change.restoredValue || '';
+                    }
+                });
+                await syncBackdateChatAssignmentMeta(submissionId, restoredSubmission, {});
+            } catch (chatError) {
+                console.warn('Backdate restore chat assignment sync failed:', chatError);
+            }
+        }
         await addDoc(collection(db, 'audit'), {
             action: 'application_backdate_restored',
             submissionId,
@@ -3988,7 +4065,7 @@ function renderStatusChangeSearchMatches(matches = []) {
         const customerName = getSubmissionCustomerName(submission) || 'Unknown';
         const penNo = getSubmissionPenNumber(submission) || '-';
         const status = String(submission.status || '-').replaceAll('_', ' ');
-        const submittedAt = formatDate(submission.uploadedAt || submission.createdAt || submission.updatedAt);
+        const submittedAt = formatDate(getSubmissionOriginalUploadAt(submission));
         return `
             <button type="button" class="status-change-match-btn" data-status-change-match-index="${index}">
                 <strong>${escapeHtml(customerName)}</strong>
@@ -4252,7 +4329,7 @@ function buildBackdateReportRow(sub = {}) {
         uploader: getUserDisplayNameByEmail(sub.uploadedBy || ''),
         penNo: getSubmissionPenNumber(sub) || '-',
         status: String(sub.status || '-').replaceAll('_', ' '),
-        uploadedAt: formatDate(sub.uploadedAt || sub.createdAt),
+        uploadedAt: formatDate(getSubmissionOriginalUploadAt(sub)),
         backdatedBy: getUserDisplayNameByEmail(sub.backdatedBy || ''),
         reason: String(sub.backdateReason || '').trim() || '-',
         reviewer: getUserDisplayNameByEmail(sub.assignedTo || ''),
@@ -4762,6 +4839,7 @@ async function loadSettings() {
     currentHouseNumberRules = normalizeHouseNumberRulesForUi(systemSettings.houseNumberRules);
     renderHouseNumberRulesManager();
     if (defaultRouteMode) defaultRouteMode.value = String(systemSettings.routingPolicies.defaultRouteMode || 'normal');
+    syncReviewerAccessControlUI();
     currentAgentBankOptions = Array.isArray(systemSettings.agentBankOptions) ? [...systemSettings.agentBankOptions] : [...defaultSystemSettings.agentBankOptions];
     renderAgentBankManagement();
     if (!settingsCardsInitialized) initializeSettingsCardLayout();
@@ -5386,6 +5464,53 @@ function renderRolePermissionsManager() {
     `).join('');
 }
 
+function isReviewerReviewAccessEnabled() {
+    const routeMode = String(
+        document.getElementById('settingDefaultRouteMode')?.value
+        || currentRoutingPolicies.defaultRouteMode
+        || 'normal'
+    ).trim().toLowerCase();
+    return routeMode !== 'skip_reviewer' && currentRolePermissions.reviewerReviewAccessEnabled !== false;
+}
+
+function setReviewerReviewAccessState(enabled) {
+    const isEnabled = enabled === true;
+    const routeMode = isEnabled ? 'normal' : 'skip_reviewer';
+    currentRoutingPolicies = {
+        ...currentRoutingPolicies,
+        defaultRouteMode: routeMode
+    };
+    currentRolePermissions = {
+        ...currentRolePermissions,
+        reviewerReviewAccessEnabled: isEnabled,
+        reviewerCanApprove: isEnabled,
+        reviewerCanReject: isEnabled
+    };
+    const defaultRouteMode = document.getElementById('settingDefaultRouteMode');
+    if (defaultRouteMode) defaultRouteMode.value = routeMode;
+    renderRolePermissionsManager();
+    syncReviewerAccessControlUI();
+}
+
+function syncReviewerAccessControlUI() {
+    const statusEl = document.getElementById('reviewerAccessStatus');
+    const button = document.getElementById('toggleReviewerAccessBtn');
+    const enabled = isReviewerReviewAccessEnabled();
+    if (statusEl) {
+        statusEl.textContent = enabled
+            ? 'Enabled: new applications go Uploader -> Reviewer -> RSA.'
+            : 'Disabled: new applications go Uploader -> RSA, and reviewer review actions are blocked.';
+        statusEl.style.color = enabled ? '#166534' : '#991b1b';
+    }
+    if (button) {
+        button.dataset.nextReviewerAccess = enabled ? 'disable' : 'enable';
+        button.style.background = enabled ? '#b91c1c' : '#166534';
+        button.innerHTML = enabled
+            ? '<i class="fas fa-user-slash"></i> Disable Reviewer Review'
+            : '<i class="fas fa-user-check"></i> Enable Reviewer Review';
+    }
+}
+
 function renderDocumentRequirementRoleManager() {
     const grid = document.getElementById('documentRequirementRoleGrid');
     if (!grid) return;
@@ -5475,6 +5600,13 @@ function getUploaderOwnedApprovedAgents(uploaderEmail = '') {
     });
 }
 
+function getAgentTransferOptionLabel(agent = {}) {
+    const agentName = String(agent.fullName || agent.agentName || '').trim() || 'Unnamed Agent';
+    const accountName = String(agent.accountName || agent.agentAccountName || '').trim() || '-';
+    const bank = String(agent.accountBank || agent.agentAccountBank || '').trim() || '-';
+    return `${agentName} | ${accountName} | ${bank}`;
+}
+
 function renderApplicationAgentModule() {
     const body = document.getElementById('superApplicationAgentTableBody');
     if (!body) return;
@@ -5493,7 +5625,7 @@ function renderApplicationAgentModule() {
         const uploaderEmail = normalizeEmail(sub.uploadedBy);
         const options = getUploaderOwnedApprovedAgents(uploaderEmail);
         const selectOptions = options.length
-            ? options.map((agent) => `<option value="${escapeHtml(agent.id)}">${escapeHtml(agent.fullName || 'Unnamed')} (${escapeHtml(agent.contactNumber || '-')})</option>`).join('')
+            ? options.map((agent) => `<option value="${escapeHtml(agent.id)}">${escapeHtml(getAgentTransferOptionLabel(agent))}</option>`).join('')
             : '<option value="">No registered approved agents for this uploader</option>';
         return `
             <tr>
@@ -5552,7 +5684,7 @@ function renderApplicationAgentRerouteModule() {
         const options = getUploaderOwnedApprovedAgents(uploaderEmail)
             .filter((agent) => String(agent.id || '').trim() !== String(sub.agentId || '').trim());
         const selectOptions = options.length
-            ? options.map((agent) => `<option value="${escapeHtml(agent.id)}">${escapeHtml(agent.fullName || 'Unnamed')} (${escapeHtml(agent.contactNumber || '-')})</option>`).join('')
+            ? options.map((agent) => `<option value="${escapeHtml(agent.id)}">${escapeHtml(getAgentTransferOptionLabel(agent))}</option>`).join('')
             : '<option value="">No other approved agents for this uploader</option>';
         return `
             <tr>
@@ -5751,6 +5883,16 @@ window.updateRolePermission = (key, value) => {
         ...currentRolePermissions,
         [key]: value === 'true'
     };
+    if (key === 'reviewerReviewAccessEnabled') {
+        const enabled = value === 'true';
+        currentRoutingPolicies = {
+            ...currentRoutingPolicies,
+            defaultRouteMode: enabled ? 'normal' : 'skip_reviewer'
+        };
+        const defaultRouteMode = document.getElementById('settingDefaultRouteMode');
+        if (defaultRouteMode) defaultRouteMode.value = currentRoutingPolicies.defaultRouteMode;
+    }
+    syncReviewerAccessControlUI();
 };
 
 window.updateDocumentRequirementRole = (key, value) => {
@@ -5765,6 +5907,67 @@ window.updateNotificationTemplate = (key, value) => {
         ...currentNotificationTemplates,
         [key]: String(value || '')
     };
+};
+
+window.toggleReviewerReviewAccess = async (button = null) => {
+    const currentEnabled = isReviewerReviewAccessEnabled();
+    const nextEnabled = !currentEnabled;
+    const originalHtml = button?.innerHTML || '';
+
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
+        }
+
+        const systemSettings = await getSystemSettings(db, { force: true });
+        const routingPolicies = {
+            ...(systemSettings.routingPolicies || {}),
+            defaultRouteMode: nextEnabled ? 'normal' : 'skip_reviewer'
+        };
+        const rolePermissions = {
+            ...(systemSettings.rolePermissions || {}),
+            reviewerReviewAccessEnabled: nextEnabled,
+            reviewerCanApprove: nextEnabled,
+            reviewerCanReject: nextEnabled
+        };
+
+        await setDoc(doc(db, 'settings', 'system'), {
+            routingPolicies,
+            rolePermissions,
+            updatedAt: serverTimestamp(),
+            updatedBy: currentUser?.email || ''
+        }, { merge: true });
+
+        await addDoc(collection(db, 'audit'), {
+            action: nextEnabled ? 'reviewer_review_access_enabled' : 'reviewer_review_access_disabled',
+            reviewerReviewAccessEnabled: nextEnabled,
+            defaultRouteMode: routingPolicies.defaultRouteMode,
+            performedBy: currentUser?.email || '',
+            timestamp: serverTimestamp()
+        });
+
+        clearSystemSettingsCache();
+        setReviewerReviewAccessState(nextEnabled);
+        settingsFormDirty = false;
+        showNotification(
+            nextEnabled
+                ? 'Reviewer review access enabled. Applications will pass through reviewer again.'
+                : 'Reviewer review access disabled. New applications will route directly to RSA.',
+            'success'
+        );
+    } catch (error) {
+        showNotification('Failed to update reviewer review access', 'error');
+        syncReviewerAccessControlUI();
+    } finally {
+        if (button) {
+            button.disabled = false;
+            if (originalHtml && !button.innerHTML.includes('Disable Reviewer Review') && !button.innerHTML.includes('Enable Reviewer Review')) {
+                button.innerHTML = originalHtml;
+            }
+            syncReviewerAccessControlUI();
+        }
+    }
 };
 
 window.updateHouseNumberRule = (index, field, value) => {
@@ -6302,7 +6505,7 @@ window.saveSuperSettings = async (triggerButton = null) => {
     const announcementMessage = String(document.getElementById('settingAnnouncementMessage')?.value || '').trim();
     const globalReadOnlyMode = String(document.getElementById('settingGlobalReadOnlyMode')?.value || 'false') === 'true';
     const globalReadOnlyMessage = String(document.getElementById('settingGlobalReadOnlyMessage')?.value || '').trim() || getDefaultSystemSettings().globalReadOnlyMessage;
-    const defaultRouteMode = String(document.getElementById('settingDefaultRouteMode')?.value || 'normal').trim() || 'normal';
+    let defaultRouteMode = String(document.getElementById('settingDefaultRouteMode')?.value || 'normal').trim() || 'normal';
     const fallbackAssignmentMode = String(document.getElementById('settingFallbackAssignmentMode')?.value || 'round_robin').trim() || 'round_robin';
     const agentRegistrationApprovalRequired = String(document.getElementById('settingAgentRegistrationApprovalRequired')?.value || 'true') === 'true';
     const rejectionMinLength = Number(document.getElementById('settingRejectionMinLength')?.value || 0);
@@ -6438,6 +6641,14 @@ window.saveSuperSettings = async (triggerButton = null) => {
     rolePermissions = Object.fromEntries(
         ROLE_PERMISSION_FIELDS.map(({ key }) => [key, rolePermissions[key] !== false])
     );
+    const reviewerReviewAccessEnabled = defaultRouteMode !== 'skip_reviewer' && rolePermissions.reviewerReviewAccessEnabled !== false;
+    defaultRouteMode = reviewerReviewAccessEnabled ? 'normal' : 'skip_reviewer';
+    rolePermissions = {
+        ...rolePermissions,
+        reviewerReviewAccessEnabled,
+        reviewerCanApprove: reviewerReviewAccessEnabled && rolePermissions.reviewerCanApprove !== false,
+        reviewerCanReject: reviewerReviewAccessEnabled && rolePermissions.reviewerCanReject !== false
+    };
     documentRequirementRoles = Object.fromEntries(
         DOCUMENT_REQUIREMENT_ROLE_FIELDS.map(({ key }) => [key, documentRequirementRoles[key] !== false])
     );
@@ -7453,6 +7664,17 @@ document.getElementById('saveSettingsBtn')?.addEventListener('click', () => {
 });
 document.getElementById('saveSettingsSectionModalBtn')?.addEventListener('click', async (event) => {
     await window.saveSuperSettings?.(event.currentTarget);
+});
+document.getElementById('toggleReviewerAccessBtn')?.addEventListener('click', async (event) => {
+    await window.toggleReviewerReviewAccess?.(event.currentTarget);
+});
+document.getElementById('settingDefaultRouteMode')?.addEventListener('change', (event) => {
+    const mode = String(event.target?.value || 'normal').trim().toLowerCase();
+    if (mode === 'skip_reviewer') {
+        setReviewerReviewAccessState(false);
+    } else {
+        setReviewerReviewAccessState(true);
+    }
 });
 document.getElementById('closeSettingsSectionModalBtn')?.addEventListener('click', (event) => {
     event.stopPropagation();
