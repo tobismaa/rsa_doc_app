@@ -5674,6 +5674,7 @@ function renderApplicationAgentRerouteModule() {
     const search = String(document.getElementById('superAgentRerouteSearch')?.value || '').trim().toLowerCase();
     const rows = allSubmissions
         .filter((sub) => String(sub.status || '').toLowerCase() !== 'draft')
+        .filter((sub) => String(sub.status || '').toLowerCase() !== 'cleared')
         .filter((sub) => String(sub.agentId || '').trim())
         .filter((sub) => {
             const currentAgentLabel = getApplicationLinkedAgentLabel(sub);
