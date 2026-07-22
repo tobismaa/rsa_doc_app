@@ -95,6 +95,8 @@ let currentStatusChangeSubmission = null;
 let currentStatusChangeSearchMatches = [];
 let statusChangeSaveInProgress = false;
 let selectedTransferSubmissionIds = new Set();
+const pendingApplicationAgentSelections = new Map();
+const pendingApplicationAgentRerouteSelections = new Map();
 const SUPER_ADMIN_DASHBOARD_TABS = [
     'global',
     'admins',
@@ -5607,6 +5609,16 @@ function getAgentTransferOptionLabel(agent = {}) {
     return `${agentName} | ${accountName} | ${bank}`;
 }
 
+function renderAgentSelectOptions(options = [], selectedAgentId = '', emptyMessage = 'No registered approved agents for this uploader') {
+    if (!options.length) return `<option value="">${escapeHtml(emptyMessage)}</option>`;
+    const normalizedSelection = String(selectedAgentId || '').trim();
+    return options.map((agent) => {
+        const agentId = String(agent.id || '').trim();
+        const selectedAttr = agentId && agentId === normalizedSelection ? ' selected' : '';
+        return `<option value="${escapeHtml(agentId)}"${selectedAttr}>${escapeHtml(getAgentTransferOptionLabel(agent))}</option>`;
+    }).join('');
+}
+
 function renderApplicationAgentModule() {
     const body = document.getElementById('superApplicationAgentTableBody');
     if (!body) return;
@@ -5624,9 +5636,10 @@ function renderApplicationAgentModule() {
     body.innerHTML = rows.map((sub) => {
         const uploaderEmail = normalizeEmail(sub.uploadedBy);
         const options = getUploaderOwnedApprovedAgents(uploaderEmail);
-        const selectOptions = options.length
-            ? options.map((agent) => `<option value="${escapeHtml(agent.id)}">${escapeHtml(getAgentTransferOptionLabel(agent))}</option>`).join('')
-            : '<option value="">No registered approved agents for this uploader</option>';
+        const rawPendingSelection = String(pendingApplicationAgentSelections.get(sub.id) || '').trim();
+        const pendingSelection = options.some((agent) => String(agent.id || '').trim() === rawPendingSelection) ? rawPendingSelection : '';
+        if (rawPendingSelection && !pendingSelection) pendingApplicationAgentSelections.delete(sub.id);
+        const selectOptions = renderAgentSelectOptions(options, pendingSelection, 'No registered approved agents for this uploader');
         return `
             <tr>
                 <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
@@ -5634,8 +5647,8 @@ function renderApplicationAgentModule() {
                 <td>${escapeHtml(String(sub.status || '-'))}</td>
                 <td>No Agent</td>
                 <td>
-                    <select id="sa-app-agent-${sub.id}" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;width:100%;">
-                        <option value="">Select registered agent...</option>
+                    <select id="sa-app-agent-${sub.id}" onchange="window.rememberApplicationAgentSelection('${sub.id}', this.value)" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;width:100%;">
+                        <option value="" ${pendingSelection ? '' : 'selected'}>Select registered agent...</option>
                         ${selectOptions}
                     </select>
                 </td>
@@ -5683,9 +5696,10 @@ function renderApplicationAgentRerouteModule() {
         const uploaderEmail = normalizeEmail(sub.uploadedBy);
         const options = getUploaderOwnedApprovedAgents(uploaderEmail)
             .filter((agent) => String(agent.id || '').trim() !== String(sub.agentId || '').trim());
-        const selectOptions = options.length
-            ? options.map((agent) => `<option value="${escapeHtml(agent.id)}">${escapeHtml(getAgentTransferOptionLabel(agent))}</option>`).join('')
-            : '<option value="">No other approved agents for this uploader</option>';
+        const rawPendingSelection = String(pendingApplicationAgentRerouteSelections.get(sub.id) || '').trim();
+        const pendingSelection = options.some((agent) => String(agent.id || '').trim() === rawPendingSelection) ? rawPendingSelection : '';
+        if (rawPendingSelection && !pendingSelection) pendingApplicationAgentRerouteSelections.delete(sub.id);
+        const selectOptions = renderAgentSelectOptions(options, pendingSelection, 'No other approved agents for this uploader');
         return `
             <tr>
                 <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
@@ -5693,8 +5707,8 @@ function renderApplicationAgentRerouteModule() {
                 <td>${escapeHtml(String(sub.status || '-'))}</td>
                 <td>${escapeHtml(getApplicationLinkedAgentLabel(sub))}</td>
                 <td>
-                    <select id="sa-reroute-agent-${sub.id}" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;width:100%;">
-                        <option value="">Select replacement agent...</option>
+                    <select id="sa-reroute-agent-${sub.id}" onchange="window.rememberApplicationAgentRerouteSelection('${sub.id}', this.value)" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;width:100%;">
+                        <option value="" ${pendingSelection ? '' : 'selected'}>Select replacement agent...</option>
                         ${selectOptions}
                     </select>
                 </td>
@@ -6818,12 +6832,34 @@ window.saveSuperSettings = async (triggerButton = null) => {
     }
 };
 
+window.rememberApplicationAgentSelection = (submissionId, agentId) => {
+    const normalizedSubmissionId = String(submissionId || '').trim();
+    const normalizedAgentId = String(agentId || '').trim();
+    if (!normalizedSubmissionId) return;
+    if (normalizedAgentId) {
+        pendingApplicationAgentSelections.set(normalizedSubmissionId, normalizedAgentId);
+    } else {
+        pendingApplicationAgentSelections.delete(normalizedSubmissionId);
+    }
+};
+
+window.rememberApplicationAgentRerouteSelection = (submissionId, agentId) => {
+    const normalizedSubmissionId = String(submissionId || '').trim();
+    const normalizedAgentId = String(agentId || '').trim();
+    if (!normalizedSubmissionId) return;
+    if (normalizedAgentId) {
+        pendingApplicationAgentRerouteSelections.set(normalizedSubmissionId, normalizedAgentId);
+    } else {
+        pendingApplicationAgentRerouteSelections.delete(normalizedSubmissionId);
+    }
+};
+
 window.assignApplicationAgent = async (submissionId) => {
     const submission = allSubmissions.find((item) => item.id === submissionId);
     if (!submission) return showNotification('Submission not found', 'error');
 
     const select = document.getElementById(`sa-app-agent-${submissionId}`);
-    const agentId = String(select?.value || '').trim();
+    const agentId = String(select?.value || pendingApplicationAgentSelections.get(submissionId) || '').trim();
     if (!agentId) return showNotification('Select an agent first', 'warning');
 
     const allowedAgents = getUploaderOwnedApprovedAgents(submission.uploadedBy);
@@ -6853,6 +6889,7 @@ window.assignApplicationAgent = async (submissionId) => {
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         });
+        pendingApplicationAgentSelections.delete(submissionId);
         showNotification('Application agent updated successfully', 'success');
     } catch (error) {
         showNotification('Failed to update application agent', 'error');
@@ -6867,7 +6904,7 @@ window.rerouteApplicationAgent = async (submissionId) => {
     if (!currentAgentId) return showNotification('This application has no linked agent to re-route', 'warning');
 
     const select = document.getElementById(`sa-reroute-agent-${submissionId}`);
-    const agentId = String(select?.value || '').trim();
+    const agentId = String(select?.value || pendingApplicationAgentRerouteSelections.get(submissionId) || '').trim();
     if (!agentId) return showNotification('Select a replacement agent first', 'warning');
     if (agentId === currentAgentId) return showNotification('Select a different agent to re-route this application', 'warning');
 
@@ -6905,6 +6942,7 @@ window.rerouteApplicationAgent = async (submissionId) => {
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         });
+        pendingApplicationAgentRerouteSelections.delete(submissionId);
         showNotification('Application re-routed successfully', 'success');
     } catch (error) {
         showNotification('Failed to re-route application agent', 'error');

@@ -2508,6 +2508,12 @@ function isExplicitUploaderSwitch() {
   return params.get('view') === 'uploader' || params.get('switch') === 'uploader';
 }
 
+function isSuperAdminDashboardSwitch() {
+  const params = new URLSearchParams(window.location.search);
+  return String(currentUserProfile?.role || '').trim().toLowerCase() === 'super_admin'
+    && String(params.get('view') || '').trim().toLowerCase() === 'super_admin';
+}
+
 function syncOriginatingTpField() {
   const originatingTpEl = document.getElementById('originatingTP');
   if (!originatingTpEl) return;
@@ -2593,7 +2599,7 @@ document.addEventListener('DOMContentLoaded', () => {
         userName.textContent = user.displayName || user.email;
       }
       const defaultDashboard = getDefaultDashboardForRole(currentUserProfile?.role);
-      if (defaultDashboard && !isExplicitUploaderSwitch()) {
+      if (defaultDashboard && !isExplicitUploaderSwitch() && !isSuperAdminDashboardSwitch()) {
         window.location.href = defaultDashboard;
         return;
       }
