@@ -15,6 +15,8 @@ async function shouldShowSwitcher(user) {
 }
 
 function renderSwitcher() {
+  if (document.getElementById('superAdminDashboardSwitcher')) return;
+
   const dashboards = [
     { label: 'Super Admin', url: 'super-admin-dashboard.html' },
     { label: 'Uploader', url: 'dashboard.html?view=super_admin' },
@@ -27,6 +29,7 @@ function renderSwitcher() {
 
   const currentPath = window.location.pathname.split('/').pop() || 'dashboard.html';
   const wrap = document.createElement('div');
+  wrap.id = 'superAdminDashboardSwitcher';
   wrap.setAttribute('aria-label', 'Super Admin dashboard switcher');
   wrap.style.cssText = [
     'position:fixed',
@@ -36,7 +39,7 @@ function renderSwitcher() {
     'display:flex',
     'align-items:center',
     'gap:8px',
-    'padding:10px',
+    'padding:10px 12px',
     'border:1px solid #cbd5e1',
     'border-radius:12px',
     'background:#ffffff',
@@ -44,9 +47,21 @@ function renderSwitcher() {
     'font:13px/1.4 Arial,sans-serif'
   ].join(';');
 
-  const label = document.createElement('label');
-  label.textContent = 'Switch';
-  label.style.cssText = 'font-weight:700;color:#0f3b67;';
+  const backButton = document.createElement('button');
+  backButton.type = 'button';
+  backButton.textContent = 'Back to Super Admin';
+  backButton.style.cssText = [
+    'padding:9px 12px',
+    'border:0',
+    'border-radius:8px',
+    'background:#0f3b67',
+    'color:#fff',
+    'font-weight:700',
+    'cursor:pointer'
+  ].join(';');
+  backButton.addEventListener('click', () => {
+    window.location.href = 'super-admin-dashboard.html';
+  });
 
   const select = document.createElement('select');
   select.style.cssText = 'padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#0f172a;';
@@ -62,11 +77,18 @@ function renderSwitcher() {
     window.location.href = select.value;
   });
 
-  wrap.appendChild(label);
+  wrap.appendChild(backButton);
   wrap.appendChild(select);
-  document.addEventListener('DOMContentLoaded', () => {
+
+  const mount = () => {
     document.body.appendChild(wrap);
-  });
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mount, { once: true });
+  } else {
+    mount();
+  }
 }
 
 auth.onAuthStateChanged(async (user) => {
