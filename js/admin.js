@@ -1156,17 +1156,21 @@ async function checkAdminAuth() {
                 userData = userProfileDoc.data() || userData;
             }
 
-            if (userData.role === 'super_admin') {
+            const role = String(userData.role || '').toLowerCase();
+            const isSuperAdminDashboardSwitch = role === 'super_admin'
+                && String(new URL(window.location.href).searchParams.get('view') || '').toLowerCase() === 'super_admin';
+
+            if (role === 'super_admin' && !isSuperAdminDashboardSwitch) {
                 window.location.href = 'super-admin-dashboard.html';
                 return;
             }
 
-            if (userData.role === 'reports_monitoring') {
+            if (role === 'reports_monitoring') {
                 window.location.href = 'reports-monitoring-dashboard.html';
                 return;
             }
 
-            if (userData.role === 'admin') {
+            if (role === 'admin' || isSuperAdminDashboardSwitch) {
                 currentAdmin = user;
                 currentAdminProfileData = userData;
                 loadAdminSystemSettings();

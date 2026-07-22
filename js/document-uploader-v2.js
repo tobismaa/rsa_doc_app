@@ -2294,6 +2294,7 @@ async function persistDraftSilentlyIfNeeded() {
 }
 
 function getRejectionHistoryEntries(submission) {
+  const auditEntries = getAuditRejectionEntries(submission);
   const rawHistory = Array.isArray(submission?.rejectionHistory) ? submission.rejectionHistory : [];
   const normalizedHistory = rawHistory
     .map((entry) => {
@@ -2311,32 +2312,8 @@ function getRejectionHistoryEntries(submission) {
     })
     .filter(Boolean);
 
+  if (auditEntries.length > 0) return auditEntries;
   if (normalizedHistory.length > 0) return normalizedHistory;
-
-  const auditHistory = Array.isArray(submission?.auditCommissionRejections)
-    ? submission.auditCommissionRejections
-      .map((entry) => {
-        const reason = String(entry?.reason || '').trim();
-        if (!reason) return null;
-        return {
-          reason,
-          rejectedAt: entry?.rejectedAt || null,
-          rejectedBy: entry?.rejectedBy || entry?.performedBy || null
-        };
-      })
-      .filter(Boolean)
-    : [];
-
-  if (auditHistory.length > 0) return auditHistory;
-
-  const auditReason = String(submission?.auditCommissionRejectionReason || '').trim();
-  if (auditReason) {
-    return [{
-      reason: auditReason,
-      rejectedAt: submission?.auditCommissionRejectedAt || null,
-      rejectedBy: submission?.auditCommissionRejectedBy || null
-    }];
-  }
 
   const fallbackReason = String(
     submission?.latestRejectionReason ||
@@ -2350,6 +2327,60 @@ function getRejectionHistoryEntries(submission) {
     rejectedAt: submission?.latestRejectedAt || submission?.previousRejectedAt || submission?.reviewedAt || null,
     rejectedBy: submission?.latestRejectedBy || submission?.reviewedBy || null
   }] : [];
+}
+
+function getAuditRejectionEntries(submission = {}) {
+  const entries = [];
+  const latestRejectedStage = String(submission?.latestRejectedStage || '').trim().toLowerCase();
+  const auditDuplicateCorrectionStatus = String(submission?.auditDuplicateCorrectionStatus || '').trim().toLowerCase();
+  const isAuditDuplicateRejection = latestRejectedStage === 'audit'
+    || submission?.auditDuplicateRejected === true
+    || auditDuplicateCorrectionStatus === 'pending'
+    || Boolean(submission?.auditDuplicateRejectionReason);
+  const auditDuplicateReason = String(
+    submission?.auditDuplicateRejectionReason ||
+    (latestRejectedStage === 'audit' ? submission?.latestRejectionReason : '') ||
+    ''
+  ).trim();
+
+  if (isAuditDuplicateRejection && auditDuplicateReason) {
+    entries.push({
+      reason: auditDuplicateReason,
+      rejectedAt: submission?.auditDuplicateRejectedAt || submission?.latestRejectedAt || submission?.previousRejectedAt || null,
+      rejectedBy: submission?.auditDuplicateRejectedBy || submission?.latestRejectedBy || null,
+      source: 'Audit'
+    });
+  }
+
+  const auditHistory = Array.isArray(submission?.auditCommissionRejections)
+    ? submission.auditCommissionRejections
+      .map((entry) => {
+        const reason = String(entry?.reason || '').trim();
+        if (!reason) return null;
+        return {
+          reason,
+          rejectedAt: entry?.rejectedAt || null,
+          rejectedBy: entry?.rejectedBy || entry?.performedBy || null,
+          source: 'Audit'
+        };
+      })
+      .filter(Boolean)
+      .reverse()
+    : [];
+
+  entries.push(...auditHistory);
+
+  const auditReason = String(submission?.auditCommissionRejectionReason || '').trim();
+  if (auditReason && !entries.some((entry) => String(entry.reason || '').trim() === auditReason)) {
+    entries.push({
+      reason: auditReason,
+      rejectedAt: submission?.auditCommissionRejectedAt || null,
+      rejectedBy: submission?.auditCommissionRejectedBy || null,
+      source: 'Audit'
+    });
+  }
+
+  return entries;
 }
 
 function hasRejectionHistory(submission) {
@@ -5772,6 +5803,30 @@ function isAuditCommissionRejected(submission = {}) {
   return String(submission.auditCommissionStatus || '').toLowerCase() === 'rejected';
 }
 
+function isAuditRejectedSubmission(submission = {}) {
+  const auditDuplicateCorrectionStatus = String(submission.auditDuplicateCorrectionStatus || '').toLowerCase();
+  return isAuditCommissionRejected(submission) ||
+    String(submission.latestRejectedStage || '').toLowerCase() === 'audit' ||
+    submission.auditDuplicateRejected === true ||
+    auditDuplicateCorrectionStatus === 'pending' ||
+    Boolean(submission.auditDuplicateRejectionReason);
+}
+
+function getUploaderRejectionEntryAt(submission = {}) {
+  if (isAuditCommissionRejected(submission)) {
+    return submission.auditCommissionRejectedAt ||
+      submission.auditCommissionSubmittedAt ||
+      submission.paymentMadeAt ||
+      getSubmissionPaymentEntryAt(submission);
+  }
+  if (isAuditRejectedSubmission(submission)) {
+    return submission.auditDuplicateRejectedAt ||
+      submission.latestRejectedAt ||
+      getSubmissionRejectionEntryAt(submission);
+  }
+  return getSubmissionRejectionEntryAt(submission);
+}
+
 function isAuditApplicationFrozen(submission = {}) {
   return submission.auditFrozen === true;
 }
@@ -6039,10 +6094,11 @@ async function renderUploaderApplicationsTable() {
     let html = '';
     for (const sub of rows) {
       const auditRejected = isAuditCommissionRejected(sub);
+      const auditRejectedByAudit = isAuditRejectedSubmission(sub);
       const auditFrozen = isAuditApplicationFrozen(sub);
       const fixCount = auditRejected ? Number(sub.auditCommissionResubmitCount || 0) : Number(sub.fixCount || 0);
-      const date = safeFormatDate(auditRejected ? (sub.auditCommissionRejectedAt || sub.auditCommissionSubmittedAt || sub.paymentMadeAt) : getSubmissionReviewEntryAt(sub));
-      const assignedName = auditRejected ? 'Audit' : (sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned');
+      const date = safeFormatDate(getUploaderRejectionEntryAt(sub));
+      const assignedName = auditRejectedByAudit ? 'Audit' : (sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned');
       const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
       const chatBtn = auditFrozen
         ? `<button class="action-btn app-chat-trigger" disabled title="Application frozen by Audit"><i class="fas fa-lock"></i> Frozen</button>`
@@ -6515,21 +6571,34 @@ async function renderRejectedTable() {
   if (!rejectedTableBody) { return; }
   const rejected = allSubmissions
     .filter(isOwnUploaderSubmission)
-    .filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase()))
+    .filter(s => ['rejected', 'rejected_by_rsa'].includes(String(s.status || '').toLowerCase()) || isAuditCommissionRejected(s))
     .slice()
-    .sort((a, b) => getStageTimestampMillis(getSubmissionRejectionEntryAt(b)) - getStageTimestampMillis(getSubmissionRejectionEntryAt(a)));
+    .sort((a, b) => getStageTimestampMillis(getUploaderRejectionEntryAt(b)) - getStageTimestampMillis(getUploaderRejectionEntryAt(a)));
   if (rejected.length === 0) { rejectedTableBody.innerHTML = '<tr><td colspan="10" class="no-data">No rejected documents</td></tr>'; return; }
   let html = '';
   for (const sub of rejected) {
-    const fixCount = Number(sub.fixCount || 0);
-    const date = safeFormatDate(getSubmissionReviewEntryAt(sub));
-    const assignedName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned';
+    const auditRejected = isAuditCommissionRejected(sub);
+    const auditRejectedByAudit = isAuditRejectedSubmission(sub);
+    const auditFrozen = isAuditApplicationFrozen(sub);
+    const fixCount = auditRejected ? Number(sub.auditCommissionResubmitCount || 0) : Number(sub.fixCount || 0);
+    const date = safeFormatDate(getUploaderRejectionEntryAt(sub));
+    const assignedName = auditRejectedByAudit ? 'Audit' : (sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned');
     const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
-    const chatBtn = `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button>`;
+    const chatBtn = auditFrozen
+      ? `<button class="action-btn app-chat-trigger" disabled title="Application frozen by Audit"><i class="fas fa-lock"></i> Frozen</button>`
+      : `<button class="action-btn app-chat-trigger" data-chat-submission="${sub.id}" onclick="window.openApplicationChat('${sub.id}')" title="Application Chat"><i class="fas fa-comments"></i> Chat</button>`;
     const reasonBtn = hasRejectionHistory(sub)
       ? `<button class="action-btn reason-btn" onclick="window.openUploaderRejectionReasonModal('${sub.id}')"><i class="fas fa-eye"></i> View Details</button>`
       : 'No reason provided';
-    html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${reasonBtn}</td><td><button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-paper-plane"></i> Resubmit</button></td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
+    const actionCell = auditFrozen
+      ? `<div class="audit-frozen-uploader-notice"><i class="fas fa-snowflake"></i><span>Frozen by Audit</span><small>Wait for Audit to unfreeze this application.</small></div>`
+      : auditRejected
+      ? `<div class="audit-rejection-actions">
+          <button class="action-btn edit-btn" onclick="window.openAuditPaymentResubmitModal('${sub.id}')" title="Submit correction to Audit"><i class="fas fa-paper-plane"></i> Resubmit</button>
+          <button class="action-btn dissolve-btn" onclick="window.dissolveAuditPaymentRequest('${sub.id}')" title="Return to Sent to PFA"><i class="fas fa-rotate-left"></i> Dissolve</button>
+        </div>`
+      : `<button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-paper-plane"></i> Resubmit</button>`;
+    html += `<tr data-submission-id="${sub.id}"><td><strong>${escapeHtml(sub.customerName || '-')}</strong></td><td>${agentName}</td><td>${chatBtn}</td><td>${fixCount}</td><td>${escapeHtml(assignedName || '-')}</td><td>${date}</td><td>${reasonBtn}</td><td>${actionCell}</td><td><button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> View</button></td><td><button class="action-btn track-btn" onclick="window.showApplicationTrack('${sub.id}')"><i class="fas fa-map-marker-alt"></i> Track</button></td></tr>`;
   }
   rejectedTableBody.innerHTML = html;
 }
@@ -6557,7 +6626,8 @@ window.openUploaderRejectionReasonModal = (submissionId) => {
             const rejectedBy = rejectedByKey && userFullNames.get(rejectedByKey)
               ? userFullNames.get(rejectedByKey)
               : (entry.rejectedBy || 'Not available');
-            return `<li><strong>Rejection ${index + 1}</strong><div><b>Reason:</b> ${escapeHtml(entry.reason)}</div><div><b>Rejected By:</b> ${escapeHtml(rejectedBy)}</div><span class="rejection-history-time"><b>Rejected Date/Time:</b> ${escapeHtml(timeText)}</span></li>`;
+            const title = entry.source ? `${entry.source} Rejection ${index + 1}` : `Rejection ${index + 1}`;
+            return `<li><strong>${escapeHtml(title)}</strong><div><b>Reason:</b> ${escapeHtml(entry.reason)}</div><div><b>Rejected By:</b> ${escapeHtml(rejectedBy)}</div><span class="rejection-history-time"><b>Rejected Date/Time:</b> ${escapeHtml(timeText)}</span></li>`;
           }).join('')}
         </ol>
       `;

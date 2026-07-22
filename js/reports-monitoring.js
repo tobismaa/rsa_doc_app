@@ -4382,7 +4382,9 @@ auth.onAuthStateChanged(async (user) => {
         }
 
         const role = String(userData.role || '').toLowerCase();
-        if (role !== 'reports_monitoring' && role !== 'audit') {
+        const isSuperAdminDashboardSwitch = role === 'super_admin'
+            && String(new URL(window.location.href).searchParams.get('view') || '').toLowerCase() === 'super_admin';
+        if (role !== 'reports_monitoring' && role !== 'audit' && !isSuperAdminDashboardSwitch) {
             if (role === 'super_admin') window.location.href = 'super-admin-dashboard.html';
             else if (role === 'admin') window.location.href = 'admin-dashboard.html';
             else if (role === 'reviewer') window.location.href = 'reviewer-dashboard.html';

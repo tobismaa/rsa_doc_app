@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cmbank-rsa-v61';
+const CACHE_NAME = 'cmbank-rsa-v65';
 const BADGE_DB_NAME = 'cmbank-badge-db';
 const BADGE_STORE_NAME = 'appState';
 const BADGE_COUNT_KEY = 'unreadCount';
@@ -29,6 +29,7 @@ const ASSETS = [
   '/js/pwa-install.js',
   '/js/app-chat.js',
   '/js/shared/logout.js',
+  '/js/shared/super-admin-dashboard-switcher.js',
   '/favicon.png',
   '/favicon.svg',
   '/icons/icon-192.png',

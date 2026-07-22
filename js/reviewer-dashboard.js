@@ -982,7 +982,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const role = String(currentUserData?.role || '').toLowerCase();
-            if (role === 'reviewer') {
+            const isSuperAdminDashboardSwitch = role === 'super_admin'
+                && String(new URL(window.location.href).searchParams.get('view') || '').toLowerCase() === 'super_admin';
+            if (role === 'reviewer' || isSuperAdminDashboardSwitch) {
                 renderProfileTab();
                 loadSubmissions();
                 window.switchTab(getInitialReviewerTab());

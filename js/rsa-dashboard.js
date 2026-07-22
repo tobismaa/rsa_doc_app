@@ -355,7 +355,9 @@ async function loadCurrentRsaProfile(user) {
     updateRsaExcelAccessUI();
 
     const role = String(profileData?.role || '').toLowerCase();
-    if (role && role !== 'rsa') {
+    const isSuperAdminDashboardSwitch = role === 'super_admin'
+        && String(new URL(window.location.href).searchParams.get('view') || '').toLowerCase() === 'super_admin';
+    if (role && role !== 'rsa' && !isSuperAdminDashboardSwitch) {
         showNotification('Access denied. RSA privileges required.', 'error');
         setTimeout(() => { window.location.href = 'index.html'; }, 1500);
         return false;

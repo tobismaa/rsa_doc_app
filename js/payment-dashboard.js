@@ -2893,11 +2893,13 @@ auth.onAuthStateChanged(async (user) => {
         }
 
         const role = String(userData.role || '').toLowerCase();
+        const isSuperAdminDashboardSwitch = role === 'super_admin'
+            && String(new URL(window.location.href).searchParams.get('view') || '').toLowerCase() === 'super_admin';
         if (role === 'admin') {
             window.location.href = 'admin-dashboard.html';
             return;
         }
-        if (role !== 'payment') {
+        if (role !== 'payment' && !isSuperAdminDashboardSwitch) {
             window.location.href = 'index.html';
             return;
         }
