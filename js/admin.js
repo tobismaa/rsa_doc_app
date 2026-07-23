@@ -454,6 +454,39 @@ function getSlaBreachRows(nowMs = Date.now()) {
         .sort((a, b) => b.overdueMs - a.overdueMs);
 }
 
+function getSlaBreachFilteredRows() {
+    const search = String(slaBreachSearch?.value || '').trim().toLowerCase();
+    const stageFilter = ['rsa', 'payment'].includes(activeSlaBreachStage) ? activeSlaBreachStage : 'rsa';
+    let rows = getSlaBreachRows().filter((row) => row.stageKey === stageFilter);
+
+    if (search) {
+        rows = rows.filter(({ sub, officerEmail }) => {
+            const uploaderEmail = String(sub.uploadedBy || '').toLowerCase();
+            const officer = String(officerEmail || '').toLowerCase();
+            return String(sub.customerName || '').toLowerCase().includes(search) ||
+                String(getSubmissionPenNumber(sub) || '').toLowerCase().includes(search) ||
+                uploaderEmail.includes(search) ||
+                getDisplayNameByEmail(uploaderEmail).toLowerCase().includes(search) ||
+                officer.includes(search) ||
+                getDisplayNameByEmail(officer).toLowerCase().includes(search);
+        });
+    }
+
+    return rows;
+}
+
+function getSubmissionPenNumber(sub = {}) {
+    return String(
+        sub?.customerDetails?.penNo ||
+        sub?.customerDetails?.penNumber ||
+        sub?.penNo ||
+        sub?.penNumber ||
+        sub?.rsaPin ||
+        sub?.pin ||
+        ''
+    ).trim();
+}
+
 function updateAdminNavigationCounts() {
     const userManagementCount = getAdminSubTabCount('users') + getAdminSubTabCount('pending-users') + getAdminSubTabCount('pending-agents') + getAdminSubTabCount('registered-agents');
     const applicationManagementCount = allSubmissions.length;
@@ -595,6 +628,7 @@ const slaBreachesTableBody = document.getElementById('slaBreachesTableBody');
 const slaBreachSummary = document.getElementById('slaBreachSummary');
 const slaBreachSearch = document.getElementById('slaBreachSearch');
 const slaBreachSubtabs = document.getElementById('slaBreachSubtabs');
+const downloadSlaBreachReportBtn = document.getElementById('downloadSlaBreachReportBtn');
 const slaRsaCount = document.getElementById('slaRsaCount');
 const slaPaymentCount = document.getElementById('slaPaymentCount');
 const paymentsTableBody = document.getElementById('paymentsTableBody');
@@ -1441,6 +1475,7 @@ function setupEventListeners() {
     generateTrackReportBtn?.addEventListener('click', generateTrackReportPreview);
     clearTrackReportBtn?.addEventListener('click', clearTrackReportInputs);
     downloadTrackReportBtn?.addEventListener('click', downloadTrackReportWorkbook);
+    downloadSlaBreachReportBtn?.addEventListener('click', downloadSlaBreachReportWorkbook);
 
     document.getElementById('closeViewer')?.addEventListener('click', closeViewerModal);
 
@@ -2687,21 +2722,8 @@ function renderPaymentQueue() {
 function renderSlaBreaches() {
     if (!slaBreachesTableBody) return;
 
-    const search = String(slaBreachSearch?.value || '').trim().toLowerCase();
     const stageFilter = ['rsa', 'payment'].includes(activeSlaBreachStage) ? activeSlaBreachStage : 'rsa';
-    let rows = getSlaBreachRows().filter((row) => row.stageKey === stageFilter);
-
-    if (search) {
-        rows = rows.filter(({ sub, officerEmail }) => {
-            const uploaderEmail = String(sub.uploadedBy || '').toLowerCase();
-            const officer = String(officerEmail || '').toLowerCase();
-            return String(sub.customerName || '').toLowerCase().includes(search) ||
-                uploaderEmail.includes(search) ||
-                getDisplayNameByEmail(uploaderEmail).toLowerCase().includes(search) ||
-                officer.includes(search) ||
-                getDisplayNameByEmail(officer).toLowerCase().includes(search);
-        });
-    }
+    const rows = getSlaBreachFilteredRows();
 
     const allRows = getSlaBreachRows();
     const rsaCount = allRows.filter((row) => row.stageKey === 'rsa').length;
@@ -2754,6 +2776,161 @@ function renderSlaBreaches() {
             </tr>
         `;
     }).join('');
+}
+
+function getSlaReportFileSuffix() {
+    const date = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}`;
+}
+
+function buildSlaBreachReportRow(row = {}) {
+    const sub = row.sub || {};
+    const uploaderEmail = String(sub.uploadedBy || '').trim().toLowerCase();
+    const officerEmail = String(row.officerEmail || '').trim().toLowerCase();
+    return {
+        'Application ID': sub.id || '',
+        'Customer Name': sub.customerName || 'Unknown',
+        'PEN Number': getSubmissionPenNumber(sub) || '',
+        'Uploader': uploaderEmail ? getDisplayNameByEmail(uploaderEmail) : 'Unknown',
+        'Uploader Email': uploaderEmail,
+        'Stage': row.stageLabel || '',
+        'SLA Hours': Math.round(Number(row.allowedMs || 0) / SLA_HOUR_MS),
+        'Responsible Officer': officerEmail ? getDisplayNameByEmail(officerEmail) : 'Unassigned',
+        'Officer Email': officerEmail,
+        'Started At': formatDate(row.startedAt),
+        'Due At': formatDate(new Date(row.dueMs)),
+        'Overdue By': formatSlaDuration(row.overdueMs),
+        'Current Status': formatStatusLabel(sub.status || '-'),
+        'Uploaded At': formatDate(getSubmissionOriginalUploadAt(sub))
+    };
+}
+
+function styleSlaHeaderRow(row) {
+    row.height = 22;
+    row.eachCell((cell) => {
+        cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3B67' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        cell.border = {
+            top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+        };
+    });
+}
+
+function styleSlaBodyRow(row, fill = 'FFFFFFFF') {
+    row.eachCell((cell) => {
+        cell.font = { name: 'Calibri', size: 10, color: { argb: 'FF0F172A' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
+        cell.alignment = { vertical: 'middle', wrapText: true };
+        cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        };
+    });
+}
+
+async function downloadSlaBreachReportWorkbook() {
+    if (!ensureExcelJsLibrary()) return;
+
+    const rows = getSlaBreachFilteredRows();
+    if (!rows.length) {
+        showNotification('There are no SLA breach records to export for this selection.', 'warning');
+        return;
+    }
+
+    const originalHtml = downloadSlaBreachReportBtn?.innerHTML || '';
+    try {
+        if (downloadSlaBreachReportBtn) {
+            downloadSlaBreachReportBtn.disabled = true;
+            downloadSlaBreachReportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+        }
+
+        const allRows = getSlaBreachRows();
+        const stageFilter = ['rsa', 'payment'].includes(activeSlaBreachStage) ? activeSlaBreachStage : 'rsa';
+        const activeLabel = stageFilter === 'payment' ? 'Payment' : 'RSA';
+        const reportRows = rows.map(buildSlaBreachReportRow);
+        const headers = Object.keys(reportRows[0] || {});
+
+        const workbook = new window.ExcelJS.Workbook();
+        workbook.creator = 'CMBank RSA Admin Dashboard';
+        workbook.company = 'CMBank';
+        workbook.created = new Date();
+        workbook.modified = new Date();
+
+        const summarySheet = workbook.addWorksheet('SLA Summary');
+        summarySheet.columns = [
+            { header: 'Metric', key: 'metric', width: 34 },
+            { header: 'Value', key: 'value', width: 26 }
+        ];
+        const titleRow = summarySheet.addRow(['SLA Breach Report']);
+        summarySheet.mergeCells(`A${titleRow.number}:B${titleRow.number}`);
+        titleRow.height = 28;
+        titleRow.getCell(1).font = { name: 'Calibri', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+        titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3B67' } };
+        titleRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+        summarySheet.addRow([]);
+        const summaryHeader = summarySheet.addRow(['Metric', 'Value']);
+        styleSlaHeaderRow(summaryHeader);
+        [
+            ['Generated At', new Date().toLocaleString()],
+            ['Active Report Tab', activeLabel],
+            ['Search Filter', String(slaBreachSearch?.value || '').trim() || 'None'],
+            ['Exported Records', rows.length],
+            ['RSA Breaches Total', allRows.filter((item) => item.stageKey === 'rsa').length],
+            ['Payment Breaches Total', allRows.filter((item) => item.stageKey === 'payment').length],
+            ['Monitor Start', '14 Jul 2026 1:58 PM'],
+            ['RSA SLA', '48 hours'],
+            ['Payment SLA', '72 hours']
+        ].forEach((entry, index) => {
+            const dataRow = summarySheet.addRow(entry);
+            styleSlaBodyRow(dataRow, index % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC');
+        });
+
+        const detailSheet = workbook.addWorksheet('SLA Breaches', {
+            views: [{ state: 'frozen', ySplit: 1 }]
+        });
+        detailSheet.columns = headers.map((header) => ({
+            header,
+            key: header,
+            width: header.includes('Name') ? 28 : header.includes('Email') ? 30 : 20
+        }));
+        styleSlaHeaderRow(detailSheet.getRow(1));
+        reportRows.forEach((row, index) => {
+            const dataRow = detailSheet.addRow(row);
+            styleSlaBodyRow(dataRow, index % 2 === 0 ? 'FFFFFFFF' : 'FFFFF7ED');
+            dataRow.getCell('Overdue By').font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFB91C1C' } };
+        });
+        detailSheet.autoFilter = {
+            from: { row: 1, column: 1 },
+            to: { row: 1, column: headers.length }
+        };
+
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `cmbank_sla_breach_report_${stageFilter}_${getSlaReportFileSuffix()}.xlsx`;
+        link.click();
+        URL.revokeObjectURL(url);
+        showNotification('SLA breach report downloaded.', 'success');
+    } catch (error) {
+        console.error('Failed to generate SLA breach report:', error);
+        showNotification('Failed to generate SLA breach report.', 'error');
+    } finally {
+        if (downloadSlaBreachReportBtn) {
+            downloadSlaBreachReportBtn.disabled = false;
+            downloadSlaBreachReportBtn.innerHTML = originalHtml || '<i class="fas fa-file-excel"></i> Download Excel Report';
+        }
+    }
 }
 
 function getSubmissionHasAgent(sub) {
