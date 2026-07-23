@@ -412,6 +412,7 @@ function openTransferConfirmModal({
     count = 0,
     fromEmail = '',
     toEmail = '',
+    toLabel = '',
     reason = ''
 } = {}) {
     const modal = document.getElementById('transferConfirmModal');
@@ -422,7 +423,7 @@ function openTransferConfirmModal({
     const reasonEl = document.getElementById('transferConfirmReason');
     if (countEl) countEl.textContent = `${count} application${count === 1 ? '' : 's'}`;
     if (fromEl) fromEl.textContent = getTransferUserOptionLabel(fromEmail);
-    if (toEl) toEl.textContent = getTransferUserOptionLabel(toEmail);
+    if (toEl) toEl.textContent = toLabel || getTransferUserOptionLabel(toEmail);
     if (reasonEl) reasonEl.textContent = reason || '-';
     modal.classList.add('active');
     return new Promise((resolve) => {
@@ -2739,11 +2740,56 @@ const TRANSFER_OWNER_FIELDS = [
     { label: 'RSA', field: 'assignedToRSA', previousField: 'previousRSA' },
     { label: 'Payment', field: 'assignedToPayment', previousField: 'previousPayment' }
 ];
+const TRANSFER_FIELD_TARGET_ROLES = {
+    uploadedBy: ['uploader', 'reviewer', 'rsa', 'reports_monitoring'],
+    assignedTo: ['reviewer'],
+    assignedToRSA: ['rsa'],
+    assignedToPayment: ['payment']
+};
+
+function getTransferMode() {
+    const mode = String(document.getElementById('transferMode')?.value || 'single_user').trim();
+    return mode === 'rsa_round_robin' ? 'rsa_round_robin' : 'single_user';
+}
+
+function isTransferRsaRoundRobinMode() {
+    return getTransferMode() === 'rsa_round_robin';
+}
 
 function getTransferMatchedOwnerFields(sub = {}, email = '') {
     const normalized = normalizeEmail(email);
     if (!normalized) return [];
     return TRANSFER_OWNER_FIELDS.filter((item) => normalizeEmail(sub?.[item.field]) === normalized);
+}
+
+function getTransferMatchedOwnerFieldsForMode(sub = {}, email = '') {
+    const matchedFields = getTransferMatchedOwnerFields(sub, email);
+    if (!isTransferRsaRoundRobinMode()) return matchedFields;
+    return matchedFields.filter((item) => item.field === 'assignedToRSA');
+}
+
+function getTransferEligibleRsaUsers(fromEmail = '') {
+    const sourceEmail = normalizeEmail(fromEmail);
+    return getUsersByRole('rsa')
+        .filter((user) => normalizeEmail(user.email))
+        .filter((user) => normalizeEmail(user.email) !== sourceEmail)
+        .filter((user) => !Boolean(user.skipRsaRoundRobin))
+        .sort((a, b) => getTransferUserOptionLabel(a.email).localeCompare(getTransferUserOptionLabel(b.email)));
+}
+
+function getTransferTargetUsersForFields(matchedFields = [], fromEmail = '') {
+    const sourceEmail = normalizeEmail(fromEmail);
+    const fields = [...new Set(matchedFields.map((item) => item.field).filter(Boolean))];
+    if (fields.length === 1) {
+        const roles = TRANSFER_FIELD_TARGET_ROLES[fields[0]] || [];
+        if (roles.length) {
+            return getActiveUsersByRoles(roles)
+                .filter((user) => normalizeEmail(user.email))
+                .filter((user) => normalizeEmail(user.email) !== sourceEmail)
+                .sort((a, b) => getTransferUserOptionLabel(a.email).localeCompare(getTransferUserOptionLabel(b.email)));
+        }
+    }
+    return getTransferSelectableUsers().filter((user) => normalizeEmail(user.email) !== sourceEmail);
 }
 
 function getTransferAgentName(sub = {}) {
@@ -2780,6 +2826,29 @@ function buildTransferOptions(items = [], selectedValue = '', placeholder = 'Sel
     return options.join('');
 }
 
+function getTransferUserSearchText(user = {}) {
+    return [
+        user.fullName,
+        user.displayName,
+        user.email,
+        user.role,
+        user.status,
+        getTransferUserOptionLabel(user.email)
+    ].map((value) => String(value || '').toLowerCase()).join(' ');
+}
+
+function filterTransferUsersBySearch(users = [], searchText = '', selectedValue = '') {
+    const selected = normalizeEmail(selectedValue);
+    const terms = String(searchText || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return users;
+    return users.filter((user) => {
+        const email = normalizeEmail(user.email);
+        if (selected && email === selected) return true;
+        const haystack = getTransferUserSearchText(user);
+        return terms.every((term) => haystack.includes(term));
+    });
+}
+
 function getTransferSelectableUsers() {
     return allUsers
         .filter((user) => normalizeEmail(user.email))
@@ -2789,19 +2858,59 @@ function getTransferSelectableUsers() {
 function renderTransferSelectOptions() {
     const fromSelect = document.getElementById('transferFromUser');
     const toSelect = document.getElementById('transferToUser');
+    const fromSearch = document.getElementById('transferFromUserSearch');
+    const toSearch = document.getElementById('transferToUserSearch');
+    const toLabel = document.getElementById('transferToUserLabel');
+    const help = document.getElementById('transferModeHelp');
     if (!fromSelect || !toSelect) return;
 
     const previousFrom = normalizeEmail(fromSelect.value);
     const previousTo = normalizeEmail(toSelect.value);
     const users = getTransferSelectableUsers();
+    const filteredFromUsers = filterTransferUsersBySearch(users, fromSearch?.value || '', previousFrom);
+    const isRsaRoundRobin = isTransferRsaRoundRobinMode();
 
-    fromSelect.innerHTML = buildTransferOptions(users, previousFrom, 'Choose source user');
-    toSelect.innerHTML = buildTransferOptions(users, previousTo, 'Choose target user');
+    fromSelect.innerHTML = buildTransferOptions(
+        filteredFromUsers,
+        previousFrom,
+        filteredFromUsers.length ? 'Choose source user' : 'No matching users'
+    );
+    if (isRsaRoundRobin) {
+        const eligibleCount = getTransferEligibleRsaUsers(previousFrom).length;
+        toSelect.innerHTML = `<option value="">Round robin across ${eligibleCount} other RSA user${eligibleCount === 1 ? '' : 's'}</option>`;
+        toSelect.value = '';
+        toSelect.disabled = true;
+        if (toSearch) {
+            toSearch.value = '';
+            toSearch.disabled = true;
+            toSearch.placeholder = 'Not needed for round robin batch';
+        }
+        if (toLabel) toLabel.firstChild.textContent = 'Batch Target ';
+        if (help) {
+            help.textContent = 'RSA round robin mode shows applications currently assigned to the source RSA user. Select all or selected rows to share them across other active RSA users included in round robin. Use the row action to move one application to one RSA user.';
+        }
+    } else {
+        const filteredToUsers = filterTransferUsersBySearch(users, toSearch?.value || '', previousTo);
+        toSelect.innerHTML = buildTransferOptions(
+            filteredToUsers,
+            previousTo,
+            filteredToUsers.length ? 'Choose target user' : 'No matching users'
+        );
+        toSelect.disabled = false;
+        if (toSearch) {
+            toSearch.disabled = false;
+            toSearch.placeholder = 'Search staff name or email...';
+        }
+        if (toLabel) toLabel.firstChild.textContent = 'To User ';
+        if (help) {
+            help.textContent = 'Select a source and target user, then transfer selected applications together or use the row action for one-by-one transfer.';
+        }
+    }
 
     if (previousFrom && [...fromSelect.options].some((option) => normalizeEmail(option.value) === previousFrom)) {
         fromSelect.value = previousFrom;
     }
-    if (previousTo && [...toSelect.options].some((option) => normalizeEmail(option.value) === previousTo)) {
+    if (!isRsaRoundRobin && previousTo && [...toSelect.options].some((option) => normalizeEmail(option.value) === previousTo)) {
         toSelect.value = previousTo;
     }
 }
@@ -2812,7 +2921,7 @@ function getTransferFilteredSubmissions() {
     if (!fromEmail) return [];
 
     return allSubmissions.filter((sub) => {
-        if (!getTransferMatchedOwnerFields(sub, fromEmail).length) return false;
+        if (!getTransferMatchedOwnerFieldsForMode(sub, fromEmail).length) return false;
         if (!queryText) return true;
         const haystack = [
             getSubmissionCustomerName(sub),
@@ -2830,7 +2939,7 @@ function getTransferFilteredSubmissions() {
 
 function getTransferRowHtml(sub = {}) {
     const fromEmail = normalizeEmail(document.getElementById('transferFromUser')?.value || '');
-    const matchedFields = getTransferMatchedOwnerFields(sub, fromEmail);
+    const matchedFields = getTransferMatchedOwnerFieldsForMode(sub, fromEmail);
     const checked = selectedTransferSubmissionIds.has(sub.id) ? 'checked' : '';
     const customerName = getSubmissionCustomerName(sub) || 'Unknown';
     const penNumber = getSubmissionPenNumber(sub) || '-';
@@ -2839,6 +2948,9 @@ function getTransferRowHtml(sub = {}) {
     const rsaBalance = getSubmissionRsaBalance(sub);
     const twentyFive = getSubmissionTwentyFivePercent(sub);
     const commission = getSubmissionCommissionAmountForDisplay(sub);
+    const rowTargetUsers = getTransferTargetUsersForFields(matchedFields, fromEmail);
+    const rowTargetDisabled = rowTargetUsers.length ? '' : 'disabled';
+    const rowTargetOptions = buildTransferOptions(rowTargetUsers, '', rowTargetUsers.length ? 'Choose target' : 'No eligible target');
     return `
         <tr>
             <td><input type="checkbox" class="transfer-row-check" data-id="${escapeHtml(sub.id)}" ${checked} aria-label="Select application"></td>
@@ -2852,6 +2964,14 @@ function getTransferRowHtml(sub = {}) {
             <td>
                 <strong>${escapeHtml(getTransferUserOptionLabel(fromEmail))}</strong>
                 <div style="font-size:12px;color:#64748b;margin-top:4px;">${escapeHtml(matchedFields.map((item) => item.label).join(', ') || 'Owner')}</div>
+            </td>
+            <td>
+                <div style="display:grid;grid-template-columns:minmax(160px,1fr) auto;gap:8px;align-items:center;min-width:270px;">
+                    <select id="transfer-row-target-${escapeHtml(sub.id)}" ${rowTargetDisabled} style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;width:100%;">${rowTargetOptions}</select>
+                    <button type="button" class="action-btn transfer-row-btn" data-id="${escapeHtml(sub.id)}" ${rowTargetDisabled} style="background:#003366;color:#fff;border:none;padding:8px 10px;">
+                        <i class="fas fa-right-left"></i>
+                    </button>
+                </div>
             </td>
             <td>${escapeHtml(formatDate(sub.updatedAt || sub.submittedAt || sub.uploadedAt))}</td>
         </tr>
@@ -2869,20 +2989,25 @@ function renderTransferApplications() {
 
     const fromEmail = normalizeEmail(document.getElementById('transferFromUser')?.value || '');
     const toEmail = normalizeEmail(document.getElementById('transferToUser')?.value || '');
+    const isRsaRoundRobin = isTransferRsaRoundRobinMode();
+    const eligibleRsaUsers = getTransferEligibleRsaUsers(fromEmail);
     const rows = getTransferFilteredSubmissions();
     const visibleIds = new Set(rows.map((sub) => sub.id));
     selectedTransferSubmissionIds = new Set([...selectedTransferSubmissionIds].filter((id) => visibleIds.has(id)));
 
     if (!fromEmail) {
-        body.innerHTML = '<tr><td colspan="10" class="no-data">Choose a source user to view applications.</td></tr>';
+        body.innerHTML = '<tr><td colspan="11" class="no-data">Choose a source user to view applications.</td></tr>';
         if (summary) summary.textContent = 'Choose a source user to view applications.';
     } else if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="10" class="no-data">No applications found for this selection.</td></tr>';
+        body.innerHTML = '<tr><td colspan="11" class="no-data">No applications found for this selection.</td></tr>';
         if (summary) summary.textContent = `0 applications found for ${getTransferUserOptionLabel(fromEmail)}.`;
     } else {
         body.innerHTML = rows.map((sub) => getTransferRowHtml(sub)).join('');
         if (summary) {
-            summary.textContent = `${rows.length} application${rows.length === 1 ? '' : 's'} found. ${selectedTransferSubmissionIds.size} selected.`;
+            const targetText = isRsaRoundRobin
+                ? ` ${eligibleRsaUsers.length} other RSA user${eligibleRsaUsers.length === 1 ? '' : 's'} eligible for round robin.`
+                : '';
+            summary.textContent = `${rows.length} application${rows.length === 1 ? '' : 's'} found. ${selectedTransferSubmissionIds.size} selected.${targetText}`;
         }
     }
 
@@ -2892,7 +3017,213 @@ function renderTransferApplications() {
         selectAllCheckbox.disabled = !rows.length;
     }
     if (transferButton) {
-        transferButton.disabled = !fromEmail || !toEmail || fromEmail === toEmail || selectedTransferSubmissionIds.size === 0;
+        const canBatch = isRsaRoundRobin
+            ? Boolean(fromEmail && eligibleRsaUsers.length && selectedTransferSubmissionIds.size)
+            : Boolean(fromEmail && toEmail && fromEmail !== toEmail && selectedTransferSubmissionIds.size);
+        transferButton.disabled = !canBatch;
+        transferButton.innerHTML = isRsaRoundRobin
+            ? '<i class="fas fa-rotate"></i> Round Robin Selected'
+            : '<i class="fas fa-right-left"></i> Transfer Selected';
+    }
+}
+
+function getRoundRobinAssignmentPlan(submissions = [], eligibleUsers = [], startingIndex = -1) {
+    const users = eligibleUsers
+        .map((user) => normalizeEmail(user.email))
+        .filter(Boolean);
+    if (!submissions.length || !users.length) return { assignments: [], lastIndex: startingIndex };
+
+    const start = Number.isFinite(Number(startingIndex)) ? Number(startingIndex) : -1;
+    const assignments = submissions.map((sub, index) => {
+        const userIndex = (start + 1 + index) % users.length;
+        return {
+            submission: sub,
+            assignedToRSA: users[userIndex],
+            userIndex
+        };
+    });
+    return {
+        assignments,
+        lastIndex: assignments[assignments.length - 1]?.userIndex ?? start
+    };
+}
+
+async function writeRsaTransferHistory(sub = {}, assignedToRSA = '', assignmentMethod = 'manual_transfer') {
+    const assigned = normalizeEmail(assignedToRSA);
+    if (!sub?.id || !assigned) return;
+    try {
+        await addDoc(collection(db, 'roundRobinAssignmentsRSA'), {
+            submissionId: sub.id,
+            customerName: getSubmissionCustomerName(sub) || 'N/A',
+            assignedToRSA: assigned,
+            assignedBy: currentUser?.email || 'System',
+            assignedAt: serverTimestamp(),
+            reviewedBy: sub.reviewedBy || sub.reviewerSkippedBy || currentUser?.email || 'N/A',
+            assignmentMethod
+        });
+    } catch (_) {}
+}
+
+async function transferSelectedApplicationsByRsaRoundRobin({ fromEmail, reason, button }) {
+    const selectedIds = [...selectedTransferSubmissionIds];
+    const submissionsToTransfer = allSubmissions.filter((sub) => (
+        selectedIds.includes(sub.id) && normalizeEmail(sub.assignedToRSA) === fromEmail
+    ));
+    if (!submissionsToTransfer.length) {
+        selectedTransferSubmissionIds.clear();
+        renderTransferApplications();
+        return showNotification('No selected applications are still assigned to the source RSA user.', 'warning');
+    }
+
+    const eligibleRsaUsers = getTransferEligibleRsaUsers(fromEmail);
+    if (!eligibleRsaUsers.length) {
+        return showNotification('No other RSA user is eligible for round robin transfer.', 'warning');
+    }
+
+    const targetLabel = `RSA round robin across ${eligibleRsaUsers.length} user${eligibleRsaUsers.length === 1 ? '' : 's'}`;
+    const confirmed = await openTransferConfirmModal({
+        count: submissionsToTransfer.length,
+        fromEmail,
+        toLabel: targetLabel,
+        reason
+    });
+    if (!confirmed) return;
+
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sharing...';
+        }
+
+        const counterRef = doc(db, 'counters', 'roundRobinRSA');
+        const counterSnap = await getDoc(counterRef);
+        const counterData = counterSnap.exists() ? (counterSnap.data() || {}) : {};
+        const { assignments, lastIndex } = getRoundRobinAssignmentPlan(submissionsToTransfer, eligibleRsaUsers, Number(counterData.lastIndex ?? -1));
+        const performedBy = currentUser?.email || '';
+
+        await Promise.all(assignments.map(({ submission, assignedToRSA }) => updateDoc(doc(db, 'submissions', submission.id), {
+            assignedToRSA,
+            previousRSA: fromEmail,
+            rsaAssignedAt: serverTimestamp(),
+            rsaAssignmentMode: 'super_admin_round_robin_transfer',
+            applicationTransferredAt: serverTimestamp(),
+            applicationTransferredBy: performedBy,
+            applicationTransferType: 'rsa_round_robin',
+            applicationTransferReason: reason,
+            applicationTransferFrom: fromEmail,
+            applicationTransferTo: assignedToRSA,
+            applicationTransferFields: ['assignedToRSA'],
+            reassignedAt: serverTimestamp(),
+            reassignedBy: performedBy,
+            reassignmentReason: reason,
+            updatedAt: serverTimestamp()
+        })));
+
+        await Promise.all(assignments.map(({ submission, assignedToRSA }) => (
+            writeRsaTransferHistory(submission, assignedToRSA, 'super_admin_round_robin_transfer')
+        )));
+
+        await setDoc(counterRef, {
+            lastIndex,
+            lastDate: getLagosDateKey(),
+            updatedAt: serverTimestamp(),
+            updatedBy: performedBy
+        }, { merge: true });
+
+        await addDoc(collection(db, 'audit'), {
+            action: 'applications_transferred',
+            transferType: 'rsa_round_robin',
+            transferLabel: 'RSA Round Robin',
+            applicationCount: submissionsToTransfer.length,
+            applicationIds: submissionsToTransfer.map((sub) => sub.id).slice(0, 200),
+            applicationIdsTruncated: submissionsToTransfer.length > 200,
+            fromUser: fromEmail,
+            toUsers: [...new Set(assignments.map((item) => item.assignedToRSA))],
+            reason,
+            performedBy,
+            timestamp: serverTimestamp()
+        });
+
+        selectedTransferSubmissionIds.clear();
+        const reasonInput = document.getElementById('transferReasonInput');
+        if (reasonInput) reasonInput.value = '';
+        showNotification(`${submissionsToTransfer.length} RSA application${submissionsToTransfer.length === 1 ? '' : 's'} shared by round robin.`, 'success');
+        renderTransferApplications();
+    } catch (error) {
+        showNotification('Failed to round-robin selected RSA applications.', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml || '<i class="fas fa-rotate"></i> Round Robin Selected';
+        }
+    }
+}
+
+async function transferSingleApplication(submissionId = '') {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub) return showNotification('Application not found.', 'error');
+
+    const fromEmail = normalizeEmail(document.getElementById('transferFromUser')?.value || '');
+    const targetEmail = normalizeEmail(document.getElementById(`transfer-row-target-${submissionId}`)?.value || '');
+    const reason = String(document.getElementById('transferReasonInput')?.value || '').trim();
+    const matchedFields = getTransferMatchedOwnerFieldsForMode(sub, fromEmail);
+
+    if (!fromEmail) return showNotification('Choose the user you are transferring from.', 'warning');
+    if (!targetEmail) return showNotification('Choose a target user for this application.', 'warning');
+    if (fromEmail === targetEmail) return showNotification('Source and target user cannot be the same.', 'warning');
+    if (!reason) return showNotification('Enter a reason for this transfer.', 'warning');
+    if (!matchedFields.length) return showNotification('This application is no longer assigned to the source user.', 'warning');
+
+    const customerName = getSubmissionCustomerName(sub) || 'this application';
+    const confirmed = window.confirm(`Transfer ${customerName} from ${getTransferUserOptionLabel(fromEmail)} to ${getTransferUserOptionLabel(targetEmail)}?`);
+    if (!confirmed) return;
+
+    const performedBy = currentUser?.email || '';
+    const updates = {
+        applicationTransferredAt: serverTimestamp(),
+        applicationTransferredBy: performedBy,
+        applicationTransferType: 'single_application',
+        applicationTransferReason: reason,
+        applicationTransferFrom: fromEmail,
+        applicationTransferTo: targetEmail,
+        applicationTransferFields: matchedFields.map((item) => item.field),
+        reassignedAt: serverTimestamp(),
+        reassignedBy: performedBy,
+        reassignmentReason: reason,
+        updatedAt: serverTimestamp()
+    };
+    matchedFields.forEach((item) => {
+        updates[item.field] = targetEmail;
+        updates[item.previousField] = fromEmail;
+        if (item.field === 'assignedToRSA') {
+            updates.rsaAssignedAt = serverTimestamp();
+            updates.rsaAssignmentMode = 'super_admin_single_transfer';
+        }
+    });
+
+    try {
+        await updateDoc(doc(db, 'submissions', sub.id), updates);
+        if (matchedFields.some((item) => item.field === 'assignedToRSA')) {
+            await writeRsaTransferHistory(sub, targetEmail, 'super_admin_single_transfer');
+        }
+        await addDoc(collection(db, 'audit'), {
+            action: 'application_transferred',
+            transferType: 'single_application',
+            submissionId: sub.id,
+            customerName,
+            fromUser: fromEmail,
+            toUser: targetEmail,
+            transferFields: matchedFields.map((item) => item.field),
+            reason,
+            performedBy,
+            timestamp: serverTimestamp()
+        });
+        selectedTransferSubmissionIds.delete(sub.id);
+        showNotification('Application transferred successfully.', 'success');
+        renderTransferApplications();
+    } catch (error) {
+        showNotification('Failed to transfer application.', 'error');
     }
 }
 
@@ -2904,13 +3235,18 @@ async function transferSelectedApplications() {
     const originalHtml = button?.innerHTML || '';
 
     if (!fromEmail) return showNotification('Choose the user you are transferring from.', 'warning');
+    if (!reason) return showNotification('Enter a reason for this transfer.', 'warning');
+
+    if (isTransferRsaRoundRobinMode()) {
+        return transferSelectedApplicationsByRsaRoundRobin({ fromEmail, reason, button });
+    }
+
     if (!toEmail) return showNotification('Choose the user you are transferring to.', 'warning');
     if (fromEmail === toEmail) return showNotification('Source and target user cannot be the same.', 'warning');
-    if (!reason) return showNotification('Enter a reason for this transfer.', 'warning');
 
     const selectedIds = [...selectedTransferSubmissionIds];
     const submissionsToTransfer = allSubmissions.filter((sub) => (
-        selectedIds.includes(sub.id) && getTransferMatchedOwnerFields(sub, fromEmail).length > 0
+        selectedIds.includes(sub.id) && getTransferMatchedOwnerFieldsForMode(sub, fromEmail).length > 0
     ));
 
     if (!submissionsToTransfer.length) {
@@ -2935,7 +3271,7 @@ async function transferSelectedApplications() {
 
         const performedBy = currentUser?.email || '';
         await Promise.all(submissionsToTransfer.map((sub) => {
-            const matchedFields = getTransferMatchedOwnerFields(sub, fromEmail);
+            const matchedFields = getTransferMatchedOwnerFieldsForMode(sub, fromEmail);
             const updates = {
                 applicationTransferredAt: serverTimestamp(),
                 applicationTransferredBy: performedBy,
@@ -2949,8 +3285,18 @@ async function transferSelectedApplications() {
             matchedFields.forEach((item) => {
                 updates[item.field] = toEmail;
                 updates[item.previousField] = fromEmail;
+                if (item.field === 'assignedToRSA') {
+                    updates.rsaAssignedAt = serverTimestamp();
+                    updates.rsaAssignmentMode = 'super_admin_batch_transfer';
+                }
             });
             return updateDoc(doc(db, 'submissions', sub.id), updates);
+        }));
+
+        await Promise.all(submissionsToTransfer.map((sub) => {
+            const matchedFields = getTransferMatchedOwnerFieldsForMode(sub, fromEmail);
+            if (!matchedFields.some((item) => item.field === 'assignedToRSA')) return Promise.resolve();
+            return writeRsaTransferHistory(sub, toEmail, 'super_admin_batch_transfer');
         }));
 
         await addDoc(collection(db, 'audit'), {
@@ -7145,6 +7491,12 @@ document.getElementById('transferFromUser')?.addEventListener('change', () => {
     selectedTransferSubmissionIds.clear();
     renderTransferApplications();
 });
+document.getElementById('transferMode')?.addEventListener('change', () => {
+    selectedTransferSubmissionIds.clear();
+    renderTransferApplications();
+});
+document.getElementById('transferFromUserSearch')?.addEventListener('input', renderTransferApplications);
+document.getElementById('transferToUserSearch')?.addEventListener('input', renderTransferApplications);
 document.getElementById('transferToUser')?.addEventListener('change', renderTransferApplications);
 document.getElementById('transferApplicationSearch')?.addEventListener('input', renderTransferApplications);
 document.getElementById('transferRefreshBtn')?.addEventListener('click', () => {
@@ -7176,6 +7528,13 @@ document.getElementById('transferApplicationsTableBody')?.addEventListener('chan
     if (checkbox.checked) selectedTransferSubmissionIds.add(id);
     else selectedTransferSubmissionIds.delete(id);
     renderTransferApplications();
+});
+document.getElementById('transferApplicationsTableBody')?.addEventListener('click', (event) => {
+    const button = event.target?.closest?.('.transfer-row-btn');
+    if (!button) return;
+    const id = String(button.dataset.id || '');
+    if (!id) return;
+    transferSingleApplication(id);
 });
 document.getElementById('transferSelectedApplicationsBtn')?.addEventListener('click', transferSelectedApplications);
 document.getElementById('closeTransferConfirmModalBtn')?.addEventListener('click', () => closeTransferConfirmModal(false));

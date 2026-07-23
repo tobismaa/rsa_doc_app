@@ -333,16 +333,27 @@
                         <i class="fas fa-arrows-rotate"></i> Refresh List
                     </button>
                 </div>
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:14px;">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:10px;">
+                    <label>Transfer Mode
+                        <select id="transferMode" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
+                            <option value="single_user">Selected applications to one user</option>
+                            <option value="rsa_round_robin">RSA applications by round robin</option>
+                        </select>
+                    </label>
                     <label>From User
+                        <input type="text" id="transferFromUserSearch" placeholder="Search staff name or email..." style="width:100%;margin:6px 0;padding:9px 12px;border:1px solid #e2e8f0;border-radius:10px;">
                         <select id="transferFromUser" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;"></select>
                     </label>
-                    <label>To User
+                    <label id="transferToUserLabel">To User
+                        <input type="text" id="transferToUserSearch" placeholder="Search staff name or email..." style="width:100%;margin:6px 0;padding:9px 12px;border:1px solid #e2e8f0;border-radius:10px;">
                         <select id="transferToUser" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;"></select>
                     </label>
                     <label>Search Applications
                         <input type="text" id="transferApplicationSearch" placeholder="Customer, PEN, status..." style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
                     </label>
+                </div>
+                <div id="transferModeHelp" style="margin:0 0 14px;color:#64748b;font-size:13px;line-height:1.5;">
+                    Select a source and target user, then transfer selected applications together or use the row action for one-by-one transfer.
                 </div>
                 <label style="display:block;margin-bottom:14px;">Reason
                     <input type="text" id="transferReasonInput" placeholder="Reason for transfer" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
@@ -374,6 +385,7 @@
                                 <th>PEN Number</th>
                                 <th>Agent Name</th>
                                 <th>Current Owner</th>
+                                <th>One-by-one Transfer</th>
                                 <th>Updated</th>
                             </tr>
                         </thead>
