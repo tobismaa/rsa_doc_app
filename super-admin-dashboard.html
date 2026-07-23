@@ -341,12 +341,14 @@
                         </select>
                     </label>
                     <label>From User
-                        <input type="text" id="transferFromUserSearch" placeholder="Search staff name or email..." style="width:100%;margin:6px 0;padding:9px 12px;border:1px solid #e2e8f0;border-radius:10px;">
-                        <select id="transferFromUser" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;"></select>
+                        <input type="text" id="transferFromUserSearch" list="transferFromUserOptions" placeholder="Type or select source staff..." autocomplete="off" style="width:100%;margin-top:6px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
+                        <datalist id="transferFromUserOptions"></datalist>
+                        <select id="transferFromUser" aria-hidden="true" tabindex="-1" style="display:none;"></select>
                     </label>
                     <label id="transferToUserLabel">To User
-                        <input type="text" id="transferToUserSearch" placeholder="Search staff name or email..." style="width:100%;margin:6px 0;padding:9px 12px;border:1px solid #e2e8f0;border-radius:10px;">
-                        <select id="transferToUser" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;"></select>
+                        <input type="text" id="transferToUserSearch" list="transferToUserOptions" placeholder="Type or select target staff..." autocomplete="off" style="width:100%;margin-top:6px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">
+                        <datalist id="transferToUserOptions"></datalist>
+                        <select id="transferToUser" aria-hidden="true" tabindex="-1" style="display:none;"></select>
                     </label>
                     <label>Search Applications
                         <input type="text" id="transferApplicationSearch" placeholder="Customer, PEN, status..." style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;">

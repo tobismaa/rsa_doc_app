@@ -2765,7 +2765,16 @@ function getTransferMatchedOwnerFields(sub = {}, email = '') {
 function getTransferMatchedOwnerFieldsForMode(sub = {}, email = '') {
     const matchedFields = getTransferMatchedOwnerFields(sub, email);
     if (!isTransferRsaRoundRobinMode()) return matchedFields;
+    if (!isRsaTransferPendingFinalSubmission(sub)) return [];
     return matchedFields.filter((item) => item.field === 'assignedToRSA');
+}
+
+function isRsaTransferPendingFinalSubmission(sub = {}) {
+    const status = String(sub.status || sub.workflowStatus || '').trim().toLowerCase();
+    if (!['approved', 'processing_to_pfa'].includes(status)) return false;
+    if (sub.finalSubmitted === true || sub.rsaSubmitted === true) return false;
+    if (getTimestampMillis(sub.finalSubmittedAt) > 0 || getTimestampMillis(sub.rsaSubmittedAt) > 0) return false;
+    return true;
 }
 
 function getTransferEligibleRsaUsers(fromEmail = '') {
@@ -2826,6 +2835,16 @@ function buildTransferOptions(items = [], selectedValue = '', placeholder = 'Sel
     return options.join('');
 }
 
+function buildTransferDatalistOptions(items = []) {
+    const seen = new Set();
+    return items.map((item) => {
+        const email = normalizeEmail(item?.email || item);
+        if (!email || seen.has(email)) return '';
+        seen.add(email);
+        return `<option value="${escapeHtml(getTransferUserOptionLabel(email))}"></option>`;
+    }).join('');
+}
+
 function getTransferUserSearchText(user = {}) {
     return [
         user.fullName,
@@ -2849,6 +2868,69 @@ function filterTransferUsersBySearch(users = [], searchText = '', selectedValue 
     });
 }
 
+function findTransferUserFromLookupValue(value = '') {
+    const raw = String(value || '').trim();
+    const normalizedRaw = normalizeEmail(raw);
+    if (!raw) return null;
+    return allUsers.find((user) => {
+        const email = normalizeEmail(user.email);
+        if (!email) return false;
+        return email === normalizedRaw || getTransferUserOptionLabel(email).toLowerCase() === raw.toLowerCase();
+    }) || null;
+}
+
+function syncTransferLookupDisplay(input, selectedEmail = '') {
+    if (!input || document.activeElement === input) return;
+    input.value = selectedEmail ? getTransferUserOptionLabel(selectedEmail) : '';
+}
+
+function handleTransferUserLookupInput(kind = 'from') {
+    const isFrom = kind === 'from';
+    const input = document.getElementById(isFrom ? 'transferFromUserSearch' : 'transferToUserSearch');
+    const select = document.getElementById(isFrom ? 'transferFromUser' : 'transferToUser');
+    if (!input || !select || select.disabled) return;
+
+    const value = String(input.value || '').trim();
+    if (!value) {
+        if (select.value) {
+            select.value = '';
+            if (isFrom) selectedTransferSubmissionIds.clear();
+            renderTransferApplications();
+        }
+        return;
+    }
+
+    const user = findTransferUserFromLookupValue(value);
+    const email = normalizeEmail(user?.email || '');
+    if (!email || normalizeEmail(select.value) === email) return;
+
+    select.value = email;
+    input.value = getTransferUserOptionLabel(email);
+    if (isFrom) selectedTransferSubmissionIds.clear();
+    renderTransferApplications();
+}
+
+function cleanTransferUserLookupInput(kind = 'from') {
+    const isFrom = kind === 'from';
+    const input = document.getElementById(isFrom ? 'transferFromUserSearch' : 'transferToUserSearch');
+    const select = document.getElementById(isFrom ? 'transferFromUser' : 'transferToUser');
+    if (!input || !select || select.disabled) return;
+
+    const user = findTransferUserFromLookupValue(input.value);
+    if (user) {
+        const email = normalizeEmail(user.email);
+        if (normalizeEmail(select.value) !== email) {
+            select.value = email;
+            if (isFrom) selectedTransferSubmissionIds.clear();
+            renderTransferApplications();
+        }
+        input.value = getTransferUserOptionLabel(email);
+        return;
+    }
+
+    input.value = select.value ? getTransferUserOptionLabel(select.value) : '';
+}
+
 function getTransferSelectableUsers() {
     return allUsers
         .filter((user) => normalizeEmail(user.email))
@@ -2860,6 +2942,8 @@ function renderTransferSelectOptions() {
     const toSelect = document.getElementById('transferToUser');
     const fromSearch = document.getElementById('transferFromUserSearch');
     const toSearch = document.getElementById('transferToUserSearch');
+    const fromOptions = document.getElementById('transferFromUserOptions');
+    const toOptions = document.getElementById('transferToUserOptions');
     const toLabel = document.getElementById('transferToUserLabel');
     const help = document.getElementById('transferModeHelp');
     if (!fromSelect || !toSelect) return;
@@ -2867,19 +2951,17 @@ function renderTransferSelectOptions() {
     const previousFrom = normalizeEmail(fromSelect.value);
     const previousTo = normalizeEmail(toSelect.value);
     const users = getTransferSelectableUsers();
-    const filteredFromUsers = filterTransferUsersBySearch(users, fromSearch?.value || '', previousFrom);
     const isRsaRoundRobin = isTransferRsaRoundRobinMode();
 
-    fromSelect.innerHTML = buildTransferOptions(
-        filteredFromUsers,
-        previousFrom,
-        filteredFromUsers.length ? 'Choose source user' : 'No matching users'
-    );
+    fromSelect.innerHTML = buildTransferOptions(users, previousFrom, 'Choose source user');
+    if (fromOptions) fromOptions.innerHTML = buildTransferDatalistOptions(users);
+    syncTransferLookupDisplay(fromSearch, previousFrom);
     if (isRsaRoundRobin) {
         const eligibleCount = getTransferEligibleRsaUsers(previousFrom).length;
         toSelect.innerHTML = `<option value="">Round robin across ${eligibleCount} other RSA user${eligibleCount === 1 ? '' : 's'}</option>`;
         toSelect.value = '';
         toSelect.disabled = true;
+        if (toOptions) toOptions.innerHTML = '';
         if (toSearch) {
             toSearch.value = '';
             toSearch.disabled = true;
@@ -2887,19 +2969,16 @@ function renderTransferSelectOptions() {
         }
         if (toLabel) toLabel.firstChild.textContent = 'Batch Target ';
         if (help) {
-            help.textContent = 'RSA round robin mode shows applications currently assigned to the source RSA user. Select all or selected rows to share them across other active RSA users included in round robin. Use the row action to move one application to one RSA user.';
+            help.textContent = 'RSA round robin mode shows only applications currently assigned to the source RSA user that are not finally submitted yet. Select all or selected rows to share them across other active RSA users included in round robin. Use the row action to move one application to one RSA user.';
         }
     } else {
-        const filteredToUsers = filterTransferUsersBySearch(users, toSearch?.value || '', previousTo);
-        toSelect.innerHTML = buildTransferOptions(
-            filteredToUsers,
-            previousTo,
-            filteredToUsers.length ? 'Choose target user' : 'No matching users'
-        );
+        toSelect.innerHTML = buildTransferOptions(users, previousTo, 'Choose target user');
+        if (toOptions) toOptions.innerHTML = buildTransferDatalistOptions(users);
+        syncTransferLookupDisplay(toSearch, previousTo);
         toSelect.disabled = false;
         if (toSearch) {
             toSearch.disabled = false;
-            toSearch.placeholder = 'Search staff name or email...';
+            toSearch.placeholder = 'Type or select target staff...';
         }
         if (toLabel) toLabel.firstChild.textContent = 'To User ';
         if (help) {
@@ -3067,7 +3146,7 @@ async function writeRsaTransferHistory(sub = {}, assignedToRSA = '', assignmentM
 async function transferSelectedApplicationsByRsaRoundRobin({ fromEmail, reason, button }) {
     const selectedIds = [...selectedTransferSubmissionIds];
     const submissionsToTransfer = allSubmissions.filter((sub) => (
-        selectedIds.includes(sub.id) && normalizeEmail(sub.assignedToRSA) === fromEmail
+        selectedIds.includes(sub.id) && normalizeEmail(sub.assignedToRSA) === fromEmail && isRsaTransferPendingFinalSubmission(sub)
     ));
     if (!submissionsToTransfer.length) {
         selectedTransferSubmissionIds.clear();
@@ -7495,8 +7574,12 @@ document.getElementById('transferMode')?.addEventListener('change', () => {
     selectedTransferSubmissionIds.clear();
     renderTransferApplications();
 });
-document.getElementById('transferFromUserSearch')?.addEventListener('input', renderTransferApplications);
-document.getElementById('transferToUserSearch')?.addEventListener('input', renderTransferApplications);
+document.getElementById('transferFromUserSearch')?.addEventListener('input', () => handleTransferUserLookupInput('from'));
+document.getElementById('transferFromUserSearch')?.addEventListener('change', () => cleanTransferUserLookupInput('from'));
+document.getElementById('transferFromUserSearch')?.addEventListener('blur', () => cleanTransferUserLookupInput('from'));
+document.getElementById('transferToUserSearch')?.addEventListener('input', () => handleTransferUserLookupInput('to'));
+document.getElementById('transferToUserSearch')?.addEventListener('change', () => cleanTransferUserLookupInput('to'));
+document.getElementById('transferToUserSearch')?.addEventListener('blur', () => cleanTransferUserLookupInput('to'));
 document.getElementById('transferToUser')?.addEventListener('change', renderTransferApplications);
 document.getElementById('transferApplicationSearch')?.addEventListener('input', renderTransferApplications);
 document.getElementById('transferRefreshBtn')?.addEventListener('click', () => {
