@@ -37,7 +37,7 @@ import {
     getSubmissionClearedEntryAt,
     getSubmissionOriginalUploadAt
 } from './shared/submission-stage.js?v=20260716a';
-import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260722a';
+import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260724a';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 
 let currentUser = null;
@@ -5151,6 +5151,7 @@ async function loadSettings() {
     const commissionEffectiveFrom = document.getElementById('settingCommissionEffectiveFrom');
     const maxImageUploadMb = document.getElementById('settingMaxImageUploadMb');
     const maxPdfUploadMb = document.getElementById('settingMaxPdfUploadMb');
+    const simulateStorageCapFullFailure = document.getElementById('settingSimulateStorageCapFullFailure');
     const reviewerRoundRobinEnabled = document.getElementById('settingReviewerRoundRobinEnabled');
     const rsaRoundRobinEnabled = document.getElementById('settingRsaRoundRobinEnabled');
     const paymentRoundRobinEnabled = document.getElementById('settingPaymentRoundRobinEnabled');
@@ -5196,6 +5197,9 @@ async function loadSettings() {
     }
     if (maxImageUploadMb) maxImageUploadMb.value = String(Number(data.maxImageUploadMb ?? defaultSystemSettings.maxImageUploadMb));
     if (maxPdfUploadMb) maxPdfUploadMb.value = String(Number(data.maxPdfUploadMb ?? defaultSystemSettings.maxPdfUploadMb));
+    if (simulateStorageCapFullFailure) {
+        simulateStorageCapFullFailure.checked = systemSettings.uploadControls?.simulateStorageCapFullFailure === true;
+    }
     if (reviewerRoundRobinEnabled) reviewerRoundRobinEnabled.value = String((data.reviewerRoundRobinEnabled ?? defaultSystemSettings.reviewerRoundRobinEnabled) ? 'true' : 'false');
     if (rsaRoundRobinEnabled) rsaRoundRobinEnabled.value = String((data.rsaRoundRobinEnabled ?? defaultSystemSettings.rsaRoundRobinEnabled) ? 'true' : 'false');
     if (paymentRoundRobinEnabled) paymentRoundRobinEnabled.value = String((data.paymentRoundRobinEnabled ?? defaultSystemSettings.paymentRoundRobinEnabled) ? 'true' : 'false');
@@ -6921,6 +6925,7 @@ window.saveSuperSettings = async (triggerButton = null) => {
     const commissionEffectiveFromValue = String(document.getElementById('settingCommissionEffectiveFrom')?.value || '').trim() || '2026-05-07';
     const maxImageUploadMb = Number(document.getElementById('settingMaxImageUploadMb')?.value || getDefaultSystemSettings().maxImageUploadMb);
     const maxPdfUploadMb = Number(document.getElementById('settingMaxPdfUploadMb')?.value || getDefaultSystemSettings().maxPdfUploadMb);
+    const simulateStorageCapFullFailure = document.getElementById('settingSimulateStorageCapFullFailure')?.checked === true;
     const reviewerRoundRobinEnabled = String(document.getElementById('settingReviewerRoundRobinEnabled')?.value || 'true') === 'true';
     const rsaRoundRobinEnabled = String(document.getElementById('settingRsaRoundRobinEnabled')?.value || 'true') === 'true';
     const paymentRoundRobinEnabled = String(document.getElementById('settingPaymentRoundRobinEnabled')?.value || 'true') === 'true';
@@ -7130,6 +7135,9 @@ window.saveSuperSettings = async (triggerButton = null) => {
             commissionRateEffectiveFrom,
             maxImageUploadMb,
             maxPdfUploadMb,
+            uploadControls: {
+                simulateStorageCapFullFailure
+            },
             reviewerRoundRobinEnabled,
             rsaRoundRobinEnabled,
             paymentRoundRobinEnabled,
@@ -7214,6 +7222,7 @@ window.saveSuperSettings = async (triggerButton = null) => {
             globalReadOnlyMessage,
             maxImageUploadMb,
             maxPdfUploadMb,
+            simulateStorageCapFullFailure,
             reviewerRoundRobinEnabled,
             rsaRoundRobinEnabled,
             paymentRoundRobinEnabled,

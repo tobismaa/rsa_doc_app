@@ -1,6 +1,6 @@
 ﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// js/document-uploader.js - COMPLETE FIXED VERSION WITH WORKING FILE SIZE MODALS AND CALCULATIONS
 import { auth, db } from './firebase-config.js';
-import { BackblazeStorage } from './backblaze-storage.js?v=20260714a';
+import { BackblazeStorage } from './backblaze-storage.js?v=20260724a';
 import { queueViewerAssignmentEmail } from './email-alerts.js';
 import { notifyStatusChangePush } from './status-push.js';
 import { notifyAdminPushEvent } from './push-alerts.js';
@@ -38,7 +38,7 @@ import {
   getSubmissionClearedEntryAt,
   getSubmissionOriginalUploadAt
 } from './shared/submission-stage.js?v=20260716a';
-import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260722a';
+import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260724a';
 import {
   collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, doc,
   serverTimestamp, arrayUnion, getDocs, getDoc, setDoc, runTransaction, deleteDoc
@@ -175,6 +175,7 @@ const userFullNames = new Map();
 let customerDetailsSaved = false;
 const auditDuplicateRestoreInFlight = new Set();
 const RR_COUNTER_DOC = doc(db, 'counters', 'roundRobin');
+const STORAGE_CAP_FULL_UPLOAD_MESSAGE = 'Failed to upload. Storage cap full.';
 const DEFAULT_CUSTOMER_ACCOUNT_BANK_CODE = '90089';
 const DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME = 'Coop Savings and Loans / Cooperative Mortgage Bank';
 const FALLBACK_CUSTOMER_ACCOUNT_BANKS = [
@@ -231,6 +232,13 @@ function assertWritable(actionLabel) {
   return typeof window.assertAppWritable === 'function'
     ? window.assertAppWritable(actionLabel)
     : true;
+}
+
+function getUploadErrorMessage(error) {
+  const message = String(error?.message || error || '').trim();
+  return message === STORAGE_CAP_FULL_UPLOAD_MESSAGE
+    ? STORAGE_CAP_FULL_UPLOAD_MESSAGE
+    : message;
 }
 
 async function applyUploadSystemSettings() {
@@ -4205,8 +4213,8 @@ async function handleBatchFiles(files) {
         successCount++;
       } catch (e) {
         console.error('Batch upload failed for file', file.name, e);
-        const reason = String(e?.message || 'Unknown upload error');
-        showNotification(`Upload failed for ${file.name}: ${reason}`, 'error');
+        const reason = getUploadErrorMessage(e) || 'Unknown upload error';
+        showNotification(reason === STORAGE_CAP_FULL_UPLOAD_MESSAGE ? reason : `Upload failed for ${file.name}: ${reason}`, 'error');
         failCount++;
       }
 
@@ -4384,7 +4392,8 @@ async function uploadSingleDocument() {
     closeModal(singleUploadModal);
   } catch (error) {
     console.error('Single document upload failed', error);
-    showNotification('Upload failed: ' + error.message, 'error');
+    const reason = getUploadErrorMessage(error);
+    showNotification(reason === STORAGE_CAP_FULL_UPLOAD_MESSAGE ? reason : `Upload failed: ${reason || 'Unknown upload error'}`, 'error');
   } finally {
     if (confirmSingleUpload) {
       confirmSingleUpload.disabled = false;
@@ -6484,7 +6493,8 @@ window.openAuditPaymentResubmitModal = async (submissionId) => {
     showNotification('Payment request resubmitted to Audit.', 'success');
     switchUploaderApplicationTab('audit');
   } catch (error) {
-    showNotification(`Failed to resubmit payment request: ${error.message || error}`, 'error');
+    const reason = getUploadErrorMessage(error);
+    showNotification(reason === STORAGE_CAP_FULL_UPLOAD_MESSAGE ? reason : `Failed to resubmit payment request: ${reason || 'Unknown upload error'}`, 'error');
   }
 };
 

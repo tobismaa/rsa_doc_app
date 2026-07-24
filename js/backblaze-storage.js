@@ -1,4 +1,9 @@
 // js/backblaze-storage.js
+import { db } from './firebase-config.js';
+import { getSystemSettings } from './shared/system-settings.js?v=20260724a';
+
+const STORAGE_CAP_FULL_UPLOAD_MESSAGE = 'Failed to upload. Storage cap full.';
+
 const sharedBackblazeState = {
     session: null,
     uploadUrl: null
@@ -117,8 +122,16 @@ export class BackblazeStorage {
         }
     }
 
+    async assertUploadsEnabled() {
+        const settings = await getSystemSettings(db, { force: true });
+        if (settings?.uploadControls?.simulateStorageCapFullFailure === true) {
+            throw new Error(STORAGE_CAP_FULL_UPLOAD_MESSAGE);
+        }
+    }
+
     async uploadFile(file, customerName, documentType) {
         try {
+            await this.assertUploadsEnabled();
             if (!this.authorizationToken) {
                 await this.init();
             }

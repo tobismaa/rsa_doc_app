@@ -376,6 +376,9 @@ export function getDefaultSystemSettings() {
     bulkImportRules: {
       requiredColumns: parseStringArray(DEFAULT_BULK_IMPORT_COLUMNS)
     },
+    uploadControls: {
+      simulateStorageCapFullFailure: false
+    },
     dashboardAnnouncement: {
       enabled: false,
       message: '',
@@ -467,6 +470,14 @@ function normalizeSystemSettings(data = {}) {
       ...defaults.bulkImportRules,
       ...parseObject(data.bulkImportRules, defaults.bulkImportRules),
       requiredColumns: parseStringArray(data?.bulkImportRules?.requiredColumns, defaults.bulkImportRules.requiredColumns)
+    },
+    uploadControls: {
+      ...defaults.uploadControls,
+      ...parseObject(data.uploadControls, defaults.uploadControls),
+      simulateStorageCapFullFailure: parseBoolean(
+        data?.uploadControls?.simulateStorageCapFullFailure,
+        defaults.uploadControls.simulateStorageCapFullFailure
+      )
     },
     dashboardAnnouncement: {
       ...defaults.dashboardAnnouncement,
