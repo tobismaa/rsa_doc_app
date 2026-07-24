@@ -682,6 +682,11 @@ const applicationReportStage = document.getElementById('applicationReportStage')
 const applicationReportStartDate = document.getElementById('applicationReportStartDate');
 const applicationReportEndDate = document.getElementById('applicationReportEndDate');
 const applicationReportTableBody = document.getElementById('applicationReportTableBody');
+const applicationReportDownloadBtn = document.getElementById('applicationReportDownloadBtn');
+const applicationReportSummaryCards = document.getElementById('applicationReportSummaryCards');
+const applicationReportSummaryTableBody = document.getElementById('applicationReportSummaryTableBody');
+const applicationReportTabButtons = document.querySelectorAll('[data-application-report-view]');
+const applicationReportPanels = document.querySelectorAll('[data-application-report-panel]');
 const applicationReportPresetButtons = document.querySelectorAll('[data-application-report-range]');
 const notification = document.getElementById('notification');
 let notificationTimer = null;
@@ -1432,6 +1437,10 @@ function setupEventListeners() {
     document.getElementById('closeApplicationReportModal')?.addEventListener('click', closeApplicationReportModal);
     document.getElementById('closeApplicationReportModalFooterBtn')?.addEventListener('click', closeApplicationReportModal);
     document.getElementById('applicationReportRunBtn')?.addEventListener('click', handleApplicationReportView);
+    applicationReportDownloadBtn?.addEventListener('click', handleApplicationReportDownload);
+    applicationReportTabButtons.forEach((button) => {
+        button.addEventListener('click', () => switchApplicationReportView(button.dataset.applicationReportView || 'summary'));
+    });
     applicationReportPresetButtons.forEach((button) => {
         button.addEventListener('click', () => applyApplicationReportPreset(button.dataset.applicationReportRange || 'today'));
     });
@@ -2240,7 +2249,7 @@ function applyApplicationReportPreset(range = '') {
 }
 
 function getApplicationReportConfig(stageValue = '') {
-    const stage = String(stageValue || 'approved').trim().toLowerCase();
+    const stage = String(stageValue || 'uploaded').trim().toLowerCase();
     const configs = {
         approved: {
             label: 'Approved Applications',
@@ -2252,6 +2261,18 @@ function getApplicationReportConfig(stageValue = '') {
             },
             dateOf(sub = {}) {
                 return getSubmissionApprovalEntryAt(sub) || sub.reviewedAt || sub.uploadedAt || null;
+            }
+        },
+        uploaded: {
+            label: 'Uploaded Applications',
+            emptyText: 'No uploaded applications found for this date range.',
+            badgeClass: 'status-pending',
+            includes(sub = {}) {
+                const status = String(sub.status || '').toLowerCase();
+                return status !== 'draft' && Boolean(getSubmissionOriginalUploadAt(sub) || sub.uploadedAt || sub.createdAt);
+            },
+            dateOf(sub = {}) {
+                return getSubmissionOriginalUploadAt(sub) || sub.uploadedAt || sub.createdAt || null;
             }
         },
         pending: {
@@ -2315,11 +2336,105 @@ function getApplicationReportConfig(stageValue = '') {
             }
         }
     };
-    return configs[stage] || configs.approved;
+    return configs[stage] || configs.uploaded;
+}
+
+function getUserProfileByEmail(email = '') {
+    const normalized = String(email || '').trim().toLowerCase();
+    if (!normalized) return null;
+    return allUsers.find((user) => String(user?.email || '').trim().toLowerCase() === normalized) || null;
+}
+
+function getApplicationReportDetailValue(sub = {}, keys = []) {
+    const details = sub?.customerDetails && typeof sub.customerDetails === 'object' ? sub.customerDetails : {};
+    for (const key of keys) {
+        const value = details?.[key] ?? sub?.[key];
+        if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+    }
+    return '';
+}
+
+function getApplicationReportBadgeClass(status = '', fallbackClass = 'status-pending') {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (['rejected', 'rejected_by_reviewer', 'rejected_by_rsa'].includes(normalized)) return 'status-rejected';
+    if (['approved', 'processing_to_pfa', 'sent_to_pfa', 'rsa_submitted', 'paid', 'cleared'].includes(normalized)) return 'status-approved';
+    if (normalized === 'draft') return 'status-draft';
+    return fallbackClass || 'status-pending';
+}
+
+function isRejectedApplicationStatus(status = '') {
+    return ['rejected', 'rejected_by_reviewer', 'rejected_by_rsa'].includes(String(status || '').trim().toLowerCase());
+}
+
+function getApplicationReportRejectionReason(sub = {}) {
+    if (!isRejectedApplicationStatus(sub?.status)) return '';
+    return getRejectionHistoryEntries(sub)
+        .map((entry) => String(entry?.reason || '').trim())
+        .filter(Boolean)
+        .join(' | ');
+}
+
+function getApplicationReportUploaderSortLabel(sub = {}) {
+    const email = String(sub?.uploadedBy || '').trim().toLowerCase();
+    return email ? getDisplayNameByEmail(email) : 'Unknown';
+}
+
+function getApplicationReportUploaderLocation(profile = {}) {
+    return String(
+        profile?.location ||
+        profile?.state ||
+        profile?.branch ||
+        profile?.officeLocation ||
+        profile?.address ||
+        ''
+    ).trim() || '-';
+}
+
+function getApplicationReportRowData(sub = {}, stageDate = null, config = {}) {
+    const details = sub?.customerDetails || {};
+    const { pfa, rsaBalance, twentyFive } = getSubmissionFinancials(sub);
+    const uploaderEmail = String(sub.uploadedBy || '').trim().toLowerCase();
+    const uploaderProfile = getUserProfileByEmail(uploaderEmail);
+    const uploaderName = uploaderEmail ? getDisplayNameByEmail(uploaderEmail) : '-';
+    const uploaderPhone = getUserWhatsApp(uploaderProfile || {});
+    const reviewerEmail = String(sub.assignedTo || sub.reviewedBy || '').trim();
+    const rsaEmail = String(sub.assignedToRSA || '').trim();
+    const paymentEmail = String(sub.assignedToPayment || '').trim();
+    const status = String(sub.status || '').trim() || '-';
+    const rejectionReason = getApplicationReportRejectionReason(sub);
+
+    return {
+        customerName: sub.customerName || details.name || 'Unknown',
+        applicationStatus: formatStatusLabel(status),
+        rejectionReason: isRejectedApplicationStatus(status) ? (rejectionReason || 'No reason recorded') : '',
+        rawStatus: status,
+        uploadedAt: formatDate(getSubmissionOriginalUploadAt(sub) || sub.uploadedAt || sub.createdAt),
+        stageDate: formatDate(stageDate),
+        uploaderName,
+        uploaderEmail: uploaderEmail || '-',
+        uploaderPhone: uploaderPhone || '-',
+        uploaderRole: getRoleLabel(uploaderProfile?.role || 'uploader'),
+        uploaderStatus: formatStatusLabel(uploaderProfile?.status || 'active'),
+        uploaderLocation: getApplicationReportUploaderLocation(uploaderProfile || {}),
+        agent: getSubmissionAgentLabel(sub) || '-',
+        pfa: pfa || '-',
+        penNo: getApplicationReportDetailValue(sub, ['penNo', 'penNumber', 'rsaPin', 'pin']) || '-',
+        accountNo: getApplicationReportDetailValue(sub, ['accountNo', 'accountNumber']) || '-',
+        rsaBalance,
+        rsa25: twentyFive,
+        reviewer: reviewerEmail ? getDisplayNameByEmail(reviewerEmail) : '-',
+        rsaOfficer: rsaEmail ? getDisplayNameByEmail(rsaEmail) : '-',
+        paymentOfficer: paymentEmail ? getDisplayNameByEmail(paymentEmail) : '-',
+        propertyType: getApplicationReportDetailValue(sub, ['propertyType', 'houseType']) || '-',
+        houseNumber: getApplicationReportDetailValue(sub, ['houseNumber']) || '-',
+        customerEmail: getApplicationReportDetailValue(sub, ['email', 'customerEmail']) || '-',
+        customerPhone: getApplicationReportDetailValue(sub, ['phone', 'customerPhone']) || '-',
+        reportType: config.label || 'Application Report'
+    };
 }
 
 function getApplicationReportRows() {
-    const config = getApplicationReportConfig(applicationReportStage?.value || 'approved');
+    const config = getApplicationReportConfig(applicationReportStage?.value || 'uploaded');
     const startDate = applicationReportStartDate?.value || '';
     const endDate = applicationReportEndDate?.value || '';
     const { startMs, endMs } = getDateInputBounds(startDate, endDate);
@@ -2331,18 +2446,37 @@ function getApplicationReportRows() {
             return { sub, stageDate, stageMs: getStageTimestampMillis(stageDate) || getTimestampMsSafe(stageDate) };
         })
         .filter((item) => item.stageMs && item.stageMs >= startMs && item.stageMs <= endMs)
-        .sort((a, b) => b.stageMs - a.stageMs);
+        .sort((a, b) => {
+            const uploaderA = getApplicationReportUploaderSortLabel(a.sub).toLowerCase();
+            const uploaderB = getApplicationReportUploaderSortLabel(b.sub).toLowerCase();
+            if (uploaderA !== uploaderB) return uploaderA.localeCompare(uploaderB);
+            return b.stageMs - a.stageMs;
+        });
 
     return { config, rows, startDate, endDate };
 }
 
+function switchApplicationReportView(view = 'summary') {
+    const activeView = String(view || 'summary').trim().toLowerCase() === 'applications' ? 'applications' : 'summary';
+    applicationReportTabButtons.forEach((button) => {
+        const isActive = button.dataset.applicationReportView === activeView;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    applicationReportPanels.forEach((panel) => {
+        panel.classList.toggle('active', panel.dataset.applicationReportPanel === activeView);
+    });
+}
+
 function resetApplicationReportModal() {
     applicationReportHasViewed = false;
-    const config = getApplicationReportConfig(applicationReportStage?.value || 'approved');
+    const config = getApplicationReportConfig(applicationReportStage?.value || 'uploaded');
     if (applicationReportHeading) applicationReportHeading.textContent = config.label;
     if (applicationReportMeta) applicationReportMeta.textContent = 'Pick a report type and date range, then click View.';
     if (applicationReportCount) applicationReportCount.textContent = '0';
     if (applicationReportTableBody) applicationReportTableBody.innerHTML = '';
+    renderApplicationReportSummary(null);
+    switchApplicationReportView('summary');
 }
 
 async function ensureApplicationReportDataLoaded() {
@@ -2350,6 +2484,20 @@ async function ensureApplicationReportDataLoaded() {
 
     const snapshot = await getDocs(query(collection(db, 'submissions'), orderBy('uploadedAt', 'desc')));
     allSubmissions = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+}
+
+async function ensureApplicationReportUserDataLoaded() {
+    if (Array.isArray(allUsers) && allUsers.length > 0) return;
+
+    const snapshot = await getDocs(query(collection(db, 'users'), orderBy('createdAt', 'desc')));
+    allUsers = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data() || {};
+        const email = String(data.email || '').trim().toLowerCase();
+        const displayName = data.fullName || data.displayName || (email ? email.split('@')[0] : 'Unknown');
+        if (email) userEmailNameCache.set(email, displayName);
+        userIdNameCache.set(docSnap.id, displayName);
+        return { id: docSnap.id, ...data, email, fullName: displayName };
+    });
 }
 
 async function handleApplicationReportView() {
@@ -2361,7 +2509,8 @@ async function handleApplicationReportView() {
         applicationReportHasViewed = true;
         if (applicationReportCount) applicationReportCount.textContent = '0';
         if (applicationReportMeta) applicationReportMeta.textContent = 'Start date cannot be after end date.';
-        applicationReportTableBody.innerHTML = '<tr><td colspan="8" class="no-data">Start date cannot be after end date.</td></tr>';
+        applicationReportTableBody.innerHTML = '<tr><td colspan="14" class="no-data">Start date cannot be after end date.</td></tr>';
+        renderApplicationReportSummary(null, 'Start date cannot be after end date.');
         return;
     }
 
@@ -2375,13 +2524,15 @@ async function handleApplicationReportView() {
 
     try {
         await ensureApplicationReportDataLoaded();
+        await ensureApplicationReportUserDataLoaded();
         applicationReportHasViewed = true;
         renderApplicationReport();
     } catch (error) {
         applicationReportHasViewed = true;
         if (applicationReportCount) applicationReportCount.textContent = '0';
         if (applicationReportMeta) applicationReportMeta.textContent = 'Unable to load report applications.';
-        applicationReportTableBody.innerHTML = '<tr><td colspan="8" class="no-data">Unable to load report applications. Please try again.</td></tr>';
+        applicationReportTableBody.innerHTML = '<tr><td colspan="14" class="no-data">Unable to load report applications. Please try again.</td></tr>';
+        renderApplicationReportSummary(null, 'Unable to load report applications.');
         showNotification('Unable to load report applications.', 'error');
     } finally {
         if (viewBtn) {
@@ -2404,37 +2555,458 @@ function renderApplicationReport() {
             : 'All available dates';
         applicationReportMeta.textContent = `${rows.length} application(s) for ${rangeLabel}.`;
     }
+    renderApplicationReportSummary({ config, rows, startDate, endDate });
+    switchApplicationReportView('summary');
 
     if (startDate && endDate && startDate > endDate) {
-        applicationReportTableBody.innerHTML = '<tr><td colspan="8" class="no-data">Start date cannot be after end date.</td></tr>';
+        applicationReportTableBody.innerHTML = '<tr><td colspan="14" class="no-data">Start date cannot be after end date.</td></tr>';
         if (applicationReportCount) applicationReportCount.textContent = '0';
+        renderApplicationReportSummary(null, 'Start date cannot be after end date.');
         return;
     }
 
     if (!rows.length) {
-        applicationReportTableBody.innerHTML = `<tr><td colspan="8" class="no-data">${escapeHtml(config.emptyText)}</td></tr>`;
+        applicationReportTableBody.innerHTML = `<tr><td colspan="14" class="no-data">${escapeHtml(config.emptyText)}</td></tr>`;
         return;
     }
 
     applicationReportTableBody.innerHTML = rows.map(({ sub, stageDate }) => {
-        const { pfa, twentyFive } = getSubmissionFinancials(sub);
-        const uploaderEmail = String(sub.uploadedBy || '').trim();
-        const paymentEmail = String(sub.assignedToPayment || '').trim();
-        const status = String(sub.status || '').trim() || '-';
+        const row = getApplicationReportRowData(sub, stageDate, config);
+        const statusClass = getApplicationReportBadgeClass(row.rawStatus, config.badgeClass);
 
         return `
             <tr>
-                <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
-                <td>${escapeHtml(uploaderEmail ? getDisplayNameByEmail(uploaderEmail) : '-')}</td>
-                <td>${escapeHtml(getSubmissionAgentLabel(sub) || '-')}</td>
-                <td><span class="status-badge ${config.badgeClass}">${escapeHtml(formatStatusLabel(status))}</span></td>
-                <td>${escapeHtml(formatDate(stageDate))}</td>
-                <td>${escapeHtml(pfa || '-')}</td>
-                <td>${formatCurrency(twentyFive)}</td>
-                <td>${escapeHtml(paymentEmail ? getDisplayNameByEmail(paymentEmail) : '-')}</td>
+                <td><strong>${escapeHtml(row.customerName)}</strong></td>
+                <td><span class="status-badge ${statusClass}">${escapeHtml(row.applicationStatus)}</span></td>
+                <td>${escapeHtml(row.uploadedAt)}</td>
+                <td>${escapeHtml(row.uploaderLocation)}</td>
+                <td>${escapeHtml(row.uploaderName)}</td>
+                <td>${escapeHtml(row.uploaderEmail)}</td>
+                <td>${escapeHtml(row.agent)}</td>
+                <td>${formatCurrency(row.rsaBalance)}</td>
+                <td>${formatCurrency(row.rsa25)}</td>
+                <td>${escapeHtml(row.stageDate)}</td>
+                <td>${escapeHtml(row.pfa)}</td>
+                <td>${escapeHtml(row.penNo)}</td>
+                <td>${escapeHtml(row.rsaOfficer)}</td>
+                <td>${escapeHtml(row.paymentOfficer)}</td>
             </tr>
         `;
     }).join('');
+}
+
+function getApplicationReportExcelHeaders() {
+    return [
+        'S/N',
+        'Location',
+        'Uploader Name',
+        'Customer Name',
+        'Application Status',
+        'Rejection Reason',
+        'Uploaded Date',
+        'RSA Balance',
+        '25% RSA Balance',
+        'Assigned RSA Officer',
+        'Payment Officer'
+    ];
+}
+
+function buildApplicationReportExcelRow(row = {}, index = 0) {
+    return [
+        index + 1,
+        row.uploaderLocation,
+        row.uploaderName,
+        row.customerName,
+        row.applicationStatus,
+        row.rejectionReason,
+        row.uploadedAt,
+        row.rsaBalance || '',
+        row.rsa25 || '',
+        row.rsaOfficer,
+        row.paymentOfficer
+    ];
+}
+
+function styleApplicationReportHeaderRow(row) {
+    row.eachCell((cell) => {
+        cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3B67' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        cell.border = {
+            top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+        };
+    });
+}
+
+function styleApplicationReportBodyRow(row, fillColor = 'FFFFFFFF') {
+    row.eachCell((cell) => {
+        cell.font = { name: 'Calibri', size: 11, color: { argb: 'FF0F172A' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } };
+        cell.alignment = { vertical: 'middle', wrapText: true };
+        cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        };
+    });
+}
+
+function getApplicationReportStatusBucket(sub = {}) {
+    const status = String(sub?.status || '').trim().toLowerCase();
+    if (['rejected', 'rejected_by_reviewer', 'rejected_by_rsa'].includes(status)) return 'rejected';
+    if (status === 'cleared') return 'cleared';
+    if (status === 'paid') return 'paid';
+    if (['sent_to_pfa', 'rsa_submitted'].includes(status)) return 'sentToPfa';
+    if (['approved', 'processing_to_pfa'].includes(status)) return 'approved';
+    if (['pending', 'submitted', 'resubmitted'].includes(status)) return 'pending';
+    if (status === 'draft') return 'draft';
+    return 'other';
+}
+
+function createApplicationReportSummaryTotals() {
+    return {
+        totalUploaded: 0,
+        pending: 0,
+        approved: 0,
+        sentToPfa: 0,
+        paid: 0,
+        cleared: 0,
+        rejected: 0,
+        draft: 0,
+        other: 0,
+        rsaBalance: 0,
+        rsa25: 0
+    };
+}
+
+function addApplicationReportSummaryRecord(totals, reportRow = {}, sub = {}) {
+    if (!totals) return;
+    const bucket = getApplicationReportStatusBucket(sub);
+    totals.totalUploaded += 1;
+    if (Object.prototype.hasOwnProperty.call(totals, bucket)) totals[bucket] += 1;
+    totals.rsaBalance += Number(reportRow.rsaBalance || 0);
+    totals.rsa25 += Number(reportRow.rsa25 || 0);
+}
+
+function buildApplicationReportSummaryData(rows = [], config = {}) {
+    const total = createApplicationReportSummaryTotals();
+    const byUploader = new Map();
+
+    rows.forEach(({ sub, stageDate }) => {
+        const reportRow = getApplicationReportRowData(sub, stageDate, config);
+        const uploaderKey = String(reportRow.uploaderEmail || reportRow.uploaderName || 'Unknown').toLowerCase();
+        const existing = byUploader.get(uploaderKey) || {
+            name: reportRow.uploaderName || 'Unknown',
+            location: reportRow.uploaderLocation || '-',
+            totals: createApplicationReportSummaryTotals()
+        };
+        if ((!existing.location || existing.location === '-') && reportRow.uploaderLocation) {
+            existing.location = reportRow.uploaderLocation;
+        }
+        addApplicationReportSummaryRecord(total, reportRow, sub);
+        addApplicationReportSummaryRecord(existing.totals, reportRow, sub);
+        byUploader.set(uploaderKey, existing);
+    });
+
+    return {
+        total,
+        uploaders: Array.from(byUploader.values()).sort((a, b) => {
+            const locationCompare = String(a.location || '').toLowerCase().localeCompare(String(b.location || '').toLowerCase());
+            if (locationCompare !== 0) return locationCompare;
+            return String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase());
+        })
+    };
+}
+
+function renderApplicationReportSummary(report = null, emptyText = 'Generate a report to view summary.') {
+    if (!applicationReportSummaryCards && !applicationReportSummaryTableBody) return;
+
+    if (!report) {
+        if (applicationReportSummaryCards) applicationReportSummaryCards.innerHTML = '';
+        if (applicationReportSummaryTableBody) {
+            applicationReportSummaryTableBody.innerHTML = `<tr><td colspan="12" class="no-data">${escapeHtml(emptyText)}</td></tr>`;
+        }
+        return;
+    }
+
+    const { total, uploaders } = buildApplicationReportSummaryData(report.rows, report.config);
+    if (applicationReportSummaryCards) {
+        const cards = [
+            ['Total Uploaded', total.totalUploaded],
+            ['Pending', total.pending],
+            ['Approved', total.approved],
+            ['Sent to PFA', total.sentToPfa],
+            ['Paid', total.paid],
+            ['Cleared', total.cleared],
+            ['Rejected', total.rejected],
+            ['RSA Balance', formatCurrency(total.rsaBalance)],
+            ['25% RSA Balance', formatCurrency(total.rsa25)]
+        ];
+        applicationReportSummaryCards.innerHTML = cards.map(([label, value]) => `
+            <div class="application-report-summary-card">
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(String(value ?? '-'))}</strong>
+            </div>
+        `).join('');
+    }
+
+    if (!applicationReportSummaryTableBody) return;
+    if (!uploaders.length) {
+        applicationReportSummaryTableBody.innerHTML = '<tr><td colspan="12" class="no-data">No uploader summary for this report.</td></tr>';
+        return;
+    }
+
+    applicationReportSummaryTableBody.innerHTML = uploaders.map(({ name, location, totals }) => `
+        <tr>
+            <td>${escapeHtml(location || '-')}</td>
+            <td><strong>${escapeHtml(name || 'Unknown')}</strong></td>
+            <td>${totals.totalUploaded}</td>
+            <td>${totals.pending}</td>
+            <td>${totals.approved}</td>
+            <td>${totals.sentToPfa}</td>
+            <td>${totals.paid}</td>
+            <td>${totals.cleared}</td>
+            <td>${totals.rejected}</td>
+            <td>${totals.other}</td>
+            <td>${formatCurrency(totals.rsaBalance)}</td>
+            <td>${formatCurrency(totals.rsa25)}</td>
+        </tr>
+    `).join('');
+}
+
+function styleApplicationReportSummaryTitle(row) {
+    row.height = 28;
+    row.getCell(1).font = { name: 'Calibri', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+    row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3B67' } };
+    row.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+}
+
+function renderApplicationReportSummarySheet(workbook, rows = [], config = {}, rangeLabel = '') {
+    const worksheet = workbook.addWorksheet('Summary', {
+        views: [{ state: 'frozen', ySplit: 7 }]
+    });
+    worksheet.columns = [
+        { width: 22 },
+        { width: 28 },
+        { width: 16 },
+        { width: 16 },
+        { width: 16 },
+        { width: 16 },
+        { width: 16 },
+        { width: 16 },
+        { width: 16 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 }
+    ];
+
+    const { total, uploaders } = buildApplicationReportSummaryData(rows, config);
+
+    const titleRow = worksheet.addRow(['Application Report Summary']);
+    worksheet.mergeCells(`A${titleRow.number}:L${titleRow.number}`);
+    styleApplicationReportSummaryTitle(titleRow);
+
+    const metaRow = worksheet.addRow([
+        `Report Type: ${config.label || 'Application Report'}`,
+        '',
+        `Date Range: ${rangeLabel || '-'}`,
+        '',
+        `Generated At: ${new Date().toLocaleString()}`
+    ]);
+    worksheet.mergeCells(`A${metaRow.number}:B${metaRow.number}`);
+    worksheet.mergeCells(`C${metaRow.number}:D${metaRow.number}`);
+    worksheet.mergeCells(`E${metaRow.number}:L${metaRow.number}`);
+    styleApplicationReportBodyRow(metaRow, 'FFE2E8F0');
+
+    worksheet.addRow([]);
+    const summaryHeader = worksheet.addRow(['Metric', 'Value']);
+    styleApplicationReportHeaderRow(summaryHeader);
+    [
+        ['Total Uploaded', total.totalUploaded],
+        ['Pending', total.pending],
+        ['Approved / Processing to PFA', total.approved],
+        ['Sent to PFA', total.sentToPfa],
+        ['Paid', total.paid],
+        ['Cleared', total.cleared],
+        ['Rejected', total.rejected],
+        ['Other Status', total.other],
+        ['Total RSA Balance', total.rsaBalance],
+        ['Total 25% RSA Balance', total.rsa25]
+    ].forEach(([label, value], index) => {
+        const row = worksheet.addRow([label, value]);
+        styleApplicationReportBodyRow(row, index % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC');
+        if (typeof value === 'number' && label.includes('Balance')) row.getCell(2).numFmt = '#,##0.00';
+    });
+
+    worksheet.addRow([]);
+    const uploaderHeader = worksheet.addRow([
+        'Location',
+        'Uploader',
+        'Total Uploaded',
+        'Pending',
+        'Approved',
+        'Sent to PFA',
+        'Paid',
+        'Cleared',
+        'Rejected',
+        'Other',
+        'RSA Balance',
+        '25% RSA Balance'
+    ]);
+    styleApplicationReportHeaderRow(uploaderHeader);
+
+    uploaders
+        .forEach(({ name, location, totals }, index) => {
+            const row = worksheet.addRow([
+                location,
+                name,
+                totals.totalUploaded,
+                totals.pending,
+                totals.approved,
+                totals.sentToPfa,
+                totals.paid,
+                totals.cleared,
+                totals.rejected,
+                totals.other,
+                totals.rsaBalance,
+                totals.rsa25
+            ]);
+            styleApplicationReportBodyRow(row, index % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC');
+            row.getCell(11).numFmt = '#,##0.00';
+            row.getCell(12).numFmt = '#,##0.00';
+        });
+}
+
+async function handleApplicationReportDownload() {
+    const startDate = applicationReportStartDate?.value || '';
+    const endDate = applicationReportEndDate?.value || '';
+
+    if (startDate && endDate && startDate > endDate) {
+        showNotification('Start date cannot be after end date.', 'warning');
+        return;
+    }
+    if (!ensureExcelJsLibrary()) return;
+
+    const originalHtml = applicationReportDownloadBtn?.innerHTML || '';
+    if (applicationReportDownloadBtn) {
+        applicationReportDownloadBtn.disabled = true;
+        applicationReportDownloadBtn.classList.add('loading');
+        applicationReportDownloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Building';
+    }
+
+    try {
+        await ensureApplicationReportDataLoaded();
+        await ensureApplicationReportUserDataLoaded();
+        const { config, rows, startDate: rangeStart, endDate: rangeEnd } = getApplicationReportRows();
+        if (!rows.length) {
+            showNotification('There is no report data to download for the selected range.', 'warning');
+            return;
+        }
+
+        const workbook = new window.ExcelJS.Workbook();
+        workbook.creator = 'CMBank RSA Admin Dashboard';
+        workbook.company = 'CMBank';
+        workbook.created = new Date();
+        workbook.modified = new Date();
+
+        const rangeLabel = rangeStart || rangeEnd
+            ? `${rangeStart || 'Beginning'} to ${rangeEnd || 'Today'}`
+            : 'All available dates';
+        renderApplicationReportSummarySheet(workbook, rows, config, rangeLabel);
+
+        const worksheet = workbook.addWorksheet('Application Report', {
+            views: [{ state: 'frozen', ySplit: 5 }]
+        });
+        const headers = getApplicationReportExcelHeaders();
+        worksheet.columns = [
+            { width: 8 },
+            { width: 22 },
+            { width: 26 },
+            { width: 30 },
+            { width: 22 },
+            { width: 34 },
+            { width: 22 },
+            { width: 18 },
+            { width: 16 },
+            { width: 26 },
+            { width: 26 }
+        ];
+
+        const titleRow = worksheet.addRow([config.label]);
+        worksheet.mergeCells(`A${titleRow.number}:K${titleRow.number}`);
+        titleRow.height = 28;
+        titleRow.getCell(1).font = { name: 'Calibri', size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+        titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3B67' } };
+        titleRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+
+        const metaRow = worksheet.addRow([`Date Range: ${rangeLabel}`, '', `Generated At: ${new Date().toLocaleString()}`, '', `Records: ${rows.length}`]);
+        worksheet.mergeCells(`A${metaRow.number}:B${metaRow.number}`);
+        worksheet.mergeCells(`C${metaRow.number}:D${metaRow.number}`);
+        worksheet.mergeCells(`E${metaRow.number}:F${metaRow.number}`);
+        metaRow.eachCell((cell) => {
+            cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF334155' } };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+            cell.alignment = { vertical: 'middle', wrapText: true };
+        });
+        worksheet.addRow([]);
+
+        const headerRow = worksheet.addRow(headers);
+        headerRow.height = 24;
+        styleApplicationReportHeaderRow(headerRow);
+
+        let currentUploader = '';
+        rows.forEach(({ sub, stageDate }, index) => {
+            const reportRow = getApplicationReportRowData(sub, stageDate, config);
+            if (reportRow.uploaderName !== currentUploader) {
+                currentUploader = reportRow.uploaderName;
+                const uploaderRow = worksheet.addRow([`Uploader: ${currentUploader || 'Unknown'}`]);
+                worksheet.mergeCells(`A${uploaderRow.number}:K${uploaderRow.number}`);
+                uploaderRow.height = 22;
+                uploaderRow.getCell(1).font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF166534' } };
+                uploaderRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
+                uploaderRow.getCell(1).alignment = { vertical: 'middle', wrapText: true };
+            }
+            const dataRow = worksheet.addRow(buildApplicationReportExcelRow(reportRow, index));
+            dataRow.height = 22;
+            styleApplicationReportBodyRow(dataRow, index % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC');
+            [8, 9].forEach((colNumber) => {
+                const cell = dataRow.getCell(colNumber);
+                if (typeof cell.value === 'number') cell.numFmt = '#,##0.00';
+            });
+            styleTrackingStageCell(dataRow.getCell(5), reportRow.applicationStatus);
+        });
+
+        worksheet.autoFilter = {
+            from: { row: headerRow.number, column: 1 },
+            to: { row: headerRow.number, column: headers.length }
+        };
+
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const reportSlug = String(applicationReportStage?.value || 'uploaded').replace(/[^\w-]/g, '_');
+        const suffix = `${rangeStart || 'start'}_${rangeEnd || 'end'}`.replace(/[^\w-]/g, '_');
+        link.href = url;
+        link.download = `${reportSlug}_application_report_${suffix}.xlsx`;
+        link.click();
+        URL.revokeObjectURL(url);
+        showNotification('Application report Excel downloaded.', 'success');
+    } catch (error) {
+        showNotification('Unable to download application report.', 'error');
+    } finally {
+        if (applicationReportDownloadBtn) {
+            applicationReportDownloadBtn.disabled = false;
+            applicationReportDownloadBtn.classList.remove('loading');
+            applicationReportDownloadBtn.innerHTML = originalHtml || '<i class="fas fa-file-excel"></i> Excel';
+        }
+    }
 }
 
 function openApplicationReportModal() {
@@ -3190,7 +3762,7 @@ function getSubmissionFinancials(sub) {
     const commissionRate = resolveSubmissionCommissionRate(sub);
     const commission2 = getSubmissionCommissionAmount(sub, twentyFive);
     const pfa = String(details.pfa || sub?.pfa || '').trim() || '-';
-    return { pfa, twentyFive, commission2, commissionRate };
+    return { pfa, rsaBalance, twentyFive, commission2, commissionRate };
 }
 
 function formatStatusLabel(status) {

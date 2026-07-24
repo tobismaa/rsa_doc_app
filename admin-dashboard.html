@@ -13,7 +13,7 @@
     <title>Admin Dashboard - CMBank RSA</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
-    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260629a">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260724c">
     <!-- Security: DOMPurify for XSS protection -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 </head>
@@ -722,7 +722,7 @@
                     <div class="modal-body">
                         <div class="application-report-hero">
                             <div>
-                                <h3 id="applicationReportHeading">Approved Applications</h3>
+                                <h3 id="applicationReportHeading">Uploaded Applications</h3>
                                 <p id="applicationReportMeta">Pick a report type and date range to display applications.</p>
                             </div>
                             <div class="application-report-count" id="applicationReportCount">0</div>
@@ -730,6 +730,7 @@
                         <div class="application-report-controls">
                             <label>Report Type
                                 <select id="applicationReportStage">
+                                    <option value="uploaded">Uploaded Applications</option>
                                     <option value="approved">Approved</option>
                                     <option value="pending">Pending</option>
                                     <option value="rejected">Rejected</option>
@@ -751,23 +752,66 @@
                             <button type="button" class="action-btn application-report-run" id="applicationReportRunBtn">
                                 <i class="fas fa-eye"></i> View
                             </button>
+                            <button type="button" class="action-btn application-report-download" id="applicationReportDownloadBtn">
+                                <i class="fas fa-file-excel"></i> Excel
+                            </button>
                         </div>
-                        <div class="table-container application-report-table-wrap">
-                            <table class="customers-table application-report-table">
-                                <thead>
-                                    <tr>
-                                        <th>Customer</th>
-                                        <th>Uploaded By</th>
-                                        <th>Agent</th>
-                                        <th>Status</th>
-                                        <th>Stage Date</th>
-                                        <th>PFA</th>
-                                        <th>25% Balance</th>
-                                        <th>Payment Officer</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="applicationReportTableBody"></tbody>
-                            </table>
+                        <div class="application-report-tabs" role="tablist" aria-label="Application report views">
+                            <button type="button" class="application-report-tab-btn active" data-application-report-view="summary" role="tab" aria-selected="true">Summary</button>
+                            <button type="button" class="application-report-tab-btn" data-application-report-view="applications" role="tab" aria-selected="false">Applications</button>
+                        </div>
+                        <div class="application-report-tab-panel active" id="applicationReportSummaryPanel" data-application-report-panel="summary" role="tabpanel">
+                            <div class="application-report-summary" id="applicationReportSummary">
+                                <div class="application-report-summary-cards" id="applicationReportSummaryCards"></div>
+                                <div class="table-container application-report-summary-table-wrap">
+                                    <table class="customers-table application-report-summary-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Location</th>
+                                                <th>Uploader</th>
+                                                <th>Total Uploaded</th>
+                                                <th>Pending</th>
+                                                <th>Approved</th>
+                                                <th>Sent to PFA</th>
+                                                <th>Paid</th>
+                                                <th>Cleared</th>
+                                                <th>Rejected</th>
+                                                <th>Other</th>
+                                                <th>RSA Balance</th>
+                                                <th>25% RSA Balance</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="applicationReportSummaryTableBody">
+                                            <tr><td colspan="12" class="no-data">Generate a report to view summary.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="application-report-tab-panel" id="applicationReportApplicationsPanel" data-application-report-panel="applications" role="tabpanel">
+                            <div class="table-container application-report-table-wrap">
+                                <table class="customers-table application-report-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Customer</th>
+                                            <th>Status</th>
+                                            <th>Uploaded</th>
+                                            <th>Location</th>
+                                            <th>Uploader</th>
+                                            <th>Uploader Email</th>
+                                            <th>Agent</th>
+                                            <th>RSA Balance</th>
+                                            <th>25% Balance</th>
+                                            <th>Stage Date</th>
+                                            <th>PFA</th>
+                                            <th>PEN No</th>
+                                            <th>RSA Officer</th>
+                                            <th>Payment Officer</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="applicationReportTableBody"></tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -1445,7 +1489,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=20260722b"></script>
+    <script type="module" src="js/admin.js?v=20260724f"></script>
     <script type="module" src="js/shared/super-admin-dashboard-switcher.js?v=20260722c"></script>
     <script src="js/table-enhancer.js?v=20260512b"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260715a"></script>

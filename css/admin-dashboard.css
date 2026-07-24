@@ -2326,7 +2326,7 @@ body {
 
 .application-report-controls {
   display: grid;
-  grid-template-columns: minmax(220px, 1.2fr) repeat(2, minmax(160px, 1fr)) minmax(250px, auto) auto;
+  grid-template-columns: minmax(220px, 1.2fr) repeat(2, minmax(160px, 1fr)) minmax(250px, auto) repeat(2, auto);
   gap: 12px;
   align-items: end;
   padding: 14px;
@@ -2388,6 +2388,94 @@ body {
   background: var(--cm-primary);
   color: var(--white);
   border: none;
+}
+
+.application-report-download {
+  height: 42px;
+  background: #0f766e;
+  color: var(--white);
+  border: none;
+}
+
+.application-report-tabs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #dbe2ea;
+}
+
+.application-report-tab-btn {
+  min-height: 40px;
+  padding: 9px 14px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: transparent;
+  color: #475569;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.application-report-tab-btn:hover,
+.application-report-tab-btn.active {
+  background: #ffffff;
+  border-color: #dbe2ea;
+  color: #0f3b67;
+}
+
+.application-report-tab-panel {
+  display: none;
+}
+
+.application-report-tab-panel.active {
+  display: block;
+}
+
+.application-report-summary {
+  display: grid;
+  gap: 12px;
+  margin-bottom: var(--spacing-lg);
+}
+
+.application-report-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.application-report-summary-card {
+  min-height: 74px;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid #dbe2ea;
+  border-radius: var(--radius-md);
+  background: #ffffff;
+}
+
+.application-report-summary-card span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.application-report-summary-card strong {
+  color: #0f3b67;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.application-report-summary-table-wrap {
+  max-height: 240px;
+  overflow: auto;
+}
+
+.application-report-summary-table th,
+.application-report-summary-table td {
+  white-space: nowrap;
 }
 
 .application-report-table-wrap {
