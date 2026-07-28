@@ -1298,11 +1298,135 @@ function renderRecentReviews() {
                 <td>${escapeHtml(formatReviewerStatusLabel(sub.status))}</td>
                 <td>${dt}</td>
                 <td>${sub.uploadedByName || 'N/A'}</td>
-                <td><button class="action-btn view-btn-small" onclick="window.viewSubmission('${sub.id}')"><i class="fas fa-eye"></i></button></td>
+                <td>
+                    <button class="action-btn view-btn-small" onclick="window.openReviewerCustomerDetails('${sub.id}')"><i class="fas fa-circle-info"></i> App Details</button>
+                    <button class="action-btn view-btn-small" onclick="window.viewSubmission('${sub.id}')"><i class="fas fa-eye"></i> Docs</button>
+                </td>
             </tr>
         `;
     }).join('');
 }
+
+function formatReviewerMoney(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '-';
+    const numeric = Number(raw.replace(/[^0-9.\-]/g, ''));
+    if (!Number.isFinite(numeric) || numeric === 0) return raw === '0' ? 'NGN 0.00' : raw;
+    try {
+        return numeric.toLocaleString('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 2 });
+    } catch (_) {
+        return `NGN ${numeric.toLocaleString()}`;
+    }
+}
+
+function getReviewerDetailValue(submission = {}, keys = [], fallback = '-') {
+    const details = submission?.customerDetails || {};
+    for (const key of keys) {
+        const detailValue = details?.[key];
+        if (detailValue !== undefined && detailValue !== null && String(detailValue).trim() !== '') return String(detailValue);
+        const rootValue = submission?.[key];
+        if (rootValue !== undefined && rootValue !== null && String(rootValue).trim() !== '') return String(rootValue);
+    }
+    return fallback;
+}
+
+function escapeReviewerAttr(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function renderReviewerDetailSection(title = '', fields = []) {
+    return `
+        <div class="form-section" style="margin-bottom:16px;">
+            <div class="section-header"><h3>${escapeHtml(title)}</h3></div>
+            <div class="section-body">
+                <div class="customer-input-grid">
+                    ${fields.map(([label, value]) => `
+                        <div>
+                            <label>${escapeHtml(label)}</label>
+                            <input type="text" readonly value="${escapeReviewerAttr(value)}">
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+window.openReviewerCustomerDetails = (submissionId) => {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub) {
+        showNotification('Customer details not found', 'error');
+        return;
+    }
+    const sections = [
+        {
+            title: 'Customer Details',
+            fields: [
+                ['Customer Name', getReviewerDetailValue(sub, ['name', 'customerName'], sub.customerName || '-')],
+                ['Date of Birth', getReviewerDetailValue(sub, ['dob', 'dateOfBirth'])],
+                ['Email', getReviewerDetailValue(sub, ['email', 'customerEmail'])],
+                ['Phone', getReviewerDetailValue(sub, ['phone', 'customerPhone'])],
+                ['NIN', getReviewerDetailValue(sub, ['nin', 'customerNIN'])],
+                ['Address', getReviewerDetailValue(sub, ['address', 'customerAddress'])],
+                ['Employer', getReviewerDetailValue(sub, ['employer'])],
+                ['Account Number', getReviewerDetailValue(sub, ['accountNo', 'accountNumber'])]
+            ]
+        },
+        {
+            title: 'Amounts',
+            fields: [
+                ['RSA Balance', formatReviewerMoney(getReviewerDetailValue(sub, ['rsaBalance'], ''))],
+                ['25% RSA Balance', formatReviewerMoney(getReviewerDetailValue(sub, ['rsa25', 'rsa25Percent'], ''))],
+                ['Property Value', formatReviewerMoney(getReviewerDetailValue(sub, ['propertyValue'], ''))],
+                ['Loan Amount', formatReviewerMoney(getReviewerDetailValue(sub, ['loanAmount'], ''))],
+                ['Facility Fee', formatReviewerMoney(getReviewerDetailValue(sub, ['facilityFee'], ''))],
+                ['Tenor', getReviewerDetailValue(sub, ['tenor'])]
+            ]
+        },
+        {
+            title: 'Application Details',
+            fields: [
+                ['PFA', getReviewerDetailValue(sub, ['pfa', 'pfaName'])],
+                ['PEN Number', getReviewerDetailValue(sub, ['penNo', 'penNumber'])],
+                ['Agent', sub.agentName || 'No Agent'],
+                ['Uploaded By', sub.uploadedByName || sub.uploadedBy || '-'],
+                ['Status', formatReviewerStatusLabel(sub.status || '-')],
+                ['Application ID', sub.id || '-']
+            ]
+        }
+    ];
+
+    const modal = document.createElement('div');
+    modal.className = 'modal active';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:980px;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+                <h2><i class="fas fa-circle-info"></i> Application Details</h2>
+                <button class="close-btn" type="button">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="document-info" style="margin-bottom:18px;">
+                    <h3>${escapeHtml(sub.customerName || 'Unknown Customer')}</h3>
+                    <p>Application ID: ${escapeHtml(sub.id || '-')} | Status: ${escapeHtml(formatReviewerStatusLabel(sub.status || '-'))}</p>
+                </div>
+                ${sections.map((section) => renderReviewerDetailSection(section.title, section.fields)).join('')}
+            </div>
+            <div class="modal-footer">
+                <button class="cancel-btn" type="button">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    const close = () => modal.remove();
+    modal.querySelectorAll('button').forEach((button) => button.addEventListener('click', close));
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) close();
+    });
+};
 
 // ==================== RENDER TABLES ====================
 function renderAllTables() {
@@ -1375,6 +1499,9 @@ function renderPendingTable(submissions) {
                     <div class="action-buttons">
                         <button class="action-btn view-btn-small" onclick="window.viewSubmission('${sub.id}')">
                             <i class="fas fa-eye"></i> View
+                        </button>
+                        <button class="action-btn view-btn-small" onclick="window.openReviewerCustomerDetails('${sub.id}')">
+                            <i class="fas fa-circle-info"></i> App Details
                         </button>
                         <button class="action-btn download-all-btn" onclick="window.downloadAll('${sub.id}')" ${downloadInProgress ? 'disabled' : ''}>
                             ${downloadInProgress ? '<i class="fas fa-spinner fa-spin"></i>' : '<i class="fas fa-download"></i>'} Download
@@ -1477,8 +1604,8 @@ function renderApprovedTable(submissions) {
                         <button class="action-btn view-btn-small" onclick="window.viewSubmission('${sub.id}')">
                             <i class="fas fa-eye"></i> View
                         </button>
-                        <button class="action-btn view-btn-small" onclick="window.openReviewerTrackModal('${sub.id}')">
-                            <i class="fas fa-route"></i> Track
+                        <button class="action-btn view-btn-small" onclick="window.openReviewerCustomerDetails('${sub.id}')">
+                            <i class="fas fa-circle-info"></i> App Details
                         </button>
                         <button class="action-btn download-all-btn" onclick="window.downloadAll('${sub.id}')" ${downloadInProgress ? 'disabled' : ''}>
                             ${downloadInProgress ? '<i class="fas fa-spinner fa-spin"></i>' : '<i class="fas fa-download"></i>'} Download
@@ -1523,6 +1650,9 @@ function renderRejectedTable(submissions) {
                     <div class="action-buttons">
                         <button class="action-btn view-btn-small" onclick="window.viewSubmission('${sub.id}')">
                             <i class="fas fa-eye"></i> View
+                        </button>
+                        <button class="action-btn view-btn-small" onclick="window.openReviewerCustomerDetails('${sub.id}')">
+                            <i class="fas fa-circle-info"></i> App Details
                         </button>
                         <button class="action-btn download-all-btn" onclick="window.downloadAll('${sub.id}')" ${downloadInProgress ? 'disabled' : ''}>
                             ${downloadInProgress ? '<i class="fas fa-spinner fa-spin"></i>' : '<i class="fas fa-download"></i>'} Download

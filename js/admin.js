@@ -813,6 +813,7 @@ function renderRejectedDocRow(sub) {
             <td>${rejectCount || 0}</td>
             <td>${reasonCell}</td>
             <td>
+                ${getAdminCustomerDetailsButtonHtml(sub.id)}
                 <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
                     <i class="fas fa-eye"></i> View All
                 </button>
@@ -2509,7 +2510,7 @@ async function handleApplicationReportView() {
         applicationReportHasViewed = true;
         if (applicationReportCount) applicationReportCount.textContent = '0';
         if (applicationReportMeta) applicationReportMeta.textContent = 'Start date cannot be after end date.';
-        applicationReportTableBody.innerHTML = '<tr><td colspan="14" class="no-data">Start date cannot be after end date.</td></tr>';
+        applicationReportTableBody.innerHTML = '<tr><td colspan="15" class="no-data">Start date cannot be after end date.</td></tr>';
         renderApplicationReportSummary(null, 'Start date cannot be after end date.');
         return;
     }
@@ -2531,7 +2532,7 @@ async function handleApplicationReportView() {
         applicationReportHasViewed = true;
         if (applicationReportCount) applicationReportCount.textContent = '0';
         if (applicationReportMeta) applicationReportMeta.textContent = 'Unable to load report applications.';
-        applicationReportTableBody.innerHTML = '<tr><td colspan="14" class="no-data">Unable to load report applications. Please try again.</td></tr>';
+        applicationReportTableBody.innerHTML = '<tr><td colspan="15" class="no-data">Unable to load report applications. Please try again.</td></tr>';
         renderApplicationReportSummary(null, 'Unable to load report applications.');
         showNotification('Unable to load report applications.', 'error');
     } finally {
@@ -2559,14 +2560,14 @@ function renderApplicationReport() {
     switchApplicationReportView('summary');
 
     if (startDate && endDate && startDate > endDate) {
-        applicationReportTableBody.innerHTML = '<tr><td colspan="14" class="no-data">Start date cannot be after end date.</td></tr>';
+        applicationReportTableBody.innerHTML = '<tr><td colspan="15" class="no-data">Start date cannot be after end date.</td></tr>';
         if (applicationReportCount) applicationReportCount.textContent = '0';
         renderApplicationReportSummary(null, 'Start date cannot be after end date.');
         return;
     }
 
     if (!rows.length) {
-        applicationReportTableBody.innerHTML = `<tr><td colspan="14" class="no-data">${escapeHtml(config.emptyText)}</td></tr>`;
+        applicationReportTableBody.innerHTML = `<tr><td colspan="15" class="no-data">${escapeHtml(config.emptyText)}</td></tr>`;
         return;
     }
 
@@ -2590,6 +2591,7 @@ function renderApplicationReport() {
                 <td>${escapeHtml(row.penNo)}</td>
                 <td>${escapeHtml(row.rsaOfficer)}</td>
                 <td>${escapeHtml(row.paymentOfficer)}</td>
+                <td>${getAdminCustomerDetailsButtonHtml(sub.id, 'App Details')}</td>
             </tr>
         `;
     }).join('');
@@ -3175,6 +3177,7 @@ function renderEscalations() {
                 <td>${escapeHtml(escalatedAt)}</td>
                 <td>${handlingText}</td>
                 <td>
+                    ${submission ? getAdminCustomerDetailsButtonHtml(submission.id || chatItem.id) : ''}
                     <button class="action-btn" onclick="window.openApplicationChat('${chatItem.id}')">
                         <i class="fas fa-comments"></i> Open Chat
                     </button>
@@ -3235,6 +3238,7 @@ function renderFinallySubmitted() {
                 <td>${submittedAt}</td>
                 <td><span class="status-badge status-approved">${statusLabel}</span></td>
                 <td>
+                    ${getAdminCustomerDetailsButtonHtml(sub.id)}
                     <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
                         <i class="fas fa-eye"></i> View All
                     </button>
@@ -3262,7 +3266,7 @@ function renderPaymentQueue() {
     }).slice().sort((a, b) => getStageTimestampMillis(getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(getSubmissionCurrentStageEntryAt(a)));
 
     if (paymentQueue.length === 0) {
-        paymentsTableBody.innerHTML = '<tr><td colspan="8" class="no-data">No payment records available</td></tr>';
+        paymentsTableBody.innerHTML = '<tr><td colspan="9" class="no-data">No payment records available</td></tr>';
         return;
     }
 
@@ -3286,6 +3290,7 @@ function renderPaymentQueue() {
                 <td>${formatCurrency(twentyFive)}</td>
                 <td>${formatCurrency(commission2)}</td>
                 <td><span class="status-badge status-approved">${statusLabel}</span></td>
+                <td>${getAdminCustomerDetailsButtonHtml(sub.id, 'App Details')}</td>
             </tr>
         `;
     }).join('');
@@ -3337,9 +3342,7 @@ function renderSlaBreaches() {
                 <td>${escapeHtml(formatStatusLabel(sub.status || '-'))}</td>
                 <td>
                     <div class="track-row-actions">
-                        <button class="action-btn view-btn-small" onclick="window.openTrackApplicationModal('${sub.id}')">
-                            <i class="fas fa-route"></i> Track
-                        </button>
+                        ${getAdminCustomerDetailsButtonHtml(sub.id)}
                         <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
                             <i class="fas fa-eye"></i> View
                         </button>
@@ -5018,6 +5021,14 @@ function renderTrackSummaryCard(label, value) {
             <span class="label">${escapeHtml(label)}</span>
             <div class="value">${escapeHtml(value || '-')}</div>
         </div>
+    `;
+}
+
+function getAdminCustomerDetailsButtonHtml(submissionId = '', label = 'App Details') {
+    return `
+        <button class="action-btn view-btn-small" onclick="window.openTrackCustomerDetailsModal('${submissionId}')">
+            <i class="fas fa-circle-info"></i> ${escapeHtml(label)}
+        </button>
     `;
 }
 
@@ -6862,6 +6873,7 @@ function renderGenerateDocumentsTable() {
                 <td>${escapeHtml(sub.assignedToRSA ? getDisplayNameByEmail(sub.assignedToRSA) : '-')}</td>
                 <td><span class="status-badge status-approved">${escapeHtml(formatStatusLabel(sub.status || '-'))}</span></td>
                 <td>
+                    ${getAdminCustomerDetailsButtonHtml(sub.id)}
                     <button class="action-btn view-btn-small" onclick="window.openDocumentGenerationModal('${sub.id}', this)">
                         <i class="fas fa-file-circle-plus"></i> Generate
                     </button>
@@ -8074,11 +8086,8 @@ function renderTrackApplications() {
                 <td>${escapeHtml(lastStageTime)}</td>
                 <td>
                     <div class="track-row-actions">
-                        <button class="action-btn view-btn-small" onclick="window.openTrackApplicationModal('${s.id}')">
-                            <i class="fas fa-route"></i> Track
-                        </button>
                         <button class="action-btn view-btn-small track-details-btn" onclick="window.openTrackCustomerDetailsModal('${s.id}')">
-                            <i class="fas fa-address-card"></i> Customer Details
+                            <i class="fas fa-address-card"></i> App Details
                         </button>
                     </div>
                 </td>
@@ -8763,6 +8772,7 @@ function filterDraftDocs() {
                 <td>${formatDate(lastSaved)}</td>
                 <td><span class="status-badge status-pending">Draft</span></td>
                 <td>
+                    ${getAdminCustomerDetailsButtonHtml(sub.id)}
                     <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
                         <i class="fas fa-eye"></i> View All
                     </button>
@@ -8824,6 +8834,7 @@ function filterPendingDocs() {
                 <td>${statusCell}</td>
                 <td>${reasonCell}</td>
                 <td>
+                    ${getAdminCustomerDetailsButtonHtml(sub.id)}
                     <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
                         <i class="fas fa-eye"></i> View All
                     </button>
@@ -9004,6 +9015,7 @@ function filterApprovedDocs() {
                 <td>${assignedToName}</td>
                 <td>${approvedDate}</td>
                 <td>
+                    ${getAdminCustomerDetailsButtonHtml(sub.id)}
                     <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')">
                         <i class="fas fa-eye"></i> View All
                     </button>

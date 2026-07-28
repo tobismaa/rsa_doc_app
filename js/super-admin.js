@@ -3044,6 +3044,7 @@ function getTransferRowHtml(sub = {}) {
                 <strong>${escapeHtml(getTransferUserOptionLabel(fromEmail))}</strong>
                 <div style="font-size:12px;color:#64748b;margin-top:4px;">${escapeHtml(matchedFields.map((item) => item.label).join(', ') || 'Owner')}</div>
             </td>
+            <td>${getSuperAdminApplicationDetailsButtonHtml(sub.id)}</td>
             <td>
                 <div style="display:grid;grid-template-columns:minmax(160px,1fr) auto;gap:8px;align-items:center;min-width:270px;">
                     <select id="transfer-row-target-${escapeHtml(sub.id)}" ${rowTargetDisabled} style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;width:100%;">${rowTargetOptions}</select>
@@ -3075,10 +3076,10 @@ function renderTransferApplications() {
     selectedTransferSubmissionIds = new Set([...selectedTransferSubmissionIds].filter((id) => visibleIds.has(id)));
 
     if (!fromEmail) {
-        body.innerHTML = '<tr><td colspan="11" class="no-data">Choose a source user to view applications.</td></tr>';
+        body.innerHTML = '<tr><td colspan="12" class="no-data">Choose a source user to view applications.</td></tr>';
         if (summary) summary.textContent = 'Choose a source user to view applications.';
     } else if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="11" class="no-data">No applications found for this selection.</td></tr>';
+        body.innerHTML = '<tr><td colspan="12" class="no-data">No applications found for this selection.</td></tr>';
         if (summary) summary.textContent = `0 applications found for ${getTransferUserOptionLabel(fromEmail)}.`;
     } else {
         body.innerHTML = rows.map((sub) => getTransferRowHtml(sub)).join('');
@@ -3967,6 +3968,102 @@ function getCustomerDetailValue(submission = {}, key = '') {
     return details[key] ?? topLevelMap[key] ?? '';
 }
 
+function getSuperAdminApplicationDetailsButtonHtml(submissionId = '', label = 'App Details') {
+    return `
+        <button type="button" class="action-btn" onclick="window.openSuperAdminApplicationDetails('${escapeHtml(submissionId)}')">
+            <i class="fas fa-circle-info"></i> ${escapeHtml(label)}
+        </button>
+    `;
+}
+
+function renderSuperAdminDetailsGrid(fields = []) {
+    return `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;">
+            ${fields.map(([label, value]) => `
+                <div style="border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;padding:10px;">
+                    <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;margin-bottom:5px;">${escapeHtml(label)}</div>
+                    <div style="font-size:14px;font-weight:700;color:#0f172a;">${escapeHtml(value || '-')}</div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+window.openSuperAdminApplicationDetails = (submissionId = '') => {
+    const submission = allSubmissions.find((sub) => sub.id === submissionId);
+    if (!submission) {
+        showNotification('Application details not found', 'error');
+        return;
+    }
+    const sections = [
+        {
+            title: 'Customer Details',
+            fields: [
+                ['Customer Name', getSubmissionCustomerName(submission) || 'Unknown'],
+                ['PEN Number', getSubmissionPenNumber(submission) || '-'],
+                ['Email', getCustomerDetailValue(submission, 'email') || '-'],
+                ['Phone', getCustomerDetailValue(submission, 'phone') || '-'],
+                ['Address', getCustomerDetailValue(submission, 'address') || '-'],
+                ['PFA', getCustomerDetailValue(submission, 'pfa') || '-']
+            ]
+        },
+        {
+            title: 'Amounts',
+            fields: [
+                ['RSA Balance', formatMoneyPreview(getSubmissionRsaBalance(submission))],
+                ['25% RSA Balance', formatMoneyPreview(getSubmissionTwentyFivePercent(submission))],
+                ['Commission', formatMoneyPreview(getSubmissionCommissionAmountForDisplay(submission))],
+                ['Property Value', formatMoneyPreview(getCustomerDetailValue(submission, 'propertyValue'))],
+                ['Loan Amount', formatMoneyPreview(getCustomerDetailValue(submission, 'loanAmount'))],
+                ['Commission Rate', formatCommissionRateLabel(Number(submission.commissionRate || 0)) || '-']
+            ]
+        },
+        {
+            title: 'Workflow',
+            fields: [
+                ['Status', String(submission.status || '-').replaceAll('_', ' ')],
+                ['Uploader', getUserDisplayNameByEmail(submission.uploadedBy || '')],
+                ['Reviewer', getUserDisplayNameByEmail(submission.assignedTo || submission.reviewedBy || '')],
+                ['RSA Officer', getUserDisplayNameByEmail(submission.assignedToRSA || '')],
+                ['Payment Officer', getUserDisplayNameByEmail(submission.assignedToPayment || submission.paidBy || '')],
+                ['Application ID', submission.id || '-']
+            ]
+        }
+    ];
+
+    const modal = document.createElement('div');
+    modal.className = 'modal active';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:980px;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+                <h2><i class="fas fa-circle-info"></i> Application Details</h2>
+                <button class="close-btn" type="button">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="document-info" style="margin-bottom:16px;">
+                    <h3>${escapeHtml(getSubmissionCustomerName(submission) || 'Unknown Customer')}</h3>
+                    <p>Application ID: ${escapeHtml(submission.id || '-')} | Status: ${escapeHtml(String(submission.status || '-').replaceAll('_', ' '))}</p>
+                </div>
+                ${sections.map((section) => `
+                    <section style="margin-bottom:16px;">
+                        <h3 style="margin:0 0 10px;color:#0f3b67;font-size:16px;">${escapeHtml(section.title)}</h3>
+                        ${renderSuperAdminDetailsGrid(section.fields)}
+                    </section>
+                `).join('')}
+            </div>
+            <div class="modal-footer">
+                <button class="cancel-btn" type="button">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    const close = () => modal.remove();
+    modal.querySelectorAll('button').forEach((button) => button.addEventListener('click', close));
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) close();
+    });
+};
+
 function renderCustomerEditModal(submission = {}) {
     currentCustomerEditSubmissionId = submission.id || '';
     currentCustomerEditSubmission = { ...submission };
@@ -4780,7 +4877,7 @@ function renderBackdateReport() {
         summary.textContent = `${rows.length} backdated application${rows.length === 1 ? '' : 's'} found`;
     }
     if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="13" class="no-data">No backdated applications found</td></tr>';
+        body.innerHTML = '<tr><td colspan="14" class="no-data">No backdated applications found</td></tr>';
         return;
     }
 
@@ -4803,6 +4900,7 @@ function renderBackdateReport() {
             <td>${escapeHtml(row.rsa)}</td>
             <td>${escapeHtml(row.payment)}</td>
             <td>${escapeHtml(row.commissionRate)}</td>
+            <td>${getSuperAdminApplicationDetailsButtonHtml(row.submissionId)}</td>
         </tr>
     `).join('');
 }
@@ -6082,6 +6180,7 @@ function renderApplicationAgentModule() {
                     </select>
                 </td>
                 <td>
+                    ${getSuperAdminApplicationDetailsButtonHtml(sub.id, 'App Details')}
                     <button class="action-btn" style="background:#003366;color:#fff;border:none;" onclick="window.assignApplicationAgent('${sub.id}')">
                         <i class="fas fa-save"></i> Update Agent
                     </button>
@@ -6143,6 +6242,7 @@ function renderApplicationAgentRerouteModule() {
                     </select>
                 </td>
                 <td>
+                    ${getSuperAdminApplicationDetailsButtonHtml(sub.id, 'App Details')}
                     <button class="action-btn" style="background:#0f766e;color:#fff;border:none;" onclick="window.rerouteApplicationAgent('${sub.id}')">
                         <i class="fas fa-right-left"></i> Re-route
                     </button>

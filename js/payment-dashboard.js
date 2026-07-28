@@ -209,6 +209,137 @@ function formatDateValue(value) {
     return formatAppDateTime(value, '-');
 }
 
+function escapePaymentAttr(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function getPaymentDetailValue(sub = {}, keys = [], fallback = '-') {
+    const details = sub?.customerDetails || {};
+    for (const key of keys) {
+        const detailValue = details?.[key];
+        if (detailValue !== undefined && detailValue !== null && String(detailValue).trim() !== '') return String(detailValue);
+        const rootValue = sub?.[key];
+        if (rootValue !== undefined && rootValue !== null && String(rootValue).trim() !== '') return String(rootValue);
+    }
+    return fallback;
+}
+
+function formatPaymentMoneyValue(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '-';
+    const numeric = parseMoney(raw);
+    if (!Number.isFinite(numeric) || numeric === 0) return raw === '0' ? formatCurrency(0) : raw;
+    return formatCurrency(numeric);
+}
+
+function renderPaymentDetailSection(title = '', fields = []) {
+    return `
+        <div class="form-section" style="margin-bottom:16px;">
+            <div class="section-header"><h3>${escapeHtml(title)}</h3></div>
+            <div class="section-body">
+                <div class="customer-input-grid">
+                    ${fields.map(([label, value]) => `
+                        <div>
+                            <label>${escapeHtml(label)}</label>
+                            <input type="text" readonly value="${escapePaymentAttr(value)}">
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function getPaymentDetailsButtonHtml(submissionId = '') {
+    return `<button class="action-btn view-btn-small" onclick="window.openPaymentApplicationDetails('${submissionId}')"><i class="fas fa-circle-info"></i> App Details</button>`;
+}
+
+window.openPaymentApplicationDetails = (submissionId) => {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub) {
+        showNotification('Application details not found', 'error');
+        return;
+    }
+    const { pfa, twentyFive, commission2 } = getSubmissionFinancials(sub);
+    const sections = [
+        {
+            title: 'Customer Details',
+            fields: [
+                ['Customer Name', getPaymentDetailValue(sub, ['name', 'customerName'], sub.customerName || '-')],
+                ['Email', getPaymentDetailValue(sub, ['email', 'customerEmail'])],
+                ['Phone', getPaymentDetailValue(sub, ['phone', 'customerPhone'])],
+                ['Address', getPaymentDetailValue(sub, ['address', 'customerAddress'])],
+                ['PFA', pfa],
+                ['PEN Number', getPaymentDetailValue(sub, ['penNo', 'penNumber'])]
+            ]
+        },
+        {
+            title: 'Payment Amounts',
+            fields: [
+                ['RSA Balance', formatPaymentMoneyValue(getPaymentDetailValue(sub, ['rsaBalance'], ''))],
+                ['25% RSA Balance', formatCurrency(twentyFive)],
+                ['Commission Rate', getSubmissionRateLabel(sub)],
+                ['Commission Amount', formatCurrency(commission2)],
+                ['Property Value', formatPaymentMoneyValue(getPaymentDetailValue(sub, ['propertyValue'], ''))],
+                ['Loan Amount', formatPaymentMoneyValue(getPaymentDetailValue(sub, ['loanAmount'], ''))]
+            ]
+        },
+        {
+            title: 'Agent and Workflow',
+            fields: [
+                ['Agent Name', String(sub?.agentName || '').trim() || 'No Agent'],
+                ['Agent Account Bank', String(sub?.agentAccountBank || '').trim() || '-'],
+                ['Agent Account Number', String(sub?.agentAccountNumber || '').trim() || '-'],
+                ['Customer Account Number', getSubmissionCustomerAccountNumber(sub) || '-'],
+                ['Uploader', getUploaderDisplayName(sub?.uploadedBy)],
+                ['Payment Officer', getUploaderDisplayName(sub?.assignedToPayment || sub?.paidBy || sub?.clearedBy)]
+            ]
+        },
+        {
+            title: 'Application Timeline',
+            fields: [
+                ['Status', getPaymentStatusLabel(sub)],
+                ['Uploaded Date', formatDateValue(getSubmissionOriginalUploadAt(sub))],
+                ['Sent to PFA Date', formatDateValue(getSubmissionPaymentEntryAt(sub))],
+                ['Paid Date', formatDateValue(getSubmissionPaidEntryAt(sub))],
+                ['Cleared Date', formatDateValue(getSubmissionClearedEntryAt(sub))],
+                ['Application ID', sub.id || '-']
+            ]
+        }
+    ];
+
+    const modal = document.createElement('div');
+    modal.className = 'modal active';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:980px;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+                <h2><i class="fas fa-circle-info"></i> Application Details</h2>
+                <button class="close-btn" type="button">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="document-info" style="margin-bottom:18px;">
+                    <h3>${escapeHtml(sub.customerName || 'Unknown Customer')}</h3>
+                    <p>Application ID: ${escapeHtml(sub.id || '-')} | Status: ${escapeHtml(getPaymentStatusLabel(sub))}</p>
+                </div>
+                ${sections.map((section) => renderPaymentDetailSection(section.title, section.fields)).join('')}
+            </div>
+            <div class="modal-footer">
+                <button class="cancel-btn" type="button">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    const close = () => modal.remove();
+    modal.querySelectorAll('button').forEach((button) => button.addEventListener('click', close));
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) close();
+    });
+};
+
 function getTimestampMillis(value) {
     if (!value) return 0;
     try {
@@ -743,7 +874,7 @@ function renderAgentBreakdownTable(group, mode = 'queue') {
                 <td>${formatCurrency(commission2)}</td>
                 <td><span class="status-badge status-approved">${escapeHtml(statusLabel)}</span></td>
                 <td>${escapeHtml(dateLabel)}</td>
-                <td><button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button></td>
+                <td>${getPaymentDetailsButtonHtml(sub.id)} <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button></td>
             </tr>
         `;
     }).join('');
@@ -1993,7 +2124,7 @@ function renderPaymentQueue() {
         const reconciliationBadge = reconciliationMatch
             ? `<div style="margin-top:6px;"><span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;"><i class="fas fa-link"></i> Excel matched</span></div>`
             : '';
-        const actionHtml = `<button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>`;
+        const actionHtml = `${getPaymentDetailsButtonHtml(sub.id)} <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>`;
 
         return `
             <tr>
@@ -2093,7 +2224,7 @@ function renderPaidCustomersSimpleTableLegacy() {
                 <td>${formatCurrency(commission2)}</td>
                 <td>${escapeHtml(paidDate)}</td>
                 <td><span class="status-badge status-approved">Paid</span></td>
-                <td>${clearAction} <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button></td>
+                <td>${getPaymentDetailsButtonHtml(sub.id)} ${clearAction} <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button></td>
             </tr>
         `;
     }).join('');
@@ -2140,7 +2271,7 @@ function renderPaidCustomersSimpleTable() {
                 <td>${formatCurrency(commission2)}</td>
                 <td>${escapeHtml(paidDate)}</td>
                 <td><span class="status-badge status-approved">Paid</span></td>
-                <td>${clearAction} <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button></td>
+                <td>${getPaymentDetailsButtonHtml(sub.id)} ${clearAction} <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button></td>
             </tr>
         `;
     }).join('');

@@ -924,7 +924,7 @@ function renderRsaExcelResultsModal() {
         rsaExcelResultsSelectAll.indeterminate = false;
     }
     if (!currentRsaExcelFilteredResults.length) {
-        rsaExcelResultsTableBody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:36px;color:#666">No applications found for this date range</td></tr>';
+        rsaExcelResultsTableBody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:36px;color:#666">No applications found for this date range</td></tr>';
         return;
     }
     rsaExcelResultsTableBody.innerHTML = currentRsaExcelFilteredResults.map((sub) => {
@@ -942,6 +942,7 @@ function renderRsaExcelResultsModal() {
                 <td>${formatTimestamp(getSubmissionOriginalUploadAt(sub))}</td>
                 <td>${formatTimestamp(getApprovedTimestamp(sub))}</td>
                 <td>${statusLabel}</td>
+                <td><button class="action-btn" onclick="window.openCustomerDetails('${sub.id}')"><i class="fas fa-eye"></i> App Details</button></td>
             </tr>
         `;
     }).join('');
@@ -1789,7 +1790,7 @@ function renderRejectedRsaTab() {
             <td>${sub.latestRejectionReason || sub.comment || '-'}</td>
             <td><span class="status-badge status-rejected">Rejected by RSA</span></td>
             <td>
-                <button class="action-btn" onclick="window.openCustomerDetails('${sub.id}')"><i class="fas fa-eye"></i> Details</button>
+                <button class="action-btn" onclick="window.openCustomerDetails('${sub.id}')"><i class="fas fa-eye"></i> App Details</button>
                 <button class="action-btn" onclick="window.downloadAllRsa('${sub.id}')"><i class="fas fa-download"></i> Download All</button>
                 <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>
             </td>
@@ -1861,7 +1862,7 @@ function renderFinallySubmittedTab() {
             <td>${submittedAt}</td>
             <td><span class="status-badge status-approved">Sent to PFA</span></td>
             <td>
-                <button class="action-btn" onclick="window.openCustomerDetails('${sub.id}')"><i class="fas fa-eye"></i> Details</button>
+                <button class="action-btn" onclick="window.openCustomerDetails('${sub.id}')"><i class="fas fa-eye"></i> App Details</button>
                 <button class="action-btn" onclick="window.downloadAllRsa('${sub.id}')"><i class="fas fa-download"></i> Download All</button>
                 <button class="action-btn merge-btn" onclick="window.openMergeModal('${sub.id}')"><i class="fas fa-compress-alt"></i> Merge</button>
                 <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>
@@ -1906,7 +1907,7 @@ function renderRsaRows(submissions) {
             ? 'Processing to PFA'
             : (status.charAt(0).toUpperCase() + status.slice(1));
         const actions = `
-            <button class="action-btn" onclick="window.openCustomerDetails('${sub.id}')"><i class="fas fa-eye"></i> Details</button>
+            <button class="action-btn" onclick="window.openCustomerDetails('${sub.id}')"><i class="fas fa-eye"></i> App Details</button>
             <button class="action-btn" onclick="window.downloadAllRsa('${sub.id}')"><i class="fas fa-download"></i> Download All</button>
             <button class="action-btn merge-btn" onclick="window.openMergeModal('${sub.id}')"><i class="fas fa-compress-alt"></i> Merge</button>
             <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>
