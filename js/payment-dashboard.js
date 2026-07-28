@@ -467,6 +467,38 @@ function getSubmissionCustomerAccountNumber(sub) {
     );
 }
 
+function renderCopyableCustomerAccount(sub = {}) {
+    const accountNumber = getSubmissionCustomerAccountNumber(sub);
+    if (!accountNumber) return '-';
+    return `
+        <span class="copy-account-cell">
+            <span class="copy-account-value">${escapeHtml(accountNumber)}</span>
+            <button type="button" class="copy-account-btn" data-copy-payment-account="${escapeHtml(accountNumber)}" title="Copy account number" aria-label="Copy account number">
+                <i class="fas fa-copy"></i>
+            </button>
+        </span>
+    `;
+}
+
+async function copyTextToClipboard(text = '') {
+    const value = String(text || '').trim();
+    if (!value) return false;
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+        await navigator.clipboard.writeText(value);
+        return true;
+    }
+    const input = document.createElement('textarea');
+    input.value = value;
+    input.setAttribute('readonly', '');
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    const copied = document.execCommand('copy');
+    document.body.removeChild(input);
+    return copied;
+}
+
 function getSelectedPaymentReconciliationFile() {
     return paymentReconciliationFileInput?.files?.[0] || null;
 }
@@ -1723,13 +1755,10 @@ function createStageReportFromDateRange(request, startDate, endDate) {
     }
 
     if (request?.kind === 'paid') {
-        const records = getSortedFilteredPaidRecords().filter((sub) => {
-            const dateMs = getTimestampMillis(getSubmissionPaidEntryAt(sub));
-            return dateMs >= startMs && dateMs <= endMs;
-        });
+        const records = getSortedFilteredPaidRecords();
         return buildPaymentStageReport(records, {
-            title: 'Paid Report',
-            exportKey: `paid-report-${startDate}-to-${endDate}`,
+            title: 'Paid Report - All Paid',
+            exportKey: 'paid-report-all-paid',
             dateLabel: 'paid date',
             getDateMs: (sub) => getTimestampMillis(getSubmissionPaidEntryAt(sub)),
             statusResolver: () => 'Paid',
@@ -2108,7 +2137,7 @@ function renderPaymentQueue() {
     }
 
     if (paymentQueue.length === 0) {
-        paymentsTableBody.innerHTML = '<tr><td colspan="11" class="no-data">No applications sent to PFA yet</td></tr>';
+        paymentsTableBody.innerHTML = '<tr><td colspan="12" class="no-data">No applications sent to PFA yet</td></tr>';
         return;
     }
 
@@ -2129,6 +2158,7 @@ function renderPaymentQueue() {
         return `
             <tr>
                 <td><strong>${escapeHtml(sub.customerName || 'Unknown')}</strong></td>
+                <td>${renderCopyableCustomerAccount(sub)}</td>
                 <td>
                     <strong>${escapeHtml(agentName)}</strong>
                     <div style="font-size:12px;color:#64748b;margin-top:4px;">${escapeHtml(String(sub?.agentAccountBank || '').trim() || '-')} • ${escapeHtml(String(sub?.agentAccountNumber || '').trim() || '-')}</div>
@@ -2856,6 +2886,23 @@ paymentReconciliationMatchedBody?.addEventListener('change', (e) => {
     if (!target.classList.contains('payment-reconciliation-row-check')) return;
     togglePaymentReconciliationSelection(target.dataset.submissionId || '', target.checked);
 });
+document.addEventListener('click', async (event) => {
+    const copyButton = event.target.closest('[data-copy-payment-account]');
+    if (!copyButton) return;
+    const accountNumber = String(copyButton.dataset.copyPaymentAccount || '').trim();
+    try {
+        const copied = await copyTextToClipboard(accountNumber);
+        if (!copied) throw new Error('Copy failed');
+        const icon = copyButton.querySelector('i');
+        if (icon) {
+            icon.className = 'fas fa-check';
+            setTimeout(() => { icon.className = 'fas fa-copy'; }, 1200);
+        }
+        showNotification('Customer account copied.', 'success');
+    } catch (_) {
+        showNotification('Could not copy customer account.', 'error');
+    }
+});
 document.getElementById('paymentLeaveMineBtn')?.addEventListener('click', () => {
     document.getElementById('paymentLeaveMineSection')?.style.setProperty('display', '');
     document.getElementById('paymentLeaveReliefSection')?.style.setProperty('display', 'none');
@@ -2948,7 +2995,9 @@ generateSentToPfaReportBtn?.addEventListener('click', () => {
 });
 generatePaidReportBtn?.addEventListener('click', () => {
     pendingPaymentReportRequest = { kind: 'paid' };
-    openPaymentReportRangeModal();
+    const report = createStageReportFromDateRange(pendingPaymentReportRequest, '', '');
+    renderPaymentReportPreview(report);
+    openPaymentReportPreviewModal();
 });
 generateClearedReportBtn?.addEventListener('click', () => {
     pendingPaymentReportRequest = { kind: 'cleared' };

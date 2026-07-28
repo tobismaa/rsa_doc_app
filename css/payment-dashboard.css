@@ -388,6 +388,43 @@
   font-size: 14px;
 }
 
+.copy-account-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.copy-account-value {
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: 0;
+}
+
+.copy-account-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #c7d9ec;
+  border-radius: 8px;
+  background: #eef6ff;
+  color: #0f3b67;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.copy-account-btn:hover {
+  background: #0f3b67;
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.copy-account-btn:focus-visible {
+  outline: 3px solid rgba(15, 59, 103, 0.22);
+  outline-offset: 2px;
+}
+
 @media (max-width: 900px) {
   .payment-lookup-hero,
   .payment-customer-search-layout {

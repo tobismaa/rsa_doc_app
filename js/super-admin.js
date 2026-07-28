@@ -16,6 +16,7 @@ import {
     serverTimestamp,
     setDoc,
     updateDoc,
+    writeBatch,
     where
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import {
@@ -6837,6 +6838,50 @@ async function saveSuperUser(e) {
     }
 }
 
+async function getSubmissionsLinkedToAgent(agentId = '') {
+    const normalizedAgentId = String(agentId || '').trim();
+    if (!normalizedAgentId) return [];
+
+    const linkedByCache = allSubmissions.filter((sub) => String(sub.agentId || '').trim() === normalizedAgentId);
+    try {
+        const snap = await getDocs(query(collection(db, 'submissions'), where('agentId', '==', normalizedAgentId)));
+        const merged = new Map(linkedByCache.map((sub) => [sub.id, sub]));
+        snap.docs.forEach((docSnap) => merged.set(docSnap.id, { id: docSnap.id, ...(docSnap.data() || {}) }));
+        return Array.from(merged.values());
+    } catch (_) {
+        return linkedByCache;
+    }
+}
+
+async function syncAgentSnapshotToSubmissions(agentId = '', agentPayload = {}) {
+    const linkedSubmissions = await getSubmissionsLinkedToAgent(agentId);
+    if (!linkedSubmissions.length) return 0;
+
+    const chunks = [];
+    for (let index = 0; index < linkedSubmissions.length; index += 450) {
+        chunks.push(linkedSubmissions.slice(index, index + 450));
+    }
+
+    for (const chunk of chunks) {
+        const batch = writeBatch(db);
+        chunk.forEach((sub) => {
+            if (!sub?.id) return;
+            batch.update(doc(db, 'submissions', sub.id), {
+                agentName: agentPayload.fullName || '',
+                agentContactNumber: agentPayload.contactNumber || '',
+                agentAccountNumber: agentPayload.accountNumber || '',
+                agentAccountBank: agentPayload.accountBank || '',
+                agentRecordSyncedAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+                updatedBy: currentUser?.email || ''
+            });
+        });
+        await batch.commit();
+    }
+
+    return linkedSubmissions.length;
+}
+
 async function saveSuperAgent(e) {
     e.preventDefault();
     if (!selectedSuperAgentId) return showNotification('No agent selected', 'error');
@@ -6874,18 +6919,7 @@ async function saveSuperAgent(e) {
 
         await updateDoc(doc(db, 'agents', selectedSuperAgentId), agentPayload);
 
-        const systemSettings = await getSystemSettings(db, { force: true });
-        const linkedSubmissions = allSubmissions.filter((sub) => String(sub.agentId || '').trim() === selectedSuperAgentId);
-        if (linkedSubmissions.length && systemSettings.agentEditSyncEnabled) {
-            await Promise.all(linkedSubmissions.map((sub) => updateDoc(doc(db, 'submissions', sub.id), {
-                agentName: fullName,
-                agentContactNumber: contactNumber,
-                agentAccountNumber: accountNumber,
-                agentAccountBank: accountBank,
-                updatedAt: serverTimestamp(),
-                updatedBy: currentUser?.email || ''
-            })));
-        }
+        const linkedSubmissionCount = await syncAgentSnapshotToSubmissions(selectedSuperAgentId, agentPayload);
 
         await addDoc(collection(db, 'audit'), {
             action: 'agent_record_updated_by_super_admin',
@@ -6899,14 +6933,14 @@ async function saveSuperAgent(e) {
             newAccountNumber: accountNumber,
             newAccountBank: accountBank,
             newStatus: status,
-            linkedSubmissionCount: linkedSubmissions.length,
-            agentEditSyncEnabled: systemSettings.agentEditSyncEnabled,
+            linkedSubmissionCount,
+            agentEditSyncEnabled: true,
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         });
 
         closeSuperAgentModal();
-        showNotification('Agent record updated successfully', 'success');
+        showNotification(`Agent record updated successfully. Synced ${linkedSubmissionCount} linked application(s).`, 'success');
     } catch (error) {
         showNotification('Failed to update agent record', 'error');
     } finally {

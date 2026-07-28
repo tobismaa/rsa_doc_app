@@ -7,6 +7,7 @@ import {
     addDoc,
     doc,
     getDoc,
+    getDocs,
     onSnapshot,
     serverTimestamp,
     arrayUnion,
@@ -29,6 +30,7 @@ import { notifyUserPushEvent } from './push-alerts.js';
 let currentUser = null;
 let currentUserData = null;
 let allUsers = [];
+let allAgents = [];
 let allSubmissions = [];
 let userDisplayNamesByEmail = new Map();
 let auditRenderTimer = null;
@@ -73,6 +75,7 @@ let auditPaidReconciliationActiveResultsTab = 'matched';
 let currentAuditRejectedScope = 'rejected';
 let currentAuditDuplicateHistoryFilter = 'all';
 let usersListenerStarted = false;
+let agentsListenerStarted = false;
 let submissionsListenerMode = '';
 let submissionListenerUnsubs = [];
 const submissionSnapshotSources = new Map();
@@ -1504,7 +1507,8 @@ function getExceptionRows() {
             if (!String(sub.customerName || '').trim()) {
                 return { sub, issue: 'Customer name missing' };
             }
-            if (!String(sub.agentName || '').trim()) {
+            const agentSnapshot = getSubmissionResolvedAgentSnapshot(sub);
+            if (!String(agentSnapshot.agentId || '').trim() && agentSnapshot.agentName === 'No Agent') {
                 return { sub, issue: 'Agent not linked' };
             }
             return null;
@@ -1543,7 +1547,7 @@ function filteredApplications() {
         const matchesSearch = !search || [
             sub.customerName,
             sub.uploadedBy,
-            sub.agentName,
+            getSubmissionReportAgentName(sub),
             sub.id,
             sub.assignedTo,
             sub.assignedToRSA,
@@ -1596,14 +1600,39 @@ function getSubmissionReportUserEmail(sub = {}) {
     return normalizeEmail(sub.uploadedBy || sub.auditCommissionSubmittedBy || sub.createdBy || sub.submittedBy || '');
 }
 
+function getAgentDirectoryRecord(agentId = '') {
+    const normalizedAgentId = String(agentId || '').trim();
+    if (!normalizedAgentId) return null;
+    return allAgents.find((agent) => String(agent.id || agent.agentId || '').trim() === normalizedAgentId) || null;
+}
+
+function getSubmissionResolvedAgentSnapshot(sub = {}) {
+    const linkedAgent = getAgentDirectoryRecord(sub.agentId);
+    if (linkedAgent) {
+        return {
+            agentId: String(linkedAgent.id || sub.agentId || '').trim(),
+            agentName: String(linkedAgent.fullName || linkedAgent.agentName || 'No Agent').trim() || 'No Agent',
+            agentAccountNumber: String(linkedAgent.accountNumber || linkedAgent.agentAccountNumber || '-').trim() || '-',
+            agentBank: String(linkedAgent.accountBank || linkedAgent.agentAccountBank || '-').trim() || '-'
+        };
+    }
+
+    return {
+        agentId: String(sub.agentId || '').trim(),
+        agentName: String(
+            sub.agentName ||
+            sub.agentFullName ||
+            sub.agent?.fullName ||
+            sub.customerDetails?.agentName ||
+            'No Agent'
+        ).trim() || 'No Agent',
+        agentAccountNumber: String(sub.agentAccountNumber || sub.agent?.accountNumber || '-').trim() || '-',
+        agentBank: String(sub.agentAccountBank || sub.agent?.accountBank || '-').trim() || '-'
+    };
+}
+
 function getSubmissionReportAgentName(sub = {}) {
-    return String(
-        sub.agentName ||
-        sub.agentFullName ||
-        sub.agent?.fullName ||
-        sub.customerDetails?.agentName ||
-        'No Agent'
-    ).trim() || 'No Agent';
+    return getSubmissionResolvedAgentSnapshot(sub).agentName;
 }
 
 function createEmptyAuditUserReportRow(emailKey = '', user = null) {
@@ -1699,8 +1728,9 @@ function getAuditAgentSummaryRowsForUser(emailKey = '') {
         const cleared = isClearedLifecycle(sub);
         if (!reachedPfa && !payable && !cleared) return;
 
-        const agentName = getSubmissionReportAgentName(sub);
-        const agentKey = String(sub.agentId || '').trim() || agentName.toLowerCase();
+        const agentSnapshot = getSubmissionResolvedAgentSnapshot(sub);
+        const agentName = agentSnapshot.agentName;
+        const agentKey = agentSnapshot.agentId || agentName.toLowerCase();
         const row = rowsByAgent.get(agentKey) || {
             agentName,
             sentToPfaCount: 0,
@@ -2296,9 +2326,10 @@ function buildPaymentStageReport(records = [], options = {}) {
             const dateMs = getDateMs(sub);
             const attended = attendedResolver(sub);
             const statusText = statusResolver(sub);
-            const agentName = String(sub?.agentName || '').trim() || 'No Agent';
-            const agentAccountNumber = String(sub?.agentAccountNumber || '').trim() || '-';
-            const agentBank = String(sub?.agentAccountBank || '').trim() || '-';
+            const agentSnapshot = getSubmissionResolvedAgentSnapshot(sub);
+            const agentName = agentSnapshot.agentName;
+            const agentAccountNumber = agentSnapshot.agentAccountNumber;
+            const agentBank = agentSnapshot.agentBank;
             const uploaderName = getUserDisplayName(sub?.uploadedBy);
             const detailRow = {
                 id: sub.id,
@@ -2333,7 +2364,7 @@ function buildPaymentStageReport(records = [], options = {}) {
             else existingSummary.pending += 1;
             summaryMap.set(summaryKey, existingSummary);
 
-            const agentSummaryKey = String(sub?.agentId || '').trim() || `${agentName.toLowerCase()}::${normalizeEmail(sub?.uploadedBy)}::${agentAccountNumber}::${agentBank.toLowerCase()}`;
+            const agentSummaryKey = agentSnapshot.agentId || `${agentName.toLowerCase()}::${normalizeEmail(sub?.uploadedBy)}::${agentAccountNumber}::${agentBank.toLowerCase()}`;
             const existingAgentSummary = agentSummaryMap.get(agentSummaryKey) || {
                 agentName,
                 uploaderName,
@@ -2436,15 +2467,12 @@ function createStageReportFromDateRange(request, startDate, endDate) {
     }
 
     const paidScope = normalizeAuditPaidScope(request?.scope || currentAuditPaidScope);
-    const records = getAuditPaidRows(paidScope).filter((sub) => {
-        const dateMs = getTimestampMillis(sub.paidAt);
-        return dateMs >= startMs && dateMs <= endMs;
-    });
+    const records = getAuditPaidRows(paidScope);
     return buildPaymentStageReport(records, {
-        title: `Paid Report - ${getAuditPaidScopeLabel(paidScope)}`,
-        exportKey: `paid-report-${paidScope}-${startDate}-to-${endDate}`,
-        rangeStart: startDate,
-        rangeEnd: endDate,
+        title: `Paid Report - ${getAuditPaidScopeLabel(paidScope)} - All Paid`,
+        exportKey: `paid-report-${paidScope}-all-paid`,
+        rangeStart: '',
+        rangeEnd: '',
         dateLabel: 'paid date',
         getDateMs: (sub) => getTimestampMillis(sub.paidAt),
         statusResolver: () => 'Paid',
@@ -2863,6 +2891,7 @@ function switchTab(tabId) {
 function ensureDataForTab(tabId) {
     const dataTabs = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'reconciliation', 'user-report'];
     if (dataTabs.includes(tabId)) loadUsers();
+    if (dataTabs.includes(tabId)) loadAgents();
     if (dataTabs.includes(tabId)) loadSubmissions({ full: tabId === 'reconciliation' || tabId === 'user-report' });
 }
 
@@ -2881,6 +2910,7 @@ function openApplicationDetailsModal(submissionId) {
         showNotification('Application not found', 'warning');
         return;
     }
+    const agentSnapshot = getSubmissionResolvedAgentSnapshot(sub);
 
     const rows = [
         ['Application ID', sub.id || '-'],
@@ -2891,7 +2921,7 @@ function openApplicationDetailsModal(submissionId) {
         ['Assigned Reviewer', sub.assignedTo || sub.reviewedBy || '-'],
         ['Assigned RSA', sub.assignedToRSA || '-'],
         ['Assigned Payment', sub.assignedToPayment || '-'],
-        ['Agent Name', sub.agentName || '-'],
+        ['Agent Name', agentSnapshot.agentName || '-'],
         ['PFA', sub?.customerDetails?.pfa || sub.pfa || '-'],
         ['Customer Account Number', getCustomerAccountNumber(sub)],
         ['Audit Commission Status', statusLabel(sub.auditCommissionStatus || '-')],
@@ -3949,9 +3979,16 @@ function bindEvents() {
         pendingPaymentReportRequest = { kind: 'sent-to-pfa' };
         openPaymentReportRangeModal();
     });
-    exportAuditPaidReportBtn?.addEventListener('click', () => {
+    exportAuditPaidReportBtn?.addEventListener('click', async () => {
         pendingPaymentReportRequest = { kind: 'paid', scope: currentAuditPaidScope };
-        openPaymentReportRangeModal();
+        try {
+            await ensureAgentsLoadedForReport();
+            const report = createStageReportFromDateRange(pendingPaymentReportRequest, '', '');
+            renderPaymentReportPreview(report);
+            openPaymentReportPreviewModal();
+        } catch (_) {
+            showNotification('Failed to generate payment report', 'error');
+        }
     });
     exportAuditClearedReportBtn?.addEventListener('click', () => {
         pendingPaymentReportRequest = { kind: 'cleared' };
@@ -4208,6 +4245,7 @@ function bindEvents() {
         generatePaymentReportBtn.disabled = true;
         generatePaymentReportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
         try {
+            await ensureAgentsLoadedForReport();
             const report = createStageReportFromDateRange(pendingPaymentReportRequest, startDate, endDate);
             renderPaymentReportPreview(report);
             closePaymentReportRangeModal();
@@ -4302,6 +4340,31 @@ function loadUsers() {
     }, () => {
         showNotification('Failed to load users', 'error');
     });
+}
+
+function loadAgents() {
+    if (agentsListenerStarted) return;
+    agentsListenerStarted = true;
+    onSnapshot(collection(db, 'agents'), (snapshot) => {
+        allAgents = snapshot.docs
+            .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))
+            .sort((a, b) => String(a.fullName || a.agentName || '').localeCompare(String(b.fullName || b.agentName || '')));
+        scheduleCurrentTabRender();
+    }, () => {
+        showNotification('Failed to load agents', 'error');
+    });
+}
+
+async function ensureAgentsLoadedForReport() {
+    if (allAgents.length) return;
+    try {
+        const snapshot = await getDocs(collection(db, 'agents'));
+        allAgents = snapshot.docs
+            .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))
+            .sort((a, b) => String(a.fullName || a.agentName || '').localeCompare(String(b.fullName || b.agentName || '')));
+    } catch (_) {
+        // The report can still fall back to submission snapshots if agent directory loading fails.
+    }
 }
 
 function loadSubmissions({ full = false } = {}) {

@@ -5857,6 +5857,10 @@ function isLinkedAgentPaidSubmission(submission = {}) {
   return !!agentId && registeredAgents.some((agent) => String(agent.id || '').trim() === agentId);
 }
 
+function hasAssociatedCommissionAgent(submission = {}) {
+  return !!String(getSubmissionAgentSnapshot(submission).agentId || '').trim();
+}
+
 function isVisibleUploaderApplicationForTab(submission = {}, tab = currentUploaderApplicationTab) {
   if (tab === 'paid') return isOwnUploaderSubmission(submission) || isLinkedAgentPaidSubmission(submission);
   return isOwnUploaderSubmission(submission);
@@ -6002,6 +6006,71 @@ function getUploaderSubmissionDetailsButtonHtml(submissionId, label = 'App Detai
 function getUploaderSubmissionDocsButtonHtml(submissionId, label = 'Docs') {
   return `<button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${submissionId}')"><i class="fas fa-eye"></i> ${escapeHtml(label)}</button>`;
 }
+
+function getUploaderCustomerAccountNumber(submission = {}) {
+  const details = submission?.customerDetails || {};
+  return String(
+    details.accountNo ||
+    details.accountNumber ||
+    details.bankAccountNumber ||
+    submission.accountNo ||
+    submission.accountNumber ||
+    submission.bankAccountNumber ||
+    ''
+  ).trim();
+}
+
+function renderUploaderCopyableCustomerAccount(submission = {}) {
+  const accountNumber = getUploaderCustomerAccountNumber(submission);
+  if (!accountNumber) return '-';
+  return `
+    <span class="copy-account-cell">
+      <span class="copy-account-value">${escapeHtml(accountNumber)}</span>
+      <button type="button" class="copy-account-btn" data-copy-uploader-account="${escapeHtml(accountNumber)}" title="Copy account number" aria-label="Copy account number">
+        <i class="fas fa-copy"></i>
+      </button>
+    </span>
+  `;
+}
+
+async function copyUploaderTextToClipboard(text = '') {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return true;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  textarea.remove();
+  return copied;
+}
+
+document.addEventListener('click', async (event) => {
+  const copyButton = event.target?.closest?.('[data-copy-uploader-account]');
+  if (!copyButton) return;
+
+  try {
+    const accountNumber = String(copyButton.dataset.copyUploaderAccount || '').trim();
+    const copied = await copyUploaderTextToClipboard(accountNumber);
+    if (!copied) throw new Error('Copy failed');
+    const icon = copyButton.querySelector('i');
+    if (icon) {
+      icon.className = 'fas fa-check';
+      setTimeout(() => { icon.className = 'fas fa-copy'; }, 1200);
+    }
+    showNotification('Customer account copied.', 'success');
+  } catch (_) {
+    showNotification('Could not copy customer account.', 'error');
+  }
+});
 
 async function renderUploaderApplicationsTable() {
   const renderId = ++uploaderApplicationsRenderId;
@@ -6166,11 +6235,12 @@ async function renderUploaderApplicationsTable() {
     return;
   }
 
-  setUploaderApplicationsColumns(
-    renderTab === 'paid'
-      ? ['Customer Name', 'Agent', 'PFA', 'Uploaded By', 'Time Entered', 'Current Officer', 'Action']
-      : ['Customer Name', 'Agent', 'PFA', 'Time Entered', 'Current Officer', 'Action']
-  );
+  const sharedColumns = ['Customer Name'];
+  if (renderTab === 'sent_to_pfa') sharedColumns.push('Customer Account');
+  sharedColumns.push('Agent', 'PFA');
+  if (renderTab === 'paid') sharedColumns.push('Uploaded By');
+  sharedColumns.push('Time Entered', 'Current Officer', 'Action');
+  setUploaderApplicationsColumns(sharedColumns);
   if (!rows.length) {
     const label = renderTab === 'paid'
       ? getActiveCommissionScopeLabel(renderPaidScope)
@@ -6194,9 +6264,13 @@ async function renderUploaderApplicationsTable() {
     const uploadedByCell = renderTab === 'paid'
       ? `<td>${escapeHtml(isOwnUploaderSubmission(sub) ? 'Me' : (sub.uploadedBy || '-'))}</td>`
       : '';
+    const customerAccountCell = renderTab === 'sent_to_pfa'
+      ? `<td>${renderUploaderCopyableCustomerAccount(sub)}</td>`
+      : '';
     html += `
       <tr data-submission-id="${sub.id}">
         <td><strong>${escapeHtml(sub.customerName || '-')}</strong></td>
+        ${customerAccountCell}
         <td>${escapeHtml(getSubmissionAgentDisplayName(sub))}</td>
         <td>${escapeHtml(getSubmissionPfaName(sub))}</td>
         ${uploadedByCell}
@@ -6357,6 +6431,10 @@ window.markUploaderPaymentMade = async (submissionId) => {
   }
   if (!isUploaderSentToPfaStatus(sub)) {
     showNotification('Only Sent to PFA applications can be reported as payment made.', 'warning');
+    return;
+  }
+  if (!hasAssociatedCommissionAgent(sub)) {
+    showNotification('No agent is associated with this application. It cannot be submitted for commission.', 'error');
     return;
   }
 

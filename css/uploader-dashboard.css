@@ -944,6 +944,43 @@ body {
   background: var(--cm-primary-light);
 }
 
+.copy-account-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.copy-account-value {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.copy-account-btn {
+  width: 30px;
+  height: 30px;
+  border: 1px solid #c7d9ec;
+  border-radius: 8px;
+  background: #eef6ff;
+  color: #0f3b67;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  transition: background 0.2s, border-color 0.2s, transform 0.2s;
+}
+
+.copy-account-btn:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  transform: translateY(-1px);
+}
+
+.copy-account-btn:focus-visible {
+  outline: 3px solid rgba(59, 130, 246, 0.25);
+  outline-offset: 2px;
+}
+
 .loading-row {
   text-align: center;
   padding: var(--spacing-xxl) !important;
