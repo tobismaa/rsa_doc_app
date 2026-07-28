@@ -2401,6 +2401,7 @@ function updateRoleSwitchBackLink() {
   const roleTargets = {
     reviewer: { href: 'reviewer-dashboard.html', label: 'Switch to Reviewer' },
     rsa: { href: 'rsa-dashboard.html', label: 'Switch to RSA' },
+    payment: { href: 'payment-dashboard.html', label: 'Switch to Payment' },
     reports_monitoring: { href: 'reports-monitoring-dashboard.html', label: 'Switch to Audit' },
     audit: { href: 'reports-monitoring-dashboard.html', label: 'Switch to Audit' }
   };
