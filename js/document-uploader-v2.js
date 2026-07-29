@@ -1266,6 +1266,7 @@ let currentCommissionTab = 'sent_to_pfa';
 let currentUploaderApplicationTab = 'draft';
 let currentUploaderPaidScope = 'mine';
 let uploaderApplicationsRenderId = 0;
+const expandedUploaderClearedBatchKeys = new Set();
 let submissionInProgress = false;
 const UPLOADER_DASHBOARD_TABS = ['overview', 'draft', 'applications', 'pending', 'approved', 'rejected', 'paid', 'register-agent', 'profile', 'help'];
 const UPLOADER_APPLICATION_TABS = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'audit', 'paid', 'cleared'];
@@ -5958,7 +5959,12 @@ function getUploaderApplicationRows(tab = currentUploaderApplicationTab) {
         getSubmissionPfaName(sub),
         formatSubmissionStatusLabel(sub.status || ''),
         getUploaderAuditNote(sub),
-        getUploaderDeletedReason(sub)
+        getUploaderDeletedReason(sub),
+        getUploaderClearanceModeLabel(sub.clearanceMode || ''),
+        sub.clearanceBatchSourceFileName,
+        sub.clearanceBatchId,
+        sub.clearedBy,
+        sub.auditClearedBy
       ].some((value) => String(value || '').toLowerCase().includes(search));
     })
     .sort((a, b) => getSubmissionSortMillis(b) - getSubmissionSortMillis(a));
@@ -6072,6 +6078,119 @@ document.addEventListener('click', async (event) => {
   }
 });
 
+function getUploaderClearanceBatchKey(submission = {}) {
+  const batchId = String(submission.clearanceBatchId || submission.auditClearanceBatchId || '').trim();
+  return batchId || `single-clear:${String(submission.id || '').trim()}`;
+}
+
+function getUploaderClearanceModeLabel(mode = '') {
+  const normalized = String(mode || '').toLowerCase().trim();
+  if (normalized === 'excel') return 'Excel Batch Clear';
+  if (normalized === 'bulk') return 'Batch Clear';
+  if (normalized === 'single') return 'Single Clear';
+  return normalized ? normalized.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()) : 'Audit Clear';
+}
+
+function getUploaderClearanceDateValue(submission = {}) {
+  return submission.clearedAt ||
+    submission.auditClearedAt ||
+    submission.clearanceBatchCreatedAtIso ||
+    getSubmissionClearedEntryAt(submission) ||
+    submission.updatedAt;
+}
+
+function buildUploaderClearedCommissionHistory(rows = []) {
+  const groups = new Map();
+
+  rows.forEach((sub) => {
+    const key = getUploaderClearanceBatchKey(sub);
+    const { twentyFive, commission2 } = getFinancials(sub);
+    const clearedAt = getUploaderClearanceDateValue(sub);
+    const clearedAtMs = getStageTimestampMillis(clearedAt);
+    const existing = groups.get(key) || {
+      key,
+      mode: String(sub.clearanceMode || '').trim() || (String(sub.clearanceBatchId || '').trim() ? 'bulk' : 'single'),
+      sourceFileName: String(sub.clearanceBatchSourceFileName || '').trim(),
+      clearedBy: String(sub.clearedBy || sub.auditClearedBy || '').trim(),
+      submissions: [],
+      totalTwentyFive: 0,
+      totalCommission: 0,
+      latestClearedAt: clearedAt,
+      latestClearedAtMs: clearedAtMs,
+      storedBatchCount: Number(sub.clearanceBatchCount || 0)
+    };
+
+    existing.submissions.push(sub);
+    existing.totalTwentyFive += twentyFive;
+    existing.totalCommission += commission2;
+    existing.storedBatchCount = Math.max(existing.storedBatchCount || 0, Number(sub.clearanceBatchCount || 0));
+    if (!existing.sourceFileName && String(sub.clearanceBatchSourceFileName || '').trim()) {
+      existing.sourceFileName = String(sub.clearanceBatchSourceFileName).trim();
+    }
+    if (!existing.clearedBy && String(sub.clearedBy || sub.auditClearedBy || '').trim()) {
+      existing.clearedBy = String(sub.clearedBy || sub.auditClearedBy).trim();
+    }
+    if (clearedAtMs > existing.latestClearedAtMs) {
+      existing.latestClearedAt = clearedAt;
+      existing.latestClearedAtMs = clearedAtMs;
+    }
+    groups.set(key, existing);
+  });
+
+  return Array.from(groups.values()).sort((a, b) => b.latestClearedAtMs - a.latestClearedAtMs);
+}
+
+function renderUploaderClearedBatchBreakdown(group) {
+  const sortedRows = [...group.submissions].sort((a, b) => {
+    return getStageTimestampMillis(getUploaderClearanceDateValue(b)) - getStageTimestampMillis(getUploaderClearanceDateValue(a));
+  });
+  const rows = sortedRows.map((sub) => {
+    const { twentyFive, commission2 } = getFinancials(sub);
+    return `
+      <tr data-submission-id="${escapeHtml(sub.id)}">
+        <td><strong>${escapeHtml(sub.customerName || '-')}</strong></td>
+        <td>${escapeHtml(getSubmissionAgentDisplayName(sub))}</td>
+        <td>${escapeHtml(getSubmissionPfaName(sub))}</td>
+        <td><strong>${formatCurrency(twentyFive)}</strong></td>
+        <td><strong>${formatCurrency(commission2)}</strong></td>
+        <td>${safeFormatDate(getUploaderClearanceDateValue(sub))}</td>
+        <td>${getUploaderSubmissionDetailsButtonHtml(sub.id)} ${getUploaderSubmissionDocsButtonHtml(sub.id)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <tr class="cleared-history-breakdown-row">
+      <td colspan="6">
+        <div class="table-container cleared-history-breakdown">
+          <table class="customers-table">
+            <thead>
+              <tr>
+                <th>Customer Name</th>
+                <th>Agent</th>
+                <th>PFA</th>
+                <th>25% RSA</th>
+                <th>Commission</th>
+                <th>Cleared Date</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+window.toggleUploaderClearedBatchBreakdown = (encodedKey = '') => {
+  const key = decodeURIComponent(String(encodedKey || '').trim());
+  if (!key) return;
+  if (expandedUploaderClearedBatchKeys.has(key)) expandedUploaderClearedBatchKeys.delete(key);
+  else expandedUploaderClearedBatchKeys.add(key);
+  renderUploaderApplicationsTable();
+};
+
 async function renderUploaderApplicationsTable() {
   const renderId = ++uploaderApplicationsRenderId;
   const renderTab = currentUploaderApplicationTab;
@@ -6105,6 +6224,52 @@ async function renderUploaderApplicationsTable() {
   }
 
   const rows = getUploaderApplicationRows(renderTab);
+
+  if (renderTab === 'cleared') {
+    setUploaderApplicationsColumns(['Clearance Batch', 'Cleared Commission', 'Applications', 'Cleared Date', 'Cleared By', 'Action']);
+    if (!rows.length) {
+      writeEmptyRows('cleared');
+      return;
+    }
+
+    const groups = buildUploaderClearedCommissionHistory(rows);
+    let html = '';
+    for (const group of groups) {
+      const encodedKey = encodeURIComponent(group.key);
+      const expanded = expandedUploaderClearedBatchKeys.has(group.key);
+      const clearedBy = group.clearedBy ? await getUserFullName(group.clearedBy) : 'Audit';
+      const sourceMeta = group.sourceFileName
+        ? `<div style="font-size:12px;color:#64748b;margin-top:4px;">${escapeHtml(group.sourceFileName)}</div>`
+        : '';
+      const batchCountLabel = group.storedBatchCount > group.submissions.length
+        ? `${group.submissions.length} of ${group.storedBatchCount} app${group.storedBatchCount === 1 ? '' : 's'}`
+        : `${group.submissions.length} app${group.submissions.length === 1 ? '' : 's'}`;
+      html += `
+        <tr class="cleared-history-row" data-clearance-batch="${escapeHtml(group.key)}">
+          <td>
+            <strong>${escapeHtml(getUploaderClearanceModeLabel(group.mode))}</strong>
+            ${sourceMeta}
+          </td>
+          <td>
+            <button type="button" class="action-btn view-btn-small" onclick="window.toggleUploaderClearedBatchBreakdown('${encodedKey}')" title="Show cleared commission breakdown">
+              <i class="fas ${expanded ? 'fa-chevron-up' : 'fa-chevron-down'}"></i> ${formatCurrency(group.totalCommission)}
+            </button>
+          </td>
+          <td>${escapeHtml(batchCountLabel)}</td>
+          <td>${safeFormatDate(group.latestClearedAt)}</td>
+          <td>${escapeHtml(clearedBy || 'Audit')}</td>
+          <td>
+            <button type="button" class="action-btn view-btn-small" onclick="window.toggleUploaderClearedBatchBreakdown('${encodedKey}')">
+              <i class="fas ${expanded ? 'fa-eye-slash' : 'fa-eye'}"></i> ${expanded ? 'Hide Breakdown' : 'View Breakdown'}
+            </button>
+          </td>
+        </tr>
+      `;
+      if (expanded) html += renderUploaderClearedBatchBreakdown(group);
+    }
+    writeRows(html);
+    return;
+  }
 
   if (renderTab === 'draft') {
     setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Documents', 'Last Saved', 'Action']);

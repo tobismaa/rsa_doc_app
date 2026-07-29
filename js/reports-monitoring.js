@@ -3585,8 +3585,31 @@ window.rejectAuditDuplicateApplication = rejectAuditDuplicateApplication;
 window.rejectAuditDuplicateGroup = rejectAuditDuplicateGroup;
 window.deleteAuditDuplicateApplication = deleteAuditDuplicateApplication;
 
-function getAuditPaymentClearPayload(sub = {}) {
+function createAuditClearanceBatchMeta(submissions = [], { mode = 'bulk', sourceFileName = '' } = {}) {
+    const now = new Date();
+    const id = `audit-clear-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`;
+    const totals = submissions.reduce((acc, sub) => {
+        const { commission, twentyFive } = getSubmissionFinancials(sub);
+        acc.commission += commission;
+        acc.twentyFive += twentyFive;
+        return acc;
+    }, { commission: 0, twentyFive: 0 });
+    return {
+        id,
+        mode,
+        source: 'audit',
+        sourceFileName: String(sourceFileName || '').trim(),
+        createdAtIso: now.toISOString(),
+        count: submissions.length,
+        totalCommission: totals.commission,
+        totalTwentyFive: totals.twentyFive,
+        clearedBy: currentUser?.email || ''
+    };
+}
+
+function getAuditPaymentClearPayload(sub = {}, clearanceBatch = null) {
     const { commission, twentyFive, rsaBalance } = getSubmissionFinancials(sub);
+    const batch = clearanceBatch || createAuditClearanceBatchMeta([sub], { mode: 'single' });
     return {
         updates: {
             status: 'cleared',
@@ -3594,6 +3617,14 @@ function getAuditPaymentClearPayload(sub = {}) {
             clearedBy: currentUser?.email || '',
             auditClearedAt: serverTimestamp(),
             auditClearedBy: currentUser?.email || '',
+            clearanceSource: batch.source,
+            clearanceMode: batch.mode,
+            clearanceBatchId: batch.id,
+            clearanceBatchCreatedAtIso: batch.createdAtIso,
+            clearanceBatchCount: batch.count,
+            clearanceBatchTotalCommission: batch.totalCommission,
+            clearanceBatchTotalTwentyFive: batch.totalTwentyFive,
+            clearanceBatchSourceFileName: batch.sourceFileName,
             auditCommissionAmount: commission,
             auditRsaBalance: rsaBalance,
             auditRsaTwentyFivePercent: twentyFive,
@@ -3605,6 +3636,11 @@ function getAuditPaymentClearPayload(sub = {}) {
             customerName: sub.customerName || '',
             uploadedBy: sub.uploadedBy || '',
             commissionAmount: commission,
+            clearanceBatchId: batch.id,
+            clearanceMode: batch.mode,
+            clearanceBatchCount: batch.count,
+            clearanceBatchTotalCommission: batch.totalCommission,
+            clearanceBatchSourceFileName: batch.sourceFileName,
             performedBy: currentUser?.email || '',
             timestamp: serverTimestamp()
         },
@@ -3619,9 +3655,11 @@ function getAuditPaymentClearPayload(sub = {}) {
                 submissionId: String(sub?.id || '').trim(),
                 customerName: sub.customerName || '',
                 clearedBy: currentUser?.email || '',
-                commissionAmount: commission
+                commissionAmount: commission,
+                clearanceBatchId: batch.id
             }
-        }
+        },
+        batchMeta: batch
     };
 }
 
@@ -3636,19 +3674,29 @@ function queueAuditPaymentClearSideEffects(records = []) {
 }
 
 function markAuditPaymentRecordsClearedLocally(records = []) {
-    records.forEach(({ sub }) => {
+    records.forEach(({ sub, payload }) => {
         const submissionId = String(sub?.id || '').trim();
         const localSub = allSubmissions.find((item) => item.id === submissionId);
         if (!localSub) return;
         localSub.status = 'cleared';
         localSub.clearedBy = currentUser?.email || '';
+        localSub.clearedAt = payload?.batchMeta?.createdAtIso || localSub.clearedAt || '';
+        localSub.auditClearedAt = payload?.batchMeta?.createdAtIso || localSub.auditClearedAt || '';
         localSub.auditClearedBy = currentUser?.email || '';
         localSub.auditCommissionStatus = 'cleared';
+        localSub.clearanceSource = payload?.batchMeta?.source || 'audit';
+        localSub.clearanceMode = payload?.batchMeta?.mode || 'bulk';
+        localSub.clearanceBatchId = payload?.batchMeta?.id || '';
+        localSub.clearanceBatchCreatedAtIso = payload?.batchMeta?.createdAtIso || '';
+        localSub.clearanceBatchCount = payload?.batchMeta?.count || records.length;
+        localSub.clearanceBatchTotalCommission = payload?.batchMeta?.totalCommission || 0;
+        localSub.clearanceBatchTotalTwentyFive = payload?.batchMeta?.totalTwentyFive || 0;
+        localSub.clearanceBatchSourceFileName = payload?.batchMeta?.sourceFileName || '';
     });
 }
 
-async function clearAuditPaymentRecordsBulk(submissions = [], { onProgress = null } = {}) {
-    const clearableRecords = [];
+async function clearAuditPaymentRecordsBulk(submissions = [], { onProgress = null, mode = 'bulk', sourceFileName = '' } = {}) {
+    const clearableSubmissions = [];
     let skippedCount = 0;
 
     submissions.forEach((sub) => {
@@ -3657,9 +3705,11 @@ async function clearAuditPaymentRecordsBulk(submissions = [], { onProgress = nul
             skippedCount += 1;
             return;
         }
-        clearableRecords.push({ sub, payload: getAuditPaymentClearPayload(sub) });
+        clearableSubmissions.push(sub);
     });
 
+    const batchMeta = createAuditClearanceBatchMeta(clearableSubmissions, { mode, sourceFileName });
+    const clearableRecords = clearableSubmissions.map((sub) => ({ sub, payload: getAuditPaymentClearPayload(sub, batchMeta) }));
     let clearedCount = 0;
     let failedCount = 0;
     const clearedRecords = [];
@@ -4183,6 +4233,8 @@ function bindEvents() {
         try {
             const selectedSubmissions = submissionIds.map((submissionId) => allSubmissions.find((item) => item.id === submissionId)).filter(Boolean);
             result = await clearAuditPaymentRecordsBulk(selectedSubmissions, {
+                mode: 'excel',
+                sourceFileName: auditPaidReconciliationFileName,
                 onProgress: (cleared, total) => {
                     auditPaidReconciliationClearSelectedBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Clearing ${cleared}/${total}...`;
                 }

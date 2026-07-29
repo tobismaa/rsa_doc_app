@@ -2549,6 +2549,25 @@ body.modal-open {
   line-height: 1.25;
 }
 
+.cleared-history-row td {
+  vertical-align: middle;
+}
+
+.cleared-history-breakdown-row > td {
+  background: #f8fafc;
+  padding: 12px 16px;
+}
+
+.cleared-history-breakdown {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.cleared-history-breakdown .customers-table {
+  margin: 0;
+}
+
 /* Force track modal to show */
 #trackModal,
 .modal[id^="trackModal-"] {
