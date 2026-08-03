@@ -8,7 +8,7 @@
       + '<div class="dev-credit-mark" aria-hidden="true"><span>TS</span></div>'
       + '<div class="dev-credit-text">'
       + '  <div class="dev-credit-title">Designed by Tsoft Inc.</div>'
-      + '  <div class="dev-credit-meta"><i class="fab fa-whatsapp"></i><span>WhatsApp: +2349066678171</span></div>'
+      + '  <div class="dev-credit-meta"><i class="fab fa-whatsapp"></i><span>WhatsApp: +2348140497248</span></div>'
       + '  <div class="dev-credit-copy">&copy; Tsoft Inc.</div>'
       + '</div>';
   }
@@ -25,11 +25,11 @@
     const card = document.createElement('a');
     card.id = SIDEBAR_BADGE_ID;
     card.className = 'dev-credit-sidebar';
-    card.href = 'https://wa.me/2349066678171';
+    card.href = 'https://wa.me/2348140497248';
     card.target = '_blank';
     card.rel = 'noopener noreferrer';
     card.title = 'Chat Tsoft Inc. on WhatsApp';
-    card.setAttribute('aria-label', 'Designed by Tsoft Inc. WhatsApp +2349066678171');
+    card.setAttribute('aria-label', 'Designed by Tsoft Inc. WhatsApp +2348140497248');
     card.innerHTML = badgeMarkup();
     toolsWrap.appendChild(card);
   }
@@ -38,11 +38,11 @@
     const badge = document.createElement('a');
     badge.id = BADGE_ID;
     badge.className = 'dev-credit-badge';
-    badge.href = 'https://wa.me/2349066678171';
+    badge.href = 'https://wa.me/2348140497248';
     badge.target = '_blank';
     badge.rel = 'noopener noreferrer';
     badge.title = 'Chat Tsoft Inc. on WhatsApp';
-    badge.setAttribute('aria-label', 'Designed by Tsoft Inc. WhatsApp +2349066678171');
+    badge.setAttribute('aria-label', 'Designed by Tsoft Inc. WhatsApp +2348140497248');
     badge.innerHTML = badgeMarkup();
     document.body.appendChild(badge);
   }
