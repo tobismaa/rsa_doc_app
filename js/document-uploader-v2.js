@@ -6599,7 +6599,7 @@ window.markUploaderPaymentMade = async (submissionId) => {
     return;
   }
   if (!hasAssociatedCommissionAgent(sub)) {
-    showNotification('No agent is associated with this application. It cannot be submitted for commission.', 'error');
+    showNotification('Commission cannot be claimed because no agent is attached to this application.', 'error');
     return;
   }
 
@@ -6663,6 +6663,10 @@ window.openAuditPaymentResubmitModal = async (submissionId) => {
   }
   if (!isAuditCommissionRejected(sub)) {
     showNotification('Only rejected Audit payment requests can be resubmitted.', 'warning');
+    return;
+  }
+  if (!hasAssociatedCommissionAgent(sub)) {
+    showNotification('Commission cannot be claimed because no agent is attached to this application.', 'error');
     return;
   }
 

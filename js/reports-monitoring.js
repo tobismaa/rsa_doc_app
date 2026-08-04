@@ -1635,6 +1635,10 @@ function getSubmissionReportAgentName(sub = {}) {
     return getSubmissionResolvedAgentSnapshot(sub).agentName;
 }
 
+function hasReportableCommissionAgent(sub = {}) {
+    return !!String(getSubmissionResolvedAgentSnapshot(sub).agentId || '').trim();
+}
+
 function createEmptyAuditUserReportRow(emailKey = '', user = null) {
     const email = normalizeEmail(emailKey || user?.email || '');
     return {
@@ -2320,7 +2324,9 @@ function buildPaymentStageReport(records = [], options = {}) {
 
     const summaryMap = new Map();
     const agentSummaryMap = new Map();
-    const details = records
+    const reportRecords = records.filter(hasReportableCommissionAgent);
+    const excludedNoAgentCount = records.length - reportRecords.length;
+    const details = reportRecords
         .map((sub) => {
             const { twentyFive, commission } = getSubmissionFinancials(sub);
             const dateMs = getDateMs(sub);
@@ -2402,7 +2408,7 @@ function buildPaymentStageReport(records = [], options = {}) {
         exportKey,
         rangeStart: options.rangeStart || '',
         rangeEnd: options.rangeEnd || '',
-        metaText: `${title} generated from ${records.length} record(s). Includes agent commission summary and application breakdown for the selected ${dateLabel.toLowerCase()} range.`,
+        metaText: `${title} generated from ${reportRecords.length} record(s). Includes agent commission summary and application breakdown for the selected ${dateLabel.toLowerCase()} range.${excludedNoAgentCount ? ` ${excludedNoAgentCount} application(s) without an attached agent were excluded.` : ''}`,
         summaryRows,
         agentSummaryRows,
         details,
