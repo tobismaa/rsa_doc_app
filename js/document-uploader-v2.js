@@ -1102,9 +1102,15 @@ async function getApplicationStage(submission) {
     if (status === 'cleared') return 'Cleared';
     if (status === 'paid') return 'Paid';
     if (status === 'sent_to_pfa' || status === 'rsa_submitted') return 'Sent to PFA';
-    if (status === 'processing_to_pfa' || status === 'approved') return 'Processing to PFA';
     if (status === 'rejected') return 'Rejected - Fix Required';
-    if (status === 'rejected_by_rsa') return 'Rejected by RSA - Fix Required';
+    if (status === 'rejected_by_rsa') {
+      const rsaOfficerName = submission.assignedToRSA ? await getUserFullName(submission.assignedToRSA) : '';
+      return rsaOfficerName ? `Rejected by RSA: ${rsaOfficerName}` : 'Rejected by RSA - Fix Required';
+    }
+    if (status === 'processing_to_pfa' || status === 'approved' || submission.assignedToRSA) {
+      const rsaOfficerName = submission.assignedToRSA ? await getUserFullName(submission.assignedToRSA) : '';
+      return rsaOfficerName ? `With RSA: ${rsaOfficerName}` : 'Processing to PFA';
+    }
     if (submission.assignedTo) {
       const reviewerName = await getUserFullName(submission.assignedTo);
       return `With Reviewer: ${reviewerName}`;
@@ -4478,6 +4484,10 @@ window.showApplicationTrack = async (submissionId) => {
   }
   try {
     const stage = await getApplicationStage(sub);
+    const reviewerName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : '';
+    const rsaOfficerName = sub.assignedToRSA ? await getUserFullName(sub.assignedToRSA) : '';
+    const paymentOfficerName = sub.assignedToPayment ? await getUserFullName(sub.assignedToPayment) : '';
+    const currentOfficerName = await getCurrentHandlerName(sub);
     const trackModal = document.createElement('div');
     trackModal.className = 'modal';
     trackModal.id = 'trackModal';
@@ -4491,8 +4501,8 @@ window.showApplicationTrack = async (submissionId) => {
         <div class="modal-body" style="padding: 30px;">
           <div style="text-align: center; margin-bottom: 30px;">
             <i class="fas fa-file-alt" style="font-size: 60px; color: var(--cm-primary);"></i>
-            <h3 style="margin: 15px 0 5px;">${sub.customerName}</h3>
-            <p style="color: var(--gray-500);">Application ID: ${sub.id.substring(0, 8)}...</p>
+            <h3 style="margin: 15px 0 5px;">${escapeHtml(sub.customerName || '-')}</h3>
+            <p style="color: var(--gray-500);">Application ID: ${escapeHtml(sub.id.substring(0, 8))}...</p>
           </div>
           <div style="background: #f8fafc; border-radius: 12px; padding: 20px;">
             <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
@@ -4501,21 +4511,27 @@ window.showApplicationTrack = async (submissionId) => {
               </div>
               <div>
                 <div style="font-size: 12px; color: var(--gray-500);">Current Stage</div>
-                <div style="font-size: 18px; font-weight: 600; color: var(--gray-800);">${stage}</div>
+                <div style="font-size: 18px; font-weight: 600; color: var(--gray-800);">${escapeHtml(stage)}</div>
               </div>
             </div>
             <div style="border-top: 1px solid var(--gray-200); padding-top: 15px;">
               <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
                 <span style="color: var(--gray-600);">Status:</span>
-                <span class="status-badge status-${sub.status}">${sub.status}</span>
+                <span class="status-badge status-${escapeHtml(sub.status)}">${escapeHtml(formatSubmissionStatusLabel(sub.status || 'pending'))}</span>
               </div>
               <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
                 <span style="color: var(--gray-600);">Uploaded:</span>
                 <span>${safeFormatDate(getSubmissionOriginalUploadAt(sub))}</span>
               </div>
-              ${sub.assignedTo ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="color: var(--gray-600);">Assigned To:</span><span>${sub.assignedTo}</span></div>` : ''}
+              <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                <span style="color: var(--gray-600);">Current Officer:</span>
+                <span>${escapeHtml(currentOfficerName || '-')}</span>
+              </div>
+              ${reviewerName ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="color: var(--gray-600);">Assigned Reviewer:</span><span>${escapeHtml(reviewerName)}</span></div>` : ''}
+              ${rsaOfficerName ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="color: var(--gray-600);">Assigned RSA:</span><span>${escapeHtml(rsaOfficerName)}</span></div>` : ''}
+              ${paymentOfficerName ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="color: var(--gray-600);">Assigned Payment:</span><span>${escapeHtml(paymentOfficerName)}</span></div>` : ''}
               ${sub.reviewedAt ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="color: var(--gray-600);">Reviewed:</span><span>${safeFormatDate(sub.reviewedAt)}</span></div>` : ''}
-              ${sub.comment ? `<div style="margin-top: 15px;"><span style="color: var(--gray-600);">Comment:</span><p style="background: white; padding: 10px; border-radius: 8px; margin-top: 5px;">${sub.comment}</p></div>` : ''}
+              ${sub.comment ? `<div style="margin-top: 15px;"><span style="color: var(--gray-600);">Comment:</span><p style="background: white; padding: 10px; border-radius: 8px; margin-top: 5px;">${escapeHtml(sub.comment)}</p></div>` : ''}
             </div>
           </div>
           <div style="margin-top: 25px; text-align: center;">
@@ -4993,11 +5009,13 @@ async function submitCustomer() {
         correctionPayload.auditDuplicateRestoredStatus = nextStatus;
       }
       await updateDoc(submissionRef, correctionPayload);
+      let directCorrectionRsa = '';
       if (directToRsaAfterCorrection) {
-        await assignDirectToRSA(submissionRef, uploaderEmail);
+        directCorrectionRsa = await assignDirectToRSA(submissionRef, uploaderEmail);
       } else if (returnsToReviewer && !reviewerToReassign) {
         await assignRoundRobin(submissionRef);
       }
+      const directCorrectionRsaName = directCorrectionRsa ? await getUserFullName(directCorrectionRsa).catch(() => directCorrectionRsa) : '';
       notifyStatusChangePush({
         currentUser,
         submissionId: currentEditId,
@@ -5012,7 +5030,7 @@ async function submitCustomer() {
         : (auditDuplicateRestoreStatus
             ? `✅ Correction resubmitted and restored to ${getResubmissionStatusLabel(nextStatus)}.`
             : directToRsaAfterCorrection
-            ? '✅ Fix submitted and routed directly to RSA.'
+            ? `✅ Fix submitted and routed directly to RSA${directCorrectionRsaName ? `: ${directCorrectionRsaName}` : ''}.`
             : reviewerToReassign
             ? '✅ Fix submitted and reassigned to the same reviewer for another review.'
             : '✅ Fix submitted successfully!'), 'success');
@@ -5089,7 +5107,8 @@ async function submitCustomer() {
     const effectiveRouteMode = reviewerReviewAccessEnabled ? configuredRouteMode : 'skip_reviewer';
     if (effectiveRouteMode === 'skip_reviewer') {
       const assignedRsa = await assignDirectToRSA(subRef, uploaderEmail).catch(() => '');
-      showNotification(assignedRsa ? `✅ Submitted and routed directly to RSA: ${assignedRsa}` : '✅ Submitted and routed directly to RSA queue.', 'success');
+      const assignedRsaName = assignedRsa ? await getUserFullName(assignedRsa).catch(() => assignedRsa) : '';
+      showNotification(assignedRsaName ? `✅ Submitted and routed directly to RSA: ${assignedRsaName}` : '✅ Submitted and routed directly to RSA queue.', 'success');
       notifyStatusChangePush({
         currentUser,
         submissionId: subRef.id,
@@ -5599,7 +5618,7 @@ function getSubmissionStageKey(submission) {
   const st = String(submission?.status || '').toLowerCase();
   if (st === 'cleared') return 'closed';
   if (st === 'sent_to_pfa' || st === 'rsa_submitted' || st === 'paid') return 'payment';
-  if (st === 'processing_to_pfa' || st === 'approved') return 'rsa';
+  if (st === 'processing_to_pfa' || st === 'approved' || st === 'rejected_by_rsa') return 'rsa';
   return 'review';
 }
 
@@ -5666,7 +5685,7 @@ async function renderRecentTable() {
       <td><strong>${escapeHtml(sub.customerName || '-')}</strong></td>
       <td>${safeFormatDate(getSubmissionCurrentStageEntryAt(sub))}</td>
       <td><span class="status-badge status-${String(sub.status || 'pending').toLowerCase().replace(/[^a-z0-9_-]+/g, '-')}">${escapeHtml(String(sub.status || 'pending').replace(/_/g, ' '))}</span></td>
-      <td>${escapeHtml(sub.uploadedBy || '-')}</td>
+      <td>${escapeHtml(getCurrentHandlerEmail(sub) ? (userFullNames.get(getCurrentHandlerEmail(sub)) || getCurrentHandlerEmail(sub)) : 'Not assigned')}</td>
       <td>${getUploaderSubmissionDetailsButtonHtml(sub.id, 'App Details')} <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i> Docs</button></td>
     </tr>
   `).join('');
@@ -6348,7 +6367,7 @@ async function renderUploaderApplicationsTable() {
       const auditFrozen = isAuditApplicationFrozen(sub);
       const fixCount = auditRejected ? Number(sub.auditCommissionResubmitCount || 0) : Number(sub.fixCount || 0);
       const date = safeFormatDate(getUploaderRejectionEntryAt(sub));
-      const assignedName = auditRejectedByAudit ? 'Audit' : (sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned');
+      const assignedName = auditRejectedByAudit ? 'Audit' : await getCurrentHandlerName(sub);
       const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
       const chatBtn = auditFrozen
         ? `<button class="action-btn app-chat-trigger" disabled title="Application frozen by Audit"><i class="fas fa-lock"></i> Frozen</button>`
@@ -6846,7 +6865,7 @@ async function renderRejectedTable() {
     const auditFrozen = isAuditApplicationFrozen(sub);
     const fixCount = auditRejected ? Number(sub.auditCommissionResubmitCount || 0) : Number(sub.fixCount || 0);
     const date = safeFormatDate(getUploaderRejectionEntryAt(sub));
-    const assignedName = auditRejectedByAudit ? 'Audit' : (sub.assignedTo ? await getUserFullName(sub.assignedTo) : 'Not assigned');
+    const assignedName = auditRejectedByAudit ? 'Audit' : await getCurrentHandlerName(sub);
     const agentName = escapeHtml(getSubmissionAgentDisplayName(sub));
     const chatBtn = auditFrozen
       ? `<button class="action-btn app-chat-trigger" disabled title="Application frozen by Audit"><i class="fas fa-lock"></i> Frozen</button>`
@@ -7349,14 +7368,31 @@ function getSubmissionDetailValue(submission = {}, keys = [], fallback = '-') {
   return fallback;
 }
 
-window.viewSubmissionDetails = (submissionId) => {
+window.viewSubmissionDetails = async (submissionId) => {
   const sub = allSubmissions.find((item) => item.id === submissionId);
   if (!sub) {
     showNotification('Submission details not found', 'error');
     return;
   }
   const agentSnapshot = getSubmissionAgentSnapshot(sub);
+  const currentOfficerName = await getCurrentHandlerName(sub);
+  const reviewerName = sub.assignedTo ? await getUserFullName(sub.assignedTo) : '-';
+  const rsaOfficerName = sub.assignedToRSA ? await getUserFullName(sub.assignedToRSA) : '-';
+  const paymentOfficerName = sub.assignedToPayment ? await getUserFullName(sub.assignedToPayment) : '-';
+  const reviewedByName = sub.reviewedBy ? await getUserFullName(sub.reviewedBy) : '-';
   const detailSections = [
+    {
+      title: 'Workflow Assignment',
+      fields: [
+        ['Current Officer', currentOfficerName || '-'],
+        ['Assigned Reviewer', reviewerName],
+        ['Assigned RSA', rsaOfficerName],
+        ['Assigned Payment', paymentOfficerName],
+        ['Reviewed By', reviewedByName],
+        ['RSA Assigned Time', safeFormatDate(sub.rsaAssignedAt)],
+        ['Payment Assigned Time', safeFormatDate(sub.paymentAssignedAt)]
+      ]
+    },
     {
       title: 'Customer Details',
       fields: [

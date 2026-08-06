@@ -523,6 +523,8 @@ function loadSubmissionsForDisplay() {
             if (data.uploadedBy) emails.add(data.uploadedBy);
             if (data.reviewedBy) emails.add(data.reviewedBy);
             if (data.assignedTo) emails.add(data.assignedTo);
+            if (data.assignedToRSA) emails.add(data.assignedToRSA);
+            if (data.assignedToPayment) emails.add(data.assignedToPayment);
         });
 
         await ensureUserFullNames(Array.from(emails));
@@ -565,6 +567,15 @@ function getDisplayNameByEmail(email) {
     const raw = String(email || '').trim();
     if (!raw) return '-';
     return userFullNames.get(raw) || raw;
+}
+
+function getCurrentOfficerEmail(submission = {}) {
+    const stage = getApplicationCurrentStage(submission).key;
+    if (stage === 'reviewer') return submission.assignedTo || submission.reviewedBy || '';
+    if (stage === 'rsa') return submission.assignedToRSA || '';
+    if (stage === 'payment') return submission.assignedToPayment || submission.paidBy || submission.finalSubmittedBy || submission.rsaSubmittedBy || '';
+    if (stage === 'cleared') return submission.clearedBy || submission.assignedToPayment || submission.paidBy || '';
+    return '';
 }
 
 function getSubmissionAgentLabel(sub = {}) {
@@ -705,7 +716,8 @@ function renderRecentTable() {
 
     rows.innerHTML = recent.map(sub => {
         const uploadDate = formatAppDateTime(getSubmissionCurrentStageEntryAt(sub), 'N/A');
-        const uploaderName = (sub.uploadedBy && userFullNames.get(sub.uploadedBy)) ? userFullNames.get(sub.uploadedBy) : (sub.uploadedBy || '-');
+        const currentOfficerEmail = getCurrentOfficerEmail(sub);
+        const currentOfficerName = currentOfficerEmail ? getDisplayNameByEmail(currentOfficerEmail) : 'Not assigned';
         return `
             <tr>
                 <td><strong>${sub.customerName || 'Unknown'}</strong></td>
@@ -717,7 +729,7 @@ function renderRecentTable() {
                     sub.status === 'approved' ? '#065f46' :
                     sub.status === 'rejected' ? '#991b1b' : '#92400e'
                 };">${sub.status ? sub.status.charAt(0).toUpperCase() + sub.status.slice(1) : 'Pending'}</span></td>
-                <td>${uploaderName}</td>
+                <td>${escapeHtml(currentOfficerName)}</td>
                 <td>
                     <button class="action-btn view-btn-small" onclick="window.viewSubmissionDocs('${sub.id}')"><i class="fas fa-eye"></i></button>
                     <button class="action-btn" onclick="window.showCustomerDetails('${sub.id}')"><i class="fas fa-user"></i></button>
