@@ -543,6 +543,10 @@
                     <span>Commission</span>
                     <span class="badge" id="paidCount">0</span>
                 </a>
+                <a href="#" class="nav-item" data-tab="reports">
+                    <i class="fas fa-chart-line"></i>
+                    <span>Reports</span>
+                </a>
                 <a href="#" class="nav-item" data-tab="register-agent">
                     <i class="fas fa-user-tie"></i>
                     <span>Register Agent</span>
@@ -949,6 +953,111 @@
                                     <tr><td colspan="6" class="loading-row"><div class="loading-spinner"></div> Loading cleared records...</td></tr>
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Reports Tab -->
+            <div id="reportsTab" class="tab-content">
+                <div class="table-section">
+                    <div id="uploaderApplicationReportPanel" class="report-controls" style="display:flex;flex-direction:column;gap:12px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:14px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;">
+                            <div>
+                                <h3 id="uploaderApplicationReportHeading" style="margin:0;color:#0f172a;">Uploaded Applications</h3>
+                                <p id="uploaderApplicationReportMeta" style="margin:4px 0 0;color:#64748b;">Pick a report type and date range to display applications.</p>
+                            </div>
+                            <div id="uploaderApplicationReportCount" style="min-width:64px;text-align:center;font-size:28px;font-weight:800;color:#0f3b67;">0</div>
+                        </div>
+                        <div class="filters-bar" style="margin-bottom:0;align-items:end;gap:10px;flex-wrap:wrap;">
+                            <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:#475569;">
+                                Report Type
+                                <select id="uploaderApplicationReportStage" style="min-width:190px;">
+                                    <option value="uploaded">Uploaded Applications</option>
+                                    <option value="approved">Approved</option>
+                                    <option value="pending">Pending</option>
+                                    <option value="rejected">Rejected</option>
+                                    <option value="final_submission">Final Submission</option>
+                                    <option value="payment">Payment</option>
+                                </select>
+                            </label>
+                            <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:#475569;">
+                                Start Date
+                                <input type="date" id="uploaderApplicationReportStartDate">
+                            </label>
+                            <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:#475569;">
+                                End Date
+                                <input type="date" id="uploaderApplicationReportEndDate">
+                            </label>
+                            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                                <button type="button" class="action-btn view-btn-small" data-uploader-application-report-range="today">Today</button>
+                                <button type="button" class="action-btn view-btn-small" data-uploader-application-report-range="week">This Week</button>
+                                <button type="button" class="action-btn view-btn-small" data-uploader-application-report-range="month">This Month</button>
+                            </div>
+                            <button type="button" class="action-btn view-btn-small" id="uploaderApplicationReportPreviewBtn">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                            <button type="button" class="action-btn view-btn-small" id="uploaderApplicationReportExcelBtn">
+                                <i class="fas fa-file-excel"></i> Excel
+                            </button>
+                        </div>
+                        <div style="display:flex;gap:8px;border-bottom:1px solid #e2e8f0;">
+                            <button type="button" class="admin-subtab-btn active" data-uploader-application-report-view="summary">Summary</button>
+                            <button type="button" class="admin-subtab-btn" data-uploader-application-report-view="applications">Applications</button>
+                        </div>
+                        <div id="uploaderApplicationReportSummaryPanel" data-uploader-application-report-panel="summary">
+                            <div id="uploaderApplicationReportSummary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px;"></div>
+                            <div class="table-container" style="margin-top:0;">
+                                <table class="customers-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Location</th>
+                                            <th>Uploader</th>
+                                            <th>Total Uploaded</th>
+                                            <th>Pending</th>
+                                            <th>Approved</th>
+                                            <th>Sent to PFA</th>
+                                            <th>Paid</th>
+                                            <th>Cleared</th>
+                                            <th>Rejected</th>
+                                            <th>Other</th>
+                                            <th>RSA Balance</th>
+                                            <th>25% RSA Balance</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="uploaderApplicationReportSummaryTableBody">
+                                        <tr><td colspan="12" class="no-data">Generate a report to view summary.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div id="uploaderApplicationReportApplicationsPanel" data-uploader-application-report-panel="applications" style="display:none;">
+                            <div class="table-container" id="uploaderApplicationReportBreakdown" style="margin-top:0;">
+                                <table class="customers-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Customer</th>
+                                            <th>Status</th>
+                                            <th>Uploaded</th>
+                                            <th>Location</th>
+                                            <th>Uploader</th>
+                                            <th>Uploader Email</th>
+                                            <th>Agent</th>
+                                            <th>RSA Balance</th>
+                                            <th>25% Balance</th>
+                                            <th>Stage Date</th>
+                                            <th>PFA</th>
+                                            <th>PEN No</th>
+                                            <th>RSA Officer</th>
+                                            <th>Payment Officer</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="uploaderApplicationReportBreakdownBody">
+                                        <tr><td colspan="15" class="no-data">Generate a report to view applications.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1521,7 +1630,7 @@
     <script type="module" src="js/backblaze-storage.js?v=20260724a"></script>
 
     <!-- 6. Document Uploader (main upload logic) -->
-<script type="module" src="js/document-uploader-v2.js?v=20260806a"></script>
+<script type="module" src="js/document-uploader-v2.js?v=20260807a"></script>
 
     <!-- 7. Dashboard (Track & Calculator only) -->
 <script type="module" src="js/uploader-dashboard.js?v=20260806a"></script>

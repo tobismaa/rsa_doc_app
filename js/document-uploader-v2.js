@@ -1194,6 +1194,21 @@ const rejectedTableBody = document.getElementById('rejectedTableBody');
 const applicationsTableBody = document.getElementById('applicationsTableBody');
 const applicationsTableHeadRow = applicationsTableBody?.closest('table')?.querySelector('thead tr');
 const applicationsSearch = document.getElementById('applicationsSearch');
+const uploaderApplicationReportStage = document.getElementById('uploaderApplicationReportStage');
+const uploaderApplicationReportStartDate = document.getElementById('uploaderApplicationReportStartDate');
+const uploaderApplicationReportEndDate = document.getElementById('uploaderApplicationReportEndDate');
+const uploaderApplicationReportPreviewBtn = document.getElementById('uploaderApplicationReportPreviewBtn');
+const uploaderApplicationReportExcelBtn = document.getElementById('uploaderApplicationReportExcelBtn');
+const uploaderApplicationReportHeading = document.getElementById('uploaderApplicationReportHeading');
+const uploaderApplicationReportMeta = document.getElementById('uploaderApplicationReportMeta');
+const uploaderApplicationReportCount = document.getElementById('uploaderApplicationReportCount');
+const uploaderApplicationReportSummary = document.getElementById('uploaderApplicationReportSummary');
+const uploaderApplicationReportSummaryTableBody = document.getElementById('uploaderApplicationReportSummaryTableBody');
+const uploaderApplicationReportBreakdown = document.getElementById('uploaderApplicationReportBreakdown');
+const uploaderApplicationReportBreakdownBody = document.getElementById('uploaderApplicationReportBreakdownBody');
+const uploaderApplicationReportPresetButtons = document.querySelectorAll('[data-uploader-application-report-range]');
+const uploaderApplicationReportViewButtons = document.querySelectorAll('[data-uploader-application-report-view]');
+const uploaderApplicationReportPanels = document.querySelectorAll('[data-uploader-application-report-panel]');
 const uploaderRejectionReasonModal = document.getElementById('uploaderRejectionReasonModal');
 const closeUploaderRejectionReasonModal = document.getElementById('closeUploaderRejectionReasonModal');
 const closeUploaderRejectionReasonBtn = document.getElementById('closeUploaderRejectionReasonBtn');
@@ -1272,9 +1287,10 @@ let currentCommissionTab = 'sent_to_pfa';
 let currentUploaderApplicationTab = 'draft';
 let currentUploaderPaidScope = 'mine';
 let uploaderApplicationsRenderId = 0;
+let currentUploaderApplicationReportRows = [];
 const expandedUploaderClearedBatchKeys = new Set();
 let submissionInProgress = false;
-const UPLOADER_DASHBOARD_TABS = ['overview', 'draft', 'applications', 'pending', 'approved', 'rejected', 'paid', 'register-agent', 'profile', 'help'];
+const UPLOADER_DASHBOARD_TABS = ['overview', 'draft', 'applications', 'pending', 'approved', 'rejected', 'paid', 'reports', 'register-agent', 'profile', 'help'];
 const UPLOADER_APPLICATION_TABS = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'audit', 'paid', 'cleared'];
 let registeredAgents = [];
 let agentAccountLookupSequence = 0;
@@ -3282,6 +3298,34 @@ function setupEventListeners() {
   if (applicationsSearch) {
     applicationsSearch.addEventListener('input', renderUploaderApplicationsTable);
   }
+  setUploaderApplicationReportPreset('week');
+  if (uploaderApplicationReportStage) {
+    uploaderApplicationReportStage.addEventListener('change', renderUploaderApplicationReportPreview);
+  }
+  if (uploaderApplicationReportStartDate) {
+    uploaderApplicationReportStartDate.addEventListener('change', () => {
+      setUploaderApplicationReportPresetActive('');
+      renderUploaderApplicationReportPreview();
+    });
+  }
+  if (uploaderApplicationReportEndDate) {
+    uploaderApplicationReportEndDate.addEventListener('change', () => {
+      setUploaderApplicationReportPresetActive('');
+      renderUploaderApplicationReportPreview();
+    });
+  }
+  uploaderApplicationReportPresetButtons.forEach((button) => {
+    button.addEventListener('click', () => applyUploaderApplicationReportPreset(button.dataset.uploaderApplicationReportRange || 'week'));
+  });
+  uploaderApplicationReportViewButtons.forEach((button) => {
+    button.addEventListener('click', () => switchUploaderApplicationReportView(button.dataset.uploaderApplicationReportView || 'summary'));
+  });
+  if (uploaderApplicationReportPreviewBtn) {
+    uploaderApplicationReportPreviewBtn.addEventListener('click', renderUploaderApplicationReportPreview);
+  }
+  if (uploaderApplicationReportExcelBtn) {
+    uploaderApplicationReportExcelBtn.addEventListener('click', downloadUploaderApplicationReportExcel);
+  }
   if (rejectedTableBody) {
     rejectedTableBody.addEventListener('click', (e) => {
       const chatTrigger = e.target.closest('.app-chat-trigger');
@@ -3562,13 +3606,16 @@ window.switchTab = (tabId) => {
   document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
   document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
   document.getElementById(`${tabId}Tab`)?.classList.add('active');
-  const titles = { overview: 'Dashboard', draft: 'Draft Submissions', applications: 'Applications', pending: 'Pending Documents', approved: 'Approved Documents', rejected: 'Rejected Documents', paid: 'Commission', 'register-agent': 'Register Agent', profile: 'My Profile' };
+  const titles = { overview: 'Dashboard', draft: 'Draft Submissions', applications: 'Applications', pending: 'Pending Documents', approved: 'Approved Documents', rejected: 'Rejected Documents', paid: 'Commission', reports: 'Reports', 'register-agent': 'Register Agent', profile: 'My Profile' };
   if (pageTitle) pageTitle.textContent = titles[tabId] || 'My Documents';
   if (tabId === 'applications') {
     renderUploaderApplicationsTable();
   }
   if (tabId === 'paid') {
     renderPaidTable();
+  }
+  if (tabId === 'reports') {
+    renderUploaderApplicationReportPreview();
   }
   if (tabId === 'register-agent') {
     loadApprovedAgents();
@@ -5565,6 +5612,9 @@ async function loadSubmissions() {
     await renderApprovedTable();
     await renderRejectedTable();
     renderUploaderApplicationsTable();
+    if (document.getElementById('reportsTab')?.classList.contains('active')) {
+      await renderUploaderApplicationReportPreview();
+    }
     renderPaidTable();
     updateDashboardCards();
   };
@@ -5909,6 +5959,560 @@ function getUploaderDeletedReason(submission = {}) {
 
 function getSubmissionPfaName(submission = {}) {
   return String(submission?.customerDetails?.pfa || submission?.pfa || '').trim() || '-';
+}
+
+function formatDateForInput(date = new Date()) {
+  const value = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(value.getTime())) return '';
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getUploaderReportPresetRange(range = 'week') {
+  const today = new Date();
+  const start = new Date(today);
+  const normalized = String(range || 'week').trim().toLowerCase();
+
+  if (normalized === 'today') {
+    start.setHours(0, 0, 0, 0);
+  } else if (normalized === 'week') {
+    const day = start.getDay();
+    const diffToMonday = day === 0 ? 6 : day - 1;
+    start.setDate(start.getDate() - diffToMonday);
+  } else if (normalized === 'month') {
+    start.setDate(1);
+  }
+
+  return {
+    startDate: formatDateForInput(start),
+    endDate: formatDateForInput(today)
+  };
+}
+
+function getUploaderReportDateBounds() {
+  const startValue = String(uploaderApplicationReportStartDate?.value || '').trim();
+  const endValue = String(uploaderApplicationReportEndDate?.value || '').trim();
+  const start = startValue ? new Date(`${startValue}T00:00:00`) : null;
+  const end = endValue ? new Date(`${endValue}T23:59:59.999`) : null;
+  return {
+    startValue,
+    endValue,
+    startMs: start && !Number.isNaN(start.getTime()) ? start.getTime() : 0,
+    endMs: end && !Number.isNaN(end.getTime()) ? end.getTime() : Number.POSITIVE_INFINITY
+  };
+}
+
+function formatUploaderReportRangeLabel(startValue = '', endValue = '') {
+  if (startValue || endValue) return `${startValue || 'Beginning'} to ${endValue || 'Today'}`;
+  return 'All available dates';
+}
+
+function setUploaderApplicationReportPresetActive(range = '') {
+  const normalized = String(range || '').trim().toLowerCase();
+  uploaderApplicationReportPresetButtons.forEach((button) => {
+    button.classList.toggle('active', button.dataset.uploaderApplicationReportRange === normalized);
+  });
+}
+
+function setUploaderApplicationReportPreset(range = 'week', { render = false } = {}) {
+  const normalized = String(range || 'week').trim().toLowerCase();
+  if (['today', 'week', 'month'].includes(normalized)) {
+    const { startDate, endDate } = getUploaderReportPresetRange(normalized);
+    if (uploaderApplicationReportStartDate) uploaderApplicationReportStartDate.value = startDate;
+    if (uploaderApplicationReportEndDate) uploaderApplicationReportEndDate.value = endDate;
+    setUploaderApplicationReportPresetActive(normalized);
+  }
+  if (render) renderUploaderApplicationReportPreview();
+}
+
+function applyUploaderApplicationReportPreset(range = 'week') {
+  setUploaderApplicationReportPreset(range, { render: true });
+}
+
+function switchUploaderApplicationReportView(view = 'summary') {
+  const activeView = String(view || 'summary').trim().toLowerCase() === 'applications' ? 'applications' : 'summary';
+  uploaderApplicationReportViewButtons.forEach((button) => {
+    const isActive = button.dataset.uploaderApplicationReportView === activeView;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+  uploaderApplicationReportPanels.forEach((panel) => {
+    const isActive = panel.dataset.uploaderApplicationReportPanel === activeView;
+    panel.style.display = isActive ? '' : 'none';
+  });
+}
+
+function getUploaderReportDetailValue(submission = {}, keys = [], fallback = '-') {
+  const details = submission?.customerDetails || {};
+  for (const key of keys) {
+    const detailValue = details?.[key];
+    if (detailValue !== undefined && detailValue !== null && String(detailValue).trim() !== '') return detailValue;
+    const rootValue = submission?.[key];
+    if (rootValue !== undefined && rootValue !== null && String(rootValue).trim() !== '') return rootValue;
+  }
+  return fallback;
+}
+
+function getUploaderReportPenNumber(submission = {}) {
+  return String(getUploaderReportDetailValue(submission, ['penNumber', 'penNo', 'rsaPin', 'pin', 'rsaNumber'], '-')).trim() || '-';
+}
+
+function getUploaderReportUploadDate(submission = {}) {
+  return getSubmissionOriginalUploadAt(submission) || submission.uploadedAt || submission.createdAt || submission.submittedAt || null;
+}
+
+function getUploaderApplicationReportConfig(stageValue = '') {
+  const stage = String(stageValue || 'uploaded').trim().toLowerCase();
+  const configs = {
+    approved: {
+      label: 'Approved Applications',
+      emptyText: 'No approved applications found for this date range.',
+      includes(sub = {}) {
+        const status = String(sub.status || '').toLowerCase();
+        return status === 'processing_to_pfa' || status === 'approved';
+      },
+      dateOf(sub = {}) {
+        return getSubmissionApprovalEntryAt(sub) || sub.reviewedAt || getUploaderReportUploadDate(sub);
+      }
+    },
+    uploaded: {
+      label: 'Uploaded Applications',
+      emptyText: 'No uploaded applications found for this date range.',
+      includes(sub = {}) {
+        const status = String(sub.status || '').toLowerCase();
+        return status !== 'draft' && !isUploaderDeletedApplication(sub) && Boolean(getUploaderReportUploadDate(sub));
+      },
+      dateOf(sub = {}) {
+        return getUploaderReportUploadDate(sub);
+      }
+    },
+    pending: {
+      label: 'Pending Applications',
+      emptyText: 'No pending applications found for this date range.',
+      includes(sub = {}) {
+        const status = String(sub.status || '').toLowerCase();
+        return status === 'pending' || status === 'submitted' || status === 'resubmitted';
+      },
+      dateOf(sub = {}) {
+        return getSubmissionReviewEntryAt(sub) || sub.reuploadedAt || getUploaderReportUploadDate(sub);
+      }
+    },
+    rejected: {
+      label: 'Rejected Applications',
+      emptyText: 'No rejected applications found for this date range.',
+      includes(sub = {}) {
+        const status = String(sub.status || '').toLowerCase();
+        return status === 'rejected' || status === 'rejected_by_reviewer' || status === 'rejected_by_rsa';
+      },
+      dateOf(sub = {}) {
+        return getSubmissionRejectionEntryAt(sub) || sub.rejectedAt || sub.rsaRejectedAt || getUploaderReportUploadDate(sub);
+      }
+    },
+    final_submission: {
+      label: 'Final Submission Applications',
+      emptyText: 'No final submission applications found for this date range.',
+      includes(sub = {}) {
+        const status = String(sub.status || '').toLowerCase();
+        return sub.finalSubmitted === true || sub.rsaSubmitted === true || status === 'sent_to_pfa' || status === 'rsa_submitted';
+      },
+      dateOf(sub = {}) {
+        return sub.finalSubmittedAt || sub.rsaSubmittedAt || sub.finalSubmissionAt || sub.rsaSubmissionAt || null;
+      }
+    },
+    payment: {
+      label: 'Payment Applications',
+      emptyText: 'No payment applications found for this date range.',
+      includes(sub = {}) {
+        const status = String(sub.status || '').toLowerCase();
+        return status === 'sent_to_pfa' ||
+          status === 'rsa_submitted' ||
+          status === 'paid' ||
+          status === 'cleared' ||
+          sub.finalSubmitted === true ||
+          sub.rsaSubmitted === true;
+      },
+      dateOf(sub = {}) {
+        return getSubmissionPaymentEntryAt(sub) ||
+          getSubmissionPaidEntryAt(sub) ||
+          getSubmissionClearedEntryAt(sub) ||
+          sub.paymentAssignedAt ||
+          sub.paidAt ||
+          sub.clearedAt ||
+          sub.finalSubmittedAt ||
+          sub.rsaSubmittedAt ||
+          null;
+      }
+    }
+  };
+  return configs[stage] || configs.uploaded;
+}
+
+function getUploaderReportFinancials(submission = {}) {
+  const details = submission?.customerDetails || {};
+  const rsaBalance = parseMoney(details.rsaBalance || submission.rsaBalance || 0);
+  const stored25 = parseMoney(
+    details.rsa25Percent ||
+    details.rsa25 ||
+    details.twentyFivePercent ||
+    submission.rsa25Percent ||
+    submission.rsa25 ||
+    submission.twentyFivePercent ||
+    0
+  );
+  const twentyFive = stored25 ? roundDownToNearestThousand(stored25) : calculateRoundedRsa25(rsaBalance);
+  return { rsaBalance, twentyFive };
+}
+
+function getUploaderReportExcelFileName(startValue = '', endValue = '') {
+  const range = `${startValue || 'all'}_${endValue || 'today'}`.replace(/[^0-9A-Za-z_-]+/g, '-');
+  return `uploader-applications-${range}.xlsx`;
+}
+
+function getUploaderApplicationReportStatusBucket(status = '') {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (['rejected', 'rejected_by_reviewer', 'rejected_by_rsa'].includes(normalized)) return 'rejected';
+  if (normalized === 'cleared') return 'cleared';
+  if (normalized === 'paid') return 'paid';
+  if (['sent_to_pfa', 'rsa_submitted'].includes(normalized)) return 'sentToPfa';
+  if (['approved', 'processing_to_pfa'].includes(normalized)) return 'approved';
+  if (['pending', 'submitted', 'resubmitted'].includes(normalized)) return 'pending';
+  if (normalized === 'draft') return 'draft';
+  return 'other';
+}
+
+function createUploaderApplicationReportTotals() {
+  return {
+    totalUploaded: 0,
+    pending: 0,
+    approved: 0,
+    sentToPfa: 0,
+    paid: 0,
+    cleared: 0,
+    rejected: 0,
+    draft: 0,
+    other: 0,
+    rsaBalance: 0,
+    rsa25: 0
+  };
+}
+
+function addUploaderApplicationReportTotal(totals, row = {}) {
+  if (!totals) return;
+  const bucket = getUploaderApplicationReportStatusBucket(row.rawStatus);
+  totals.totalUploaded += 1;
+  if (Object.prototype.hasOwnProperty.call(totals, bucket)) totals[bucket] += 1;
+  totals.rsaBalance += Number(row.rsaBalance || 0);
+  totals.rsa25 += Number(row.rsa25 || 0);
+}
+
+function buildUploaderApplicationReportSummary(rows = []) {
+  const total = createUploaderApplicationReportTotals();
+  rows.forEach((row) => addUploaderApplicationReportTotal(total, row));
+  return total;
+}
+
+function getUploaderApplicationReportLocation() {
+  return String(
+    currentUserProfile?.location ||
+    currentUserProfile?.state ||
+    currentUserProfile?.branch ||
+    currentUserProfile?.officeLocation ||
+    currentUserProfile?.address ||
+    ''
+  ).trim() || '-';
+}
+
+function getUploaderApplicationReportRejectionReason(submission = {}) {
+  const status = String(submission.status || '').toLowerCase();
+  if (!['rejected', 'rejected_by_reviewer', 'rejected_by_rsa'].includes(status)) return '';
+  const history = Array.isArray(submission.rejectionHistory) ? submission.rejectionHistory : [];
+  return history
+    .map((entry) => String(entry?.reason || '').trim())
+    .filter(Boolean)
+    .join(' | ') ||
+    String(submission.rejectionReason || submission.rsaRejectionReason || submission.reviewRejectionReason || '').trim() ||
+    'No reason recorded';
+}
+
+async function getUploaderApplicationReportRowData(sub = {}, stageDate = null, config = {}) {
+  const details = sub?.customerDetails || {};
+  const { rsaBalance, twentyFive } = getUploaderReportFinancials(sub);
+  const uploaderEmail = normalizeEmail(sub.uploadedBy || currentUser?.email || '');
+  const uploaderName = currentUserProfile?.fullName || currentUser?.displayName || (uploaderEmail ? await getUserFullName(uploaderEmail) : 'Uploader');
+  const rsaEmail = String(sub.assignedToRSA || '').trim();
+  const paymentEmail = String(sub.assignedToPayment || sub.paidBy || '').trim();
+  const rawStatus = String(sub.status || '').trim() || '-';
+
+  return {
+    id: sub.id || '',
+    customerName: String(sub.customerName || details.customerName || details.name || 'Unknown').trim() || 'Unknown',
+    applicationStatus: formatSubmissionStatusLabel(rawStatus),
+    rejectionReason: getUploaderApplicationReportRejectionReason(sub),
+    rawStatus,
+    uploadedAt: safeFormatDate(getUploaderReportUploadDate(sub)),
+    stageDate: safeFormatDate(stageDate),
+    uploaderName: uploaderName || 'Uploader',
+    uploaderEmail: uploaderEmail || '-',
+    uploaderLocation: getUploaderApplicationReportLocation(),
+    agent: getSubmissionAgentDisplayName(sub),
+    pfa: getSubmissionPfaName(sub),
+    penNo: getUploaderReportPenNumber(sub),
+    rsaBalance,
+    rsa25: twentyFive,
+    rsaOfficer: rsaEmail ? await getUserFullName(rsaEmail) : '-',
+    paymentOfficer: paymentEmail ? await getUserFullName(paymentEmail) : '-',
+    propertyType: String(getUploaderReportDetailValue(sub, ['propertyType', 'houseType'], '-')).trim() || '-',
+    propertyValue: parseMoney(getUploaderReportDetailValue(sub, ['propertyValue'], 0)),
+    facilityFee: parseMoney(getUploaderReportDetailValue(sub, ['facilityFee'], 0)),
+    loanAmount: parseMoney(getUploaderReportDetailValue(sub, ['loanAmount'], 0)),
+    houseNumber: String(getUploaderReportDetailValue(sub, ['houseNumber'], '-')).trim() || '-',
+    tenor: String(getUploaderReportDetailValue(sub, ['tenor'], '-')).trim() || '-',
+    reportType: config.label || 'Application Report'
+  };
+}
+
+function getUploaderApplicationReportRowItems() {
+  const config = getUploaderApplicationReportConfig(uploaderApplicationReportStage?.value || 'uploaded');
+  const { startMs, endMs, startValue, endValue } = getUploaderReportDateBounds();
+  if (startValue && endValue && startValue > endValue) return { config, items: [], startValue, endValue, error: 'Start date cannot be after end date.' };
+
+  const items = allSubmissions
+    .filter(isOwnUploaderSubmission)
+    .filter((sub) => config.includes(sub))
+    .map((sub) => {
+      const stageDate = config.dateOf(sub);
+      return { sub, stageDate, stageMs: getStageTimestampMillis(stageDate) };
+    })
+    .filter((item) => item.stageMs && item.stageMs >= startMs && item.stageMs <= endMs)
+    .sort((a, b) => b.stageMs - a.stageMs);
+
+  return { config, items, startValue, endValue, error: '' };
+}
+
+async function buildUploaderApplicationReportRows() {
+  const report = getUploaderApplicationReportRowItems();
+  if (report.error) return { ...report, rows: [] };
+  const rows = await Promise.all(report.items.map(({ sub, stageDate }) => getUploaderApplicationReportRowData(sub, stageDate, report.config)));
+  return { ...report, rows };
+}
+
+function renderUploaderApplicationReportSummaryCards(summary, rangeLabel = '') {
+  if (!uploaderApplicationReportSummary) return;
+  const cards = [
+    ['Total Uploaded', summary.totalUploaded],
+    ['Pending', summary.pending],
+    ['Approved', summary.approved],
+    ['Sent to PFA', summary.sentToPfa],
+    ['Paid', summary.paid],
+    ['Cleared', summary.cleared],
+    ['Rejected', summary.rejected],
+    ['RSA Balance', formatCurrency(summary.rsaBalance)],
+    ['25% RSA Balance', formatCurrency(summary.rsa25)]
+  ];
+  uploaderApplicationReportSummary.innerHTML = cards.map(([label, value]) => `
+    <div style="border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:10px;">
+      <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;">${escapeHtml(label)}</div>
+      <div style="font-size:18px;font-weight:800;color:#0f172a;margin-top:4px;">${escapeHtml(value)}</div>
+    </div>
+  `).join('') + `
+    <div style="border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:10px;">
+      <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;">Range</div>
+      <div style="font-size:13px;font-weight:700;color:#0f172a;margin-top:6px;">${escapeHtml(rangeLabel)}</div>
+    </div>
+  `;
+}
+
+function renderUploaderApplicationReportSummaryTable(summary = null, emptyText = 'Generate a report to view summary.') {
+  if (!uploaderApplicationReportSummaryTableBody) return;
+  if (!summary) {
+    uploaderApplicationReportSummaryTableBody.innerHTML = `<tr><td colspan="12" class="no-data">${escapeHtml(emptyText)}</td></tr>`;
+    return;
+  }
+  uploaderApplicationReportSummaryTableBody.innerHTML = `
+    <tr>
+      <td>${escapeHtml(getUploaderApplicationReportLocation())}</td>
+      <td><strong>${escapeHtml(currentUserProfile?.fullName || currentUser?.displayName || currentUser?.email || 'Uploader')}</strong></td>
+      <td>${summary.totalUploaded}</td>
+      <td>${summary.pending}</td>
+      <td>${summary.approved}</td>
+      <td>${summary.sentToPfa}</td>
+      <td>${summary.paid}</td>
+      <td>${summary.cleared}</td>
+      <td>${summary.rejected}</td>
+      <td>${summary.other}</td>
+      <td>${formatCurrency(summary.rsaBalance)}</td>
+      <td>${formatCurrency(summary.rsa25)}</td>
+    </tr>
+  `;
+}
+
+function renderUploaderApplicationReportEmpty(config, message = '') {
+  if (uploaderApplicationReportBreakdownBody) {
+    uploaderApplicationReportBreakdownBody.innerHTML = `<tr><td colspan="15" class="no-data">${escapeHtml(message || config.emptyText)}</td></tr>`;
+  }
+}
+
+async function renderUploaderApplicationReportPreview() {
+  if (!uploaderApplicationReportBreakdownBody && !uploaderApplicationReportSummary) return;
+  const result = await buildUploaderApplicationReportRows();
+  currentUploaderApplicationReportRows = result.rows;
+  const rangeLabel = formatUploaderReportRangeLabel(result.startValue, result.endValue);
+
+  if (uploaderApplicationReportHeading) uploaderApplicationReportHeading.textContent = result.config.label;
+  if (uploaderApplicationReportCount) uploaderApplicationReportCount.textContent = String(result.rows.length);
+  if (uploaderApplicationReportMeta) {
+    uploaderApplicationReportMeta.textContent = result.error || `${result.rows.length} application(s) for ${rangeLabel}.`;
+  }
+  switchUploaderApplicationReportView('summary');
+
+  if (result.error) {
+    const emptySummary = createUploaderApplicationReportTotals();
+    renderUploaderApplicationReportSummaryCards(emptySummary, result.error);
+    renderUploaderApplicationReportSummaryTable(null, result.error);
+    renderUploaderApplicationReportEmpty(result.config, result.error);
+    return;
+  }
+
+  const summary = buildUploaderApplicationReportSummary(result.rows);
+  renderUploaderApplicationReportSummaryCards(summary, rangeLabel);
+  renderUploaderApplicationReportSummaryTable(summary);
+
+  if (!result.rows.length) {
+    renderUploaderApplicationReportEmpty(result.config);
+    return;
+  }
+
+  uploaderApplicationReportBreakdownBody.innerHTML = result.rows.map((row) => `
+    <tr>
+      <td><strong>${escapeHtml(row.customerName)}</strong></td>
+      <td><span class="status-badge status-${escapeHtml(getUploaderApplicationReportStatusBucket(row.rawStatus))}">${escapeHtml(row.applicationStatus)}</span></td>
+      <td>${escapeHtml(row.uploadedAt)}</td>
+      <td>${escapeHtml(row.uploaderLocation)}</td>
+      <td>${escapeHtml(row.uploaderName)}</td>
+      <td>${escapeHtml(row.uploaderEmail)}</td>
+      <td>${escapeHtml(row.agent)}</td>
+      <td>${formatCurrency(row.rsaBalance)}</td>
+      <td><strong>${formatCurrency(row.rsa25)}</strong></td>
+      <td>${escapeHtml(row.stageDate)}</td>
+      <td>${escapeHtml(row.pfa)}</td>
+      <td>${escapeHtml(row.penNo)}</td>
+      <td>${escapeHtml(row.rsaOfficer)}</td>
+      <td>${escapeHtml(row.paymentOfficer)}</td>
+      <td>${getUploaderSubmissionDetailsButtonHtml(row.id, 'Details')}</td>
+    </tr>
+  `).join('');
+}
+
+function styleUploaderReportWorksheet(worksheet) {
+  worksheet.views = [{ state: 'frozen', ySplit: 1 }];
+  worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } };
+  worksheet.getRow(1).alignment = { vertical: 'middle' };
+  worksheet.columns.forEach((column) => {
+    let maxLength = 12;
+    column.eachCell({ includeEmpty: true }, (cell) => {
+      const value = cell.value === null || cell.value === undefined ? '' : String(cell.value);
+      maxLength = Math.max(maxLength, Math.min(value.length + 2, 38));
+    });
+    column.width = maxLength;
+  });
+}
+
+async function downloadUploaderApplicationReportExcel() {
+  if (!window.ExcelJS) {
+    showNotification('Excel export is unavailable. Please refresh and try again.', 'error');
+    return;
+  }
+
+  const originalHtml = uploaderApplicationReportExcelBtn?.innerHTML || '';
+  if (uploaderApplicationReportExcelBtn) {
+    uploaderApplicationReportExcelBtn.disabled = true;
+    uploaderApplicationReportExcelBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting';
+  }
+
+  try {
+    const result = await buildUploaderApplicationReportRows();
+    currentUploaderApplicationReportRows = result.rows;
+    if (result.error) {
+      await renderUploaderApplicationReportPreview();
+      showNotification(result.error, 'error');
+      return;
+    }
+
+    const summary = buildUploaderApplicationReportSummary(result.rows);
+    const rangeLabel = formatUploaderReportRangeLabel(result.startValue, result.endValue);
+    const workbook = new window.ExcelJS.Workbook();
+    workbook.creator = 'RSA Document App';
+    workbook.created = new Date();
+
+    const summarySheet = workbook.addWorksheet('Summary');
+    summarySheet.columns = [
+      { header: 'Metric', key: 'metric', width: 28 },
+      { header: 'Value', key: 'value', width: 24 }
+    ];
+    [
+      ['Report Type', result.config.label],
+      ['Date Range', rangeLabel],
+      ['Uploader', currentUserProfile?.fullName || currentUser?.displayName || currentUser?.email || 'Uploader'],
+      ['Location', getUploaderApplicationReportLocation()],
+      ['Generated At', safeFormatDate(new Date())],
+      ['Total Uploaded', summary.totalUploaded],
+      ['Pending', summary.pending],
+      ['Approved', summary.approved],
+      ['Sent to PFA', summary.sentToPfa],
+      ['Paid', summary.paid],
+      ['Cleared', summary.cleared],
+      ['Rejected', summary.rejected],
+      ['Other', summary.other],
+      ['RSA Balance', summary.rsaBalance],
+      ['25% RSA Balance', summary.rsa25]
+    ].forEach(([metric, value]) => summarySheet.addRow({ metric, value }));
+    styleUploaderReportWorksheet(summarySheet);
+    summarySheet.getColumn(2).numFmt = '#,##0.00';
+
+    const breakdownSheet = workbook.addWorksheet('Applications');
+    breakdownSheet.columns = [
+      { header: 'S/N', key: 'serial' },
+      { header: 'Location', key: 'uploaderLocation' },
+      { header: 'Uploader Name', key: 'uploaderName' },
+      { header: 'Customer Name', key: 'customerName' },
+      { header: 'Application Status', key: 'applicationStatus' },
+      { header: 'Rejection Reason', key: 'rejectionReason' },
+      { header: 'Uploaded Date', key: 'uploadedAt' },
+      { header: 'RSA Balance', key: 'rsaBalance' },
+      { header: '25% RSA Balance', key: 'rsa25' },
+      { header: 'Assigned RSA Officer', key: 'rsaOfficer' },
+      { header: 'Payment Officer', key: 'paymentOfficer' }
+    ];
+    result.rows.forEach((row, index) => breakdownSheet.addRow({ serial: index + 1, ...row }));
+    styleUploaderReportWorksheet(breakdownSheet);
+    ['H', 'I'].forEach((letter) => {
+      breakdownSheet.getColumn(letter).numFmt = '#,##0.00';
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = getUploaderReportExcelFileName(result.startValue, result.endValue);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    await renderUploaderApplicationReportPreview();
+    showNotification('Uploader application report downloaded.', 'success');
+  } catch (error) {
+    console.error('Uploader application report export failed:', error);
+    showNotification('Unable to download uploader application report.', 'error');
+  } finally {
+    if (uploaderApplicationReportExcelBtn) {
+      uploaderApplicationReportExcelBtn.disabled = false;
+      uploaderApplicationReportExcelBtn.innerHTML = originalHtml || '<i class="fas fa-file-excel"></i> Excel';
+    }
+  }
 }
 
 function getUploaderAuditNote(submission = {}) {
