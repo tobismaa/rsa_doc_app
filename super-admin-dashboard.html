@@ -270,17 +270,17 @@
                     <button id="applicationControlsStatusChangeBtn" class="action-btn" type="button" onclick="window.switchApplicationControlSubTab('status-change')">
                         <i class="fas fa-arrows-rotate"></i> Status Change
                     </button>
+                    <button id="applicationControlsStageRerouteBtn" class="action-btn" type="button" onclick="window.switchApplicationControlSubTab('stage-reroute')">
+                        <i class="fas fa-route"></i> Reroute Stage
+                    </button>
                 </div>
 
                 <div id="applicationControlBackdateSection" class="application-control-panel">
                     <div class="backdate-launch-section">
                         <div>
                             <h3>Backdate</h3>
-                            <p style="color:#64748b;margin:0 0 12px;">Search an application by PEN number or customer name, then edit stage dates, times, and assigned handlers.</p>
+                            <p style="color:#64748b;margin:0;">Search opens automatically. Find an application by PEN number or customer name, then edit stage dates, times, and assigned handlers.</p>
                         </div>
-                        <button id="openBackdateSearchModalBtn" class="action-btn" type="button" style="background:#003366;color:#fff;border:none;">
-                            <i class="fas fa-magnifying-glass"></i> Search Application
-                        </button>
                     </div>
                 </div>
 
@@ -288,11 +288,8 @@
                     <div class="customer-edit-launch-section">
                         <div>
                             <h3>Customer Edit</h3>
-                            <p style="color:#64748b;margin:0 0 12px;">Search an application by PEN number or customer name and edit the customer details used across dashboards.</p>
+                            <p style="color:#64748b;margin:0;">Search opens automatically. Find an application by PEN number or customer name and edit the customer details used across dashboards.</p>
                         </div>
-                        <button id="openCustomerEditSearchModalBtn" class="action-btn" type="button" style="background:#003366;color:#fff;border:none;">
-                            <i class="fas fa-magnifying-glass"></i> Search Application
-                        </button>
                     </div>
                 </div>
 
@@ -300,11 +297,8 @@
                     <div class="mark-paid-launch-section">
                         <div>
                             <h3>Mark Paid</h3>
-                            <p style="color:#64748b;margin:0 0 12px;">Search an application by PEN number or customer name and choose the payment user who should appear as the officer that marked it paid.</p>
+                            <p style="color:#64748b;margin:0;">Search opens automatically. Find an application by PEN number or customer name and choose the payment user who should appear as the officer that marked it paid.</p>
                         </div>
-                        <button id="openMarkPaidSearchModalBtn" class="action-btn" type="button" style="background:#003366;color:#fff;border:none;">
-                            <i class="fas fa-magnifying-glass"></i> Search Application
-                        </button>
                     </div>
                 </div>
 
@@ -312,11 +306,17 @@
                     <div class="mark-paid-launch-section">
                         <div>
                             <h3>Status Change</h3>
-                            <p style="color:#64748b;margin:0 0 12px;">Search an application by PEN number or customer name and update its workflow status. Reopening a final submission to RSA clears the old Sent to PFA timestamps.</p>
+                            <p style="color:#64748b;margin:0;">Search opens automatically. Find an application by PEN number or customer name and update its workflow status. Reopening a final submission to RSA clears the old Sent to PFA timestamps.</p>
                         </div>
-                        <button id="openStatusChangeSearchModalBtn" class="action-btn" type="button" style="background:#003366;color:#fff;border:none;">
-                            <i class="fas fa-magnifying-glass"></i> Search Application
-                        </button>
+                    </div>
+                </div>
+
+                <div id="applicationControlStageRerouteSection" class="application-control-panel" style="display:none;">
+                    <div class="mark-paid-launch-section">
+                        <div>
+                            <h3>Reroute Current Stage</h3>
+                            <p style="color:#64748b;margin:0;">Search opens automatically. Find an application and move only the officer for its current workflow stage. The application status remains unchanged.</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1159,6 +1159,7 @@
                 <input id="customerEditPenInput" type="text" placeholder="Enter customer PEN or customer name">
             </label>
             <div id="customerEditSearchStatus" class="customer-edit-status" style="display:none;"></div>
+            <div id="customerEditSearchResults" class="status-change-search-results" style="display:none;"></div>
         </div>
         <div class="modal-footer">
             <button id="cancelCustomerEditSearchModalBtn" type="button" class="cancel-btn">Cancel</button>
@@ -1520,6 +1521,104 @@
     </div>
 </div>
 
+<div id="stageRerouteSearchModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="stageRerouteSearchModalTitle">
+    <div class="modal-content small">
+        <div class="modal-header">
+            <h2 id="stageRerouteSearchModalTitle"><i class="fas fa-route"></i> Reroute Current Stage</h2>
+            <button id="closeStageRerouteSearchModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <label class="mark-paid-search-field">Customer PEN Number or Name
+                <input id="stageReroutePenInput" type="text" placeholder="Enter customer PEN or customer name">
+            </label>
+            <div id="stageRerouteSearchStatus" class="mark-paid-status" style="display:none;"></div>
+            <div id="stageRerouteSearchResults" class="status-change-search-results" style="display:none;"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelStageRerouteSearchModalBtn" type="button" class="cancel-btn">Cancel</button>
+            <button id="searchStageReroutePenBtn" type="button" class="confirm-btn">
+                <i class="fas fa-magnifying-glass"></i> Search
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="stageRerouteModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="stageRerouteModalTitle">
+    <div class="modal-content mark-paid-modal-content">
+        <div class="modal-header">
+            <h2 id="stageRerouteModalTitle"><i class="fas fa-user-gear"></i> Stage Reroute</h2>
+            <button id="closeStageRerouteModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="stageRerouteSummary" class="mark-paid-summary"></div>
+            <label class="mark-paid-field">New Stage Officer
+                <select id="stageRerouteTargetUserSelect"></select>
+            </label>
+            <label class="mark-paid-field mark-paid-reason-field">Reason (Optional)
+                <textarea id="stageRerouteReasonInput" rows="3" placeholder="Optional note for audit"></textarea>
+            </label>
+            <div id="stageRerouteNotice" class="mark-paid-status" style="display:none;"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelStageRerouteModalBtn" type="button" class="cancel-btn">Cancel</button>
+            <button id="confirmStageRerouteBtn" type="button" class="confirm-btn">
+                <i class="fas fa-route"></i> Reroute Stage
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="stageRerouteConfirmModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="stageRerouteConfirmModalTitle">
+    <div class="modal-content settings-section-modal-content" style="max-width:560px;width:min(560px,92vw);">
+        <div class="modal-header settings-section-modal-header">
+            <h2 id="stageRerouteConfirmModalTitle"><i class="fas fa-route"></i> Confirm Stage Reroute</h2>
+            <button id="closeStageRerouteConfirmModalBtn" class="close-btn" aria-label="Close modal">&times;</button>
+        </div>
+        <div class="modal-body settings-section-modal-body">
+            <div class="settings-section-modal-hero" style="margin-bottom:14px;">
+                <div class="settings-section-modal-icon" style="background:linear-gradient(135deg,#0f766e,#0f3b67);">
+                    <i class="fas fa-user-gear"></i>
+                </div>
+                <div>
+                    <strong>Reroute current stage officer</strong>
+                    <p>Status and other stage officers will remain unchanged.</p>
+                </div>
+            </div>
+            <div style="display:grid;gap:10px;margin-bottom:14px;">
+                <div style="display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;">
+                    <span style="color:#64748b;font-weight:700;">Application</span>
+                    <strong id="stageRerouteConfirmApplication">-</strong>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;">
+                    <span style="color:#64748b;font-weight:700;">Stage</span>
+                    <strong id="stageRerouteConfirmStage">-</strong>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;">
+                    <span style="color:#64748b;font-weight:700;">From</span>
+                    <strong id="stageRerouteConfirmFrom">-</strong>
+                </div>
+                <div style="display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;">
+                    <span style="color:#64748b;font-weight:700;">To</span>
+                    <strong id="stageRerouteConfirmTo">-</strong>
+                </div>
+                <div style="padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;">
+                    <span style="display:block;color:#64748b;font-weight:700;margin-bottom:4px;">Reason</span>
+                    <strong id="stageRerouteConfirmReason">-</strong>
+                </div>
+            </div>
+            <div style="padding:12px 14px;border-radius:12px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:13px;line-height:1.6;">
+                Confirm only after checking the selected officer. This action will be recorded in audit.
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelStageRerouteConfirmBtn" type="button" class="cancel-btn">Cancel</button>
+            <button id="confirmStageRerouteConfirmBtn" type="button" class="confirm-btn">
+                <i class="fas fa-route"></i> Confirm Reroute
+            </button>
+        </div>
+    </div>
+</div>
+
 <div id="transferConfirmModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="transferConfirmModalTitle">
     <div class="modal-content settings-section-modal-content" style="max-width:560px;width:min(560px,92vw);">
         <div class="modal-header settings-section-modal-header">
@@ -1803,7 +1902,7 @@
 <div id="notification" class="notification" style="display:none;" role="alert" aria-live="polite"></div>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="js/table-enhancer.js?v=20260512b"></script>
-<script type="module" src="js/super-admin.js?v=20260724a"></script>
+<script type="module" src="js/super-admin.js?v=20260807a"></script>
 <script type="module" src="js/profile-completion-guard.js?v=20260715a"></script>
 <link rel="stylesheet" href="css/pwa-install.css">
     <script src="js/pwa-install.js?v=20260625b"></script>

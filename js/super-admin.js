@@ -75,6 +75,7 @@ let settingsModalSourceDropdownTab = '';
 let currentScheduledReportPreview = null;
 let scheduledReportConfirmResolver = null;
 let transferConfirmResolver = null;
+let stageRerouteConfirmResolver = null;
 let lastScheduledReportLogSnapshot = null;
 let currentScheduledReportSendTab = 'daily';
 let currentScheduledReportDownloadTab = 'daily';
@@ -88,6 +89,7 @@ let currentBackdateSubmissionId = '';
 let currentBackdateSubmission = null;
 let currentCustomerEditSubmissionId = '';
 let currentCustomerEditSubmission = null;
+let currentCustomerEditSearchMatches = [];
 let currentMarkPaidSubmissionId = '';
 let currentMarkPaidSubmission = null;
 let markPaidSaveInProgress = false;
@@ -95,9 +97,14 @@ let currentStatusChangeSubmissionId = '';
 let currentStatusChangeSubmission = null;
 let currentStatusChangeSearchMatches = [];
 let statusChangeSaveInProgress = false;
+let currentStageRerouteSubmissionId = '';
+let currentStageRerouteSubmission = null;
+let currentStageRerouteSearchMatches = [];
+let stageRerouteSaveInProgress = false;
 let selectedTransferSubmissionIds = new Set();
 const pendingApplicationAgentSelections = new Map();
 const pendingApplicationAgentRerouteSelections = new Map();
+let customerEditHouseNumberPreviewSequence = 0;
 const SUPER_ADMIN_DASHBOARD_TABS = [
     'global',
     'admins',
@@ -436,6 +443,38 @@ function closeTransferConfirmModal(confirmed = false) {
     document.getElementById('transferConfirmModal')?.classList.remove('active');
     const resolver = transferConfirmResolver;
     transferConfirmResolver = null;
+    if (typeof resolver === 'function') resolver(confirmed === true);
+}
+
+function openStageRerouteConfirmModal({
+    applicationLabel = '',
+    stageLabel = '',
+    fromEmail = '',
+    toEmail = '',
+    reason = ''
+} = {}) {
+    const modal = document.getElementById('stageRerouteConfirmModal');
+    if (!modal) return Promise.resolve(false);
+    const applicationEl = document.getElementById('stageRerouteConfirmApplication');
+    const stageEl = document.getElementById('stageRerouteConfirmStage');
+    const fromEl = document.getElementById('stageRerouteConfirmFrom');
+    const toEl = document.getElementById('stageRerouteConfirmTo');
+    const reasonEl = document.getElementById('stageRerouteConfirmReason');
+    if (applicationEl) applicationEl.textContent = applicationLabel || '-';
+    if (stageEl) stageEl.textContent = stageLabel || '-';
+    if (fromEl) fromEl.textContent = fromEmail ? getTransferUserOptionLabel(fromEmail) : 'Unassigned';
+    if (toEl) toEl.textContent = toEmail ? getTransferUserOptionLabel(toEmail) : '-';
+    if (reasonEl) reasonEl.textContent = reason || '-';
+    modal.classList.add('active');
+    return new Promise((resolve) => {
+        stageRerouteConfirmResolver = resolve;
+    });
+}
+
+function closeStageRerouteConfirmModal(confirmed = false) {
+    document.getElementById('stageRerouteConfirmModal')?.classList.remove('active');
+    const resolver = stageRerouteConfirmResolver;
+    stageRerouteConfirmResolver = null;
     if (typeof resolver === 'function') resolver(confirmed === true);
 }
 
@@ -1545,7 +1584,198 @@ function roundDownToNearestThousand(value) {
     return Math.max(0, Math.floor(num / 1000) * 1000);
 }
 
-function handleRsaBalanceChangeForCustomerEdit() {
+function roundUpToNearestThousand(value) {
+    const num = Number(value || 0);
+    return Math.max(0, Math.ceil(num / 1000) * 1000);
+}
+
+function calculateTenorFromDob(dobString = '') {
+    if (!dobString) return '';
+    const birthDate = new Date(dobString);
+    if (Number.isNaN(birthDate.getTime())) return '';
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) age -= 1;
+    const tenor = 60 - age;
+    return Number.isFinite(tenor) ? String(Math.max(0, tenor)) : '';
+}
+
+async function ensureCustomerEditPropertyConfigLoaded() {
+    if (currentPropertyRules.length && currentHouseNumberRules.length) return;
+    try {
+        const defaults = getDefaultSystemSettings();
+        const settings = await getSystemSettings(db, { force: false });
+        currentPropertyRules = Array.isArray(settings.propertyRules) && settings.propertyRules.length
+            ? settings.propertyRules.map((rule) => ({ ...rule }))
+            : (defaults.propertyRules || []).map((rule) => ({ ...rule }));
+        currentHouseNumberRules = normalizeHouseNumberRulesForUi(settings.houseNumberRules || defaults.houseNumberRules || {});
+    } catch (_) {
+        const defaults = getDefaultSystemSettings();
+        currentPropertyRules = (defaults.propertyRules || []).map((rule) => ({ ...rule }));
+        currentHouseNumberRules = normalizeHouseNumberRulesForUi(defaults.houseNumberRules || {});
+    }
+}
+
+function determineCustomerEditPropertyByRsa(rsaAmount) {
+    const amount = Number(rsaAmount || 0);
+    if (!amount) return null;
+    const rules = currentPropertyRules.length ? currentPropertyRules : (getDefaultSystemSettings().propertyRules || []);
+    return rules.find((rule) => amount >= Number(rule.min || 0) && amount <= Number(rule.max || 0)) || null;
+}
+
+function getCustomerEditHouseNumberRule(propertyType = '') {
+    const normalizedType = String(propertyType || '').trim();
+    if (!normalizedType) return null;
+    const rules = currentHouseNumberRules.length
+        ? currentHouseNumberRules
+        : normalizeHouseNumberRulesForUi(getDefaultSystemSettings().houseNumberRules || {});
+    return rules.find((rule) => String(rule.propertyType || '').trim().toLowerCase() === normalizedType.toLowerCase()) || null;
+}
+
+function customerEditHouseCounterDocId(propertyType = '') {
+    const key = String(propertyType || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    return key ? `house_${key}` : '';
+}
+
+function customerEditLettersToIndex(value = '') {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const text = String(value || '').trim().toUpperCase();
+    if (!text) return 0;
+    let result = 0;
+    for (const char of text) {
+        const pos = alphabet.indexOf(char);
+        if (pos < 0) continue;
+        result = (result * 26) + pos + 1;
+    }
+    return Math.max(0, result - 1);
+}
+
+function customerEditIndexToLetters(index = 0) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    let value = Number(index);
+    if (!Number.isFinite(value) || value < 0) value = 0;
+    let text = '';
+    let current = Math.floor(value);
+    do {
+        text = alphabet[current % 26] + text;
+        current = Math.floor(current / 26) - 1;
+    } while (current >= 0);
+    return text;
+}
+
+function formatCustomerEditGeneratedHouseNumber(rule = {}, index = 0) {
+    const safeIndex = Math.max(0, Number(index) || 0);
+    if (!rule) return '';
+    if (rule.mode === 'alpha_suffix') {
+        const startLetterIndex = customerEditLettersToIndex(rule.startLetter);
+        const firstSpan = 26 - startLetterIndex;
+        if (safeIndex < firstSpan) {
+            return `${rule.prefix}${rule.startNumber}${customerEditIndexToLetters(startLetterIndex + safeIndex)}`;
+        }
+        const remainder = safeIndex - firstSpan;
+        const numberOffset = Math.floor(remainder / 26) + 1;
+        const suffixIndex = remainder % 26;
+        return `${rule.prefix}${Number(rule.startNumber || 0) + numberOffset}${customerEditIndexToLetters(suffixIndex)}`;
+    }
+    if (rule.mode === 'block_100') {
+        const firstSpan = 101 - Number(rule.startNumber || 0);
+        if (safeIndex < firstSpan) {
+            return `${rule.startPrefix}${Number(rule.startNumber || 0) + safeIndex}`;
+        }
+        const remainder = safeIndex - firstSpan;
+        const prefixOffset = Math.floor(remainder / 100) + 1;
+        const numberValue = (remainder % 100) + 1;
+        return `${customerEditIndexToLetters(customerEditLettersToIndex(rule.startPrefix) + prefixOffset)}${numberValue}`;
+    }
+    if (rule.mode === 'house_infinite') {
+        return `House ${Number(rule.startNumber || 0) + safeIndex}`;
+    }
+    if (rule.mode === 'house_block_100') {
+        const firstSpan = 101 - Number(rule.startNumber || 0);
+        if (safeIndex < firstSpan) {
+            return `House ${rule.startPrefix}${Number(rule.startNumber || 0) + safeIndex}`;
+        }
+        const remainder = safeIndex - firstSpan;
+        const prefixOffset = Math.floor(remainder / 100) + 1;
+        const numberValue = (remainder % 100) + 1;
+        return `House ${customerEditIndexToLetters(customerEditLettersToIndex(rule.startPrefix) + prefixOffset)}${numberValue}`;
+    }
+    return '';
+}
+
+async function getCustomerEditNextHouseNumberPreview(propertyType = '') {
+    const rule = getCustomerEditHouseNumberRule(propertyType);
+    const counterId = customerEditHouseCounterDocId(propertyType);
+    if (!rule || !counterId) return '';
+    try {
+        const counterSnap = await getDoc(doc(db, 'houseNumberCounters', counterId));
+        const lastIndex = counterSnap.exists() ? Number(counterSnap.data()?.lastIndex) : -1;
+        return formatCustomerEditGeneratedHouseNumber(rule, Number.isFinite(lastIndex) ? lastIndex + 1 : 0);
+    } catch (_) {
+        return '';
+    }
+}
+
+function shouldReplaceCustomerEditHouseNumber(nextPropertyType = '') {
+    const existingPropertyType = String(getCustomerDetailValue(currentCustomerEditSubmission || {}, 'propertyType') || '').trim();
+    const existingHouseNumber = String(getCustomerDetailValue(currentCustomerEditSubmission || {}, 'houseNumber') || '').trim();
+    const currentHouseNumber = String(document.getElementById('customer-edit-houseNumber')?.value || '').trim();
+    if (!currentHouseNumber) return true;
+    if (nextPropertyType && existingPropertyType && nextPropertyType.toLowerCase() !== existingPropertyType.toLowerCase()) return true;
+    return !existingHouseNumber;
+}
+
+async function syncCustomerEditDerivedPropertyFields() {
+    await ensureCustomerEditPropertyConfigLoaded();
+    const sequence = ++customerEditHouseNumberPreviewSequence;
+    const rsaBalanceInput = document.getElementById('customer-edit-rsaBalance') || document.getElementById('customerEditRsaBalance');
+    const rsa25PercentInput = document.getElementById('customer-edit-rsa25') || document.getElementById('customerEditRsa25Percent');
+    if (!rsaBalanceInput || !rsa25PercentInput) return;
+
+    const rsaBalance = parseMoneyValue(rsaBalanceInput.value);
+    const rsa25Percent = parseMoneyValue(rsa25PercentInput.value);
+    const rule = determineCustomerEditPropertyByRsa(rsaBalance);
+    const propertyTypeInput = document.getElementById('customer-edit-propertyType');
+    const propertyValueInput = document.getElementById('customer-edit-propertyValue');
+    const facilityFeeInput = document.getElementById('customer-edit-facilityFee');
+    const loanAmountInput = document.getElementById('customer-edit-loanAmount');
+    const houseNumberInput = document.getElementById('customer-edit-houseNumber');
+    const tenorInput = document.getElementById('customer-edit-tenor');
+    const dobInput = document.getElementById('customer-edit-dob');
+
+    if (!rule) {
+        if (!rsaBalance) {
+            if (propertyTypeInput) propertyTypeInput.value = '';
+            if (propertyValueInput) propertyValueInput.value = '';
+            if (facilityFeeInput) facilityFeeInput.value = '';
+            if (loanAmountInput) loanAmountInput.value = '';
+            if (houseNumberInput && shouldReplaceCustomerEditHouseNumber('')) houseNumberInput.value = '';
+        }
+        if (tenorInput && dobInput?.value) tenorInput.value = calculateTenorFromDob(dobInput.value);
+        return;
+    }
+
+    const rounded25 = rsa25Percent || roundDownToNearestThousand(rsaBalance * 0.25);
+    if (propertyTypeInput) propertyTypeInput.value = String(rule.name || '');
+    if (propertyValueInput) propertyValueInput.value = String(rule.value || '');
+    if (facilityFeeInput) facilityFeeInput.value = String(rule.fee || '');
+    if (loanAmountInput) loanAmountInput.value = String(roundUpToNearestThousand(Number(rule.value || 0) - rounded25));
+    if (tenorInput && dobInput?.value) tenorInput.value = calculateTenorFromDob(dobInput.value);
+
+    if (houseNumberInput && shouldReplaceCustomerEditHouseNumber(rule.name)) {
+        const preview = await getCustomerEditNextHouseNumberPreview(rule.name);
+        if (sequence === customerEditHouseNumberPreviewSequence && preview) {
+            houseNumberInput.value = preview;
+        }
+    }
+}
+
+async function handleRsaBalanceChangeForCustomerEdit() {
     const rsaBalanceInput = document.getElementById('customer-edit-rsaBalance') || document.getElementById('customerEditRsaBalance');
     const rsa25PercentInput = document.getElementById('customer-edit-rsa25') || document.getElementById('customerEditRsa25Percent');
     if (!rsaBalanceInput || !rsa25PercentInput) return;
@@ -1556,9 +1786,10 @@ function handleRsaBalanceChangeForCustomerEdit() {
     } else if (!String(rsaBalanceInput.value || '').trim()) {
         rsa25PercentInput.value = '';
     }
+    await syncCustomerEditDerivedPropertyFields();
 }
 
-function handleRsaTwentyFiveChangeForCustomerEdit() {
+async function handleRsaTwentyFiveChangeForCustomerEdit() {
     const rsaBalanceInput = document.getElementById('customer-edit-rsaBalance') || document.getElementById('customerEditRsaBalance');
     const rsa25PercentInput = document.getElementById('customer-edit-rsa25') || document.getElementById('customerEditRsa25Percent');
     if (!rsaBalanceInput || !rsa25PercentInput) return;
@@ -1568,6 +1799,7 @@ function handleRsaTwentyFiveChangeForCustomerEdit() {
     } else if (!String(rsa25PercentInput.value || '').trim()) {
         rsaBalanceInput.value = '';
     }
+    await syncCustomerEditDerivedPropertyFields();
 }
 
 function getSubmissionRsaBalance(sub = {}) {
@@ -2458,7 +2690,8 @@ function renderApplicationControlsSubTabState() {
         ['backdate', 'applicationControlsBackdateBtn', 'applicationControlBackdateSection'],
         ['customer-edit', 'applicationControlsCustomerEditBtn', 'applicationControlCustomerEditSection'],
         ['mark-paid', 'applicationControlsMarkPaidBtn', 'applicationControlMarkPaidSection'],
-        ['status-change', 'applicationControlsStatusChangeBtn', 'applicationControlStatusChangeSection']
+        ['status-change', 'applicationControlsStatusChangeBtn', 'applicationControlStatusChangeSection'],
+        ['stage-reroute', 'applicationControlsStageRerouteBtn', 'applicationControlStageRerouteSection']
     ];
     configs.forEach(([key, buttonId, sectionId]) => {
         const isActive = key === active;
@@ -2474,11 +2707,24 @@ function renderApplicationControlsSubTabState() {
     });
 }
 
+function openApplicationControlSearchForSubTab(subTab = currentApplicationControlSubTab) {
+    const openers = {
+        backdate: openBackdateSearchModal,
+        'customer-edit': openCustomerEditSearchModal,
+        'mark-paid': openMarkPaidSearchModal,
+        'status-change': openStatusChangeSearchModal,
+        'stage-reroute': openStageRerouteSearchModal
+    };
+    const opener = openers[String(subTab || '')];
+    if (typeof opener === 'function') setTimeout(opener, 0);
+}
+
 window.switchApplicationControlSubTab = (subTab) => {
-    const allowed = ['backdate', 'customer-edit', 'mark-paid', 'status-change'];
+    const allowed = ['backdate', 'customer-edit', 'mark-paid', 'status-change', 'stage-reroute'];
     const requested = String(subTab || 'backdate');
     currentApplicationControlSubTab = allowed.includes(requested) ? requested : 'backdate';
     renderApplicationControlsSubTabState();
+    openApplicationControlSearchForSubTab(currentApplicationControlSubTab);
 };
 
 function renderAgentSubTabState() {
@@ -3920,6 +4166,7 @@ function openCustomerEditSearchModal() {
     const modal = document.getElementById('customerEditSearchModal');
     if (!modal) return;
     setCustomerEditSearchStatus('');
+    renderCustomerEditSearchMatches([]);
     const input = document.getElementById('customerEditPenInput');
     if (input) input.value = '';
     modal.classList.add('active');
@@ -3928,6 +4175,7 @@ function openCustomerEditSearchModal() {
 
 function closeCustomerEditSearchModal() {
     document.getElementById('customerEditSearchModal')?.classList.remove('active');
+    renderCustomerEditSearchMatches([]);
 }
 
 function openCustomerEditModal() {
@@ -4065,7 +4313,42 @@ window.openSuperAdminApplicationDetails = (submissionId = '') => {
     });
 };
 
-function renderCustomerEditModal(submission = {}) {
+function renderCustomerEditSearchMatches(matches = []) {
+    currentCustomerEditSearchMatches = Array.isArray(matches) ? matches : [];
+    const host = document.getElementById('customerEditSearchResults');
+    if (!host) return;
+    if (!currentCustomerEditSearchMatches.length) {
+        host.innerHTML = '';
+        host.style.display = 'none';
+        return;
+    }
+    host.style.display = 'grid';
+    host.innerHTML = currentCustomerEditSearchMatches.map((submission, index) => {
+        const customerName = getSubmissionCustomerName(submission) || 'Unknown';
+        const penNo = getSubmissionPenNumber(submission) || '-';
+        const status = String(submission.status || '-').replaceAll('_', ' ');
+        const uploadedAt = formatDate(getSubmissionOriginalUploadAt(submission));
+        return `
+            <button type="button" class="status-change-match-btn" data-customer-edit-match-index="${index}">
+                <strong>${escapeHtml(customerName)}</strong>
+                <span>PEN: ${escapeHtml(penNo)} | Status: ${escapeHtml(status)} | Date: ${escapeHtml(uploadedAt)}</span>
+            </button>
+        `;
+    }).join('');
+    host.querySelectorAll('[data-customer-edit-match-index]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const index = Number(button.getAttribute('data-customer-edit-match-index'));
+            const submission = currentCustomerEditSearchMatches[index];
+            if (!submission) return;
+            await renderCustomerEditModal(submission);
+            closeCustomerEditSearchModal();
+            openCustomerEditModal();
+        });
+    });
+}
+
+async function renderCustomerEditModal(submission = {}) {
+    await ensureCustomerEditPropertyConfigLoaded();
     currentCustomerEditSubmissionId = submission.id || '';
     currentCustomerEditSubmission = { ...submission };
 
@@ -4111,9 +4394,18 @@ function renderCustomerEditModal(submission = {}) {
     if (rsa25Input) {
         rsa25Input.addEventListener('input', handleRsaTwentyFiveChangeForCustomerEdit);
     }
+    const dobInput = document.getElementById('customer-edit-dob');
+    if (dobInput) {
+        dobInput.addEventListener('input', () => {
+            const tenorInput = document.getElementById('customer-edit-tenor');
+            if (tenorInput) tenorInput.value = calculateTenorFromDob(dobInput.value);
+        });
+    }
 
     const reason = document.getElementById('customerEditReasonInput');
     if (reason) reason.value = '';
+
+    await syncCustomerEditDerivedPropertyFields();
 }
 
 async function searchCustomerEditPenNumber() {
@@ -4130,6 +4422,7 @@ async function searchCustomerEditPenNumber() {
             button.disabled = true;
             button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Searching...';
         }
+        renderCustomerEditSearchMatches([]);
         setCustomerEditSearchStatus('Searching applications...', 'info');
         const matches = await findSubmissionsByApplicationLookup(searchValue);
         const submission = getFirstLookupMatch(matches);
@@ -4138,9 +4431,11 @@ async function searchCustomerEditPenNumber() {
             return;
         }
         if (matches.length > 1) {
-            showNotification(`${matches.length} matches found. Opening the newest match: ${getSubmissionCustomerName(submission) || getSubmissionPenNumber(submission) || submission.id}.`, 'info');
+            setCustomerEditSearchStatus(`${matches.length} matching applications found. Select the exact customer below.`, 'warning');
+            renderCustomerEditSearchMatches(matches);
+            return;
         }
-        renderCustomerEditModal(submission);
+        await renderCustomerEditModal(submission);
         closeCustomerEditSearchModal();
         openCustomerEditModal();
     } catch (error) {
@@ -4162,6 +4457,8 @@ async function saveCustomerEditDetails() {
     const submissionId = currentCustomerEditSubmissionId;
     const submission = allSubmissions.find((sub) => sub.id === submissionId) || currentCustomerEditSubmission || {};
     if (!submissionId) return showNotification('No application is open for editing.', 'warning');
+
+    await syncCustomerEditDerivedPropertyFields();
 
     const oldDetails = submission?.customerDetails && typeof submission.customerDetails === 'object' ? submission.customerDetails : {};
     const nextDetails = { ...oldDetails };
@@ -4223,6 +4520,7 @@ async function saveCustomerEditDetails() {
         rsa25Percent: String(nextDetails.rsa25 || '').trim(),
         propertyType: String(nextDetails.propertyType || '').trim(),
         propertyValue: String(nextDetails.propertyValue || '').trim(),
+        facilityFee: String(nextDetails.facilityFee || '').trim(),
         loanAmount: String(nextDetails.loanAmount || '').trim(),
         tenor: String(nextDetails.tenor || '').trim(),
         accountNo: String(nextDetails.accountNo || '').trim(),
@@ -4540,6 +4838,273 @@ function getStatusChangeOptions(currentStatus = '', submission = {}) {
     )).join('');
 }
 
+function getStageRerouteConfig(submission = {}) {
+    const status = String(submission.status || submission.workflowStatus || '').trim().toLowerCase();
+    const auditStatus = String(submission.auditCommissionStatus || '').trim().toLowerCase();
+    if (status === 'draft') {
+        return { key: 'draft', label: 'Draft', reroutable: false, reason: 'Draft applications are not in a workflow queue yet.' };
+    }
+    if (status === 'deleted') {
+        return { key: 'deleted', label: 'Deleted', reroutable: false, reason: 'Deleted applications cannot be rerouted.' };
+    }
+    if (status === 'cleared') {
+        return { key: 'cleared', label: 'Cleared', reroutable: false, reason: 'Cleared applications are closed.' };
+    }
+    if (status === 'audit_pending' || auditStatus === 'pending') {
+        return { key: 'audit', label: 'Audit Queue', reroutable: false, reason: 'Audit queue records are handled by the Audit dashboard and do not have a single assigned officer field.' };
+    }
+    if (status === 'paid') {
+        return {
+            key: 'payment',
+            label: 'Payment Stage',
+            field: 'assignedToPayment',
+            previousField: 'previousPayment',
+            roles: ['payment'],
+            currentEmail: normalizeEmail(submission.assignedToPayment || submission.paidBy || ''),
+            timestampField: 'paymentAssignedAt',
+            assignmentMethodField: 'paymentAssignmentMethod',
+            assignmentMethod: 'super_admin_stage_reroute',
+            reroutable: true
+        };
+    }
+    if (
+        status === 'sent_to_pfa' ||
+        status === 'rsa_submitted' ||
+        submission.finalSubmitted === true ||
+        submission.rsaSubmitted === true ||
+        getTimestampMillis(submission.finalSubmittedAt) > 0 ||
+        getTimestampMillis(submission.rsaSubmittedAt) > 0
+    ) {
+        return {
+            key: 'payment',
+            label: 'Payment Stage',
+            field: 'assignedToPayment',
+            previousField: 'previousPayment',
+            roles: ['payment'],
+            currentEmail: normalizeEmail(submission.assignedToPayment || ''),
+            timestampField: 'paymentAssignedAt',
+            assignmentMethodField: 'paymentAssignmentMethod',
+            assignmentMethod: 'super_admin_stage_reroute',
+            reroutable: true
+        };
+    }
+    if (status === 'processing_to_pfa' || status === 'approved' || status === 'rejected_by_rsa' || normalizeEmail(submission.assignedToRSA)) {
+        return {
+            key: 'rsa',
+            label: status === 'rejected_by_rsa' ? 'RSA Rejected Stage' : 'RSA Stage',
+            field: 'assignedToRSA',
+            previousField: 'previousRSA',
+            roles: ['rsa'],
+            currentEmail: normalizeEmail(submission.assignedToRSA || ''),
+            timestampField: 'rsaAssignedAt',
+            assignmentMethodField: 'rsaAssignmentMode',
+            assignmentMethod: 'super_admin_stage_reroute',
+            reroutable: true
+        };
+    }
+    return {
+        key: 'review',
+        label: status === 'rejected' || status === 'rejected_by_reviewer' ? 'Reviewer Rejected Stage' : 'Reviewer Stage',
+        field: 'assignedTo',
+        previousField: 'previousReviewer',
+        roles: ['reviewer'],
+        currentEmail: normalizeEmail(submission.assignedTo || submission.reviewedBy || ''),
+        assignmentMethodField: 'assignmentMode',
+        assignmentMethod: 'super_admin_stage_reroute',
+        reroutable: true
+    };
+}
+
+function getStageRerouteUsers(config = {}) {
+    if (!config?.reroutable) return [];
+    const users = getActiveUsersByRoles(config.roles || []);
+    const currentEmail = normalizeEmail(config.currentEmail || '');
+    if (currentEmail && !users.some((user) => normalizeEmail(user.email) === currentEmail)) {
+        const existing = allUsers.find((user) => normalizeEmail(user.email) === currentEmail);
+        users.unshift(existing || { email: currentEmail, fullName: currentEmail, role: config.roles?.[0] || 'user' });
+    }
+    return users.sort((a, b) => getTransferUserOptionLabel(a.email).localeCompare(getTransferUserOptionLabel(b.email)));
+}
+
+function setStageRerouteSearchStatus(message = '', type = 'info') {
+    const status = document.getElementById('stageRerouteSearchStatus');
+    if (!status) return;
+    if (!String(message || '').trim()) {
+        status.style.display = 'none';
+        status.textContent = '';
+        return;
+    }
+    const styles = {
+        info: ['#bfdbfe', '#eff6ff', '#1d4ed8'],
+        warning: ['#fcd34d', '#fffbeb', '#92400e'],
+        error: ['#fecaca', '#fef2f2', '#991b1b']
+    };
+    const [border, background, color] = styles[type] || styles.info;
+    status.style.display = 'block';
+    status.style.borderColor = border;
+    status.style.background = background;
+    status.style.color = color;
+    status.textContent = message;
+}
+
+function openStageRerouteSearchModal() {
+    const modal = document.getElementById('stageRerouteSearchModal');
+    if (!modal) return;
+    setStageRerouteSearchStatus('');
+    renderStageRerouteSearchMatches([]);
+    const input = document.getElementById('stageReroutePenInput');
+    if (input) input.value = '';
+    modal.classList.add('active');
+    setTimeout(() => input?.focus(), 50);
+}
+
+function closeStageRerouteSearchModal() {
+    document.getElementById('stageRerouteSearchModal')?.classList.remove('active');
+    renderStageRerouteSearchMatches([]);
+}
+
+function openStageRerouteModal() {
+    document.getElementById('stageRerouteModal')?.classList.add('active');
+}
+
+function closeStageRerouteModal() {
+    document.getElementById('stageRerouteModal')?.classList.remove('active');
+}
+
+function renderStageRerouteSearchMatches(matches = []) {
+    currentStageRerouteSearchMatches = Array.isArray(matches) ? matches : [];
+    const host = document.getElementById('stageRerouteSearchResults');
+    if (!host) return;
+    if (!currentStageRerouteSearchMatches.length) {
+        host.innerHTML = '';
+        host.style.display = 'none';
+        return;
+    }
+    host.style.display = 'grid';
+    host.innerHTML = currentStageRerouteSearchMatches.map((submission, index) => {
+        const config = getStageRerouteConfig(submission);
+        const customerName = getSubmissionCustomerName(submission) || 'Unknown';
+        const penNo = getSubmissionPenNumber(submission) || '-';
+        const status = String(submission.status || '-').replaceAll('_', ' ');
+        return `
+            <button type="button" class="status-change-match-btn" data-stage-reroute-match-index="${index}">
+                <strong>${escapeHtml(customerName)}</strong>
+                <span>PEN: ${escapeHtml(penNo)} | Status: ${escapeHtml(status)} | Stage: ${escapeHtml(config.label || '-')}</span>
+            </button>
+        `;
+    }).join('');
+    host.querySelectorAll('[data-stage-reroute-match-index]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const index = Number(button.getAttribute('data-stage-reroute-match-index'));
+            const submission = currentStageRerouteSearchMatches[index];
+            if (!submission) return;
+            renderStageRerouteModal(submission);
+            closeStageRerouteSearchModal();
+            openStageRerouteModal();
+        });
+    });
+}
+
+function renderStageRerouteModal(submission = {}) {
+    currentStageRerouteSubmissionId = submission.id || '';
+    currentStageRerouteSubmission = { ...submission };
+    const config = getStageRerouteConfig(submission);
+    const summary = document.getElementById('stageRerouteSummary');
+    const notice = document.getElementById('stageRerouteNotice');
+    const select = document.getElementById('stageRerouteTargetUserSelect');
+    const reason = document.getElementById('stageRerouteReasonInput');
+    const saveBtn = document.getElementById('confirmStageRerouteBtn');
+    const currentEmail = normalizeEmail(config.currentEmail || '');
+    if (reason) reason.value = '';
+    if (summary) {
+        const items = [
+            ['Customer', getSubmissionCustomerName(submission) || 'Unknown'],
+            ['PEN Number', getSubmissionPenNumber(submission) || '-'],
+            ['Current Status', String(submission.status || '-').replaceAll('_', ' ')],
+            ['Detected Stage', config.label || '-'],
+            ['Current Officer', currentEmail ? getTransferUserOptionLabel(currentEmail) : 'Unassigned'],
+            ['Field To Update', config.field || '-']
+        ];
+        summary.innerHTML = items.map(([label, value]) => `
+            <div class="mark-paid-summary-item">
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value)}</strong>
+            </div>
+        `).join('');
+    }
+
+    if (!config.reroutable) {
+        if (select) {
+            select.innerHTML = '<option value="">Not available</option>';
+            select.disabled = true;
+        }
+        if (notice) {
+            notice.style.display = 'block';
+            notice.style.borderColor = '#fcd34d';
+            notice.style.background = '#fffbeb';
+            notice.style.color = '#92400e';
+            notice.textContent = config.reason || 'This application cannot be rerouted at its current stage.';
+        }
+        if (saveBtn) saveBtn.disabled = true;
+        return;
+    }
+
+    const users = getStageRerouteUsers(config);
+    if (select) {
+        select.disabled = !users.length;
+        select.innerHTML = optionsForUsers(users, currentEmail);
+    }
+    if (notice) {
+        notice.style.display = 'block';
+        notice.style.borderColor = '#bfdbfe';
+        notice.style.background = '#eff6ff';
+        notice.style.color = '#1d4ed8';
+        notice.textContent = `Only ${config.label} ownership will change. Status and other stage officers will remain the same.`;
+    }
+    if (saveBtn) saveBtn.disabled = !users.length;
+}
+
+async function searchStageReroutePenNumber() {
+    const input = document.getElementById('stageReroutePenInput');
+    const button = document.getElementById('searchStageReroutePenBtn');
+    const searchValue = String(input?.value || '').trim();
+    if (!searchValue) {
+        setStageRerouteSearchStatus('Enter a customer PEN number or name.', 'warning');
+        return;
+    }
+    const originalHtml = button?.innerHTML || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Searching...';
+        }
+        renderStageRerouteSearchMatches([]);
+        setStageRerouteSearchStatus('Searching applications...', 'info');
+        const matches = await findSubmissionsByApplicationLookup(searchValue);
+        const submission = getFirstLookupMatch(matches);
+        if (!submission) {
+            setStageRerouteSearchStatus('No application found for that PEN number or customer name.', 'error');
+            return;
+        }
+        if (matches.length > 1) {
+            setStageRerouteSearchStatus(`${matches.length} matching applications found. Select the exact customer below.`, 'warning');
+            renderStageRerouteSearchMatches(matches);
+            return;
+        }
+        renderStageRerouteModal(submission);
+        closeStageRerouteSearchModal();
+        openStageRerouteModal();
+    } catch (error) {
+        console.error('Stage reroute search failed:', error);
+        setStageRerouteSearchStatus('Failed to search for this application.', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+}
+
 function isFinalSubmissionStatus(submission = {}) {
     const status = String(submission.status || '').trim().toLowerCase();
     return status === 'sent_to_pfa'
@@ -4808,6 +5373,105 @@ async function saveApplicationStatusChange() {
             button.innerHTML = originalHtml;
         }
         statusChangeSaveInProgress = false;
+    }
+}
+
+async function saveStageReroute() {
+    if (stageRerouteSaveInProgress) {
+        showNotification('Stage reroute is already saving. Please wait.', 'info');
+        return;
+    }
+    const submissionId = currentStageRerouteSubmissionId;
+    const submission = allSubmissions.find((sub) => sub.id === submissionId) || currentStageRerouteSubmission || {};
+    if (!submissionId) return showNotification('No application is open for stage reroute.', 'warning');
+
+    const config = getStageRerouteConfig(submission);
+    if (!config.reroutable || !config.field) {
+        return showNotification(config.reason || 'This application cannot be rerouted at its current stage.', 'warning');
+    }
+
+    const targetEmail = normalizeEmail(document.getElementById('stageRerouteTargetUserSelect')?.value || '');
+    const reason = String(document.getElementById('stageRerouteReasonInput')?.value || '').trim();
+    const currentEmail = normalizeEmail(submission?.[config.field] || config.currentEmail || '');
+    if (!targetEmail) return showNotification('Select the new stage officer.', 'warning');
+    if (targetEmail === currentEmail) return showNotification('Select a different officer for this stage.', 'warning');
+
+    const allowedUsers = getStageRerouteUsers(config);
+    if (!allowedUsers.some((user) => normalizeEmail(user.email) === targetEmail)) {
+        return showNotification(`Selected user is not eligible for ${config.label}.`, 'warning');
+    }
+
+    const button = document.getElementById('confirmStageRerouteBtn');
+    const originalHtml = button?.innerHTML || '';
+    const performedBy = currentUser?.email || '';
+    const updates = {
+        [config.field]: targetEmail,
+        [config.previousField || `previous_${config.field}`]: currentEmail,
+        stageReroutedAt: serverTimestamp(),
+        stageReroutedBy: performedBy,
+        stageRerouteReason: reason,
+        stageRerouteStage: config.key,
+        stageRerouteField: config.field,
+        stageRerouteFrom: currentEmail,
+        stageRerouteTo: targetEmail,
+        reassignedAt: serverTimestamp(),
+        reassignedBy: performedBy,
+        reassignmentReason: reason,
+        updatedAt: serverTimestamp(),
+        updatedBy: performedBy
+    };
+    if (config.timestampField) updates[config.timestampField] = serverTimestamp();
+    if (config.assignmentMethodField) updates[config.assignmentMethodField] = config.assignmentMethod || 'super_admin_stage_reroute';
+    if (config.key === 'rsa') updates.rsaReady = true;
+
+    const customerName = getSubmissionCustomerName(submission) || 'this application';
+    const confirmed = await openStageRerouteConfirmModal({
+        applicationLabel: customerName,
+        stageLabel: config.label,
+        fromEmail: currentEmail,
+        toEmail: targetEmail,
+        reason
+    });
+    if (!confirmed) return;
+
+    try {
+        stageRerouteSaveInProgress = true;
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Rerouting...';
+        }
+        await updateDoc(doc(db, 'submissions', submissionId), updates);
+        await syncBackdateChatAssignmentMeta(submissionId, submission, { [config.field]: targetEmail });
+        if (config.key === 'rsa') {
+            await writeRsaTransferHistory(submission, targetEmail, 'super_admin_stage_reroute');
+        }
+        await addDoc(collection(db, 'audit'), {
+            action: 'super_admin_stage_rerouted',
+            submissionId,
+            customerName,
+            penNo: getSubmissionPenNumber(submission),
+            status: String(submission.status || '').trim().toLowerCase(),
+            stage: config.key,
+            stageLabel: config.label,
+            field: config.field,
+            fromUser: currentEmail,
+            toUser: targetEmail,
+            reason,
+            performedBy,
+            timestamp: serverTimestamp()
+        });
+        showNotification(`${config.label} rerouted successfully.`, 'success');
+        closeStageRerouteModal();
+        setTimeout(openStageRerouteSearchModal, 80);
+    } catch (error) {
+        console.error('Stage reroute failed:', error);
+        showNotification('Failed to reroute this application stage.', 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+        stageRerouteSaveInProgress = false;
     }
 }
 
@@ -7783,7 +8447,6 @@ settingsSectionModal?.addEventListener('change', () => {
     if (settingsFormLoaded) settingsFormDirty = true;
 });
 
-document.getElementById('openBackdateSearchModalBtn')?.addEventListener('click', openBackdateSearchModal);
 document.getElementById('closeBackdateSearchModalBtn')?.addEventListener('click', closeBackdateSearchModal);
 document.getElementById('cancelBackdateSearchModalBtn')?.addEventListener('click', closeBackdateSearchModal);
 document.getElementById('searchBackdatePenBtn')?.addEventListener('click', searchBackdatePenNumber);
@@ -7796,7 +8459,6 @@ document.getElementById('backdatePenInput')?.addEventListener('keydown', (event)
 document.getElementById('closeBackdateEditorModalBtn')?.addEventListener('click', closeBackdateEditorModal);
 document.getElementById('cancelBackdateEditorModalBtn')?.addEventListener('click', closeBackdateEditorModal);
 document.getElementById('saveBackdateChangesBtn')?.addEventListener('click', saveBackdateChanges);
-document.getElementById('openCustomerEditSearchModalBtn')?.addEventListener('click', openCustomerEditSearchModal);
 document.getElementById('closeCustomerEditSearchModalBtn')?.addEventListener('click', closeCustomerEditSearchModal);
 document.getElementById('cancelCustomerEditSearchModalBtn')?.addEventListener('click', closeCustomerEditSearchModal);
 document.getElementById('searchCustomerEditPenBtn')?.addEventListener('click', searchCustomerEditPenNumber);
@@ -7809,7 +8471,6 @@ document.getElementById('customerEditPenInput')?.addEventListener('keydown', (ev
 document.getElementById('closeCustomerEditModalBtn')?.addEventListener('click', closeCustomerEditModal);
 document.getElementById('cancelCustomerEditModalBtn')?.addEventListener('click', closeCustomerEditModal);
 document.getElementById('saveCustomerEditBtn')?.addEventListener('click', saveCustomerEditDetails);
-document.getElementById('openMarkPaidSearchModalBtn')?.addEventListener('click', openMarkPaidSearchModal);
 document.getElementById('closeMarkPaidSearchModalBtn')?.addEventListener('click', closeMarkPaidSearchModal);
 document.getElementById('cancelMarkPaidSearchModalBtn')?.addEventListener('click', closeMarkPaidSearchModal);
 document.getElementById('searchMarkPaidPenBtn')?.addEventListener('click', searchMarkPaidPenNumber);
@@ -7822,7 +8483,6 @@ document.getElementById('markPaidPenInput')?.addEventListener('keydown', (event)
 document.getElementById('closeMarkPaidModalBtn')?.addEventListener('click', closeMarkPaidModal);
 document.getElementById('cancelMarkPaidModalBtn')?.addEventListener('click', closeMarkPaidModal);
 document.getElementById('confirmMarkPaidBtn')?.addEventListener('click', saveMarkPaidFromSuperAdmin);
-document.getElementById('openStatusChangeSearchModalBtn')?.addEventListener('click', openStatusChangeSearchModal);
 document.getElementById('closeStatusChangeSearchModalBtn')?.addEventListener('click', closeStatusChangeSearchModal);
 document.getElementById('cancelStatusChangeSearchModalBtn')?.addEventListener('click', closeStatusChangeSearchModal);
 document.getElementById('searchStatusChangePenBtn')?.addEventListener('click', searchStatusChangePenNumber);
@@ -7836,6 +8496,21 @@ document.getElementById('statusChangeTargetStatus')?.addEventListener('change', 
 document.getElementById('closeStatusChangeModalBtn')?.addEventListener('click', closeStatusChangeModal);
 document.getElementById('cancelStatusChangeModalBtn')?.addEventListener('click', closeStatusChangeModal);
 document.getElementById('confirmStatusChangeBtn')?.addEventListener('click', saveApplicationStatusChange);
+document.getElementById('closeStageRerouteSearchModalBtn')?.addEventListener('click', closeStageRerouteSearchModal);
+document.getElementById('cancelStageRerouteSearchModalBtn')?.addEventListener('click', closeStageRerouteSearchModal);
+document.getElementById('searchStageReroutePenBtn')?.addEventListener('click', searchStageReroutePenNumber);
+document.getElementById('stageReroutePenInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        searchStageReroutePenNumber();
+    }
+});
+document.getElementById('closeStageRerouteModalBtn')?.addEventListener('click', closeStageRerouteModal);
+document.getElementById('cancelStageRerouteModalBtn')?.addEventListener('click', closeStageRerouteModal);
+document.getElementById('confirmStageRerouteBtn')?.addEventListener('click', saveStageReroute);
+document.getElementById('closeStageRerouteConfirmModalBtn')?.addEventListener('click', () => closeStageRerouteConfirmModal(false));
+document.getElementById('cancelStageRerouteConfirmBtn')?.addEventListener('click', () => closeStageRerouteConfirmModal(false));
+document.getElementById('confirmStageRerouteConfirmBtn')?.addEventListener('click', () => closeStageRerouteConfirmModal(true));
 document.getElementById('viewBackdateReportBtn')?.addEventListener('click', renderBackdateReport);
 document.getElementById('downloadBackdateReportBtn')?.addEventListener('click', downloadBackdateReportWorkbook);
 document.getElementById('backdateReportSearch')?.addEventListener('input', renderBackdateReport);
