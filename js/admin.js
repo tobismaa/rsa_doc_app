@@ -679,6 +679,7 @@ const applicationReportHeading = document.getElementById('applicationReportHeadi
 const applicationReportMeta = document.getElementById('applicationReportMeta');
 const applicationReportCount = document.getElementById('applicationReportCount');
 const applicationReportStage = document.getElementById('applicationReportStage');
+const applicationReportLocation = document.getElementById('applicationReportLocation');
 const applicationReportStartDate = document.getElementById('applicationReportStartDate');
 const applicationReportEndDate = document.getElementById('applicationReportEndDate');
 const applicationReportTableBody = document.getElementById('applicationReportTableBody');
@@ -1445,6 +1446,9 @@ function setupEventListeners() {
     applicationReportPresetButtons.forEach((button) => {
         button.addEventListener('click', () => applyApplicationReportPreset(button.dataset.applicationReportRange || 'today'));
     });
+    applicationReportLocation?.addEventListener('change', () => {
+        if (applicationReportHasViewed) handleApplicationReportView();
+    });
     applicationReportStartDate?.addEventListener('change', () => setApplicationReportPresetActive(''));
     applicationReportEndDate?.addEventListener('change', () => setApplicationReportPresetActive(''));
 
@@ -1793,6 +1797,7 @@ function loadUsers() {
         });
         renderUsersTable(users);
         allUsers = users;
+        populateApplicationReportLocationOptions();
         updateAdminNavigationCounts();
         renderAdminSubTabs(currentParentTab);
         if (Array.isArray(allAudits) && allAudits.length > 0) {
@@ -2391,6 +2396,50 @@ function getApplicationReportUploaderLocation(profile = {}) {
     ).trim() || '-';
 }
 
+function getApplicationReportSelectedLocation() {
+    return String(applicationReportLocation?.value || '').trim();
+}
+
+function getApplicationReportLocationLabel(location = '') {
+    return String(location || '').trim() || 'All Locations';
+}
+
+function getApplicationReportAvailableLocations() {
+    const locationsByKey = new Map();
+    (Array.isArray(allUsers) ? allUsers : []).forEach((user) => {
+        const location = getApplicationReportUploaderLocation(user);
+        if (!location || location === '-') return;
+        const key = location.toLowerCase();
+        if (!locationsByKey.has(key)) locationsByKey.set(key, location);
+    });
+
+    return Array.from(locationsByKey.values()).sort((a, b) => a.localeCompare(b));
+}
+
+function populateApplicationReportLocationOptions() {
+    if (!applicationReportLocation) return;
+
+    const selectedLocation = getApplicationReportSelectedLocation();
+    const locations = getApplicationReportAvailableLocations();
+    applicationReportLocation.innerHTML = '';
+
+    const allOption = document.createElement('option');
+    allOption.value = '';
+    allOption.textContent = 'All Locations';
+    applicationReportLocation.appendChild(allOption);
+
+    locations.forEach((location) => {
+        const option = document.createElement('option');
+        option.value = location;
+        option.textContent = location;
+        applicationReportLocation.appendChild(option);
+    });
+
+    const selectedKey = selectedLocation.toLowerCase();
+    const selectedMatch = locations.find((location) => location.toLowerCase() === selectedKey);
+    applicationReportLocation.value = selectedMatch || '';
+}
+
 function getApplicationReportRowData(sub = {}, stageDate = null, config = {}) {
     const details = sub?.customerDetails || {};
     const { pfa, rsaBalance, twentyFive } = getSubmissionFinancials(sub);
@@ -2436,12 +2485,20 @@ function getApplicationReportRowData(sub = {}, stageDate = null, config = {}) {
 
 function getApplicationReportRows() {
     const config = getApplicationReportConfig(applicationReportStage?.value || 'uploaded');
+    const selectedLocation = getApplicationReportSelectedLocation();
+    const selectedLocationKey = selectedLocation.toLowerCase();
     const startDate = applicationReportStartDate?.value || '';
     const endDate = applicationReportEndDate?.value || '';
     const { startMs, endMs } = getDateInputBounds(startDate, endDate);
 
     const rows = allSubmissions
         .filter((sub) => config.includes(sub))
+        .filter((sub) => {
+            if (!selectedLocationKey) return true;
+            const uploaderEmail = String(sub?.uploadedBy || '').trim().toLowerCase();
+            const uploaderProfile = getUserProfileByEmail(uploaderEmail);
+            return getApplicationReportUploaderLocation(uploaderProfile || {}).toLowerCase() === selectedLocationKey;
+        })
         .map((sub) => {
             const stageDate = config.dateOf(sub);
             return { sub, stageDate, stageMs: getStageTimestampMillis(stageDate) || getTimestampMsSafe(stageDate) };
@@ -2454,7 +2511,7 @@ function getApplicationReportRows() {
             return b.stageMs - a.stageMs;
         });
 
-    return { config, rows, startDate, endDate };
+    return { config, rows, startDate, endDate, selectedLocation };
 }
 
 function switchApplicationReportView(view = 'summary') {
@@ -2499,6 +2556,7 @@ async function ensureApplicationReportUserDataLoaded() {
         userIdNameCache.set(docSnap.id, displayName);
         return { id: docSnap.id, ...data, email, fullName: displayName };
     });
+    populateApplicationReportLocationOptions();
 }
 
 async function handleApplicationReportView() {
@@ -2546,7 +2604,7 @@ async function handleApplicationReportView() {
 
 function renderApplicationReport() {
     if (!applicationReportTableBody) return;
-    const { config, rows, startDate, endDate } = getApplicationReportRows();
+    const { config, rows, startDate, endDate, selectedLocation } = getApplicationReportRows();
 
     if (applicationReportHeading) applicationReportHeading.textContent = config.label;
     if (applicationReportCount) applicationReportCount.textContent = String(rows.length);
@@ -2554,7 +2612,8 @@ function renderApplicationReport() {
         const rangeLabel = startDate || endDate
             ? `${startDate || 'Beginning'} to ${endDate || 'Today'}`
             : 'All available dates';
-        applicationReportMeta.textContent = `${rows.length} application(s) for ${rangeLabel}.`;
+        const locationSuffix = selectedLocation ? ` in ${selectedLocation}` : '';
+        applicationReportMeta.textContent = `${rows.length} application(s) for ${rangeLabel}${locationSuffix}.`;
     }
     renderApplicationReportSummary({ config, rows, startDate, endDate });
     switchApplicationReportView('summary');
@@ -2787,7 +2846,7 @@ function styleApplicationReportSummaryTitle(row) {
     row.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
 }
 
-function renderApplicationReportSummarySheet(workbook, rows = [], config = {}, rangeLabel = '') {
+function renderApplicationReportSummarySheet(workbook, rows = [], config = {}, rangeLabel = '', locationLabel = 'All Locations') {
     const worksheet = workbook.addWorksheet('Summary', {
         views: [{ state: 'frozen', ySplit: 7 }]
     });
@@ -2817,7 +2876,7 @@ function renderApplicationReportSummarySheet(workbook, rows = [], config = {}, r
         '',
         `Date Range: ${rangeLabel || '-'}`,
         '',
-        `Generated At: ${new Date().toLocaleString()}`
+        `Location: ${locationLabel || 'All Locations'} | Generated At: ${new Date().toLocaleString()}`
     ]);
     worksheet.mergeCells(`A${metaRow.number}:B${metaRow.number}`);
     worksheet.mergeCells(`C${metaRow.number}:D${metaRow.number}`);
@@ -2903,7 +2962,7 @@ async function handleApplicationReportDownload() {
     try {
         await ensureApplicationReportDataLoaded();
         await ensureApplicationReportUserDataLoaded();
-        const { config, rows, startDate: rangeStart, endDate: rangeEnd } = getApplicationReportRows();
+        const { config, rows, startDate: rangeStart, endDate: rangeEnd, selectedLocation } = getApplicationReportRows();
         if (!rows.length) {
             showNotification('There is no report data to download for the selected range.', 'warning');
             return;
@@ -2918,7 +2977,8 @@ async function handleApplicationReportDownload() {
         const rangeLabel = rangeStart || rangeEnd
             ? `${rangeStart || 'Beginning'} to ${rangeEnd || 'Today'}`
             : 'All available dates';
-        renderApplicationReportSummarySheet(workbook, rows, config, rangeLabel);
+        const locationLabel = getApplicationReportLocationLabel(selectedLocation);
+        renderApplicationReportSummarySheet(workbook, rows, config, rangeLabel, locationLabel);
 
         const worksheet = workbook.addWorksheet('Application Report', {
             views: [{ state: 'frozen', ySplit: 5 }]
@@ -2945,10 +3005,11 @@ async function handleApplicationReportDownload() {
         titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3B67' } };
         titleRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
 
-        const metaRow = worksheet.addRow([`Date Range: ${rangeLabel}`, '', `Generated At: ${new Date().toLocaleString()}`, '', `Records: ${rows.length}`]);
+        const metaRow = worksheet.addRow([`Date Range: ${rangeLabel}`, '', `Location: ${locationLabel}`, '', `Generated At: ${new Date().toLocaleString()}`, '', `Records: ${rows.length}`]);
         worksheet.mergeCells(`A${metaRow.number}:B${metaRow.number}`);
         worksheet.mergeCells(`C${metaRow.number}:D${metaRow.number}`);
         worksheet.mergeCells(`E${metaRow.number}:F${metaRow.number}`);
+        worksheet.mergeCells(`G${metaRow.number}:K${metaRow.number}`);
         metaRow.eachCell((cell) => {
             cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF334155' } };
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
@@ -2994,9 +3055,10 @@ async function handleApplicationReportDownload() {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         const reportSlug = String(applicationReportStage?.value || 'uploaded').replace(/[^\w-]/g, '_');
+        const locationSlug = String(selectedLocation || 'all_locations').replace(/[^\w-]/g, '_');
         const suffix = `${rangeStart || 'start'}_${rangeEnd || 'end'}`.replace(/[^\w-]/g, '_');
         link.href = url;
-        link.download = `${reportSlug}_application_report_${suffix}.xlsx`;
+        link.download = `${reportSlug}_application_report_${locationSlug}_${suffix}.xlsx`;
         link.click();
         URL.revokeObjectURL(url);
         showNotification('Application report Excel downloaded.', 'success');
@@ -3013,6 +3075,10 @@ async function handleApplicationReportDownload() {
 
 function openApplicationReportModal() {
     if (!applicationReportModal) return;
+    populateApplicationReportLocationOptions();
+    ensureApplicationReportUserDataLoaded()
+        .then(populateApplicationReportLocationOptions)
+        .catch(() => {});
     resetApplicationReportModal();
     applicationReportModal.classList.add('active');
 }

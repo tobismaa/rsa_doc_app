@@ -2326,7 +2326,7 @@ body {
 
 .application-report-controls {
   display: grid;
-  grid-template-columns: minmax(220px, 1.2fr) repeat(2, minmax(160px, 1fr)) minmax(250px, auto) repeat(2, auto);
+  grid-template-columns: minmax(200px, 1.2fr) minmax(180px, 1fr) repeat(2, minmax(145px, 0.8fr)) minmax(250px, auto) repeat(2, auto);
   gap: 12px;
   align-items: end;
   padding: 14px;
