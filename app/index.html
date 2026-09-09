@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#073b2d" />
+    <title>CMBank Intranet</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+      :root {
+        --forest: #073b2d;
+        --forest-mid: #0e573f;
+        --forest-light: #deefe7;
+        --ink: #17251f;
+        --muted: #617169;
+        --line: #d8e1dc;
+        --canvas: #f4f7f5;
+        --surface: #ffffff;
+        --gold: #b27616;
+        --gold-soft: #fff3da;
+        --blue: #1b678b;
+        --blue-soft: #e4f3fb;
+      }
+
+      * { box-sizing: border-box; }
+
+      html { background: var(--canvas); }
+
+      body {
+        min-width: 320px;
+        min-height: 100vh;
+        margin: 0;
+        color: var(--ink);
+        background: var(--canvas);
+        font-family: "DM Sans", Arial, sans-serif;
+      }
+
+      .page-width {
+        width: min(1180px, calc(100% - 48px));
+        margin: 0 auto;
+      }
+
+      .topbar {
+        height: 76px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 1px 0 rgba(23, 37, 31, 0.02);
+      }
+
+      .topbar .page-width {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--forest);
+        font-family: "Manrope", Arial, sans-serif;
+        font-size: 18px;
+        font-weight: 800;
+        letter-spacing: 0;
+        text-decoration: none;
+        transition: color 160ms ease;
+      }
+
+      .brand:hover { color: var(--forest-mid); }
+
+      .brand-mark {
+        transition: background-color 160ms ease, transform 160ms ease;
+      }
+
+      .brand:hover .brand-mark {
+        background: var(--forest-mid);
+        transform: rotate(-4deg);
+      }
+
+      .brand-mark {
+        width: 37px;
+        height: 37px;
+        display: grid;
+        place-items: center;
+        border-radius: 7px;
+        background: var(--forest);
+        color: white;
+        font-size: 12px;
+        letter-spacing: 0;
+      }
+
+      .connection {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .connection::before {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #2b9c65;
+        content: "";
+      }
+
+      main { padding: 32px 0 48px; }
+
+      .workspace-heading {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 24px;
+        margin: 4px 0 18px;
+      }
+
+      .workspace-heading p {
+        margin: 0 0 6px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      h2 {
+        margin: 0;
+        font-family: "Manrope", Arial, sans-serif;
+        font-size: 24px;
+        letter-spacing: 0;
+      }
+
+      .workspace-count {
+        padding: 7px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .workspace-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .workspace {
+        --accent: var(--forest-mid);
+        --accent-soft: var(--forest-light);
+        position: relative;
+        min-height: 342px;
+        display: flex;
+        flex-direction: column;
+        padding: 27px;
+        overflow: hidden;
+        border: 1px solid #dce5df;
+        border-radius: 8px;
+        background: var(--surface);
+        box-shadow: 0 2px 5px rgba(23, 37, 31, 0.035);
+        transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+      }
+
+      .workspace:hover {
+        transform: translateY(-6px);
+        border-color: var(--accent);
+        box-shadow: 0 18px 34px rgba(23, 37, 31, 0.12);
+      }
+
+      .workspace::before {
+        position: absolute;
+        top: 0;
+        right: 0;
+        left: 0;
+        height: 5px;
+        background: var(--accent);
+        content: "";
+      }
+
+      .voucher { --accent: var(--gold); --accent-soft: var(--gold-soft); }
+      .hr { --accent: var(--forest-mid); --accent-soft: var(--forest-light); }
+      .assets { --accent: var(--blue); --accent-soft: var(--blue-soft); }
+
+      .card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 112px;
+        margin: -27px -27px 27px;
+        padding: 22px 27px;
+        border-bottom: 1px solid var(--line);
+        background: var(--accent-soft);
+        transition: background-color 180ms ease;
+      }
+
+      .workspace:hover .card-header { background: var(--accent); }
+
+      .app-icon {
+        width: 52px;
+        height: 52px;
+        display: grid;
+        place-items: center;
+        border-radius: 7px;
+        transition: background-color 180ms ease, color 180ms ease, transform 180ms ease;
+      }
+
+      .app-icon i { width: 25px; height: 25px; }
+      .workspace .app-icon {
+        background: white;
+        color: var(--accent);
+        box-shadow: 0 4px 10px rgba(23, 37, 31, 0.1);
+      }
+
+      .workspace:hover .app-icon {
+        background: white;
+        color: var(--accent);
+        transform: rotate(-5deg) scale(1.08);
+      }
+
+      .app-number {
+        color: var(--accent);
+        font-family: "Manrope", Arial, sans-serif;
+        font-size: 28px;
+        font-weight: 800;
+        line-height: 1;
+        transition: color 180ms ease;
+      }
+
+      .workspace:hover .app-number { color: white; }
+
+      h3 {
+        margin: 0;
+        font-family: "Manrope", Arial, sans-serif;
+        font-size: 21px;
+        letter-spacing: 0;
+        transition: color 180ms ease;
+      }
+
+      .workspace:hover h3 { color: var(--accent); }
+
+      .workspace-description {
+        margin: 8px 0 28px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .launch-button {
+        min-height: 43px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: auto;
+        padding: 10px 13px 10px 15px;
+        border: 1px solid var(--accent);
+        border-radius: 6px;
+        background: var(--accent);
+        color: white;
+        font-size: 14px;
+        font-weight: 700;
+        text-decoration: none;
+        transition: filter 180ms ease, transform 180ms ease;
+      }
+
+      .launch-button:hover { filter: brightness(0.92); }
+      .launch-button:focus-visible { outline: 3px solid #8bc9a7; outline-offset: 3px; }
+      .launch-button i {
+        width: 18px;
+        height: 18px;
+        transition: transform 180ms ease;
+      }
+
+      .workspace:hover .launch-button i,
+      .launch-button:hover i { transform: translate(3px, -3px); }
+
+      .access-strip {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        margin-top: 28px;
+        padding: 20px 0;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .access-detail {
+        display: flex;
+        align-items: center;
+        gap: 13px;
+      }
+
+      .access-icon {
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        border-radius: 7px;
+        background: var(--forest-light);
+        color: var(--forest-mid);
+      }
+
+      .access-icon i { width: 19px; height: 19px; }
+
+      .access-copy {
+        display: grid;
+        gap: 3px;
+      }
+
+      .access-copy strong {
+        font-size: 14px;
+        line-height: 1.2;
+      }
+
+      .access-copy span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .access-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--forest-mid);
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .access-badge i { width: 15px; height: 15px; }
+
+      footer {
+        padding: 23px 0 32px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (max-width: 850px) {
+        .workspace-grid { grid-template-columns: 1fr; }
+        .workspace { min-height: 260px; }
+      }
+
+      @media (max-width: 540px) {
+        .page-width { width: min(100% - 40px, 1180px); }
+        .connection { display: none; }
+        main { padding: 16px 0 24px; }
+        .workspace-heading { align-items: start; gap: 10px; margin-top: 0; margin-bottom: 10px; }
+        .workspace-heading p { margin-bottom: 3px; font-size: 12px; }
+        h2 { font-size: 20px; }
+        .workspace-count { padding-top: 3px; }
+        .workspace { min-height: 0; padding: 16px; }
+        .card-header { min-height: 64px; margin: -16px -16px 14px; padding: 12px 16px; }
+        .app-icon { width: 38px; height: 38px; }
+        .app-icon i { width: 19px; height: 19px; }
+        .app-number { font-size: 20px; }
+        h3 { font-size: 17px; }
+        .workspace-description { margin: 4px 0 12px; font-size: 12px; }
+        .launch-button { min-height: 40px; padding-top: 8px; padding-bottom: 8px; font-size: 12px; }
+        .access-strip { margin-top: 16px; padding: 12px 0; gap: 12px; }
+        .access-strip { align-items: flex-start; flex-direction: column; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="page-width">
+        <a class="brand" href="index.html" aria-label="CMBank Intranet home">
+          <span class="brand-mark" aria-hidden="true">CM</span>
+          <span>CMBank Intranet</span>
+        </a>
+        <span class="connection">All systems available</span>
+      </div>
+    </header>
+
+    <main class="page-width">
+      <section aria-labelledby="workspaces-title">
+        <div class="workspace-heading">
+          <div>
+            <p>CMBank applications</p>
+            <h2 id="workspaces-title">Choose a workspace</h2>
+          </div>
+          <span class="workspace-count">03 workspaces</span>
+        </div>
+
+        <div class="workspace-grid">
+          <article class="workspace voucher">
+            <div class="card-header">
+              <span class="app-icon" aria-hidden="true"><i data-lucide="receipt-text"></i></span>
+              <span class="app-number">01</span>
+            </div>
+            <h3>E-Voucher</h3>
+            <p class="workspace-description">Voucher workflow and approvals.</p>
+            <a class="launch-button" href="e_voucher/index.html">
+              <span>Open E-Voucher</span><i data-lucide="arrow-up-right" aria-hidden="true"></i>
+            </a>
+          </article>
+
+          <article class="workspace hr">
+            <div class="card-header">
+              <span class="app-icon" aria-hidden="true"><i data-lucide="users-round"></i></span>
+              <span class="app-number">02</span>
+            </div>
+            <h3>HR Hub</h3>
+            <p class="workspace-description">People, performance, and payroll.</p>
+            <a class="launch-button" href="hrms/login.html">
+              <span>Open HR Hub</span><i data-lucide="arrow-up-right" aria-hidden="true"></i>
+            </a>
+          </article>
+
+          <article class="workspace assets">
+            <div class="card-header">
+              <span class="app-icon" aria-hidden="true"><i data-lucide="landmark"></i></span>
+              <span class="app-number">03</span>
+            </div>
+            <h3>Asset Manager</h3>
+            <p class="workspace-description">Asset register and reporting.</p>
+            <a class="launch-button" href="assets_manager/login.html">
+              <span>Open Asset Manager</span><i data-lucide="arrow-up-right" aria-hidden="true"></i>
+            </a>
+          </article>
+        </div>
+
+        <aside class="access-strip" aria-label="Access information">
+          <div class="access-detail">
+            <span class="access-icon" aria-hidden="true"><i data-lucide="shield-check"></i></span>
+            <div class="access-copy">
+              <strong>Secure internal access</strong>
+              <span>Use your approved CMBank account to continue.</span>
+            </div>
+          </div>
+          <span class="access-badge"><i data-lucide="lock-keyhole" aria-hidden="true"></i> Authorized staff only</span>
+        </aside>
+      </section>
+    </main>
+
+    <footer>
+      <div class="page-width">CMBank Intranet</div>
+    </footer>
+    <script>lucide.createIcons();</script>
+  </body>
+</html>

@@ -1,0 +1,3482 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>E-Voucher Professional Dashboard</title>
+  <!-- Dependencies -->
+  <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1048.0.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-functions-compat.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"
+    crossorigin="anonymous" referrerpolicy="no-referrer">
+  <style>
+    :root {
+      --primary: #137a52;
+      --success: #20b26b;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --dark: #06281f;
+      --light: #eef7f1;
+      --green-900: #0b3b2e;
+      --green-800: #0f513b;
+      --green-700: #137a52;
+      --green-100: #dcfce7;
+      --green-50: #f0fdf4;
+      --gold: #d8b45b;
+      --ink-muted: #66756f;
+      --line: #d9e7df;
+      --surface: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    body {
+      background:
+        radial-gradient(circle at 16% 12%, rgba(32, 178, 107, 0.12), transparent 30%),
+        linear-gradient(135deg, #f7fbf8 0%, #eef7f1 55%, #e2f1e7 100%);
+      color: var(--dark);
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 260px;
+      background: linear-gradient(180deg, #06281f 0%, #0b3b2e 58%, #082f25 100%);
+      color: white;
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      height: 100%;
+      left: 0;
+      top: 0;
+      z-index: 50;
+      transition: transform 0.3s;
+      box-shadow: 16px 0 40px rgba(6, 40, 31, 0.22);
+    }
+
+    .sidebar-header {
+      padding: 24px;
+      border-bottom: 1px solid rgba(216, 180, 91, 0.18);
+    }
+
+    .sidebar-header h2 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .sidebar-header h2 {
+      font-size: 0;
+    }
+
+    .sidebar-header h2::after {
+      content: "E-Voucher";
+      font-size: 1.25rem;
+      font-weight: 800;
+    }
+
+    .sidebar-header p {
+      font-size: 0;
+      color: rgba(255, 255, 255, 0.62);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .sidebar-header p::after {
+      content: "Workflow System";
+      font-size: 0.75rem;
+    }
+
+    .user-profile {
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.07);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .avatar {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(145deg, var(--primary), var(--gold));
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 1.1rem;
+      box-shadow: 0 14px 28px rgba(0, 0, 0, 0.22);
+    }
+
+    .user-info div:first-child {
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    .user-info div:last-child {
+      font-size: 0.7rem;
+      color: rgba(255, 255, 255, 0.64);
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    .nav-links {
+      list-style: none;
+      padding: 18px 12px;
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .nav-links li a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      color: rgba(255, 255, 255, 0.76);
+      text-decoration: none;
+      transition: all 0.2s;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      margin-bottom: 6px;
+    }
+
+    .nav-links li a:hover,
+    .nav-links li a.active {
+      background: rgba(255, 255, 255, 0.11);
+      color: white;
+      border-color: rgba(216, 180, 91, 0.2);
+      transform: translateX(3px);
+    }
+
+    .logout-btn {
+      padding: 16px 24px;
+      background: none;
+      border: none;
+      color: #f87171;
+      text-align: left;
+      cursor: pointer;
+      width: 100%;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: 0.2s;
+    }
+
+    .logout-btn:hover {
+      background: rgba(255, 255, 255, 0.09);
+      color: #ef4444;
+    }
+
+    /* Main Content */
+    .main-content {
+      flex: 1;
+      margin-left: 260px;
+      padding: 32px;
+      width: calc(100% - 260px);
+      transition: margin-left 0.3s;
+    }
+
+    .dashboard-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 28px;
+      padding: 28px;
+      border: 1px solid rgba(19, 122, 82, 0.14);
+      border-radius: 22px;
+      background:
+        linear-gradient(145deg, rgba(6, 40, 31, 0.96) 0%, rgba(15, 81, 59, 0.97) 58%, rgba(19, 122, 82, 0.95) 100%);
+      color: white;
+      box-shadow: 0 24px 55px -28px rgba(6, 40, 31, 0.68);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .dashboard-hero::after {
+      content: "";
+      position: absolute;
+      right: -70px;
+      bottom: -120px;
+      width: 260px;
+      height: 260px;
+      border-radius: 50%;
+      background: rgba(216, 180, 91, 0.18);
+      pointer-events: none;
+    }
+
+    .dashboard-eyebrow {
+      display: inline-flex;
+      margin-bottom: 10px;
+      padding: 5px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.1);
+      color: rgba(255, 255, 255, 0.76);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .dashboard-hero h1 {
+      position: relative;
+      z-index: 1;
+      margin-bottom: 8px;
+      font-size: clamp(1.9rem, 4vw, 2.8rem);
+      line-height: 1.08;
+      font-weight: 800;
+    }
+
+    .dashboard-hero p {
+      position: relative;
+      z-index: 1;
+      max-width: 620px;
+      color: rgba(255, 255, 255, 0.75);
+      line-height: 1.6;
+    }
+
+    .hero-summary {
+      position: relative;
+      z-index: 1;
+      min-width: 180px;
+      padding: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(10px);
+    }
+
+    .hero-summary span {
+      display: block;
+      margin-bottom: 8px;
+      color: rgba(255, 255, 255, 0.68);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .hero-summary strong {
+      display: block;
+      color: #fff;
+      font-size: 1.35rem;
+      text-transform: uppercase;
+    }
+
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 18px;
+      margin-bottom: 32px;
+    }
+
+    .action-card {
+      position: relative;
+      background: rgba(255, 255, 255, 0.92);
+      padding: 22px;
+      border-radius: 16px;
+      box-shadow: 0 18px 38px -30px rgba(6, 40, 31, 0.48);
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: left;
+      border: 1px solid rgba(19, 122, 82, 0.12);
+      overflow: hidden;
+    }
+
+    .action-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 24px 50px -28px rgba(6, 40, 31, 0.62);
+      border-color: var(--primary);
+    }
+
+    .icon {
+      width: 46px;
+      height: 46px;
+      margin-bottom: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 14px;
+      background: var(--green-50);
+      color: var(--primary);
+      font-size: 1.25rem;
+      box-shadow: inset 0 0 0 1px rgba(19, 122, 82, 0.12);
+    }
+
+    .action-card h3 {
+      font-size: 1rem;
+      font-weight: 750;
+      margin-bottom: 6px;
+      color: var(--dark);
+    }
+
+    .action-card p {
+      font-size: 0.85rem;
+      color: var(--ink-muted);
+      line-height: 1.4;
+    }
+
+    /* Tables & Containers */
+    .table-container {
+      background: rgba(255, 255, 255, 0.93);
+      border-radius: 18px;
+      border: 1px solid rgba(19, 122, 82, 0.12);
+      box-shadow: 0 24px 55px -34px rgba(6, 40, 31, 0.42);
+      padding: 24px;
+      margin-bottom: 24px;
+      overflow: hidden;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+    }
+
+    .compact-table {
+      font-size: 0.84rem;
+    }
+
+    .compact-table-wrap {
+      max-width: 920px;
+      width: 100%;
+      overflow-x: auto;
+    }
+
+    .compact-table th,
+    .compact-table td {
+      padding: 9px 10px;
+    }
+
+    .compact-table .btn {
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 0.76rem;
+    }
+
+    th,
+    td {
+      padding: 14px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+    }
+
+    th {
+      background: #f2f9f5;
+      color: var(--green-800);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:hover {
+      background: #f8fcfa;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), var(--green-900));
+      color: white;
+      box-shadow: 0 14px 28px -18px rgba(6, 40, 31, 0.8);
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #14945f, var(--green-900));
+      transform: translateY(-1px);
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #14945f;
+      transform: translateY(-1px);
+    }
+
+    .btn-warning {
+      background: var(--warning);
+      color: white;
+    }
+
+    .btn-warning:hover {
+      background: #d97706;
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: white;
+    }
+
+    .btn-secondary {
+      background: #6b7280;
+      color: white;
+    }
+
+    .btn-view {
+      background: linear-gradient(135deg, var(--primary), var(--green-900));
+      color: white;
+      padding: 7px 12px;
+      border-radius: 9px;
+      font-size: 0.8rem;
+    }
+
+    .btn-edit {
+      background: var(--warning);
+      color: white;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      margin-right: 6px;
+    }
+
+    .btn-file-view {
+      display: inline-block;
+      padding: 6px 12px;
+      background: var(--primary);
+      color: white;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      border: none;
+      margin-top: 4px;
+      text-decoration: none;
+    }
+
+    .btn-file-view:hover {
+      background: #0f513b;
+    }
+
+    .btn-file-download {
+      display: inline-block;
+      padding: 6px 12px;
+      background: #6b7280;
+      color: white;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      text-decoration: none;
+      margin-top: 4px;
+      margin-left: 4px;
+    }
+
+    .btn-file-download:hover {
+      background: #4b5563;
+    }
+
+    .btn-file-pdf {
+      display: inline-block;
+      padding: 6px 12px;
+      background: #dc2626;
+      color: white;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      border: none;
+      margin-top: 4px;
+      text-decoration: none;
+    }
+
+    .btn-file-pdf:hover {
+      background: #b91c1c;
+    }
+
+    .btn-remove-file-small {
+      background: #ef4444;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 0.7rem;
+      cursor: pointer;
+    }
+
+    .btn-remove-file-small:hover {
+      background: #dc2626;
+    }
+
+    /* Modals */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(6, 40, 31, 0.48);
+      backdrop-filter: blur(5px);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+      animation: fadeIn 0.2s ease-out;
+    }
+
+    .modal-box {
+      background: white;
+      width: 95%;
+      max-width: 1300px;
+      max-height: 95vh;
+      border-radius: 18px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 30px 70px -28px rgba(6, 40, 31, 0.62);
+    }
+
+    .modal-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #f7fbf8;
+    }
+
+    .modal-header h3 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--dark);
+    }
+
+    .modal-body {
+      padding: 24px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .modal-footer {
+      padding: 16px 24px;
+      border-top: 1px solid var(--line);
+      background: #f7fbf8;
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+    }
+
+    .close-modal {
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      cursor: pointer;
+      color: #9ca3af;
+      transition: 0.2s;
+    }
+
+    .close-modal:hover {
+      color: var(--dark);
+    }
+
+    /* Forms */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--green-900);
+      margin-bottom: 6px;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      font-size: 0.95rem;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 4px rgba(32, 178, 107, 0.12);
+    }
+
+    .full-width {
+      grid-column: 1 / -1;
+    }
+
+    /* Send Back Alert */
+    .send-back-alert {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #991b1b;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: start;
+      gap: 12px;
+    }
+
+    .send-back-alert strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 0.9rem;
+    }
+
+    .send-back-alert p {
+      font-size: 0.9rem;
+      line-height: 1.4;
+      white-space: pre-wrap;
+    }
+
+    /* File Upload */
+    .file-upload-area {
+      border: 2px dashed #b8d6c4;
+      border-radius: 14px;
+      padding: 24px;
+      text-align: center;
+      background: #f7fbf8;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    .file-upload-area:hover {
+      border-color: var(--primary);
+      background: #f0fdf4;
+    }
+
+    .file-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .file-card {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+
+    .settlement-upload-panel {
+      margin-top: 24px;
+      padding: 20px;
+      border: 1px solid rgba(19, 122, 82, 0.14);
+      border-radius: 18px;
+      background: linear-gradient(180deg, #ffffff 0%, #f7fbf8 100%);
+      box-shadow: 0 18px 36px -30px rgba(6, 40, 31, 0.42);
+    }
+
+    .settlement-upload-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .settlement-upload-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: #f0fdf4;
+      color: var(--primary);
+      box-shadow: inset 0 0 0 1px rgba(19, 122, 82, 0.12);
+    }
+
+    .settlement-upload-header h3 {
+      margin-bottom: 3px;
+      color: var(--green-900);
+      font-size: 1rem;
+    }
+
+    .settlement-upload-header p {
+      color: var(--ink-muted);
+      font-size: 0.84rem;
+      line-height: 1.45;
+    }
+
+    .settlement-existing-list {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    .file-thumb {
+      height: 120px;
+      background: #f3f4f6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .file-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .file-thumb embed,
+    .file-thumb iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    .file-info {
+      padding: 12px;
+      font-size: 0.75rem;
+      text-align: center;
+    }
+
+    .file-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #374151;
+    }
+
+    .btn-remove-file {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: rgba(239, 68, 68, 0.95);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: 0.2s;
+    }
+
+    .btn-remove-file:hover {
+      transform: scale(1.1);
+    }
+
+    /* GL & Schedule Specifics */
+    .entry-leg {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    .entry-leg.debit {
+      border-left: 4px solid var(--danger);
+    }
+
+    .entry-leg.credit {
+      border-left: 4px solid var(--success);
+    }
+
+    .leg-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      color: #4b5563;
+    }
+
+    .autocomplete-items {
+      position: absolute;
+      border: 1px solid rgba(19, 122, 82, 0.16);
+      z-index: 1100;
+      top: calc(100% + 8px);
+      left: 0;
+      right: 0;
+      max-height: 260px;
+      overflow-y: auto;
+      background: white;
+      box-shadow: 0 18px 40px -22px rgba(6, 40, 31, 0.6);
+      border-radius: 14px;
+      padding: 6px;
+    }
+
+    .autocomplete-items div {
+      padding: 11px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid #edf5f0;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+    }
+
+    .autocomplete-items div:last-child {
+      border-bottom: none;
+    }
+
+    .autocomplete-items div:hover {
+      background-color: #f0fdf4;
+      color: var(--primary);
+      transform: translateX(2px);
+    }
+
+    .autocomplete-items strong {
+      display: block;
+      color: var(--green-900);
+      font-size: 0.85rem;
+      margin-bottom: 2px;
+    }
+
+    .autocomplete-items span {
+      display: block;
+      color: #66756f;
+      font-size: 0.78rem;
+      line-height: 1.35;
+    }
+
+    .autocomplete-empty {
+      color: #8a9b94 !important;
+      cursor: default !important;
+      text-align: center;
+    }
+
+    .autocomplete-empty:hover {
+      transform: none !important;
+      background: transparent !important;
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 24px;
+      gap: 8px;
+    }
+
+      .tab-btn {
+      padding: 12px 20px;
+      cursor: pointer;
+      font-weight: 600;
+      color: #6b7280;
+      border: 1px solid transparent;
+      margin-bottom: -1px;
+      transition: 0.2s;
+      border-radius: 999px;
+    }
+
+    .tab-btn:hover {
+      color: var(--primary);
+    }
+
+      .tab-btn.active {
+      color: var(--primary);
+      border-color: rgba(19, 122, 82, 0.18);
+      background: #f0fdf4;
+    }
+
+    .tab-content {
+      display: none;
+      animation: fadeIn 0.3s;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    /* Status Badge */
+    .badge {
+      display: inline-block;
+      padding: 5px 12px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 750;
+      letter-spacing: 0.02em;
+    }
+
+    .badge-pending {
+      background: #dcfce7;
+      color: #0f513b;
+    }
+
+    .badge-completed {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .badge-outstanding {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    /* Loading Spinner Overlay */
+    #loadingOverlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(247, 251, 248, 0.84);
+      backdrop-filter: blur(4px);
+      z-index: 2000;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+    }
+
+    #loadingOverlay.active {
+      display: flex;
+    }
+
+    .spinner-large {
+      width: 50px;
+      height: 50px;
+      border: 5px solid #e5e7eb;
+      border-top: 5px solid var(--primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 16px;
+    }
+
+    .loading-text {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--dark);
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    /* Info Grid */
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+      background: #f7fbf8;
+      padding: 20px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      margin-bottom: 20px;
+    }
+
+    .info-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 12px;
+      background: white;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+    }
+
+    .info-item label {
+      font-weight: 600;
+      color: #6b7280;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .info-item span {
+      color: #1f2937;
+      font-size: 0.95rem;
+      font-weight: 500;
+    }
+
+    .voucher-sheet {
+      margin-bottom: 24px;
+    }
+
+    .voucher-top-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 680px) minmax(220px, 280px);
+      gap: 16px;
+      align-items: start;
+      margin-bottom: 20px;
+    }
+
+    .voucher-card {
+      position: relative;
+      max-width: 680px;
+      background: linear-gradient(145deg, #06281f 0%, #0f513b 50%, #0b3b2e 100%);
+      color: white;
+      border-radius: 28px;
+      padding: 26px 28px 24px;
+      box-shadow: 0 26px 56px rgba(6, 40, 31, 0.28);
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+
+    .voucher-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at top right, rgba(212, 175, 55, 0.33) 0%, transparent 28%), radial-gradient(circle at bottom left, rgba(255, 255, 255, 0.08) 0%, transparent 26%);
+      pointer-events: none;
+    }
+
+    .voucher-card::after {
+      content: "";
+      position: absolute;
+      inset: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 20px;
+      pointer-events: none;
+    }
+
+    .voucher-card-top {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      margin-bottom: 24px;
+    }
+
+    .voucher-card-bank small {
+      display: block;
+      color: rgba(255, 255, 255, 0.68);
+      text-transform: uppercase;
+      letter-spacing: 0.22em;
+      font-size: 0.66rem;
+      margin-bottom: 10px;
+    }
+
+    .voucher-card-bank h2 {
+      font-size: 1.15rem;
+      line-height: 1.35;
+      letter-spacing: 0.08em;
+      font-weight: 800;
+    }
+
+    .voucher-card-bank p {
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 0.82rem;
+      margin-top: 6px;
+    }
+
+    .voucher-card-badge {
+      min-width: 88px;
+      height: 88px;
+      border-radius: 50%;
+      border: 1px solid rgba(212, 175, 55, 0.44);
+      background: radial-gradient(circle, rgba(212, 175, 55, 0.3) 0%, rgba(212, 175, 55, 0.08) 54%, transparent 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 12px;
+      color: #f5df90;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .voucher-card-amount-row {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .voucher-card-amount label,
+    .voucher-card-mini label {
+      display: block;
+      font-size: 0.66rem;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: rgba(248, 231, 165, 0.9);
+      margin-bottom: 8px;
+      font-weight: 800;
+    }
+
+    .voucher-card-amount strong {
+      display: block;
+      font-size: 1.8rem;
+      line-height: 1.05;
+      font-weight: 800;
+    }
+
+    .voucher-status-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #eef6ff;
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .voucher-card-mini-grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .voucher-card-mini {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 14px;
+      padding: 12px 14px;
+    }
+
+    .voucher-card-mini span {
+      color: white;
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+
+    .voucher-attachment-panel {
+      background: linear-gradient(180deg, #ffffff 0%, #f7fbf8 100%);
+      border: 1px solid rgba(19, 122, 82, 0.14);
+      border-radius: 22px;
+      padding: 14px;
+      box-shadow: 0 18px 34px rgba(6, 40, 31, 0.08);
+      min-height: 100%;
+    }
+
+    .voucher-attachment-panel h3 {
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: #0f513b;
+      margin-bottom: 14px;
+    }
+
+    .voucher-attachment-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .voucher-attachment-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+    }
+
+    .voucher-attachment-item span {
+      font-size: 0.88rem;
+      color: #334155;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .voucher-attachment-actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .voucher-attachment-empty {
+      color: #64748b;
+      font-size: 0.92rem;
+      background: #fff;
+      border: 1px dashed #cbd5e1;
+      border-radius: 14px;
+      padding: 18px;
+      text-align: center;
+    }
+
+    .voucher-mail-trail {
+      margin-top: 12px;
+      background: #f7fbf8;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+    }
+
+    .voucher-mail-trail h4 {
+      margin-bottom: 8px;
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #475569;
+    }
+
+    .voucher-mail-trail p {
+      font-size: 0.88rem;
+      color: #334155;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    .voucher-meta-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    .voucher-meta-card {
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid rgba(19, 122, 82, 0.13);
+      border-radius: 16px;
+      padding: 16px 18px;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+    }
+
+    .voucher-meta-card label {
+      display: block;
+      font-size: 0.69rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #7b8797;
+      margin-bottom: 8px;
+      font-weight: 800;
+    }
+
+    .voucher-meta-card span {
+      color: #10233f;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .voucher-narration-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .voucher-narration {
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid rgba(19, 122, 82, 0.16);
+      border-radius: 18px;
+      padding: 20px 22px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.68);
+    }
+
+    .voucher-narration h3 {
+      font-size: 0.8rem;
+      color: #0f513b;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      margin-bottom: 12px;
+    }
+
+    .voucher-narration p {
+      color: #334155;
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+
+    .voucher-approval-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+
+    .voucher-approval-box {
+      background: linear-gradient(180deg, #ffffff 0%, #f7fbf8 100%);
+      border: 1px solid rgba(212, 175, 55, 0.22);
+      border-radius: 18px;
+      padding: 18px;
+      min-height: 132px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .voucher-approval-box::after {
+      content: "";
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      bottom: 16px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent 0%, rgba(148, 163, 184, 0.7) 14%, rgba(148, 163, 184, 0.7) 86%, transparent 100%);
+    }
+
+    .voucher-approval-box strong {
+      display: block;
+      color: #10294d;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 12px;
+    }
+
+    .voucher-approval-box span {
+      color: #556274;
+      font-size: 0.88rem;
+      line-height: 1.55;
+      display: block;
+      margin-bottom: 22px;
+    }
+
+    .voucher-approval-box em {
+      color: #9aa6b2;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-style: normal;
+    }
+
+    .gl-entry-modal-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .gl-entry-box {
+      max-width: 840px;
+      border: 1px solid rgba(19, 122, 82, 0.14);
+    }
+
+    .gl-entry-box .modal-header {
+      align-items: flex-start;
+      border-bottom: none;
+      background: linear-gradient(135deg, rgba(6, 40, 31, 0.98), rgba(19, 122, 82, 0.95));
+      color: white;
+    }
+
+    .gl-entry-title {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .gl-entry-title span {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.14);
+      color: var(--gold);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+    }
+
+    .gl-entry-title h3 {
+      color: white;
+      margin-bottom: 4px;
+    }
+
+    .gl-entry-title p {
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 0.82rem;
+      line-height: 1.4;
+    }
+
+    .gl-entry-box .close-modal {
+      color: rgba(255, 255, 255, 0.72);
+    }
+
+    .gl-entry-box .close-modal:hover {
+      color: white;
+    }
+
+    .gl-search-field {
+      position: relative;
+    }
+
+    .gl-search-field input {
+      padding-right: 2.55rem;
+      background: linear-gradient(180deg, #ffffff 0%, #fbfefc 100%);
+    }
+
+    .gl-search-field::after {
+      content: "\f002";
+      position: absolute;
+      right: 14px;
+      bottom: 13px;
+      color: #7aa08d;
+      font-family: "Font Awesome 5 Free";
+      font-weight: 900;
+      font-size: 0.82rem;
+      pointer-events: none;
+    }
+
+    .gl-name-field input[readonly] {
+      background: #f4fbf7 !important;
+      color: var(--green-900);
+      font-weight: 700;
+    }
+
+    .section-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--dark);
+      margin: 24px 0 16px 0;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* Media Viewer Modal */
+    #mediaViewerBody {
+      background: #1f2937;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      min-height: 60vh;
+    }
+
+    #mediaViewerBody img {
+      max-width: 100%;
+      max-height: 70vh;
+      object-fit: contain;
+    }
+
+    #mediaViewerBody iframe {
+      width: 100%;
+      height: 70vh;
+      border: none;
+    }
+
+    #mediaViewerBody embed {
+      width: 100%;
+      height: 70vh;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar {
+        transform: translateX(-100%);
+      }
+
+      .sidebar.active {
+        transform: translateX(0);
+      }
+
+      .main-content {
+        margin-left: 0;
+        width: 100%;
+        padding: 20px;
+      }
+
+      .dashboard-hero {
+        grid-template-columns: 1fr;
+        align-items: start;
+        padding: 24px 20px;
+        margin-top: 48px;
+      }
+
+      .hero-summary {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .cards-grid {
+        grid-template-columns: 1fr;
+      }
+
+      #activeTabContent,
+      #sectionContent {
+        overflow-x: auto;
+      }
+
+      .menu-toggle {
+        display: block;
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        z-index: 101;
+        background: var(--primary);
+        color: white;
+        border: none;
+        padding: 10px;
+        border-radius: 12px;
+        box-shadow: 0 14px 28px -18px rgba(6, 40, 31, 0.8);
+      }
+
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .gl-entry-modal-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .info-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .voucher-top-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .voucher-card {
+        padding: 20px 18px;
+      }
+
+      .voucher-card-top,
+      .voucher-meta-grid,
+      .voucher-narration-grid,
+      .voucher-approval-strip,
+      .voucher-card-mini-grid {
+        grid-template-columns: 1fr;
+        display: grid;
+      }
+
+      .voucher-card-top {
+        display: grid;
+      }
+
+      .voucher-card-badge {
+        min-width: 0;
+        width: 82px;
+        height: 82px;
+      }
+
+      .voucher-card-amount-row {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+
+    @media (min-width: 769px) {
+      .menu-toggle {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay">
+    <div class="spinner-large"></div>
+    <div class="loading-text" id="loadingText">Processing...</div>
+  </div>
+  <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h2>🧾 E-Voucher</h2>
+      <p>Bank Transaction System</p>
+    </div>
+    <div class="user-profile">
+      <div class="avatar" id="userAvatar">U</div>
+      <div class="user-info">
+        <div id="userNameDisplay">Loading...</div>
+        <div id="userRoleDisplay">...</div>
+      </div>
+    </div>
+    <ul class="nav-links" id="navLinks"></ul>
+    <button class="logout-btn" onclick="logout()">🚪 Logout</button>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <section class="dashboard-hero">
+      <div>
+        <span class="dashboard-eyebrow">E-Voucher</span>
+        <h1 id="dashboardGreeting">Welcome back</h1>
+        <p id="dashboardSubtitle">Manage voucher approvals, posting, and settlement from one workspace.</p>
+      </div>
+      <div class="hero-summary">
+        <span>Current Role</span>
+        <strong id="heroRoleDisplay">...</strong>
+      </div>
+    </section>
+
+    <div class="cards-grid" id="actionCards"></div>
+
+    <!-- Dynamic Section (Admin/GL/Schedule) -->
+    <div id="dynamicSection" style="display:none;">
+      <div class="table-container">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+          <h2 id="sectionTitle" style="font-size:1.25rem; font-weight:600;">Section Title</h2>
+          <button class="btn btn-primary" id="sectionActionBtn" style="display:none;">Action</button>
+        </div>
+        <div id="sectionContent"></div>
+      </div>
+    </div>
+
+    <!-- Voucher List -->
+    <div class="table-container" id="voucherListSection">
+      <h2 style="margin-bottom: 20px; font-size:1.25rem; font-weight:600;" id="listTitle">Pending Vouchers</h2>
+      <div class="tabs" id="voucherTabs"></div>
+      <div id="activeTabContent">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Initiator</th>
+              <th>Amount</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <tr>
+              <td colspan="7" style="text-align:center; padding: 40px; color:#6b7280;">Loading vouchers...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- Universal Modal -->
+  <div class="modal-overlay" id="universalModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modalTitle">Details</h3>
+        <button class="close-modal" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer" id="modalFooter"></div>
+    </div>
+  </div>
+
+  <!-- Media Viewer Modal (For PDF/Image Viewing) -->
+  <div class="modal-overlay" id="mediaViewerModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="mediaViewerTitle">Document Viewer</h3>
+        <button class="close-modal" onclick="closeMediaViewer()">&times;</button>
+      </div>
+      <div class="modal-body" id="mediaViewerBody"></div>
+      <div class="modal-footer">
+        <a href="#" id="mediaDownloadLink" target="_blank" class="btn btn-primary">⬇️ Download</a>
+        <button class="btn btn-secondary" onclick="closeMediaViewer()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- GL Entry Modal -->
+  <div class="modal-overlay" id="glEntryModal">
+    <div class="modal-box gl-entry-box">
+      <div class="modal-header">
+        <div class="gl-entry-title">
+          <span><i class="fas fa-book"></i></span>
+          <div>
+            <h3>Operations GL Entry</h3>
+            <p>Select debit and credit GL accounts from the searchable list.</p>
+          </div>
+        </div>
+        <button class="close-modal" onclick="closeGlEntryModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="gl-entry-modal-grid">
+          <div class="form-group gl-search-field"><label>Debit GL Code</label><input type="text"
+              id="glModalDebitCode" placeholder="Search..."
+              onfocus="filterGL('glModalDebitCode','glModalDebitName','glModalDebitList')"
+              oninput="filterGL('glModalDebitCode','glModalDebitName','glModalDebitList')">
+            <div id="glModalDebitList" class="autocomplete-items"></div>
+          </div>
+          <div class="form-group gl-name-field"><label>Debit GL Name</label><input type="text" id="glModalDebitName" readonly
+              style="background:#f3f4f6;"></div>
+          <div class="form-group gl-search-field"><label>Credit GL Code</label><input type="text"
+              id="glModalCreditCode" placeholder="Search..."
+              onfocus="filterGL('glModalCreditCode','glModalCreditName','glModalCreditList')"
+              oninput="filterGL('glModalCreditCode','glModalCreditName','glModalCreditList')">
+            <div id="glModalCreditList" class="autocomplete-items"></div>
+          </div>
+          <div class="form-group gl-name-field"><label>Credit GL Name</label><input type="text" id="glModalCreditName" readonly
+              style="background:#f3f4f6;"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeGlEntryModal()">Cancel</button>
+        <button class="btn btn-success" onclick="approveGL()">Save GL & Submit to FinCon</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ================= CONFIGURATION =================
+    const firebaseConfig = {
+      apiKey: "AIzaSyCqFDo6SzEBS2vI0rRtoagUegSTU_xNZ8Y",
+      authDomain: "evoucher-b42ae.firebaseapp.com",
+      projectId: "evoucher-b42ae",
+      storageBucket: "evoucher-b42ae.firebasestorage.app",
+      messagingSenderId: "108322286006",
+      appId: "1:108322286006:web:97c3c3004c356acbcfb917"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+    const functionsApi = firebase.functions();
+    let userCreationApp = null;
+
+    function getUserCreationAuth() {
+      if (!userCreationApp) {
+        userCreationApp = firebase.initializeApp(firebaseConfig, 'userCreationApp');
+      }
+      return userCreationApp.auth();
+    }
+
+    // ================= STATE MANAGEMENT =================
+    let currentUser = null;
+    let currentVoucher = null;
+    let glCache = [];
+    let allUsers = [];
+    let ccList = [];
+    let selectedFiles = [];
+    let currentView = 'dashboard';
+    let activeTab = 'all';
+    let settlementReceipts = [];
+    let currentGlModalSource = 'inline';
+    const DASHBOARD_STATE_KEY = 'evoucher_dashboard_state';
+    const GITHUB_CONFIG = {
+      username: 'tobismaa',
+      repo: 'e-voucher-files',
+      branch: 'main',
+      folder: 'vouchers'
+    };
+    const PREVIOUS_STEP_MAP = {
+      operations: 'initiated',
+      fincon: 'operations',
+      iad: 'fincon',
+      coo: 'iad',
+      posting: 'coo',
+      settlement: 'posting'
+    };
+    const ROLE_STEP_LABELS = {
+      initiated: 'Initiator',
+      operations: 'Operations',
+      fincon: 'FinCon',
+      iad: 'IAD',
+      coo: 'COO',
+      posting: 'Operations Posting',
+      settlement: 'Initiator Settlement',
+      completed: 'Completed'
+    };
+
+    // ================= UTILS =================
+    const showLoading = (msg = "Processing...") => {
+      document.getElementById('loadingText').innerText = msg;
+      document.getElementById('loadingOverlay').classList.add('active');
+    };
+    const hideLoading = () => document.getElementById('loadingOverlay').classList.remove('active');
+
+    // Helper function to safely parse dates from Firestore
+    function parseDate(dateValue) {
+      if (!dateValue) return new Date();
+      if (dateValue instanceof Date) return dateValue;
+      if (dateValue.toDate) return dateValue.toDate();
+      if (typeof dateValue === 'string') return new Date(dateValue);
+      if (typeof dateValue === 'number') return new Date(dateValue);
+      return new Date();
+    }
+
+    function formatDate(dateValue) {
+      try {
+        const date = parseDate(dateValue);
+        if (isNaN(date.getTime())) return 'Invalid Date';
+        return date.toLocaleDateString('en-NG', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+      } catch (e) {
+        return 'Invalid Date';
+      }
+    }
+
+    function getPreviousStep(step) {
+      return PREVIOUS_STEP_MAP[step] || null;
+    }
+
+    function getPreviousStageLabel(step) {
+      const previousStep = getPreviousStep(step);
+      return previousStep ? (ROLE_STEP_LABELS[previousStep] || previousStep) : '';
+    }
+
+    function findWorkflowUserByRole(voucher, role) {
+      if (!voucher || !voucher.workflow || !Array.isArray(voucher.workflow)) return null;
+      for (let index = voucher.workflow.length - 1; index >= 0; index -= 1) {
+        const entry = voucher.workflow[index];
+        if (entry.role === role || entry.step === role) {
+          const matchedUser = allUsers.find(u => u.name === entry.actor || u.name === entry.actorName);
+          if (matchedUser) return matchedUser;
+        }
+      }
+      return null;
+    }
+
+    function getHashState() {
+      const rawHash = window.location.hash.replace(/^#/, '');
+      if (!rawHash) return null;
+      const [view, tab] = rawHash.split(':');
+      return { view: view || 'dashboard', tab: tab || '' };
+    }
+
+    function getStoredState() {
+      const hashState = getHashState();
+      if (hashState) return hashState;
+
+      try {
+        return JSON.parse(sessionStorage.getItem(DASHBOARD_STATE_KEY) || 'null');
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function saveDashboardState(view = currentView, tab = activeTab) {
+      const state = { view, tab };
+      sessionStorage.setItem(DASHBOARD_STATE_KEY, JSON.stringify(state));
+
+      const nextHash = view === 'dashboard' && tab ? `#${view}:${tab}` : `#${view}`;
+      if (window.location.hash !== nextHash) {
+        history.replaceState(null, '', nextHash);
+      }
+    }
+
+    function closeSidebarOnMobile() {
+      if (window.innerWidth <= 768) {
+        document.getElementById('sidebar').classList.remove('active');
+      }
+    }
+
+    function restoreSavedView() {
+      const state = getStoredState() || {};
+      const view = state.view || 'dashboard';
+      const tab = state.tab || '';
+
+      if (view === 'users' && currentUser.role === 'admin') {
+        loadUserManagement();
+      } else if (view === 'gl' && currentUser.role === 'admin') {
+        loadGLManagement();
+      } else if (view === 'schedule' && currentUser.role === 'operations') {
+        loadScheduleEntry();
+      } else {
+        loadDashboard(tab);
+      }
+    }
+
+    // ================= GITHUB UPLOAD FUNCTIONS =================
+    const fileToBase64 = (file) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = error => reject(error);
+    });
+
+    async function uploadToGitHub(file, onProgress) {
+      const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const fileName = `${GITHUB_CONFIG.folder}/${Date.now()}_${cleanName}`;
+
+      if (onProgress) onProgress(`Encoding ${file.name}...`);
+      const content = await fileToBase64(file);
+      const url = `https://api.github.com/repos/${GITHUB_CONFIG.username}/${GITHUB_CONFIG.repo}/contents/${fileName}`;
+      const payload = {
+        message: `Upload voucher: ${cleanName}`,
+        content,
+        branch: GITHUB_CONFIG.branch
+      };
+
+      if (onProgress) onProgress(`Uploading ${file.name} to GitHub...`);
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || `GitHub upload failed with status ${response.status}`);
+      }
+
+      return {
+        name: file.name,
+        url: `https://cdn.jsdelivr.net/gh/${GITHUB_CONFIG.username}/${GITHUB_CONFIG.repo}@${GITHUB_CONFIG.branch}/${fileName}`,
+        provider: 'github',
+        type: file.type || 'application/octet-stream',
+        size: file.size
+      };
+    }
+
+    async function processGitHubUploads(filesArray, updateStatusFn) {
+      const attachments = [];
+      for (let i = 0; i < filesArray.length; i++) {
+        const fileObj = filesArray[i];
+        if (updateStatusFn) updateStatusFn(`Uploading... (${i + 1}/${filesArray.length})`);
+        const result = await uploadToGitHub(fileObj.file, updateStatusFn);
+        attachments.push(result);
+      }
+      return attachments;
+    }
+
+    // ================= BACKBLAZE B2 UPLOAD FUNCTIONS =================
+    async function getBackblazeDownloadUrl(file) {
+      if (!file.key) {
+        if (file.url) return file.url;
+        throw new Error("Attachment is missing its Backblaze file key.");
+      }
+
+      const createDownloadUrl = functionsApi.httpsCallable('createB2DownloadUrl');
+      const response = await createDownloadUrl({ key: file.key });
+      return response.data.downloadUrl;
+    }
+
+    async function uploadToBackblaze(file, onProgress) {
+      if (onProgress) onProgress(`Preparing secure upload for ${file.name}...`);
+
+      const createUploadUrl = functionsApi.httpsCallable('createB2UploadUrl');
+      const response = await createUploadUrl({
+        fileName: file.name,
+        contentType: file.type || 'application/octet-stream',
+        size: file.size
+      });
+      const uploadData = response.data;
+
+      if (onProgress) onProgress(`Uploading ${file.name} to Backblaze B2...`);
+      const uploadResponse = await fetch(uploadData.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream'
+        },
+        body: file
+      });
+
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        throw new Error(errorText || `Backblaze upload failed with status ${uploadResponse.status}`);
+      }
+
+      return {
+        name: file.name,
+        url: uploadData.url || '',
+        key: uploadData.key,
+        provider: uploadData.provider || 'backblaze_b2',
+        type: file.type || 'application/octet-stream',
+        size: file.size
+      };
+    }
+
+    async function processBackblazeUploads(filesArray, updateStatusFn) {
+      const attachments = [];
+      for (let i = 0; i < filesArray.length; i++) {
+        const fileObj = filesArray[i];
+        if (updateStatusFn) updateStatusFn(`Uploading... (${i + 1}/${filesArray.length})`);
+        const result = await uploadToBackblaze(fileObj.file, updateStatusFn);
+        attachments.push(result);
+      }
+      return attachments;
+    }
+
+    // ================= AUTH & INIT =================
+    auth.onAuthStateChanged(async (user) => {
+      if (!user) { window.location.href = 'index.html'; return; }
+      try {
+        showLoading("Loading Profile...");
+        const userDoc = await db.collection('users').doc(user.uid).get();
+        if (!userDoc.exists) { alert("Profile not found"); auth.signOut(); return; }
+        currentUser = { uid: user.uid, email: user.email, ...userDoc.data() };
+        document.getElementById('userNameDisplay').innerText = currentUser.name || user.email;
+        document.getElementById('userRoleDisplay').innerText = currentUser.role.toUpperCase();
+        document.getElementById('userAvatar').innerText = (currentUser.name || 'U')[0].toUpperCase();
+        document.getElementById('dashboardGreeting').innerText = `Welcome back, ${(currentUser.name || 'User').split(' ')[0]}`;
+        document.getElementById('heroRoleDisplay').innerText = currentUser.role;
+        await Promise.all([loadUsers(), loadGLCodes()]);
+        restoreSavedView();
+      } catch (error) {
+        console.error(error);
+        alert("Error loading profile: " + error.message);
+      } finally {
+        hideLoading();
+      }
+    });
+
+    function logout() { auth.signOut().then(() => window.location.href = 'index.html'); }
+    function toggleSidebar() { document.getElementById('sidebar').classList.toggle('active'); }
+
+    async function loadUsers() {
+      const snap = await db.collection('users').get();
+      allUsers = [];
+      snap.forEach(doc => { if (doc.id !== currentUser.uid) allUsers.push({ id: doc.id, ...doc.data() }); });
+    }
+
+    async function loadGLCodes() {
+      const snap = await db.collection('gl_codes').orderBy('code', 'asc').get();
+      glCache = [];
+      snap.forEach(doc => glCache.push(doc.data()));
+    }
+
+    // ================= NAVIGATION =================
+    function loadDashboard(preferredTab = activeTab) {
+      currentView = 'dashboard';
+      document.getElementById('dynamicSection').style.display = 'none';
+      document.getElementById('voucherListSection').style.display = 'block';
+      renderNav();
+      renderCards();
+      loadVoucherTabs(preferredTab);
+      saveDashboardState('dashboard', activeTab);
+      loadVouchersByTab(activeTab);
+      closeSidebarOnMobile();
+    }
+
+    function renderNav() {
+      let html = `<li><a href="#" class="${currentView === 'dashboard' ? 'active' : ''}" onclick="loadDashboard(); return false;">📊 Dashboard</a></li>`;
+      if (currentUser.role === 'admin') {
+        html += `<li><a href="#" class="${currentView === 'users' ? 'active' : ''}" onclick="loadUserManagement(); return false;">👥 User Management</a></li>`;
+        html += `<li><a href="#" class="${currentView === 'gl' ? 'active' : ''}" onclick="loadGLManagement(); return false;">📒 GL Codes</a></li>`;
+      }
+      document.getElementById('navLinks').innerHTML = html;
+    }
+
+    function renderCards() {
+      const container = document.getElementById('actionCards');
+      const role = currentUser.role;
+      const cards = [
+        { r: 'initiator', icon: '➕', title: 'Create Voucher', desc: 'Start new request', action: 'openCreate' },
+        { r: 'initiator', icon: '🏦', title: 'Pending Settlement', desc: 'Track cash advances awaiting settlement', action: 'scrollToTable' },
+        { r: 'initiator', icon: '🧾', title: 'My Vouchers', desc: 'View submitted requests and updates', action: 'scrollToTable' },
+        { r: 'operations', icon: '⚙️', title: 'Pending Operations', desc: 'Enter GL, voucher type, and submit', action: 'scrollToTable' },
+        { r: 'operations', icon: '🔖', title: 'Ready For Posting', desc: 'Add posting reference numbers', action: 'scrollToTable' },
+        { r: 'operations', icon: '📅', title: 'Schedule Entry', desc: 'Double-Entry Journal', action: 'loadScheduleEntry' },
+        { r: 'iad', icon: '✓', title: 'Pending Audit', desc: 'Review & Approve', action: 'scrollToTable' },
+        { r: 'fincon', icon: '💰', title: 'Pending FinCon', desc: 'Financial Approval', action: 'scrollToTable' },
+        { r: 'coo', icon: '⭐', title: 'Pending COO', desc: 'Final Sign-off', action: 'scrollToTable' }
+      ];
+      if (role === 'admin') {
+        cards.push(
+          { r: 'admin', icon: '👥', title: 'Manage Users', desc: 'Create/Edit Users', action: 'loadUserManagement' },
+          { r: 'admin', icon: '📒', title: 'GL Management', desc: 'Upload/Manage GLs', action: 'loadGLManagement' }
+        );
+      }
+      const myCards = cards.filter(c => c.r === role);
+      container.innerHTML = myCards.length ? myCards.map(c => {
+        let onClick = '';
+        if (c.action.startsWith('load')) onClick = `${c.action}()`;
+        else if (c.action === 'scrollToTable') onClick = 'scrollToTable()';
+        else if (c.action === 'openCreate') onClick = 'openCreateModal()';
+        return `<div class="action-card" onclick="${onClick}"><span class="icon">${c.icon}</span><h3>${c.title}</h3><p>${c.desc}</p></div>`;
+      }).join('') : `<div class="action-card"><h3>Welcome</h3><p>No actions defined.</p></div>`;
+    }
+
+    function renderNav() {
+      let html = `<li><a href="#" class="${currentView === 'dashboard' ? 'active' : ''}" onclick="loadDashboard(); return false;"><i class="fas fa-chart-line"></i> Dashboard</a></li>`;
+      if (currentUser.role === 'operations') {
+        html += `<li><a href="#" class="${currentView === 'schedule' ? 'active' : ''}" onclick="loadScheduleEntry(); return false;"><i class="fas fa-table"></i> Schedule Entry</a></li>`;
+      }
+      if (currentUser.role === 'admin') {
+        html += `<li><a href="#" class="${currentView === 'users' ? 'active' : ''}" onclick="loadUserManagement(); return false;"><i class="fas fa-users-cog"></i> User Management</a></li>`;
+        html += `<li><a href="#" class="${currentView === 'gl' ? 'active' : ''}" onclick="loadGLManagement(); return false;"><i class="fas fa-book"></i> GL Codes</a></li>`;
+      }
+      document.getElementById('navLinks').innerHTML = html;
+    }
+
+    function renderCards() {
+      const container = document.getElementById('actionCards');
+      const role = currentUser.role;
+      const cards = [
+        { r: 'initiator', icon: 'fa-plus', title: 'Create Voucher', desc: 'Start a new request', action: 'openCreate' },
+        { r: 'initiator', icon: 'fa-wallet', title: 'Pending Settlement', desc: 'Track cash advances awaiting settlement', action: 'scrollToTable' },
+        { r: 'initiator', icon: 'fa-receipt', title: 'My Vouchers', desc: 'View submitted requests and updates', action: 'scrollToTable' },
+        { r: 'operations', icon: 'fa-sliders-h', title: 'Pending Operations', desc: 'Enter GL details and submit', action: 'scrollToTable' },
+        { r: 'operations', icon: 'fa-stamp', title: 'Ready For Posting', desc: 'Add posting reference numbers', action: 'scrollToTable' },
+        { r: 'operations', icon: 'fa-table', title: 'Schedule Entry', desc: 'Post double-entry journals', action: 'loadScheduleEntry' },
+        { r: 'iad', icon: 'fa-shield-alt', title: 'Pending Audit', desc: 'Review controls and approve', action: 'scrollToTable' },
+        { r: 'fincon', icon: 'fa-balance-scale', title: 'Pending FinCon', desc: 'Validate financial treatment', action: 'scrollToTable' },
+        { r: 'coo', icon: 'fa-check-double', title: 'Pending COO', desc: 'Complete final sign-off', action: 'scrollToTable' },
+        { r: 'admin', icon: 'fa-users-cog', title: 'Manage Users', desc: 'Create and update access', action: 'loadUserManagement' },
+        { r: 'admin', icon: 'fa-book', title: 'GL Management', desc: 'Upload and manage GLs', action: 'loadGLManagement' }
+      ];
+
+      const myCards = cards.filter(c => c.r === role);
+      container.innerHTML = myCards.length ? myCards.map(c => {
+        let onClick = '';
+        if (c.action.startsWith('load')) onClick = `${c.action}()`;
+        else if (c.action === 'scrollToTable') onClick = 'scrollToTable()';
+        else if (c.action === 'openCreate') onClick = 'openCreateModal()';
+        return `<div class="action-card" onclick="${onClick}"><span class="icon"><i class="fas ${c.icon}"></i></span><h3>${c.title}</h3><p>${c.desc}</p></div>`;
+      }).join('') : `<div class="action-card"><span class="icon"><i class="fas fa-home"></i></span><h3>Welcome</h3><p>No actions defined.</p></div>`;
+    }
+
+    window.scrollToTable = () => document.getElementById('voucherListSection').scrollIntoView({ behavior: 'smooth' });
+
+    // ================= VOUCHER TAB SYSTEM =================
+    function loadVoucherTabs(preferredTab = activeTab) {
+      const role = currentUser.role;
+      const tabs = [];
+      if (role === 'initiator') {
+        tabs.push(
+          { id: 'all', label: 'All Vouchers', count: 'all' },
+          { id: 'pending_settlement', label: 'Pending Settlement', count: 'pending_settlement_initiator' }
+        );
+      } else {
+        tabs.push(
+          { id: 'pending', label: 'Pending My Queue', count: 'pending_my_role' },
+          { id: 'outstanding', label: 'Outstanding (All)', count: 'outstanding_all_users' },
+          { id: 'completed', label: 'Completed', count: 'completed' }
+        );
+        if (role === 'operations') {
+          tabs.push(
+            { id: 'ready_posting', label: 'Ready For Posting', count: 'ready_posting' }
+          );
+        }
+      }
+      const tabsHtml = tabs.map((tab, index) => {
+        const isActive = tab.id === preferredTab ? 'active' : '';
+        return `<button class="tab-btn ${isActive}" data-tab="${tab.id}" onclick="switchVoucherTab('${tab.id}', this)">${tab.label}</button>`;
+      }).join('');
+      document.getElementById('voucherTabs').innerHTML = tabsHtml;
+      activeTab = tabs.some(tab => tab.id === preferredTab) ? preferredTab : tabs[0].id;
+      const activeButton = document.querySelector(`#voucherTabs .tab-btn[data-tab="${activeTab}"]`);
+      if (activeButton) activeButton.classList.add('active');
+    }
+
+    window.switchVoucherTab = async function (tabId, button = null) {
+      activeTab = tabId;
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      if (button) button.classList.add('active');
+      saveDashboardState('dashboard', activeTab);
+      await loadVouchersByTab(tabId);
+    };
+
+    async function loadVouchersByTab(tabId) {
+      const tbody = document.getElementById('tableBody');
+      const title = document.getElementById('listTitle');
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 40px; color:#6b7280;">Loading vouchers...</td></tr>';
+      try {
+        let query;
+        if (tabId === 'all' && currentUser.role === 'initiator') {
+          query = db.collection('vouchers').where('initiatorId', '==', currentUser.uid).orderBy('createdAt', 'desc').limit(50);
+          title.innerText = 'All Vouchers';
+        } else if (tabId === 'pending_settlement' && currentUser.role === 'initiator') {
+          query = db.collection('vouchers')
+            .where('initiatorId', '==', currentUser.uid)
+            .where('voucherType', '==', 'cash_advance')
+            .where('settlementStatus', '==', 'pending')
+            .orderBy('createdAt', 'desc').limit(50);
+          title.innerText = 'Pending Settlement';
+        } else if (tabId === 'pending') {
+          query = db.collection('vouchers')
+            .where('currentStep', '==', currentUser.role)
+            .orderBy('createdAt', 'desc').limit(50);
+          title.innerText = `Pending ${currentUser.role.toUpperCase()}`;
+        } else if (tabId === 'outstanding') {
+          query = db.collection('vouchers')
+            .where('voucherType', '==', 'cash_advance')
+            .where('settlementStatus', '==', 'pending')
+            .orderBy('createdAt', 'desc').limit(50);
+          title.innerText = 'Outstanding Cash Advances';
+        } else if (tabId === 'completed') {
+          query = db.collection('vouchers')
+            .where('status', '==', 'completed')
+            .orderBy('createdAt', 'desc').limit(50);
+          title.innerText = 'Completed Vouchers';
+        } else if (tabId === 'ready_posting' && currentUser.role === 'operations') {
+          query = db.collection('vouchers')
+            .where('currentStep', '==', 'posting')
+            .orderBy('createdAt', 'desc').limit(50);
+          title.innerText = 'Ready For Posting (Operations)';
+        } else {
+          query = db.collection('vouchers')
+            .where('currentStep', '==', currentUser.role)
+            .orderBy('createdAt', 'desc').limit(50);
+        }
+        const snapshot = await query.get();
+        if (snapshot.empty) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:40px; color:#9ca3af;">No vouchers found in this category.</td></tr>';
+          return;
+        }
+        let rows = '';
+        snapshot.forEach(doc => {
+          const v = doc.data();
+          const amount = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(v.amount);
+          const dateStr = formatDate(v.createdAt);
+          const statusClass = getStatusClass(v.status);
+          rows += `<tr>
+<td><strong>#${doc.id.substring(0, 8)}</strong></td>
+<td>${v.initiatorName || 'Unknown'}</td>
+<td>${amount}</td>
+<td>${v.voucherType || 'Expense'}</td>
+<td><span class="badge badge-${statusClass}">${formatStatus(v.status)}</span></td>
+<td>${dateStr}</td>
+<td><button class="btn btn-view" onclick="openViewModal('${doc.id}')">View & Act</button></td>
+</tr>`;
+        });
+        tbody.innerHTML = rows;
+      } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="7" style="color:red; text-align:center;">Error: ${error.message}</td></tr>`;
+      }
+    }
+
+    function getStatusColor(status) {
+      const colors = { pending: '#137a52', completed: '#20b26b', outstanding: '#f59e0b', settled: '#20b26b', sent_back: '#f59e0b' };
+      return colors[status.split('_')[0]] || '#6b7280';
+    }
+
+    function getStatusClass(status) {
+      const classes = { pending: 'pending', completed: 'completed', outstanding: 'outstanding', settled: 'completed', sent_back: 'pending' };
+      return classes[status.split('_')[0]] || 'pending';
+    }
+
+    function formatStatus(status) {
+      return status.replace(/_/g, ' ').toUpperCase();
+    }
+
+    // ================= ADMIN: USER MANAGEMENT =================
+    window.loadUserManagement = async function () {
+      currentView = 'users';
+      saveDashboardState('users', activeTab);
+      renderNav();
+      document.getElementById('voucherListSection').style.display = 'none';
+      document.getElementById('dynamicSection').style.display = 'block';
+      document.getElementById('sectionTitle').innerText = "User Management";
+      document.getElementById('sectionActionBtn').innerText = "+ Create User";
+      document.getElementById('sectionActionBtn').style.display = 'inline-flex';
+      document.getElementById('sectionActionBtn').onclick = openCreateUserModal;
+      const container = document.getElementById('sectionContent');
+      container.innerHTML = '<div style="text-align:center; padding:40px;">Loading users...</div>';
+      try {
+        const snap = await db.collection('users').get();
+        let html = `<div class="compact-table-wrap"><table class="compact-table"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Dept</th><th>Status</th><th>Action</th></tr></thead><tbody>`;
+        snap.forEach(doc => {
+          const u = doc.data();
+          const statusText = u.active ? 'Active' : 'Inactive';
+          const statusColor = u.active ? '#10b981' : '#ef4444';
+          html += `<tr>
+<td>${u.name}</td>
+<td>${u.email}</td>
+<td><span style="background:#e0e7ff; color:#3730a3; padding:2px 8px; border-radius:12px; font-size:0.75rem; font-weight:600;">${u.role}</span></td>
+<td>${u.department || '-'}</td>
+<td><span style="color:${statusColor}; font-weight:600;">${statusText}</span></td>
+<td><button class="btn btn-edit" onclick="openEditUserModal('${doc.id}', '${u.name.replace(/'/g, "\\'")}', '${u.email}', '${u.role}', '${u.department || ''}', ${u.active})">Edit</button></td>
+</tr>`;
+        });
+        html += `</tbody></table></div>`;
+        container.innerHTML = html;
+      } catch (e) {
+        container.innerHTML = `<p style="color:red; text-align:center;">Error: ${e.message}</p>`;
+      }
+      closeSidebarOnMobile();
+    }
+
+    window.openCreateUserModal = function () {
+      const modal = document.getElementById('universalModal');
+      const body = document.getElementById('modalBody');
+      const footer = document.getElementById('modalFooter');
+      modal.classList.add('active');
+      document.getElementById('modalTitle').innerText = "Create New User";
+      body.innerHTML = `
+<div class="form-grid">
+<div class="form-group full-width"><label>Full Name *</label><input type="text" id="newUserName" placeholder="John Doe"></div>
+<div class="form-group"><label>Work Email *</label><input type="email" id="newUserEmail" placeholder="john@bank.com"></div>
+<div class="form-group"><label>Department</label><input type="text" id="newUserDept" placeholder="e.g., Finance"></div>
+<div class="form-group full-width"><label>Temporary Password *</label><input type="password" id="newUserPass" placeholder="Min 6 characters"></div>
+<div class="form-group full-width"><label>Assign Role *</label><select id="newUserRole">
+<option value="initiator">Initiator</option><option value="operations">Operations</option><option value="iad">Internal Audit (IAD)</option>
+<option value="fincon">FinCon</option><option value="coo">COO</option><option value="admin">Admin</option>
+</select></div>
+</div>`;
+      footer.innerHTML = `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="btnSubmitNewUser">Create User</button>`;
+      document.getElementById('btnSubmitNewUser').onclick = submitNewUserToFirebase;
+    }
+
+    window.submitNewUserToFirebase = async function () {
+      const name = document.getElementById('newUserName').value.trim();
+      const email = document.getElementById('newUserEmail').value.trim();
+      const pass = document.getElementById('newUserPass').value;
+      const role = document.getElementById('newUserRole').value;
+      const dept = document.getElementById('newUserDept').value.trim();
+      if (!name || !email || !pass) { alert("Name, Email, and Password are required."); return; }
+      showLoading("Creating Account...");
+      try {
+        const userCreationAuth = getUserCreationAuth();
+        const userCredential = await userCreationAuth.createUserWithEmailAndPassword(email, pass);
+        await db.collection('users').doc(userCredential.user.uid).set({
+          name, email, role, department: dept || 'General', active: true,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await userCreationAuth.signOut();
+        alert(`✅ Success!\nUser: ${name}\nEmail: ${email}\nRole: ${role}`);
+        closeModal();
+        loadUserManagement();
+      } catch (error) {
+        let msg = error.message;
+        if (error.code === 'auth/email-already-in-use') msg = "Email already registered.";
+        if (error.code === 'auth/weak-password') msg = "Password too weak (min 6 chars).";
+        alert("❌ Error: " + msg);
+      } finally { hideLoading(); }
+    }
+
+    window.openEditUserModal = function (id, name, email, role, dept, isActive) {
+      const modal = document.getElementById('universalModal');
+      const body = document.getElementById('modalBody');
+      const footer = document.getElementById('modalFooter');
+      modal.classList.add('active');
+      document.getElementById('modalTitle').innerText = "Edit User: " + name;
+      body.innerHTML = `
+<div class="form-grid">
+<div class="form-group full-width"><label>Full Name *</label><input type="text" id="editUserName" value="${name}"></div>
+<div class="form-group full-width"><label>Email</label><input type="email" value="${email}" disabled style="background:#f3f4f6; color:#9ca3af;"><small>Email cannot be changed.</small></div>
+<div class="form-group"><label>Department</label><input type="text" id="editUserDept" value="${dept}"></div>
+<div class="form-group"><label>Status</label>
+<select id="editUserStatus">
+<option value="true" ${isActive ? 'selected' : ''}>Active</option>
+<option value="false" ${!isActive ? 'selected' : ''}>Inactive</option>
+</select>
+</div>
+<div class="form-group full-width"><label>Role *</label><select id="editUserRole">
+<option value="initiator" ${role === 'initiator' ? 'selected' : ''}>Initiator</option>
+<option value="operations" ${role === 'operations' ? 'selected' : ''}>Operations</option>
+<option value="iad" ${role === 'iad' ? 'selected' : ''}>Internal Audit (IAD)</option>
+<option value="fincon" ${role === 'fincon' ? 'selected' : ''}>FinCon</option>
+<option value="coo" ${role === 'coo' ? 'selected' : ''}>COO</option>
+<option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option>
+</select></div>
+</div>`;
+      footer.innerHTML = `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" id="btnSaveEdit">Save Changes</button>`;
+      document.getElementById('btnSaveEdit').onclick = () => submitEditUserToFirebase(id);
+    }
+
+    window.submitEditUserToFirebase = async function (userId) {
+      const name = document.getElementById('editUserName').value.trim();
+      const role = document.getElementById('editUserRole').value;
+      const dept = document.getElementById('editUserDept').value.trim();
+      const isActive = document.getElementById('editUserStatus').value === 'true';
+      if (!name) { alert("Name is required."); return; }
+      showLoading("Saving Changes...");
+      try {
+        await db.collection('users').doc(userId).update({ name, role, department: dept, active: isActive });
+        alert("✅ User updated successfully!");
+        closeModal();
+        loadUserManagement();
+      } catch (error) { alert("❌ Error: " + error.message); }
+      finally { hideLoading(); }
+    }
+
+    // ================= ADMIN: GL MANAGEMENT =================
+    window.loadGLManagement = async function () {
+      currentView = 'gl';
+      saveDashboardState('gl', activeTab);
+      renderNav();
+      document.getElementById('voucherListSection').style.display = 'none';
+      document.getElementById('dynamicSection').style.display = 'block';
+      document.getElementById('sectionTitle').innerText = "GL Code Management";
+      document.getElementById('sectionActionBtn').style.display = 'none';
+      const container = document.getElementById('sectionContent');
+      await loadGLCodes();
+      container.innerHTML = `
+<div class="tabs">
+<div class="tab-btn active" onclick="switchGLTab('upload')">📤 Bulk Upload (Excel)</div>
+<div class="tab-btn" onclick="switchGLTab('manual')">✍️ Manual Entry</div>
+</div>
+<div id="tab-upload" class="tab-content active">
+<div style="margin-bottom:20px; background:#fff3cd; padding:16px; border-radius:8px; border:1px solid #ffeeba; color:#92400e;">
+<strong>Instructions:</strong> Upload an Excel file with columns: <code>Code</code>, <code>Name</code>.
+</div>
+<div class="file-upload-area" onclick="document.getElementById('glFileInput').click()" style="cursor:pointer;">
+<p style="color:#6b7280; margin-bottom:8px; font-weight:600;">Click to select Excel file</p>
+<p style="font-size:0.85rem; color:#9ca3af;">Supports .xlsx, .xls</p>
+<input type="file" id="glFileInput" accept=".xlsx, .xls" style="display:none" onchange="handleGLUpload(this)">
+</div>
+<div id="uploadStatus" style="margin-top:16px; text-align:center; font-weight:600; color:var(--primary);"></div>
+</div>
+<div id="tab-manual" class="tab-content">
+<div class="form-grid" style="background:#f9fafb; padding:20px; border-radius:8px; border:1px solid #e5e7eb;">
+<div class="form-group"><label>GL Code *</label><input type="text" id="manualCode" placeholder="e.g., 101001"></div>
+<div class="form-group"><label>GL Name *</label><input type="text" id="manualName" placeholder="e.g., Cash in Hand"></div>
+<div class="form-group full-width" style="text-align:right;"><button class="btn btn-primary" onclick="addManualGL()">Add GL Code</button></div>
+</div>
+</div>
+<div class="section-title" style="margin-top:32px;">Existing GL Codes</div>
+<table><thead><tr><th>Code</th><th>Name</th><th>Usage Count</th></tr></thead><tbody id="glTableBody"></tbody></table>
+`;
+      renderGLTable();
+      closeSidebarOnMobile();
+    }
+
+    window.switchGLTab = function (tabName) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      if (tabName === 'upload') { document.querySelectorAll('.tab-btn')[0].classList.add('active'); document.getElementById('tab-upload').classList.add('active'); }
+      else { document.querySelectorAll('.tab-btn')[1].classList.add('active'); document.getElementById('tab-manual').classList.add('active'); }
+    }
+
+    window.renderGLTable = function () {
+      const tbody = document.getElementById('glTableBody');
+      if (!tbody) return;
+      tbody.innerHTML = glCache.map(gl => `<tr><td><strong>${gl.code}</strong></td><td>${gl.name}</td><td>${gl.usageCount || 0}</td></tr>`).join('');
+    }
+
+    window.addManualGL = async function () {
+      const code = document.getElementById('manualCode').value.trim();
+      const name = document.getElementById('manualName').value.trim();
+      if (!code || !name) { alert("Code and Name are required"); return; }
+      showLoading("Saving GL...");
+      try {
+        await db.collection('gl_codes').doc(code).set({ code, name, usageCount: 0 }, { merge: true });
+        alert("✅ GL Code added successfully!");
+        document.getElementById('manualCode').value = '';
+        document.getElementById('manualName').value = '';
+        await loadGLCodes();
+        renderGLTable();
+      } catch (e) { alert("❌ Error: " + e.message); }
+      finally { hideLoading(); }
+    }
+
+    window.handleGLUpload = function (input) {
+      const file = input.files[0];
+      if (!file) return;
+      const statusDiv = document.getElementById('uploadStatus');
+      statusDiv.innerText = "Reading file...";
+      const reader = new FileReader();
+      reader.onload = async function (e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          if (!workbook.SheetNames || workbook.SheetNames.length === 0) throw new Error("No sheets found");
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+          if (!json || json.length === 0) throw new Error("File is empty");
+          const batch = db.batch();
+          let count = 0;
+          const total = json.length;
+          showLoading(`Processing 0%`);
+          for (let i = 0; i < json.length; i++) {
+            const row = json[i];
+            if (!row || Object.keys(row).length === 0) continue;
+            const keys = Object.keys(row);
+            const codeKey = keys.find(k => k.toLowerCase() === 'code');
+            const nameKey = keys.find(k => k.toLowerCase() === 'name');
+            const code = codeKey ? String(row[codeKey]).trim() : null;
+            const name = nameKey ? String(row[nameKey]).trim() : null;
+            if (code && name) {
+              const ref = db.collection('gl_codes').doc(code);
+              batch.set(ref, { code, name, usageCount: 0 }, { merge: true });
+              count++;
+            }
+            if (i % 20 === 0 || i === total - 1) {
+              const percent = Math.round(((i + 1) / total) * 100);
+              document.getElementById('loadingText').innerText = `Processing: ${percent}%`;
+              await new Promise(r => setTimeout(r, 10));
+            }
+          }
+          if (count === 0) throw new Error("No valid rows found. Check headers 'Code' and 'Name'.");
+          showLoading("Committing to Database...");
+          await batch.commit();
+          statusDiv.innerText = `✅ Success! Uploaded ${count} codes.`;
+          statusDiv.style.color = "#10b981";
+          alert(`✅ Successfully uploaded ${count} GL codes.`);
+          await loadGLCodes();
+          renderGLTable();
+        } catch (err) {
+          console.error(err);
+          statusDiv.innerText = "❌ Error: " + err.message;
+          statusDiv.style.color = "#ef4444";
+          alert("❌ Error: " + err.message);
+        } finally {
+          hideLoading();
+          input.value = '';
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    // ================= OPERATIONS: SCHEDULE ENTRY =================
+    window.loadScheduleEntry = async function () {
+      currentView = 'schedule';
+      saveDashboardState('schedule', activeTab);
+      renderNav();
+      document.getElementById('voucherListSection').style.display = 'none';
+      document.getElementById('dynamicSection').style.display = 'block';
+      document.getElementById('sectionTitle').innerText = "Schedule Entry (Journal)";
+      document.getElementById('sectionActionBtn').style.display = 'none';
+      const container = document.getElementById('sectionContent');
+      container.innerHTML = `
+<div style="background:white; padding:24px; border-radius:12px; border:1px solid #e5e7eb;">
+<div class="form-grid">
+<div class="form-group"><label>Date</label><input type="date" id="schedDate"></div>
+<div class="form-group"><label>Description / Narration</label><input type="text" id="schedDesc" placeholder="e.g., Monthly Rent Payment"></div>
+</div>
+<div class="entry-leg debit">
+<div class="leg-title">🔴 Debit Entry (Dr)</div>
+<div class="form-grid">
+<div class="form-group gl-search-field"><label>GL Code</label><input type="text" id="drCode" placeholder="Search GL..." onfocus="filterGL('drCode','drName','drList')" oninput="filterGL('drCode','drName','drList')"><div id="drList" class="autocomplete-items"></div></div>
+<div class="form-group gl-name-field"><label>GL Name</label><input type="text" id="drName" readonly style="background:#f3f4f6;"></div>
+<div class="form-group"><label>Amount (₦)</label><input type="number" id="drAmount" placeholder="0.00" oninput="checkBalance()"></div>
+</div>
+</div>
+<div class="entry-leg credit">
+<div class="leg-title">🟢 Credit Entry (Cr)</div>
+<div class="form-grid">
+<div class="form-group gl-search-field"><label>GL Code</label><input type="text" id="crCode" placeholder="Search GL..." onfocus="filterGL('crCode','crName','crList')" oninput="filterGL('crCode','crName','crList')"><div id="crList" class="autocomplete-items"></div></div>
+<div class="form-group gl-name-field"><label>GL Name</label><input type="text" id="crName" readonly style="background:#f3f4f6;"></div>
+<div class="form-group"><label>Amount (₦)</label><input type="number" id="crAmount" placeholder="0.00" oninput="checkBalance()"></div>
+</div>
+</div>
+<div id="balanceCheck" style="text-align:right; font-weight:bold; padding:12px; background:#fff; border:1px solid #ddd; border-radius:6px; margin-top:10px; color:#ef4444;">Difference: ₦0.00</div>
+<div style="margin-top:24px; text-align:right;"><button class="btn btn-primary" onclick="submitScheduleEntry()">Post Entry</button></div>
+</div>
+<div style="margin-top:32px;"><h3 style="margin-bottom:16px; font-size:1.1rem;">Recent Entries</h3><div id="scheduleList" style="margin-top:10px;">Loading...</div></div>
+`;
+      loadScheduleList();
+      closeSidebarOnMobile();
+    }
+
+    window.checkBalance = function () {
+      const dr = parseFloat(document.getElementById('drAmount').value) || 0;
+      const cr = parseFloat(document.getElementById('crAmount').value) || 0;
+      const diff = Math.abs(dr - cr);
+      const indicator = document.getElementById('balanceCheck');
+      indicator.innerText = `Difference: ₦${diff.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+      if (diff === 0 && dr > 0) { indicator.style.color = "#10b981"; indicator.innerText += " (Balanced)"; }
+      else { indicator.style.color = "#ef4444"; }
+      return diff === 0 && dr > 0;
+    }
+
+    window.submitScheduleEntry = async function () {
+      const date = document.getElementById('schedDate').value;
+      const desc = document.getElementById('schedDesc').value;
+      const drCode = document.getElementById('drCode').value;
+      const drName = document.getElementById('drName').value;
+      const drAmt = parseFloat(document.getElementById('drAmount').value);
+      const crCode = document.getElementById('crCode').value;
+      const crName = document.getElementById('crName').value;
+      const crAmt = parseFloat(document.getElementById('crAmount').value);
+      if (!date || !desc) { alert("Date and Description required"); return; }
+      if (!drCode || !crCode) { alert("Both Debit and Credit GLs are required"); return; }
+      if (!checkBalance()) { alert("Debit and Credit amounts must match and be greater than 0."); return; }
+      showLoading("Posting Entry...");
+      try {
+        await db.collection('schedules').add({
+          date, description: desc,
+          debit: { code: drCode, name: drName, amount: drAmt },
+          credit: { code: crCode, name: crName, amount: crAmt },
+          totalAmount: drAmt,
+          createdBy: currentUser.name, role: currentUser.role, status: 'posted',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        alert("✅ Entry Posted Successfully!");
+        loadScheduleEntry();
+      } catch (e) { alert("❌ Error: " + e.message); }
+      finally { hideLoading(); }
+    }
+
+    async function loadScheduleList() {
+      const div = document.getElementById('scheduleList');
+      try {
+        const snap = await db.collection('schedules').orderBy('createdAt', 'desc').limit(10).get();
+        if (snap.empty) { div.innerHTML = "<p style='color:#9ca3af;'>No entries yet.</p>"; return; }
+        let html = '<table style="font-size:0.9rem;"><thead><tr><th>Date</th><th>Description</th><th>Debit (GL)</th><th>Credit (GL)</th><th>Amount</th><th>By</th></tr></thead><tbody>';
+        snap.forEach(d => {
+          const data = d.data();
+          html += `<tr><td>${formatDate(data.date)}</td><td>${data.description}</td><td style="color:#ef4444; font-weight:600;">Dr: ${data.debit.code}</td><td style="color:#10b981; font-weight:600;">Cr: ${data.credit.code}</td><td>${new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(data.totalAmount)}</td><td>${data.createdBy}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        div.innerHTML = html;
+      } catch (e) { div.innerHTML = "Error loading list"; }
+    }
+
+    // ================= VOUCHER CREATION & EDITING =================
+    window.openCreateModal = function (isEdit = false) {
+      const modal = document.getElementById('universalModal');
+      const body = document.getElementById('modalBody');
+      const footer = document.getElementById('modalFooter');
+      ccList = [];
+      selectedFiles = [];
+      let initialData = { type: 'expense', amount: '', toId: '', subject: '', mail: '', attachments: [] };
+      if (isEdit && currentVoucher) {
+        initialData = {
+          type: currentVoucher.voucherType || 'expense',
+          amount: currentVoucher.amount,
+          toId: currentVoucher.toUser,
+          subject: currentVoucher.subject,
+          mail: currentVoucher.mail,
+          attachments: currentVoucher.attachments || []
+        };
+        if (currentVoucher.ccUsers) ccList = [...currentVoucher.ccUsers];
+        if (initialData.attachments) selectedFiles = initialData.attachments.map(f => ({ file: { name: f.name }, url: f.url, existing: true }));
+      }
+      modal.classList.add('active');
+      document.getElementById('modalTitle').innerText = isEdit ? "Edit Voucher" : "Create New Voucher";
+      const operationsUsers = allUsers.filter(u => u.role === 'operations');
+      const userOptions = operationsUsers.map(u => `<option value="${u.id}" ${u.id === initialData.toId ? 'selected' : ''}>${u.name} (${u.role})</option>`).join('');
+      const ccOptions = allUsers.map(u => `<option value="${u.id}">${u.name} (${u.role})</option>`).join('');
+      body.innerHTML = `
+${isEdit && currentVoucher.workflow ? `
+<div class="send-back-alert">
+<div>
+<strong>⚠️ Sent Back for Correction</strong>
+<p>${currentVoucher.workflow[currentVoucher.workflow.length - 1].notes || 'No reason provided.'}</p>
+</div>
+</div>` : ''}
+<div class="form-grid">
+<div class="form-group"><label>Voucher Type</label><select id="createType"><option value="expense" ${initialData.type === 'expense' ? 'selected' : ''}>Direct Expense</option><option value="cash_advance" ${initialData.type === 'cash_advance' ? 'selected' : ''}>Cash Advance</option></select></div>
+<div class="form-group"><label>Amount (₦)</label><input type="number" id="createAmount" value="${initialData.amount}" placeholder="0.00"></div>
+<div class="form-group"><label>To (Operations User)</label><select id="createTo">${userOptions}</select></div>
+<div class="form-group"><label>Add CC (Observers)</label><div style="display:flex; gap:10px;"><select id="createCcSelect" style="flex:1;">${ccOptions}</select><button class="btn btn-primary" style="padding:8px 12px;" onclick="addCc()">+ Add</button></div><div class="cc-container" id="ccContainer"></div></div>
+<div class="form-group full-width"><label>Subject</label><input type="text" id="createSubject" value="${initialData.subject}" placeholder="Brief subject line"></div>
+<div class="form-group full-width"><label>Mail / Instructions</label><textarea id="createMail" placeholder="Compose your mail or detailed instructions here...">${initialData.mail}</textarea></div>
+<div class="form-group full-width">
+<label>Supporting Documents</label>
+<div class="file-upload-area" onclick="document.getElementById('createFiles').click()">
+<p style="color:#6b7280; margin-bottom:8px; font-weight:600;">Click to upload/add files</p>
+<p style="font-size:0.85rem; color:#9ca3af;">Images, PDFs, Excel, Word</p>
+<input type="file" id="createFiles" multiple accept="image/*,.pdf,.doc,.docx,.xlsx" style="display:none" onchange="handleFileSelect(this)">
+</div>
+<div class="file-grid" id="fileGrid"></div>
+</div>
+</div>`;
+      renderCcTags();
+      renderFileGrid();
+      footer.innerHTML = `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="${isEdit ? 'updateVoucher()' : 'submitVoucher()'}">${isEdit ? 'Update Voucher' : 'Submit Voucher'}</button>`;
+    }
+
+    window.addCc = function () {
+      const select = document.getElementById('createCcSelect');
+      const userId = select.value;
+      if (userId && !ccList.includes(userId)) { ccList.push(userId); renderCcTags(); }
+    }
+
+    function renderCcTags() {
+      const container = document.getElementById('ccContainer');
+      if (!container) return;
+      container.innerHTML = ccList.map((id, index) => {
+        const user = allUsers.find(u => u.id === id);
+        return `<span style="display:inline-block; background:#e0e7ff; color:#3730a3; padding:4px 10px; border-radius:20px; margin-right:8px; margin-bottom:8px; font-size:0.8rem;">${user ? user.name : id} <span onclick="removeCc(${index})" style="cursor:pointer; color:#ef4444; font-weight:bold; margin-left:6px;">&times;</span></span>`;
+      }).join('');
+    }
+
+    window.removeCc = function (index) { ccList.splice(index, 1); renderCcTags(); }
+
+    window.handleFileSelect = function (input) {
+      const files = Array.from(input.files);
+      files.forEach(file => {
+        // Create preview URL immediately for all files
+        const previewUrl = URL.createObjectURL(file);
+        selectedFiles.push({ file, previewUrl, existing: false });
+      });
+      renderFileGrid();
+      input.value = '';
+    }
+
+    function renderFileGrid() {
+      const grid = document.getElementById('fileGrid');
+      if (!grid) return;
+      grid.innerHTML = selectedFiles.map((item, index) => {
+        const isImage = item.previewUrl !== null || (item.existing && item.url && item.url.match(/\.(jpeg|jpg|gif|png|webp)$/i));
+        const isPdf = !isImage && (item.file && item.file.type === 'application/pdf' || (item.url && item.url.match(/\.pdf$/i)));
+        let thumb = '';
+
+        if (isImage) {
+          thumb = `<img src="${item.previewUrl || item.url}" alt="thumb" style="width:100%; height:100%; object-fit:cover;">`;
+        } else if (isPdf) {
+          thumb = `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#fee2e2; color:#dc2626; font-size:2rem;">📕</div>`;
+        } else {
+          thumb = `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#f3f4f6; color:#6b7280; font-size:2rem;">📄</div>`;
+        }
+
+        // Create preview URL for new files
+        let previewUrl = item.previewUrl;
+        if (!previewUrl && item.file) {
+          previewUrl = URL.createObjectURL(item.file);
+          item.previewUrl = previewUrl; // Store it back
+        }
+
+        return `
+   <div class="file-card">
+     <div class="file-thumb">
+       ${thumb}
+       ${!item.existing ? `<button class="btn-remove-file" onclick="removeFile(${index})">&times;</button>` : ''}
+     </div>
+     <div class="file-info">
+       <span class="file-name" title="${item.file?.name || 'Existing File'}">${item.file?.name || 'Attached'}</span>
+       <div style="display:flex; gap:4px; justify-content:center; margin-top:8px;">
+         <button class="btn-file-view" onclick="previewFile(${index})" style="padding:4px 8px; font-size:0.7rem;">👁️ Preview</button>
+         ${item.existing ? '' : `<button class="btn-remove-file-small" onclick="removeFile(${index})">🗑️ Remove</button>`}
+       </div>
+     </div>
+   </div>`;
+      }).join('');
+    }
+
+    // Preview file before upload
+    window.previewFile = function (index) {
+      const item = selectedFiles[index];
+      if (!item) return;
+
+      let url = item.url || item.previewUrl;
+
+      // For new files that don't have a URL yet, create object URL
+      if (!url && item.file) {
+        url = URL.createObjectURL(item.file);
+      }
+
+      if (!url) {
+        alert("Cannot preview this file");
+        return;
+      }
+
+      viewAttachment(url, item.file?.name || 'Document', item.file?.type || '');
+    }
+
+    window.removeFile = function (index) {
+      if (selectedFiles[index].previewUrl) {
+        URL.revokeObjectURL(selectedFiles[index].previewUrl);
+      }
+      selectedFiles.splice(index, 1);
+      renderFileGrid();
+    }
+
+    window.handleSettlementFileSelect = function (input) {
+      const files = Array.from(input.files || []);
+      files.forEach(file => {
+        const previewUrl = URL.createObjectURL(file);
+        settlementReceipts.push({ file, previewUrl });
+      });
+      renderSettlementFileGrid();
+      input.value = '';
+    }
+
+    function renderSettlementFileGrid() {
+      const grid = document.getElementById('settlementFileGrid');
+      if (!grid) return;
+
+      grid.innerHTML = settlementReceipts.map((item, index) => {
+        const isImage = item.file && item.file.type.startsWith('image/');
+        const isPdf = item.file && item.file.type === 'application/pdf';
+        let thumb = '';
+
+        if (isImage) {
+          thumb = `<img src="${item.previewUrl}" alt="thumb" style="width:100%; height:100%; object-fit:cover;">`;
+        } else if (isPdf) {
+          thumb = `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#fee2e2; color:#dc2626; font-size:2rem;"><i class="fas fa-file-pdf"></i></div>`;
+        } else {
+          thumb = `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#f0fdf4; color:#137a52; font-size:2rem;"><i class="fas fa-file-alt"></i></div>`;
+        }
+
+        return `
+<div class="file-card">
+<div class="file-thumb">
+${thumb}
+<button class="btn-remove-file" onclick="removeSettlementFile(${index})">&times;</button>
+</div>
+<div class="file-info">
+<span class="file-name" title="${escapeHtml(item.file.name)}">${escapeHtml(item.file.name)}</span>
+<div style="display:flex; gap:4px; justify-content:center; margin-top:8px;">
+<button class="btn-file-view" onclick="previewSettlementFile(${index})" style="padding:4px 8px; font-size:0.7rem;">Preview</button>
+<button class="btn-remove-file-small" onclick="removeSettlementFile(${index})">Remove</button>
+</div>
+</div>
+</div>`;
+      }).join('');
+    }
+
+    window.previewSettlementFile = function (index) {
+      const item = settlementReceipts[index];
+      if (!item) return;
+      viewAttachment(item.previewUrl, item.file.name, item.file.type || '');
+    }
+
+    window.removeSettlementFile = function (index) {
+      const item = settlementReceipts[index];
+      if (item && item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      settlementReceipts.splice(index, 1);
+      renderSettlementFileGrid();
+    }
+
+    window.submitVoucher = async function () { await processVoucherSubmission(false); }
+    window.updateVoucher = async function () { await processVoucherSubmission(true); }
+
+    async function processVoucherSubmission(isEdit) {
+      const type = document.getElementById('createType').value;
+      const amount = parseFloat(document.getElementById('createAmount').value);
+      const toId = document.getElementById('createTo').value;
+      const subject = document.getElementById('createSubject').value;
+      const mail = document.getElementById('createMail').value;
+      if (!amount || !toId || !subject) { alert("Please fill Amount, To, and Subject."); return; }
+      showLoading(isEdit ? "Updating Voucher..." : "Submitting Voucher...");
+      try {
+        let attachments = [];
+        const newFiles = selectedFiles.filter(f => !f.existing);
+        if (newFiles.length > 0) {
+          const uploaded = await processGitHubUploads(newFiles, (txt) => document.getElementById('loadingText').innerText = txt);
+          attachments = uploaded;
+        }
+        const existingAttachments = selectedFiles.filter(f => f.existing).map(f => ({ name: f.file.name, url: f.url, type: f.type }));
+        attachments = [...existingAttachments, ...attachments];
+        const toUser = allUsers.find(u => u.id === toId);
+        const workflowEntry = {
+          actor: currentUser.name,
+          role: currentUser.role,
+          action: isEdit ? 'Resubmitted after Correction' : 'Created',
+          notes: mail
+        };
+        const updateData = {
+          initiatorId: currentUser.uid,
+          initiatorName: currentUser.name,
+          toUser: toId,
+          toUserName: toUser ? toUser.name : 'Unknown',
+          ccUsers: ccList,
+          voucherType: type,
+          amount: amount,
+          subject: subject,
+          mail: mail,
+          attachments: attachments,
+          status: 'pending_operations',
+          currentStep: 'operations',
+          workflow: firebase.firestore.FieldValue.arrayUnion(workflowEntry),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        if (!isEdit) {
+          updateData.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+          await db.collection('vouchers').add(updateData);
+        } else {
+          await db.collection('vouchers').doc(currentVoucher.id).update(updateData);
+        }
+        alert(isEdit ? "✅ Voucher Updated Successfully!" : "✅ Voucher Created Successfully!");
+        closeModal();
+        loadVouchersByTab(activeTab);
+      } catch (error) {
+        console.error(error);
+        alert("❌ Error: " + error.message);
+      } finally {
+        hideLoading();
+      }
+    }
+
+    // ================= VIEW VOUCHER & WORKFLOW LOGIC =================
+    window.openViewModal = async function (id) {
+      const modal = document.getElementById('universalModal');
+      const body = document.getElementById('modalBody');
+      const footer = document.getElementById('modalFooter');
+      body.innerHTML = '<div style="text-align:center; padding:60px;"><div class="spinner-large" style="margin:0 auto 20px;"></div>Loading details...</div>';
+      modal.classList.add('active');
+      document.getElementById('modalTitle').innerText = "Voucher Details";
+      try {
+        const doc = await db.collection('vouchers').doc(id).get();
+        if (!doc.exists) throw new Error("Voucher not found");
+        currentVoucher = { id: doc.id, ...doc.data() };
+        settlementReceipts = [];
+        const v = currentVoucher;
+        const amount = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(v.amount);
+
+        const participants = [];
+        participants.push({ id: v.initiatorId, name: v.initiatorName, role: 'initiator' });
+        const seenIds = new Set([v.initiatorId]);
+        if (v.workflow && Array.isArray(v.workflow)) {
+          v.workflow.forEach(w => {
+            const match = allUsers.find(u => u.name === w.actor);
+            if (match && !seenIds.has(match.id)) {
+              participants.push({ id: match.id, name: `${match.name} (${w.role})`, role: w.role });
+              seenIds.add(match.id);
+            }
+          });
+        }
+
+        let html = `
+<div class="voucher-sheet">
+<div class="voucher-top-layout">
+<div class="voucher-card">
+<div class="voucher-card-top">
+<div class="voucher-card-bank">
+<small>Approval Card</small>
+<h2>COOPERATIVE MORTGAGE BANK</h2>
+<p>E-Voucher Instrument</p>
+</div>
+<div class="voucher-card-badge">Secure Copy</div>
+</div>
+<div class="voucher-card-amount-row">
+<div class="voucher-card-amount">
+<label>Amount</label>
+<strong>${amount}</strong>
+</div>
+<div class="voucher-status-pill">${formatStatus(v.status)}</div>
+</div>
+<div class="voucher-card-mini-grid">
+<div class="voucher-card-mini"><label>Voucher ID</label><span>${v.id.slice(0, 8).toUpperCase()}</span></div>
+<div class="voucher-card-mini"><label>Type</label><span>${String(v.voucherType || 'expense').replace('_', ' ').toUpperCase()}</span></div>
+<div class="voucher-card-mini"><label>Initiator</label><span>${v.initiatorName}</span></div>
+<div class="voucher-card-mini"><label>Stage</label><span>${String(v.currentStep || 'initiated').toUpperCase()}</span></div>
+<div class="voucher-card-mini"><label>Date Raised</label><span>${formatDate(v.createdAt)}</span></div>
+<div class="voucher-card-mini"><label>Current Status</label><span>${formatStatus(v.status)}</span></div>
+${v.debitGL ? `<div class="voucher-card-mini"><label>Debit GL</label><span>${v.debitGL.code}</span></div>` : ''}
+${v.creditGL ? `<div class="voucher-card-mini"><label>Credit GL</label><span>${v.creditGL.code}</span></div>` : ''}
+${v.referenceNumber ? `<div class="voucher-card-mini"><label>Posting Ref</label><span>${v.referenceNumber}</span></div>` : ''}
+</div>
+</div>
+<div class="voucher-attachment-panel">
+<h3>Attachments</h3>
+${v.attachments && v.attachments.length > 0 ? `
+<div class="voucher-attachment-list">
+${v.attachments.map((f, index) => `
+<div class="voucher-attachment-item">
+<span title="${f.name}">${f.name}</span>
+<div class="voucher-attachment-actions">
+<button class="btn-file-view" onclick="viewVoucherAttachment(${index})">View</button>
+<button class="btn-file-download" onclick="downloadVoucherAttachment(${index})">Download</button>
+</div>
+</div>`).join('')}
+</div>
+` : `<div class="voucher-attachment-empty">No attachments uploaded for this voucher.</div>`}
+<div class="voucher-mail-trail">
+<h4>Mail Trail</h4>
+<p>${v.mail || 'No mail trail attached to this voucher.'}</p>
+</div>
+</div>
+</div>
+</div>
+`;
+
+        if (v.glCode) {
+          html += `
+<div class="section-title">Accounting Entry</div>
+<div class="gl-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin:16px 0;">
+<div class="entry-leg debit" style="background:#fef2f2; border-left-color:#ef4444;">
+<h4 style="color:#ef4444; margin-bottom:8px;">🔴 Debit Account</h4>
+<div style="display:flex; align-items:center; gap:12px;">
+<div style="background:#ef4444; color:#fff; font-weight:800; padding:12px 14px; border-radius:12px; min-width:84px; text-align:center;">GL</div>
+<div>
+<p style="font-weight:800; font-size:1.15rem; margin-bottom:2px;">${v.debitGL ? v.debitGL.code : v.glCode.code}</p>
+<p style="color:#6b7280; margin-top:0;">${v.debitGL ? v.debitGL.name : v.glCode.name}</p>
+</div>
+</div>
+</div>
+<div class="entry-leg credit" style="background:#f0fdf4; border-left-color:#10b981;">
+<h4 style="color:#10b981; margin-bottom:8px;">🟢 Credit Account</h4>
+<div style="display:flex; align-items:center; gap:12px;">
+<div style="background:#10b981; color:#fff; font-weight:800; padding:12px 14px; border-radius:12px; min-width:84px; text-align:center;">GL</div>
+<div>
+<p style="font-weight:800; font-size:1.15rem; margin-bottom:2px;">${v.creditGL ? v.creditGL.code : v.glCode.code}</p>
+</div>
+</div>
+</div>
+</div>
+`;
+        }
+
+        html += `
+<div class="section-title">Workflow History</div>
+<div style="background:#f9fafb; padding:16px; border-radius:8px; max-height:300px; overflow-y:auto;">`;
+        if (v.workflow && Array.isArray(v.workflow) && v.workflow.length > 0) {
+          v.workflow.forEach(entry => {
+            const entryDate = entry.timestamp ? formatDate(entry.timestamp) : 'Date not available';
+            html += `<div style="padding:12px; border-bottom:1px solid #e5e7eb; font-size:0.9rem;">
+<strong>${entry.actor}</strong> <span style="background:#e5e7eb; padding:2px 6px; border-radius:4px; font-size:0.75rem;">${entry.role || ''}</span> - ${entry.action}<br/>
+<em style="color:#6b7280; font-size:0.85rem;">${entry.notes || ''}</em><br/>
+<small style="color:#9ca3af;">🕐 ${entryDate}</small>
+</div>`;
+          });
+        } else {
+          html += "<p style='color:#9ca3af;'>No workflow history available.</p>";
+        }
+        html += "</div>";
+
+        if (currentUser.role === 'operations' && v.currentStep === 'posting') {
+          html += `
+<div class="section-title" style="margin-top:24px;">Posting Reference</div>
+<div class="form-grid">
+<div class="form-group full-width"><label>Posting Reference Number</label><input type="text" id="postingReferenceNumber" value="${v.referenceNumber || ''}" placeholder="Enter posting reference number"></div>
+</div>`;
+        }
+
+        if (v.settlementAttachments && v.settlementAttachments.length > 0) {
+          html += `
+<div class="section-title" style="margin-top:24px;">Settlement Evidence</div>
+<div class="settlement-existing-list">
+${v.settlementAttachments.map((f, index) => `
+<div class="voucher-attachment-item">
+<span title="${f.name}">${f.name}</span>
+<div class="voucher-attachment-actions">
+<button class="btn-file-view" onclick="viewSettlementAttachment(${index})">View</button>
+<button class="btn-file-download" onclick="downloadSettlementAttachment(${index})">Download</button>
+</div>
+</div>`).join('')}
+</div>`;
+        }
+
+        if (currentUser.role === 'initiator' && v.currentStep === 'settlement' && v.voucherType === 'cash_advance') {
+          html += `
+<div class="settlement-upload-panel">
+<div class="settlement-upload-header">
+<span class="settlement-upload-icon"><i class="fas fa-file-upload"></i></span>
+<div>
+<h3>Settlement Evidence</h3>
+<p>Upload payment proof, retirement documents, receipts, or other support before marking this voucher settled.</p>
+</div>
+</div>
+<div class="file-upload-area" onclick="document.getElementById('settlementFiles').click()">
+<p style="color:#0f513b; margin-bottom:8px; font-weight:700;">Click to upload settlement files</p>
+<p style="font-size:0.85rem; color:#66756f;">Images, PDFs, Excel, Word</p>
+<input type="file" id="settlementFiles" multiple accept="image/*,.pdf,.doc,.docx,.xlsx,.xls" style="display:none" onchange="handleSettlementFileSelect(this)">
+</div>
+<div class="file-grid" id="settlementFileGrid"></div>
+<div class="form-group" style="margin-top:16px;">
+<label>Settlement Notes</label>
+<textarea id="settlementNotes" placeholder="Add settlement details, references, or notes..." style="min-height:90px;"></textarea>
+</div>
+</div>`;
+        }
+
+        const isSentBack = v.status === 'sent_back';
+        const canEdit = (currentUser.role === 'initiator' && isSentBack) || (currentUser.role === 'operations' && isSentBack && v.currentStep === 'operations');
+        body.innerHTML = html;
+
+        if (!canEdit && ['operations', 'iad', 'fincon', 'coo'].includes(currentUser.role) && v.currentStep === currentUser.role) {
+          const sendBackLabel = getPreviousStageLabel(v.currentStep);
+          body.innerHTML += `<textarea id="modalComment" placeholder="Add a comment or reason for sending back to ${sendBackLabel || 'the previous stage'}..." style="width:100%; margin-top:20px; padding:12px; border:1px solid #d1d5db; border-radius:6px; min-height:80px;"></textarea>`;
+        }
+
+        let buttons = `<button class="btn btn-secondary" onclick="closeModal()">Close</button>`;
+
+        if (canEdit) {
+          buttons = `<button class="btn btn-primary" onclick="openCreateModal(true)">Edit & Resubmit</button>`;
+        }
+        else if (currentUser.role === 'operations' && v.currentStep === 'operations' && !v.glCode) {
+          buttons = `<div style="display:flex; flex-direction:column; width:100%; gap:12px;"><div style="font-size:0.85rem; color:#6b7280;">Sending back from this stage returns the voucher to the Initiator.</div><div style="display:flex; gap:10px; justify-content:flex-end;"><button class="btn btn-warning" onclick="sendBack()">Send Back</button><button class="btn btn-primary" onclick="openGlEntryModal()">Open GL Entry</button></div></div>`;
+        }
+        else if (['iad', 'fincon', 'coo'].includes(currentUser.role) && v.currentStep === currentUser.role) {
+          buttons = `<div style="display:flex; flex-direction:column; width:100%; gap:12px;"><div style="font-size:0.85rem; color:#6b7280;">Sending back from this stage returns the voucher to ${getPreviousStageLabel(v.currentStep)}.</div><div style="display:flex; gap:10px; justify-content:flex-end;"><button class="btn btn-warning" onclick="sendBack()">Send Back</button><button class="btn btn-success" onclick="approveForward()">Approve & Forward</button></div></div>`;
+        }
+        else if (currentUser.role === 'operations' && v.currentStep === 'posting') {
+          buttons = `<div style="display:flex; gap:10px; justify-content:flex-end; width:100%;"><button class="btn btn-success" onclick="addReference()">Save Posting Reference</button></div>`;
+        }
+        else if (currentUser.role === 'initiator' && v.currentStep === 'settlement' && v.voucherType === 'cash_advance') {
+          buttons = `<button class="btn btn-success" onclick="settleVoucher()">Mark Settled</button>`;
+        }
+        footer.innerHTML = buttons;
+      } catch (error) {
+        body.innerHTML = `<p style="color:red; text-align:center; padding:40px;">Error: ${error.message}</p>`;
+        footer.innerHTML = `<button class="btn btn-secondary" onclick="closeModal()">Close</button>`;
+      }
+    }
+
+    window.closeModal = function () {
+      document.getElementById('universalModal').classList.remove('active');
+      settlementReceipts.forEach(item => {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      });
+      currentVoucher = null;
+      settlementReceipts = [];
+    }
+    window.openGlEntryModal = function () {
+      currentGlModalSource = 'modal';
+      ['glModalDebitCode', 'glModalDebitName', 'glModalCreditCode', 'glModalCreditName'].forEach(id => {
+        const field = document.getElementById(id);
+        if (field) field.value = '';
+      });
+      document.querySelectorAll('#glEntryModal .autocomplete-items').forEach(el => el.innerHTML = '');
+      document.getElementById('glEntryModal').classList.add('active');
+    }
+    window.closeGlEntryModal = function () {
+      document.getElementById('glEntryModal').classList.remove('active');
+      document.querySelectorAll('#glEntryModal .autocomplete-items').forEach(el => el.innerHTML = '');
+      currentGlModalSource = 'inline';
+    }
+
+    // ================= ATTACHMENT VIEWER (USES MODAL) =================
+    window.viewAttachment = function (url, filename, fileType) {
+      if (!url) {
+        alert("Cannot view this file");
+        return;
+      }
+
+      const modal = document.getElementById('mediaViewerModal');
+      const body = document.getElementById('mediaViewerBody');
+      const title = document.getElementById('mediaViewerTitle');
+      const downloadLink = document.getElementById('mediaDownloadLink');
+
+      title.innerText = `Viewing: ${filename}`;
+      downloadLink.href = url;
+      downloadLink.download = filename;
+
+      const isImage = fileType.startsWith('image/') || url.match(/\.(jpeg|jpg|gif|png|webp)$/i);
+      const isPdf = fileType === 'application/pdf' || url.match(/\.pdf$/i);
+
+      if (isImage) {
+        body.innerHTML = `<img src="${url}" alt="${filename}" style="max-width:100%; max-height:70vh; object-fit:contain;">`;
+      } else if (isPdf) {
+        // Simple PDF embedding that works with blob URLs
+        body.innerHTML = `<iframe src="${url}" style="width:100%; height:70vh;" frameborder="0"></iframe>`;
+      } else {
+        // For other file types, show download option
+        body.innerHTML = `<div style="text-align:center; padding:40px;">
+      <div style="font-size:4rem; margin-bottom:20px;">📄</div>
+      <p style="margin-bottom:20px;">This file type cannot be previewed directly.</p>
+      <a href="${url}" download="${filename}" class="btn btn-primary">Download to View</a>
+    </div>`;
+      }
+
+      modal.classList.add('active');
+    }
+
+    window.closeMediaViewer = function () {
+      document.getElementById('mediaViewerModal').classList.remove('active');
+      document.getElementById('mediaViewerBody').innerHTML = '';
+    }
+
+    // Keep for backward compatibility
+    window.openMediaViewer = function (url, filename, type) {
+      viewAttachment(url, filename, type);
+    }
+
+    window.viewVoucherAttachment = async function (index) {
+      const file = currentVoucher && currentVoucher.attachments ? currentVoucher.attachments[index] : null;
+      if (!file) {
+        alert("Attachment not found.");
+        return;
+      }
+
+      try {
+        showLoading("Opening attachment...");
+        const url = await getBackblazeDownloadUrl(file);
+        viewAttachment(url, file.name || "Attachment", file.type || "");
+      } catch (error) {
+        console.error(error);
+        alert("Could not open attachment: " + error.message);
+      } finally {
+        hideLoading();
+      }
+    }
+
+    window.downloadVoucherAttachment = async function (index) {
+      const file = currentVoucher && currentVoucher.attachments ? currentVoucher.attachments[index] : null;
+      if (!file) {
+        alert("Attachment not found.");
+        return;
+      }
+
+      try {
+        showLoading("Preparing download...");
+        const url = await getBackblazeDownloadUrl(file);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = file.name || "attachment";
+        link.target = "_blank";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } catch (error) {
+        console.error(error);
+        alert("Could not download attachment: " + error.message);
+      } finally {
+        hideLoading();
+      }
+    }
+
+    window.viewSettlementAttachment = async function (index) {
+      const file = currentVoucher && currentVoucher.settlementAttachments ? currentVoucher.settlementAttachments[index] : null;
+      if (!file) {
+        alert("Settlement attachment not found.");
+        return;
+      }
+
+      try {
+        showLoading("Opening settlement evidence...");
+        const url = await getBackblazeDownloadUrl(file);
+        viewAttachment(url, file.name || "Settlement evidence", file.type || "");
+      } catch (error) {
+        console.error(error);
+        alert("Could not open settlement evidence: " + error.message);
+      } finally {
+        hideLoading();
+      }
+    }
+
+    window.downloadSettlementAttachment = async function (index) {
+      const file = currentVoucher && currentVoucher.settlementAttachments ? currentVoucher.settlementAttachments[index] : null;
+      if (!file) {
+        alert("Settlement attachment not found.");
+        return;
+      }
+
+      try {
+        showLoading("Preparing settlement evidence...");
+        const url = await getBackblazeDownloadUrl(file);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = file.name || "settlement-evidence";
+        link.target = "_blank";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } catch (error) {
+        console.error(error);
+        alert("Could not download settlement evidence: " + error.message);
+      } finally {
+        hideLoading();
+      }
+    }
+
+    // ================= GL AUTOCOMPLETE =================
+    function escapeHtml(value) {
+      return String(value || '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[char]));
+    }
+
+    window.filterGL = function (codeInputId, nameInputId, listId) {
+      const input = document.getElementById(codeInputId);
+      if (!input) return;
+      const nameInput = document.getElementById(nameInputId);
+      const list = document.getElementById(listId);
+      if (!list || !nameInput) return;
+
+      const val = input.value.trim().toUpperCase();
+      list.innerHTML = '';
+
+      if (!glCache.length) {
+        list.innerHTML = '<div class="autocomplete-empty">No GL codes have been uploaded yet.</div>';
+        return;
+      }
+
+      const matches = glCache
+        .filter(item => {
+          const code = String(item.code || '').toUpperCase();
+          const name = String(item.name || '').toUpperCase();
+          return !val || code.includes(val) || name.includes(val);
+        })
+        .slice(0, 12);
+
+      if (!matches.length) {
+        list.innerHTML = '<div class="autocomplete-empty">No matching GL code found.</div>';
+        return;
+      }
+
+      matches.forEach(item => {
+        const div = document.createElement("div");
+        div.innerHTML = `<strong>${escapeHtml(item.code)}</strong><span>${escapeHtml(item.name)}</span>`;
+        div.addEventListener("mousedown", function (event) {
+          event.preventDefault();
+          input.value = item.code;
+          nameInput.value = item.name;
+          list.innerHTML = '';
+        });
+        list.appendChild(div);
+      });
+    }
+
+    document.addEventListener("click", function (e) {
+      if (!e.target.matches("input") && !e.target.closest(".autocomplete-items")) {
+        document.querySelectorAll(".autocomplete-items").forEach(el => el.innerHTML = '');
+      }
+    });
+
+    // ================= ACTIONS =================
+    async function processUpdate(newStatus, newStep, extraData, actionLabel) {
+      const commentEl = document.getElementById('modalComment');
+      const comment = commentEl ? commentEl.value.trim() : '';
+      if (actionLabel === 'Sent Back' && !comment) { alert("⚠️ Please provide a reason for sending back."); commentEl.focus(); return; }
+      const notes = comment ? `${actionLabel}: ${comment}` : actionLabel;
+      const workflowEntry = {
+        actor: currentUser.name,
+        role: currentUser.role,
+        action: actionLabel,
+        notes: notes
+      };
+      showLoading("Updating Status...");
+      try {
+        const updateData = {
+          status: newStatus,
+          currentStep: newStep,
+          ...extraData,
+          workflow: firebase.firestore.FieldValue.arrayUnion(workflowEntry),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        await db.collection('vouchers').doc(currentVoucher.id).update(updateData);
+        alert("✅ Success!");
+        closeModal();
+        loadVouchersByTab(activeTab);
+      } catch (error) { console.error(error); alert("❌ Error: " + error.message); } finally { hideLoading(); }
+    }
+
+    window.approveGL = async function () {
+      const debitCodeId = currentGlModalSource === 'modal' ? 'glModalDebitCode' : 'debitCode';
+      const debitNameId = currentGlModalSource === 'modal' ? 'glModalDebitName' : 'debitName';
+      const creditCodeId = currentGlModalSource === 'modal' ? 'glModalCreditCode' : 'creditCode';
+      const creditNameId = currentGlModalSource === 'modal' ? 'glModalCreditName' : 'creditName';
+      const dCode = document.getElementById(debitCodeId).value;
+      const dName = document.getElementById(debitNameId).value;
+      const cCode = document.getElementById(creditCodeId).value;
+      const cName = document.getElementById(creditNameId).value;
+      if (!dCode || !dName || !cCode || !cName) { alert("Please fill both Debit and Credit GL fields."); return; }
+      if (dCode === cCode) { if (!confirm("⚠️ Warning: Debit and Credit GL Codes are identical. Is this intentional?")) return; }
+      const glData = { glCode: { code: dCode, name: dName }, debitGL: { code: dCode, name: dName }, creditGL: { code: cCode, name: cName } };
+      await processUpdate('pending_fincon', 'fincon', glData, 'GL captured and submitted to FinCon');
+      if (currentGlModalSource === 'modal') {
+        closeGlEntryModal();
+      }
+    }
+
+    window.approveForward = async function () {
+      let next = '';
+      if (currentUser.role === 'fincon') next = 'iad';
+      else if (currentUser.role === 'iad') next = 'coo';
+      else if (currentUser.role === 'coo') next = 'posting';
+      await processUpdate(`pending_${next}`, next, {}, 'Approved');
+    }
+
+    window.sendBack = async function () {
+      const previousStep = getPreviousStep(currentVoucher.currentStep);
+      if (!previousStep) { alert("This voucher cannot be sent back from the current stage."); return; }
+      const extraData = {};
+      if (previousStep === 'initiated' || previousStep === 'settlement') {
+        extraData.toUser = currentVoucher.initiatorId;
+        extraData.toUserName = currentVoucher.initiatorName;
+      } else {
+        let previousActor = null;
+        if (previousStep === 'operations' && currentVoucher.toUser) {
+          previousActor = allUsers.find(u => u.id === currentVoucher.toUser) || null;
+        }
+        if (!previousActor) {
+          previousActor = findWorkflowUserByRole(currentVoucher, previousStep);
+        }
+        if (!previousActor) {
+          previousActor = allUsers.find(u => u.role === previousStep) || null;
+        }
+        if (previousActor) {
+          extraData.toUser = previousActor.id;
+          extraData.toUserName = previousActor.name;
+        }
+      }
+      await processUpdate('sent_back', previousStep, extraData, 'Sent Back');
+    }
+
+    window.addReference = async function () {
+      const refInput = document.getElementById('postingReferenceNumber');
+      const ref = refInput ? refInput.value.trim() : '';
+      if (!ref) { alert("Please enter the posting reference number."); return; }
+      const extraData = { referenceNumber: ref };
+      if (currentVoucher.voucherType === 'cash_advance') {
+        extraData.settlementStatus = 'pending';
+        extraData.toUser = currentVoucher.initiatorId;
+        extraData.toUserName = currentVoucher.initiatorName;
+        await processUpdate('pending_settlement', 'settlement', extraData, 'Posting reference saved');
+        return;
+      }
+      await processUpdate('completed', 'completed', extraData, 'Posting reference saved');
+    }
+
+    window.settleVoucher = async function () {
+      const existingEvidence = currentVoucher.settlementAttachments || [];
+      if (settlementReceipts.length === 0 && existingEvidence.length === 0) {
+        alert("Please upload at least one settlement document before marking this voucher settled.");
+        return;
+      }
+
+      if (!confirm("Confirm settlement and upload the attached settlement evidence?")) return;
+
+      showLoading("Uploading settlement evidence...");
+      try {
+        let uploadedEvidence = [];
+        if (settlementReceipts.length > 0) {
+          uploadedEvidence = await processGitHubUploads(settlementReceipts, (txt) => {
+            document.getElementById('loadingText').innerText = txt;
+          });
+        }
+
+        const settlementNotes = document.getElementById('settlementNotes')?.value.trim() || '';
+        const extraData = {
+          settlementStatus: 'settled',
+          settledBy: currentUser.uid,
+          settledByName: currentUser.name,
+          settledAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        if (settlementNotes) {
+          extraData.settlementNotes = settlementNotes;
+        }
+
+        if (uploadedEvidence.length > 0) {
+          extraData.settlementAttachments = firebase.firestore.FieldValue.arrayUnion(...uploadedEvidence);
+        }
+
+        hideLoading();
+        await processUpdate('completed', 'completed', extraData, 'Settled with supporting evidence');
+      } catch (error) {
+        console.error(error);
+        alert("Settlement failed: " + error.message);
+        hideLoading();
+      }
+    }
+  </script>
+</body>
+
+</html>

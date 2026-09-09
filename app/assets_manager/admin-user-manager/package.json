@@ -1,0 +1,14 @@
+{
+  "name": "cmbank-asset-user-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local admin interface for creating Asset Manager Firebase users.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.6.0"
+  },
+  "devDependencies": {}
+}

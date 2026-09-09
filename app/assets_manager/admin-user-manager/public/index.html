@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Asset Manager User Admin</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <section class="panel">
+      <div class="brand-row">
+        <div class="brand-mark">CM</div>
+        <div>
+          <p class="eyebrow">CMBank Asset Manager</p>
+          <h1>Create Firebase User</h1>
+        </div>
+      </div>
+
+      <div id="status-card" class="status-card pending">
+        <i data-lucide="loader-circle" aria-hidden="true"></i>
+        <span>Checking Firebase Admin connection...</span>
+      </div>
+
+      <form id="setup-form" class="user-form" hidden>
+        <label>
+          <span>Firebase private key JSON</span>
+          <textarea id="serviceAccount" name="serviceAccount" rows="9" spellcheck="false" required></textarea>
+        </label>
+
+        <button id="setup-button" class="primary-button" type="submit">
+          <i data-lucide="key-round" aria-hidden="true"></i>
+          Connect Admin Key
+        </button>
+      </form>
+
+      <form id="user-form" class="user-form">
+        <label>
+          <span>Email address</span>
+          <input id="email" name="email" type="email" autocomplete="email" required>
+        </label>
+
+        <label>
+          <span>Temporary password</span>
+          <input id="password" name="password" type="password" minlength="6" autocomplete="new-password" required>
+        </label>
+
+        <label>
+          <span>Full name</span>
+          <input id="displayName" name="displayName" type="text" maxlength="100" autocomplete="name">
+        </label>
+
+        <label>
+          <span>Role</span>
+          <select id="role" name="role">
+            <option value="staff">Staff</option>
+            <option value="admin">Admin</option>
+            <option value="super_admin">Super Admin</option>
+          </select>
+        </label>
+
+        <div class="option-row">
+          <label class="switch-line">
+            <input id="active" name="active" type="checkbox" checked>
+            <span>Allow this user into Asset Manager</span>
+          </label>
+        </div>
+
+        <div class="option-row">
+          <label class="switch-line">
+            <input id="resetExistingPassword" name="resetExistingPassword" type="checkbox">
+            <span>Reset password if this email already exists</span>
+          </label>
+        </div>
+
+        <button id="submit-button" class="primary-button" type="submit">
+          <i data-lucide="user-plus" aria-hidden="true"></i>
+          Create User
+        </button>
+      </form>
+
+      <div id="result" class="result" hidden></div>
+    </section>
+  </main>
+</body>
+</html>

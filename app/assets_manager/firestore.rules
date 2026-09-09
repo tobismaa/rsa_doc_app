@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function staffAccess() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/asset_manager_users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/asset_manager_users/$(request.auth.uid)).data.active == true
+        && (
+          !get(/databases/$(database)/documents/asset_manager_users/$(request.auth.uid)).data.keys().hasAny(['role'])
+          || get(/databases/$(database)/documents/asset_manager_users/$(request.auth.uid)).data.role in ['staff', 'admin', 'super_admin']
+        );
+    }
+    function optionalText(value) {
+      return value == null || (value is string && value.size() <= 200);
+    }
+    function validAsset(data, tag) {
+      return data.keys().hasAll(['name', 'tag', 'category', 'custodian', 'location',
+        'purchase_cost', 'book_value', 'purchase_date', 'status', 'created_by', 'created_at', 'updated_at'])
+        && data.keys().hasOnly(['name', 'tag', 'category', 'custodian', 'location',
+        'purchase_cost', 'book_value', 'purchase_date', 'status', 'created_by', 'created_at', 'updated_at'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+        && data.tag == tag && tag.matches('^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$')
+        && data.category is string && data.category.size() > 0 && data.category.size() <= 100
+        && optionalText(data.custodian) && optionalText(data.location)
+        && data.purchase_cost is number && data.purchase_cost >= 0
+        && data.book_value is number && data.book_value >= 0
+        && (data.purchase_date == null || (data.purchase_date is string && data.purchase_date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')))
+        && data.status in ['Active', 'Service due', 'Review', 'Disposal']
+        && data.created_by == request.auth.uid
+        && data.created_at == request.time && data.updated_at == request.time;
+    }
+    match /asset_manager_users/{uid} {
+      allow get: if request.auth != null && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+    match /assets/{tag} {
+      allow read: if staffAccess();
+      allow create: if staffAccess() && validAsset(request.resource.data, tag);
+      // The current UI only creates records. Edits and deletion require an administrator.
+      allow update, delete: if false;
+    }
+  }
+}

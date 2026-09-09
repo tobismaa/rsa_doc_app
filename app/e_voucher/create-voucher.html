@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Voucher - E-Voucher</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body { font-family: sans-serif; margin: 0; background: #f9fafb; }
+        .container { max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+        .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 1.5rem; }
+        .form-group { margin-bottom: 1.25rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; color: #374151; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 1rem;
+        }
+        .form-group textarea { resize: vertical; min-height: 100px; }
+        .cc-container { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+        .btn { padding: 0.75rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
+        .btn-primary { background: #2563eb; color: white; }
+        .btn-secondary { background: #6b7280; color: white; }
+        .btn-add { background: #10b981; color: white; padding: 0.75rem 1rem; }
+        .cc-list { margin-top: 0.5rem; }
+        .cc-tag { display: inline-block; background: #e5e7eb; padding: 0.25rem 0.75rem; border-radius: 99px; margin: 0.25rem; font-size: 0.875rem; cursor: pointer; }
+        .cc-tag:hover { background: #dc2626; color: white; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+        .header a { color: #6b7280; text-decoration: none; }
+        .radio-group { display: flex; gap: 1rem; }
+        .radio-group label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+        .error { color: #ef4444; font-size: 0.875rem; margin-top: 0.5rem; display: none; }
+        .success { color: #10b981; font-size: 0.875rem; margin-top: 0.5rem; display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Create Voucher</h1>
+            <a href="dashboard.html">← Back to Dashboard</a>
+        </div>
+
+        <form id="voucherForm">
+            <!-- Voucher Type -->
+            <div class="card">
+                <h2>Voucher Type</h2>
+                <div class="form-group" style="margin-top: 1rem;">
+                    <div class="radio-group">
+                        <label>
+                            <input type="radio" name="voucherType" value="expense" checked> Direct Expense
+                        </label>
+                        <label>
+                            <input type="radio" name="voucherType" value="cash_advance"> Cash Advance
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recipients -->
+            <div class="card">
+                <h2>Recipients</h2>
+
+                <div class="form-group" style="margin-top: 1rem;">
+                    <label for="toUser">To (Operations User) *</label>
+                    <select id="toUser" required>
+                        <option value="">Select user...</option>
+                    </select>
+                    <p class="error" id="toUserError">Please select a recipient</p>
+                </div>
+
+                <div class="form-group">
+                    <label>CC (Observers)</label>
+                    <div class="cc-container">
+                        <select id="ccUser">
+                            <option value="">Add CC recipient...</option>
+                        </select>
+                        <button type="button" class="btn btn-add" onclick="addCc()">+ Add</button>
+                    </div>
+                    <div class="cc-list" id="ccList"></div>
+                </div>
+            </div>
+
+            <!-- Voucher Details -->
+            <div class="card">
+                <h2>Voucher Details</h2>
+
+                <div class="form-group" style="margin-top: 1rem;">
+                    <label for="amount">Amount (₦) *</label>
+                    <input type="number" id="amount" required min="1" placeholder="₦ 0.00">
+                </div>
+
+                <div class="form-group">
+                    <label for="description">Description *</label>
+                    <input type="text" id="description" required placeholder="What is this voucher for?">
+                </div>
+
+                <div class="form-group">
+                    <label for="message">Message / Instructions</label>
+                    <textarea id="message" placeholder="Compose your request or instructions here..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Attachments (Optional)</label>
+                    <input type="file" id="attachments" multiple accept=".pdf,.jpg,.png,.doc,.docx">
+                </div>
+            </div>
+
+            <!-- Submit -->
+            <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                <button type="button" class="btn btn-secondary" onclick="window.location.href='dashboard.html'">Cancel</button>
+                <button type="submit" class="btn btn-primary">Submit Voucher</button>
+            </div>
+            <p class="error" id="submitError"></p>
+            <p class="success" id="submitSuccess">Voucher created successfully!</p>
+        </form>
+    </div>
+
+    <script type="module" src="js/config.js"></script>
+    <script type="module" src="js/auth.js"></script>
+    <script type="module">
+        import { requireAuth } from './js/auth.js';
+        import { db } from './js/config.js';
+        import { collection, addDoc, serverTimestamp, getDocs } from "https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore.js";
+
+        const user = requireAuth();
+        if (!user || user.role !== 'initiator') {
+            window.location.href = 'dashboard.html';
+        }
+
+        let ccUsers = [];
+
+        // Load users for To/CC dropdowns
+        async function loadUsers() {
+            try {
+                const usersRef = collection(db, 'users');
+                const snapshot = await getDocs(usersRef);
+                const users = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    if (doc.id !== user.id && data.active !== false && data.role === 'operations') {
+                        users.push({ id: doc.id, name: data.name, email: data.email, role: data.role });
+                    }
+                });
+
+                const toSelect = document.getElementById('toUser');
+                const ccSelect = document.getElementById('ccUser');
+
+                users.forEach(u => {
+                    const option = `<option value="${u.id}">${u.name} (${u.role})</option>`;
+                    toSelect.innerHTML += option;
+                    ccSelect.innerHTML += option;
+                });
+            } catch (err) {
+                console.error('Error loading users:', err);
+            }
+        }
+
+        // Add CC user
+        window.addCc = function() {
+            const select = document.getElementById('ccUser');
+            const userId = select.value;
+            const userName = select.options[select.selectedIndex]?.text;
+
+            if (userId && !ccUsers.includes(userId)) {
+                ccUsers.push(userId);
+                const tag = document.createElement('span');
+                tag.className = 'cc-tag';
+                tag.textContent = userName;
+                tag.onclick = () => {
+                    ccUsers = ccUsers.filter(id => id !== userId);
+                    tag.remove();
+                };
+                document.getElementById('ccList').appendChild(tag);
+                select.value = '';
+            }
+        }
+
+        // Submit voucher
+        document.getElementById('voucherForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const toUser = document.getElementById('toUser').value;
+            const amount = parseFloat(document.getElementById('amount').value);
+            const description = document.getElementById('description').value;
+            const message = document.getElementById('message').value;
+            const voucherType = document.querySelector('input[name="voucherType"]:checked').value;
+
+            if (!toUser) {
+                document.getElementById('toUserError').style.display = 'block';
+                return;
+            }
+
+            const submitBtn = e.submitter;
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Creating...';
+
+            try {
+                // ✅ FIX: Use new Date() instead of serverTimestamp() for initial workflow array
+                const createdAt = new Date();
+
+                await addDoc(collection(db, 'vouchers'), {
+                    initiatorId: user.id,
+                    initiatorName: user.name,
+                    toUser: toUser,
+                    ccUsers: ccUsers,
+                    amount: amount,
+                    description: description,
+                    message: message,
+                    voucherType: voucherType,
+                    status: 'pending_operations',
+                    currentStep: 'operations',
+                    createdAt: createdAt, // ✅ Use Date object here
+                    workflow: [{  // ✅ Array with Date object (NOT serverTimestamp)
+                        step: 'initiated',
+                        actor: user.id,
+                        actorName: user.name,
+                        action: 'created',
+                        timestamp: createdAt,
+                        notes: message
+                    }],
+                    glCode: null,
+                    referenceNumber: null,
+                    settlementStatus: null
+                });
+
+                document.getElementById('submitSuccess').style.display = 'block';
+                setTimeout(() => {
+                    window.location.href = 'dashboard.html';
+                }, 1500);
+
+            } catch (err) {
+                console.error('Error creating voucher:', err);
+                document.getElementById('submitError').textContent = 'Failed to create voucher: ' + err.message;
+                document.getElementById('submitError').style.display = 'block';
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit Voucher';
+            }
+        });
+
+        loadUsers();
+    </script>
+</body>
+</html>
