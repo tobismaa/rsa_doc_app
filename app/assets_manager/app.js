@@ -250,6 +250,9 @@ async function initializeAssetManager() {
     document.querySelector("#admin-user-form")?.addEventListener("submit", saveAdminUser);
     document.querySelector("#admin-users-body")?.addEventListener("click", handleAdminUserAction);
     loadAdminUsers();
+    if (new URLSearchParams(window.location.search).get("view") === "super_admin") {
+      activateTab(adminTab);
+    }
   } else {
     document.querySelector("#asset-role-badge").textContent = session.assetRole === "admin" ? "Admin" : "Staff";
   }

@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0f766e" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=20260918b">
     <title>Asset Manager | Sign in</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -144,6 +145,29 @@
       input:focus {
         border-color: var(--teal);
         box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.13);
+      }
+
+      select {
+        width: 100%;
+        min-height: 48px;
+        padding: 0 44px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+        color: var(--ink);
+        font: inherit;
+        outline: none;
+      }
+
+      select:focus {
+        border-color: var(--teal);
+        box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.13);
+      }
+
+      .field-note {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
       }
 
       .toggle-password {
@@ -312,7 +336,7 @@
     </style>
   <link rel="stylesheet" href="../login-shared.css">
 </head>
-  <body class="cm-login-page"><header class="cm-login-header"><a class="cm-bank" href="../index.html"><span class="cm-bank-mark">CM</span><span>CMBank<span class="cm-bank-sub">STAFF WORKSPACE</span></span></a><a class="cm-back" href="../index.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7"/></svg><span>Back to CMBank Intranet</span></a></header>
+  <body class="cm-login-page"><header class="cm-login-header"><a class="cm-bank" href="../index.html"><span class="cm-bank-mark">CM</span><span>CMBank<span class="cm-bank-sub">STAFF WORKSPACE</span></span></a><a class="cm-back" href="../index.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7"/></svg><span>Back to your workspace</span></a></header>
     <main class="cm-login-layout"><aside class="cm-story"><div class="cm-story-top"><span class="cm-story-dot"></span> CMBANK / ASSET MANAGER</div><div class="cm-story-main"><div class="cm-art" aria-hidden="true"><div class="cm-art-card"><span></span><span></span><span></span><b>&#10003;</b></div><div class="cm-art-ring"></div></div><p class="cm-kicker">YOUR WORK, CONNECTED</p><h2>Every asset.<br>A clearer picture.</h2><p class="cm-story-copy">Keep track of what matters, from the first purchase to the final retirement.</p><div class="cm-features"><span><i aria-hidden="true">&#10003;</i>Asset register</span><span><i aria-hidden="true">&#10003;</i>Custodian tracking</span><span><i aria-hidden="true">&#10003;</i>Portfolio overview</span></div></div><div class="cm-story-foot"><span>CMBank Intranet</span><span>One connected workplace.</span></div></aside><div class="cm-form-side"><div class="login-shell">
       
 
@@ -341,15 +365,6 @@
             </div>
           </div>
 
-          <p id="login-message" class="message" role="alert"></p>
-          <a id="firebase-fix-link" class="firebase-fix-link" href="https://console.firebase.google.com/project/assetmanager-f2ac7/authentication/providers" target="_blank" rel="noreferrer">
-            <i data-lucide="external-link" aria-hidden="true"></i>
-            <span>Open Firebase Authentication</span>
-          </a>
-          <a id="login-return-link" class="login-return-link" href="login.html">
-            <i data-lucide="log-in" aria-hidden="true"></i>
-            <span>Back to login</span>
-          </a>
           <button id="login-button" class="sign-in" type="submit">
             <span>Sign in</span><i data-lucide="arrow-right" aria-hidden="true"></i>
           </button>
@@ -359,13 +374,49 @@
           </button>
         </form>
 
+        <form id="asset-signup-form" hidden>
+          <div class="field">
+            <label for="display-name">Full name</label>
+            <div class="input-wrap">
+              <i data-lucide="user-round" aria-hidden="true"></i>
+              <input id="display-name" name="displayName" type="text" autocomplete="name" placeholder="Your full name" required />
+            </div>
+          </div>
+          <div class="field">
+            <label for="signup-email">Email address</label>
+            <div class="input-wrap">
+              <i data-lucide="mail" aria-hidden="true"></i>
+              <input id="signup-email" name="email" type="email" autocomplete="email" placeholder="name@cmbank.com" required />
+            </div>
+          </div>
+          <div class="field">
+            <label for="signup-password">Password</label>
+            <div class="input-wrap">
+              <i data-lucide="lock-keyhole" aria-hidden="true"></i>
+              <input id="signup-password" name="password" type="password" minlength="6" autocomplete="new-password" placeholder="At least 6 characters" required />
+            </div>
+          </div>
+          <button id="create-account-button" class="sign-in" type="submit"><span>Create account</span><i data-lucide="arrow-right" aria-hidden="true"></i></button>
+          <button id="back-to-login-button" class="sign-up" type="button"><i data-lucide="arrow-left" aria-hidden="true"></i><span>Back to login</span></button>
+        </form>
+
+          <p id="login-message" class="message" role="alert"></p>
+          <a id="firebase-fix-link" class="firebase-fix-link" href="https://console.firebase.google.com/project/assetmanager-f2ac7/authentication/providers" target="_blank" rel="noreferrer">
+            <i data-lucide="external-link" aria-hidden="true"></i>
+            <span>Open Firebase Authentication</span>
+          </a>
+          <a id="login-return-link" class="login-return-link" href="login.html">
+            <i data-lucide="log-in" aria-hidden="true"></i>
+            <span>Back to login</span>
+          </a>
+
         <p class="security-note"><i data-lucide="shield-check" aria-hidden="true"></i> Authorized CMBank staff only</p>
       </section>
 
       
     </div></div></main><footer class="cm-login-footer"><span>&copy; CMBank. All rights reserved.</span><span>For authorized staff access.</span></footer>
 
-    <script type="module" src="auth.js"></script>
-    <script>lucide.createIcons();</script>
+    <script src="login-ui.js"></script>
+    <script>window.lucide?.createIcons();</script>
   </body>
 </html>

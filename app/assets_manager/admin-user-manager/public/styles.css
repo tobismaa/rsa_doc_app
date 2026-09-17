@@ -236,8 +236,21 @@ textarea:focus {
 }
 
 .primary-button svg {
-  width: 18px;
-  height: 18px;
+    width: 18px;
+    height: 18px;
+}
+
+/* Cool professional action palette. */
+.primary-button {
+    background: #25635f !important;
+    border-color: #25635f !important;
+    color: #ffffff !important;
+    box-shadow: 0 8px 18px rgba(33, 79, 82, 0.2) !important;
+}
+.primary-button:hover {
+    background: #1b4f4b !important;
+    border-color: #1b4f4b !important;
+    color: #ffffff !important;
 }
 
 @keyframes spin {

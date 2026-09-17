@@ -412,7 +412,7 @@ createServer(async (request, response) => {
       const result = await createOrApproveUser({
         ...body,
         active: true,
-        role: "staff",
+        role: body.role,
         resetExistingPassword: false,
       });
       sendJson(response, result.status, result.payload);

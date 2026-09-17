@@ -441,3 +441,17 @@ body {
         font-size: 0.68rem;
     }
 }
+
+/* Cool professional action palette. */
+.submit-btn {
+    background: linear-gradient(135deg, #25635f, #1b4f4b) !important;
+    box-shadow: 0 18px 30px -18px rgba(20, 63, 66, 0.65) !important;
+}
+.submit-btn:hover {
+    box-shadow: 0 24px 38px -20px rgba(20, 63, 66, 0.78) !important;
+    filter: none !important;
+}
+.toggle-password:hover {
+    background: #eef5f6 !important;
+    color: #25635f !important;
+}

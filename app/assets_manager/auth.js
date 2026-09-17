@@ -43,6 +43,14 @@ async function checkAccess(user) {
   return { ...access, role };
 }
 
+function dashboardForRole(role) {
+  return role === "super_admin" ? "index.html?view=super_admin" : "index.html";
+}
+
+function redirectToDashboard(role) {
+  window.location.replace(dashboardForRole(role));
+}
+
 export async function requireAssetsSession() {
   if (!auth) {
     window.location.replace("login.html?error=config");
@@ -88,96 +96,48 @@ function showMessage(message) {
 }
 
 async function initializeLogin() {
-  const form = document.querySelector("#asset-login-form");
-  if (!form) return;
-  const password = document.querySelector("#password");
-  const toggle = document.querySelector(".toggle-password");
-  toggle?.addEventListener("click", () => {
-    const show = password.type === "password";
-    password.type = show ? "text" : "password";
-    toggle.setAttribute("aria-label", show ? "Hide password" : "Show password");
-    toggle.innerHTML = `<i data-lucide="${show ? "eye-off" : "eye"}" aria-hidden="true"></i>`;
-    window.lucide?.createIcons();
-  });
-  const button = document.querySelector("#login-button");
-  const signupButton = document.querySelector("#signup-button");
+  const loginForm = document.querySelector("#asset-login-form");
+  const signupForm = document.querySelector("#asset-signup-form");
+  if (!loginForm || !signupForm) return;
+  const loginButton = document.querySelector("#login-button");
   if (!auth) {
-    button.disabled = true;
-    if (signupButton) signupButton.disabled = true;
+    loginButton.disabled = true;
     showMessage("Firebase setup is pending. Please contact your administrator.");
     return;
   }
-  if (new URLSearchParams(location.search).get("error") === "access") {
+  const params = new URLSearchParams(location.search);
+  if (params.get("error") === "access") {
     showMessage("Your account needs Asset Manager access. Please contact your administrator.");
   }
-  if (new URLSearchParams(location.search).get("signup") === "success") {
+  if (params.get("signup") === "success") {
     showMessage("Account created successfully. Please sign in.");
   }
-  form.addEventListener("submit", async event => {
+
+  loginForm.addEventListener("submit", async event => {
     event.preventDefault();
-    if (button.disabled) return;
-    button.disabled = true;
-    button.querySelector("span").textContent = "Signing in...";
+    if (loginButton.disabled) return;
+    loginButton.disabled = true;
+    loginButton.querySelector("span").textContent = "Signing in...";
     try {
-      const result = await signInWithEmailAndPassword(auth, document.querySelector("#email").value.trim(), password.value);
+      const result = await signInWithEmailAndPassword(auth, document.querySelector("#email").value.trim(), document.querySelector("#password").value);
       const access = await checkAccess(result.user);
       result.user.assetRole = access.role;
-      window.location.replace("index.html");
+      redirectToDashboard(access.role);
     } catch (error) {
       if (auth.currentUser) await signOut(auth).catch(() => {});
       showMessage(friendlyError(error));
     } finally {
-      button.disabled = false;
-      button.querySelector("span").textContent = "Sign in";
+      loginButton.disabled = false;
+      loginButton.querySelector("span").textContent = "Sign in";
     }
   });
-  signupButton?.addEventListener("click", async () => {
-    const email = document.querySelector("#email").value.trim();
-    const pass = password.value;
 
-    if (!email || !pass) {
-      showMessage("Enter email and password first, then click Sign up.");
-      return;
-    }
-
-    button.disabled = true;
-    signupButton.disabled = true;
-    signupButton.querySelector("span").textContent = "Creating...";
-    try {
-      const response = await fetch("http://127.0.0.1:5055/api/signup", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password: pass,
-          displayName: email.split("@")[0],
-          active: true,
-          role: "staff",
-          resetExistingPassword: false,
-        }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.ok) {
-        throw Object.assign(new Error(data.error || "Could not create account."), { code: data.code });
-      }
-
-      if (auth.currentUser) await signOut(auth).catch(() => {});
-      window.location.replace("login.html?signup=success");
-    } catch (error) {
-      if (auth.currentUser) await signOut(auth).catch(() => {});
-      showMessage(friendlyError(error));
-    } finally {
-      button.disabled = false;
-      signupButton.disabled = false;
-      signupButton.querySelector("span").textContent = "Sign up";
-    }
-  });
   const user = await waitForUser();
   if (user) {
     try {
       const access = await checkAccess(user);
       user.assetRole = access.role;
-      window.location.replace("index.html");
+      redirectToDashboard(access.role);
     } catch (error) {
       await signOut(auth).catch(() => {});
       showMessage(friendlyError(error));

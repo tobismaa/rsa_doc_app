@@ -3,10 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=20260918b">
     <title>Asset Manager | CMBank</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="dashboard-design.css" />
   </head>
   <body>
     <div class="app-shell">
@@ -40,25 +42,33 @@
             <div><p class="eyebrow">YOUR ASSETS, IN FOCUS</p><h1>Asset overview<span class="heading-dot">.</span></h1><p>A clear view of your assets, their value, and what needs your attention.</p></div>
             <div class="page-actions"><button class="ghost-button" data-export type="button">&#8595; Export register</button><button class="primary-button" type="button">+ Add Asset</button></div>
           </div>
-          <div class="overview-banner"><div><span class="banner-icon" aria-hidden="true">&#9639;</span><div><strong>Make every asset count.</strong><p>Your central workspace for the complete asset lifecycle.</p></div></div><span class="period-control"><span>WORKSPACE SNAPSHOT</span><strong id="snapshot-date"></strong></span></div>
+          <div class="overview-banner">
+            <div class="banner-copy"><span class="banner-kicker">THE BIG PICTURE</span><strong>Every asset.<br>Endless possibilities.</strong><p>Bring clarity to your portfolio. Track value, stay ahead of maintenance, and make informed decisions.</p><span class="period-control"><span>WORKSPACE SNAPSHOT</span><strong id="snapshot-date"></strong></span></div>
+            <div class="portfolio-art" aria-hidden="true">
+              <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><span class="orbit-dot"></span>
+              <div class="asset-tile tile-back"><svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m32 9 22 12v24L32 57 10 45V21L32 9Z M10 21l22 12 22-12 M32 33v24 M21 15l22 12"/></svg></div>
+              <div class="asset-tile tile-front"><span>ASSET PORTFOLIO</span><svg viewBox="0 0 160 70" fill="none"><path d="M2 59 29 45 53 51 81 27 109 33 156 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 59 29 45 53 51 81 27 109 33 156 7V70H2Z" fill="currentColor" opacity=".08"/></svg><div class="art-lines"><i></i><i></i><i></i></div></div>
+              <span class="art-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 12 4 4 8-8"/></svg></span>
+            </div>
+          </div>
           <section class="metrics-grid" aria-label="Asset metrics">
             <article class="metric">
-              <div class="metric-heading"><span>Total assets</span><span class="metric-icon" aria-hidden="true">&#9639;</span></div>
+              <div class="metric-heading"><span>Total assets</span><span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8 4v10l-8 4-8-4V7l8-4Z M4 7l8 4 8-4 M12 11v10"/></svg></span></div>
               <strong id="metric-total-assets">0</strong>
               <small id="metric-total-assets-note">Assets in your register</small>
             </article>
             <article class="metric">
-              <div class="metric-heading"><span>Acquisition cost</span><span class="metric-icon" aria-hidden="true">&#9639;</span></div>
+              <div class="metric-heading"><span>Acquisition cost</span><span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18 M7 15h3"/></svg></span></div>
               <strong id="metric-acquisition-cost">₦0</strong>
               <small><span id="category-count">Across your asset categories</span></small>
             </article>
             <article class="metric">
-              <div class="metric-heading"><span>Net book value</span><span class="metric-icon" aria-hidden="true">&#9639;</span></div>
+              <div class="metric-heading"><span>Net book value</span><span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10 M10 20V4 M16 20v-8 M22 20H2"/></svg></span></div>
               <strong id="metric-book-value">₦0</strong>
               <small id="metric-book-value-note">Current carrying value</small>
             </article>
             <article class="metric">
-              <div class="metric-heading"><span>Value depreciated</span><span class="metric-icon" aria-hidden="true">&#9639;</span></div>
+              <div class="metric-heading"><span>Value depreciated</span><span class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m4 6 6 6 4-4 6 9 M14 17h6v-6"/></svg></span></div>
               <strong id="metric-depreciation">₦0</strong>
               <small>Acquisition cost less book value</small>
             </article>
