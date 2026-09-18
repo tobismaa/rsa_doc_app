@@ -447,6 +447,62 @@
   background: #b91c1c;
 }
 
+.audit-customer-edit-btn {
+  min-width: 132px;
+  min-height: 42px;
+  padding: 10px 16px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.audit-customer-edit-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.audit-customer-edit-btn:focus-visible {
+  outline: 3px solid rgba(15, 59, 103, 0.24);
+  outline-offset: 2px;
+}
+
+.audit-customer-edit-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.audit-customer-edit-cancel {
+  color: #334155;
+  border-color: #cbd5e1;
+  background: #fff;
+}
+
+.audit-customer-edit-cancel:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.audit-customer-edit-reject {
+  color: #fff;
+  background: #b91c1c;
+  box-shadow: 0 6px 14px rgba(185, 28, 28, 0.18);
+}
+
+.audit-customer-edit-reject:hover:not(:disabled) {
+  background: #991b1b;
+}
+
+.audit-customer-edit-approve {
+  color: #fff;
+  background: #0f766e;
+  box-shadow: 0 6px 14px rgba(15, 118, 110, 0.2);
+}
+
+.audit-customer-edit-approve:hover:not(:disabled) {
+  background: #0b5d57;
+}
+
 .audit-reconciliation-panel {
   display: flex;
   justify-content: space-between;

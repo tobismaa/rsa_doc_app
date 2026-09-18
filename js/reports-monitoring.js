@@ -35,7 +35,7 @@ let allSubmissions = [];
 let userDisplayNamesByEmail = new Map();
 let auditRenderTimer = null;
 let currentTab = 'overview';
-const AUDIT_DASHBOARD_TABS = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'reconciliation', 'user-report', 'profile', 'help'];
+const AUDIT_DASHBOARD_TABS = ['overview', 'sent-to-pfa', 'customer-edits', 'paid', 'cleared', 'rejected', 'reconciliation', 'user-report', 'profile', 'help'];
 const AUDIT_BULK_CLEAR_BATCH_SIZE = 200;
 const AUDIT_RECONCILIATION_VIEWS = ['excel', 'duplicates', 'ignored', 'deleted', 'rejected'];
 
@@ -96,6 +96,7 @@ const auditOverviewPendingTableBody = document.getElementById('auditOverviewPend
 const auditPaidTableBody = document.getElementById('auditPaidTableBody');
 const auditClearedTableBody = document.getElementById('auditClearedTableBody');
 const auditRejectedTableBody = document.getElementById('auditRejectedTableBody');
+const auditCustomerEditTableBody = document.getElementById('auditCustomerEditTableBody');
 const exportAuditPendingReportBtn = document.getElementById('exportAuditPendingReportBtn');
 const exportAuditPaidReportBtn = document.getElementById('exportAuditPaidReportBtn');
 const exportAuditClearedReportBtn = document.getElementById('exportAuditClearedReportBtn');
@@ -1774,6 +1775,147 @@ function getAuditSentToPfaRows() {
         .sort((a, b) => getStageTimestampMillis(b.auditCommissionSubmittedAt || b.paymentMadeAt || getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(a.auditCommissionSubmittedAt || a.paymentMadeAt || getSubmissionCurrentStageEntryAt(a)));
 }
 
+function getAuditCustomerEditRows() {
+    return allSubmissions
+        .filter((sub) => sub.customerDetailsEditPending === true || sub.customerDetailsEditRequested === true)
+        .sort((a, b) => getStageTimestampMillis(b.customerDetailsEditRequestedAt || b.updatedAt) - getStageTimestampMillis(a.customerDetailsEditRequestedAt || a.updatedAt));
+}
+
+function getAuditCustomerEditReturnStatus(sub = {}) {
+    const savedStatus = String(sub.customerDetailsEditReturnStatus || sub.customerDetailsEditPreviousStatus || '').trim().toLowerCase();
+    if (savedStatus && savedStatus !== 'audit_pending') return savedStatus;
+    if (String(sub.status || '').trim().toLowerCase() !== 'audit_pending') return String(sub.status || 'pending').trim();
+    if (sub.clearedAt || sub.auditClearedAt) return 'cleared';
+    if (sub.paidAt || sub.auditCommissionAcceptedAt) return 'paid';
+    if (sub.finalSubmitted === true || sub.rsaSubmitted === true || sub.finalSubmittedAt || sub.rsaSubmittedAt) return 'sent_to_pfa';
+    if (sub.assignedToRSA || sub.rsaReady === true) return 'processing_to_pfa';
+    return 'pending';
+}
+
+function renderAuditCustomerEditRows() {
+    if (!auditCustomerEditTableBody) return;
+    const rows = getAuditCustomerEditRows();
+    auditCustomerEditTableBody.innerHTML = rows.length ? rows.map((sub) => {
+        const before = sub.customerDetailsEditBefore || sub.customerDetails || {};
+        const proposed = sub.customerDetailsEditProposed || {};
+        return `
+            <tr>
+                <td>${escapeHtml(getUserDisplayName(sub.uploadedBy || sub.customerDetailsEditRequestedBy || '') || sub.uploadedBy || '-')}</td>
+                <td><strong>${escapeHtml(before.name || sub.customerName || '-')}</strong><br><small>${escapeHtml(before.accountNo || sub.accountNo || '-')}</small></td>
+                <td><strong>${escapeHtml(proposed.name || '-')}</strong><br><small>${escapeHtml(proposed.accountNo || '-')}</small></td>
+                <td>${escapeHtml(formatDate(sub.customerDetailsEditRequestedAt || sub.updatedAt))}</td>
+                <td><button type="button" class="action-btn" onclick="window.openAuditCustomerEditReview('${escapeHtml(sub.id)}')"><i class="fas fa-eye"></i> Review</button></td>
+            </tr>
+        `;
+    }).join('') : '<tr><td colspan="5" class="no-data">No customer detail edit requests.</td></tr>';
+}
+
+function renderAuditCustomerEditComparison(before = {}, proposed = {}) {
+    const fields = [
+        ['Customer Name', 'name'], ['Account Name', 'accountName'], ['Account Number', 'accountNo'],
+        ['Account Bank', 'accountBank'], ['Phone', 'phone'], ['Email', 'email'],
+        ['RSA Balance', 'rsaBalance'], ['25% RSA', 'rsa25Percent'], ['Loan Amount', 'loanAmount']
+    ];
+    return fields.map(([label, key]) => `
+        <tr>
+            <th style="background:#f8fafc;">${escapeHtml(label)}</th>
+            <td>${escapeHtml(String(before[key] ?? '-'))}</td>
+            <td>${escapeHtml(String(proposed[key] ?? before[key] ?? '-'))}</td>
+        </tr>
+    `).join('');
+}
+
+window.openAuditCustomerEditReview = (submissionId) => {
+    const sub = allSubmissions.find((item) => item.id === submissionId);
+    if (!sub) {
+        showNotification('Edit request not found.', 'warning');
+        return;
+    }
+    const before = sub.customerDetailsEditBefore || sub.customerDetails || {};
+    const proposed = sub.customerDetailsEditProposed || {};
+    const modal = document.createElement('div');
+    modal.className = 'modal active audit-action-modal';
+    modal.innerHTML = `
+        <div class="modal-content large-modal" style="max-width:900px;">
+            <div class="modal-header">
+                <h2><i class="fas fa-user-pen"></i> Review Customer Detail Edit</h2>
+                <button class="close-btn" type="button" data-audit-customer-edit="cancel">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin:0 0 14px;color:#475569;">${escapeHtml(sub.customerDetailsEditReason || 'No reason provided.')}</p>
+                <div class="table-container"><table class="documents-table"><thead><tr><th>Field</th><th>Current Information</th><th>Requested Information</th></tr></thead><tbody>${renderAuditCustomerEditComparison(before, proposed)}</tbody></table></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="audit-customer-edit-btn audit-customer-edit-cancel" data-audit-customer-edit="cancel">Cancel</button>
+                <button type="button" class="audit-customer-edit-btn audit-customer-edit-reject" data-audit-customer-edit="reject"><i class="fas fa-xmark"></i> Reject</button>
+                <button type="button" class="audit-customer-edit-btn audit-customer-edit-approve" data-audit-customer-edit="approve"><i class="fas fa-check"></i> Approve Update</button>
+            </div>
+        </div>
+    `;
+    modal.addEventListener('click', async (event) => {
+        if (event.target === modal || event.target.closest('[data-audit-customer-edit="cancel"]')) {
+            modal.remove();
+            return;
+        }
+        const action = event.target.closest('[data-audit-customer-edit]')?.dataset.auditCustomerEdit;
+        if (!action || action === 'cancel') return;
+        const actionButtons = modal.querySelectorAll('[data-audit-customer-edit]');
+        actionButtons.forEach((button) => {
+            button.disabled = true;
+        });
+        const clickedButton = modal.querySelector(`[data-audit-customer-edit="${action}"]`);
+        if (clickedButton) {
+            clickedButton.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${action === 'approve' ? 'Approving...' : 'Rejecting...'}`;
+        }
+        try {
+            const previousStatus = getAuditCustomerEditReturnStatus(sub);
+            const updates = {
+                customerDetailsEditPending: false,
+                customerDetailsEditRequested: false,
+                customerDetailsEditReviewedAt: serverTimestamp(),
+                customerDetailsEditReviewedBy: currentUser?.email || '',
+                customerDetailsEditApprovalStatus: action === 'approve' ? 'approved' : 'rejected',
+                status: previousStatus,
+                updatedAt: serverTimestamp()
+            };
+            if (action === 'approve') {
+                const updatedDetails = { ...(sub.customerDetails || {}), ...proposed };
+                updates.customerName = proposed.name || sub.customerName || '';
+                updates.customerDetails = updatedDetails;
+                updates.accountNo = proposed.accountNo || sub.accountNo || '';
+                updates.accountName = proposed.accountName || sub.accountName || '';
+                updates.accountBank = proposed.accountBank || sub.accountBank || '';
+                updates.accountBankCode = proposed.accountBankCode || sub.accountBankCode || '';
+                updates.customerPhone = proposed.phone || sub.customerPhone || '';
+                updates.customerEmail = proposed.email || sub.customerEmail || '';
+                updates.rsaBalance = proposed.rsaBalance || sub.rsaBalance || '';
+                updates.rsa25Percent = proposed.rsa25Percent || sub.rsa25Percent || '';
+                updates.loanAmount = proposed.loanAmount || sub.loanAmount || '';
+            }
+            await updateDoc(doc(db, 'submissions', submissionId), updates);
+            await addDoc(collection(db, 'audit'), {
+                action: action === 'approve' ? 'uploader_customer_detail_edit_approved' : 'uploader_customer_detail_edit_rejected',
+                submissionId,
+                performedBy: currentUser?.email || '',
+                timestamp: serverTimestamp()
+            }).catch(() => {});
+            modal.remove();
+            showNotification(action === 'approve' ? 'Customer detail update approved.' : 'Customer detail update rejected.', 'success');
+        } catch (error) {
+            actionButtons.forEach((button) => {
+                button.disabled = false;
+            });
+            if (clickedButton) {
+                clickedButton.innerHTML = action === 'approve'
+                    ? '<i class="fas fa-check"></i> Approve Update'
+                    : '<i class="fas fa-xmark"></i> Reject';
+            }
+            showNotification(`Unable to process customer edit: ${error.message || error}`, 'error');
+        }
+    });
+    document.body.appendChild(modal);
+};
+
 function getAuditApprovalEmail(sub = {}) {
     return normalizeEmail(sub.auditCommissionAcceptedBy || sub.paidBy || sub.commissionPaidBy || '');
 }
@@ -1828,6 +1970,7 @@ function setCountBadge(id, value) {
 
 function renderAuditWorkflowBadges() {
     setCountBadge('auditSentToPfaCountBadge', getAuditSentToPfaRows().length);
+    setCountBadge('auditCustomerEditCountBadge', getAuditCustomerEditRows().length);
     setCountBadge('auditPaidCountBadge', getAuditPaidRows('all').length);
     setCountBadge('auditClearedCountBadge', getAuditClearedRows().length);
     setCountBadge('auditRejectedCountBadge', getAuditRejectedRows().length);
@@ -2306,6 +2449,7 @@ function renderAuditWorkflowTabs() {
     });
     renderAuditMoneyRows(auditOverviewPendingTableBody, getAuditSentToPfaRows(), 'sent');
     renderAuditMoneyRows(auditSentToPfaTableBody, getAuditSentToPfaRows(), 'sent');
+    renderAuditCustomerEditRows();
     renderAuditMoneyRows(auditPaidTableBody, getAuditPaidRows(currentAuditPaidScope), 'paid');
     renderAuditMoneyRows(auditClearedTableBody, getAuditClearedRows(), 'cleared');
     renderAuditRejectedRows(auditRejectedTableBody, getAuditRejectedRowsForScope(currentAuditRejectedScope));
@@ -2831,6 +2975,10 @@ function renderCurrentTab() {
         renderAuditMoneyRows(auditSentToPfaTableBody, getAuditSentToPfaRows(), 'sent');
         return;
     }
+    if (currentTab === 'customer-edits') {
+        renderAuditCustomerEditRows();
+        return;
+    }
     if (currentTab === 'paid') {
         document.querySelectorAll('[data-audit-paid-scope]').forEach((button) => {
             button.classList.toggle('active', button.dataset.auditPaidScope === currentAuditPaidScope);
@@ -2883,6 +3031,7 @@ function switchTab(tabId) {
     const titles = {
         overview: 'Audit Overview',
         'sent-to-pfa': 'Pending Request',
+        'customer-edits': 'Customer Edits',
         paid: 'Paid',
         cleared: 'Cleared',
         rejected: 'Rejected',
@@ -2895,7 +3044,7 @@ function switchTab(tabId) {
 }
 
 function ensureDataForTab(tabId) {
-    const dataTabs = ['overview', 'sent-to-pfa', 'paid', 'cleared', 'rejected', 'reconciliation', 'user-report'];
+    const dataTabs = ['overview', 'sent-to-pfa', 'customer-edits', 'paid', 'cleared', 'rejected', 'reconciliation', 'user-report'];
     if (dataTabs.includes(tabId)) loadUsers();
     if (dataTabs.includes(tabId)) loadAgents();
     if (dataTabs.includes(tabId)) loadSubmissions({ full: tabId === 'reconciliation' || tabId === 'user-report' });
@@ -4485,6 +4634,13 @@ function loadSubmissions({ full = false } = {}) {
         query(
             collection(db, 'submissions'),
             where('auditCommissionStatus', 'in', ['pending', 'rejected'])
+        )
+    );
+    attachListener(
+        'customer-edit-requests',
+        query(
+            collection(db, 'submissions'),
+            where('customerDetailsEditPending', '==', true)
         )
     );
 }

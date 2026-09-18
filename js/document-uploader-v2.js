@@ -1290,8 +1290,8 @@ let uploaderApplicationsRenderId = 0;
 let currentUploaderApplicationReportRows = [];
 const expandedUploaderClearedBatchKeys = new Set();
 let submissionInProgress = false;
-const UPLOADER_DASHBOARD_TABS = ['overview', 'draft', 'applications', 'pending', 'approved', 'rejected', 'paid', 'reports', 'register-agent', 'profile', 'help'];
-const UPLOADER_APPLICATION_TABS = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'audit', 'paid', 'cleared'];
+const UPLOADER_DASHBOARD_TABS = ['overview', 'draft', 'applications', 'edit-customer', 'pending', 'approved', 'rejected', 'paid', 'reports', 'register-agent', 'profile', 'help'];
+const UPLOADER_APPLICATION_TABS = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'customer_edit', 'audit', 'paid', 'cleared'];
 let registeredAgents = [];
 let agentAccountLookupSequence = 0;
 let agentAccountLookupDebounce = null;
@@ -3298,6 +3298,13 @@ function setupEventListeners() {
   if (applicationsSearch) {
     applicationsSearch.addEventListener('input', renderUploaderApplicationsTable);
   }
+  document.getElementById('uploaderEditCustomerSearchBtn')?.addEventListener('click', searchUploaderEditCustomer);
+  document.getElementById('uploaderEditCustomerSearchInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      searchUploaderEditCustomer();
+    }
+  });
   setUploaderApplicationReportPreset('week');
   if (uploaderApplicationReportStage) {
     uploaderApplicationReportStage.addEventListener('change', renderUploaderApplicationReportPreview);
@@ -3606,7 +3613,7 @@ window.switchTab = (tabId) => {
   document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
   document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
   document.getElementById(`${tabId}Tab`)?.classList.add('active');
-  const titles = { overview: 'Dashboard', draft: 'Draft Submissions', applications: 'Applications', pending: 'Pending Documents', approved: 'Approved Documents', rejected: 'Rejected Documents', paid: 'Commission', reports: 'Reports', 'register-agent': 'Register Agent', profile: 'My Profile' };
+  const titles = { overview: 'Dashboard', draft: 'Draft Submissions', applications: 'Applications', 'edit-customer': 'Edit Customer', pending: 'Pending Documents', approved: 'Approved Documents', rejected: 'Rejected Documents', paid: 'Commission', reports: 'Reports', 'register-agent': 'Register Agent', profile: 'My Profile' };
   if (pageTitle) pageTitle.textContent = titles[tabId] || 'My Documents';
   if (tabId === 'applications') {
     renderUploaderApplicationsTable();
@@ -5870,9 +5877,11 @@ function getUploaderApplicationBucket(submission = {}) {
   const auditStatus = String(submission.auditCommissionStatus || '').trim().toLowerCase();
   const auditDuplicateCorrectionStatus = String(submission.auditDuplicateCorrectionStatus || '').trim().toLowerCase();
   const isAwaitingAuditDuplicateCorrection = auditDuplicateCorrectionStatus === 'pending';
+  const customerEditPending = submission.customerDetailsEditPending === true || submission.customerDetailsEditRequested === true;
   if (isUploaderDeletedApplication(submission)) return 'deleted';
   if (status === 'draft') return 'draft';
   if (isAwaitingAuditDuplicateCorrection && status !== 'audit_pending') return 'rejected';
+  if (customerEditPending && status === 'audit_pending') return 'customer_edit';
   if (status === 'audit_pending') return 'audit';
   if (status === 'pending') return 'pending';
   if (auditStatus === 'rejected') return 'rejected';
@@ -5945,7 +5954,7 @@ function getUploaderApplicationCounts() {
     const bucket = getUploaderApplicationBucket(sub);
     if (bucket && Object.prototype.hasOwnProperty.call(acc, bucket) && isVisibleUploaderApplicationForTab(sub, bucket)) acc[bucket] += 1;
     return acc;
-  }, { draft: 0, pending: 0, approved: 0, rejected: 0, sent_to_pfa: 0, audit: 0, paid: 0, cleared: 0 });
+  }, { draft: 0, pending: 0, approved: 0, rejected: 0, sent_to_pfa: 0, customer_edit: 0, audit: 0, paid: 0, cleared: 0 });
 }
 
 function getUploaderDeletedReason(submission = {}) {
@@ -6601,6 +6610,7 @@ function renderUploaderApplicationBadges() {
     appApprovedCount: counts.approved,
     appRejectedCount: counts.rejected,
     appSentToPfaCount: counts.sent_to_pfa,
+    appCustomerEditCount: counts.customer_edit,
     appAuditCount: counts.audit,
     appPaidCount: counts.paid,
     appClearedCount: counts.cleared
@@ -6680,6 +6690,85 @@ async function copyUploaderTextToClipboard(text = '') {
   const copied = document.execCommand('copy');
   textarea.remove();
   return copied;
+}
+
+function setUploaderEditCustomerStatus(message = '', type = 'info') {
+  const status = document.getElementById('uploaderEditCustomerSearchStatus');
+  if (!status) return;
+  const styles = {
+    info: ['#bfdbfe', '#eff6ff', '#1d4ed8'],
+    warning: ['#fcd34d', '#fffbeb', '#92400e'],
+    error: ['#fecaca', '#fef2f2', '#991b1b'],
+    success: ['#bbf7d0', '#f0fdf4', '#166534']
+  };
+  if (!String(message || '').trim()) {
+    status.style.display = 'none';
+    status.textContent = '';
+    return;
+  }
+  const [border, background, color] = styles[type] || styles.info;
+  status.style.display = 'block';
+  status.style.borderColor = border;
+  status.style.background = background;
+  status.style.color = color;
+  status.textContent = message;
+}
+
+function renderUploaderCustomerEditMatches(matches = []) {
+  const host = document.getElementById('uploaderEditCustomerResults');
+  if (!host) return;
+  if (!Array.isArray(matches) || !matches.length) {
+    host.innerHTML = '';
+    return;
+  }
+
+  host.innerHTML = matches.map((sub) => {
+    const customerName = String(sub.customerName || sub.customerDetails?.name || 'Unknown').trim() || 'Unknown';
+    const penNo = getSubmissionPenNumber(sub) || '-';
+    const status = String(sub.status || '').replaceAll('_', ' ') || 'Unknown';
+    const accountNumber = String(sub.accountNo || sub.customerDetails?.accountNo || 'No account').trim() || 'No account';
+    const loanAmount = formatCurrency(sub.loanAmount || sub.customerDetails?.loanAmount || 0);
+    return `
+      <button type="button" class="status-change-match-btn" data-uploader-customer-edit-id="${escapeHtml(sub.id || '')}">
+        <strong>${escapeHtml(customerName)}</strong>
+        <span>PEN: ${escapeHtml(penNo)} | Account: ${escapeHtml(accountNumber)} | Amount: ${escapeHtml(loanAmount)} | Status: ${escapeHtml(status)}</span>
+      </button>
+    `;
+  }).join('');
+
+  host.querySelectorAll('[data-uploader-customer-edit-id]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const submissionId = button.getAttribute('data-uploader-customer-edit-id');
+      const submission = allSubmissions.find((item) => item.id === submissionId);
+      if (!submission) return;
+      await window.openUploaderCustomerEditModal(submissionId);
+    });
+  });
+}
+
+async function searchUploaderEditCustomer() {
+  const input = document.getElementById('uploaderEditCustomerSearchInput');
+  const query = String(input?.value || '').trim();
+  if (!query) {
+    setUploaderEditCustomerStatus('Enter a customer name or PEN number.', 'warning');
+    renderUploaderCustomerEditMatches([]);
+    return;
+  }
+  setUploaderEditCustomerStatus('Searching matching applications...', 'info');
+  try {
+    const matches = await findSubmissionsByApplicationLookup(query);
+    if (!matches.length) {
+      setUploaderEditCustomerStatus('No matching customer found.', 'error');
+      renderUploaderCustomerEditMatches([]);
+      return;
+    }
+    setUploaderEditCustomerStatus(`${matches.length} customer match${matches.length === 1 ? '' : 'es'} found. Select one to edit.`, 'success');
+    renderUploaderCustomerEditMatches(matches);
+  } catch (error) {
+    console.error('Uploader customer search failed:', error);
+    setUploaderEditCustomerStatus('Failed to search for that customer.', 'error');
+    renderUploaderCustomerEditMatches([]);
+  }
 }
 
 document.addEventListener('click', async (event) => {
@@ -6993,6 +7082,35 @@ async function renderUploaderApplicationsTable() {
     return;
   }
 
+  if (renderTab === 'customer_edit') {
+    setUploaderApplicationsColumns(['Customer Name', 'Account Number', 'RSA Balance', 'Loan Amount', 'Requested At', 'Reason', 'Action']);
+    if (!rows.length) {
+      writeEmptyRows('edit requests');
+      return;
+    }
+    let html = '';
+    for (const sub of rows) {
+      const requestedAt = safeFormatDate(sub.customerDetailsEditRequestedAt || sub.updatedAt || sub.uploadedAt);
+      const reason = String(sub.customerDetailsEditReason || 'No explanation provided').trim();
+      html += `
+        <tr data-submission-id="${sub.id}">
+          <td><strong>${escapeHtml(sub.customerName || '-')}</strong></td>
+          <td>${escapeHtml(String(sub.accountNo || sub.customerDetails?.accountNo || '-').trim())}</td>
+          <td>${escapeHtml(formatCurrency(sub.rsaBalance || sub.customerDetails?.rsaBalance || 0))}</td>
+          <td>${escapeHtml(formatCurrency(sub.loanAmount || sub.customerDetails?.loanAmount || 0))}</td>
+          <td>${requestedAt}</td>
+          <td>${escapeHtml(reason)}</td>
+          <td>
+            <button class="action-btn edit-btn" onclick="window.openUploaderCustomerEditModal('${sub.id}')"><i class="fas fa-pen"></i> Edit</button>
+            ${getUploaderSubmissionDetailsButtonHtml(sub.id)}
+          </td>
+        </tr>
+      `;
+    }
+    writeRows(html);
+    return;
+  }
+
   if (renderTab === 'deleted') {
     setUploaderApplicationsColumns(['Customer Name', 'Agent', 'Deleted By', 'Deleted Date/Time', 'Uploaded Date/Time', 'Reason', 'View']);
     if (!rows.length) {
@@ -7065,6 +7183,7 @@ async function renderUploaderApplicationsTable() {
         <td>${safeFormatDate(getUploaderPaymentStageEntryAt(sub))}</td>
         <td>${escapeHtml(residentOfficer)}</td>
         <td>
+          <button class="action-btn edit-btn" onclick="window.openUploaderCustomerEditModal('${sub.id}')"><i class="fas fa-pen"></i> Edit</button>
           ${paymentButton}
           ${auditLabel}
           ${getUploaderSubmissionDetailsButtonHtml(sub.id)}
@@ -7085,6 +7204,308 @@ function switchUploaderApplicationTab(tab = 'pending') {
   });
   renderUploaderApplicationsTable();
 }
+
+function showUploaderCustomerEditModal(submission = {}) {
+  return new Promise((resolve) => {
+    const details = submission?.customerDetails && typeof submission.customerDetails === 'object' ? submission.customerDetails : {};
+    const modal = document.createElement('div');
+    modal.className = 'modal active uploader-customer-edit-modal';
+    const defaultBankName = String(details.accountBank || submission.accountBank || DEFAULT_CUSTOMER_ACCOUNT_BANK_NAME || '').trim();
+    const bankOptions = Array.isArray(accountLookupBanks) && accountLookupBanks.length ? accountLookupBanks : FALLBACK_CUSTOMER_ACCOUNT_BANKS;
+    const bankSelectHtml = `
+      <div>
+        <label for="uploaderEditAccountBank">Account Bank *</label>
+        <select id="uploaderEditAccountBank">
+          <option value="">Select bank</option>
+          ${bankOptions.map((bank) => {
+            const label = getCustomerAccountBankLabel(bank);
+            const isSelected = label === defaultBankName || (String(bank.code || '').trim() === String(details.accountBankCode || submission.accountBankCode || '').trim());
+            return `<option value="${escapeHtml(String(bank.code || '').trim())}" data-name="${escapeHtml(label)}" ${isSelected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+          }).join('')}
+        </select>
+      </div>
+    `;
+    modal.innerHTML = `
+      <div class="modal-content large-modal" style="max-width:760px;">
+        <div class="modal-header">
+          <h2><i class="fas fa-user-pen"></i> Edit customer details for audit</h2>
+          <button class="close-btn" type="button" data-uploader-edit-close="cancel">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="margin:0 0 16px;color:#475569;">Update customer info, account number, or amount. The submission will be returned to Audit for approval before the change is finalized.</p>
+          <div class="customer-input-grid">
+            <div>
+              <label for="uploaderEditCustomerName">Customer Name *</label>
+              <input id="uploaderEditCustomerName" type="text" value="${escapeHtml(details.name || submission.customerName || '')}" readonly>
+            </div>
+            <div>
+              <label for="uploaderEditAccountNumber">Account Number *</label>
+              <input id="uploaderEditAccountNumber" type="text" maxlength="10" inputmode="numeric" value="${escapeHtml(String(details.accountNo || submission.accountNo || '').trim())}">
+            </div>
+            ${bankSelectHtml}
+            <div>
+              <label for="uploaderEditAccountName">Account Name</label>
+              <input id="uploaderEditAccountName" type="text" value="${escapeHtml(String(details.accountName || submission.accountName || details.name || submission.customerName || '').trim())}" readonly>
+            </div>
+            <div>
+              <label for="uploaderEditCustomerPhone">Phone</label>
+              <input id="uploaderEditCustomerPhone" type="tel" maxlength="11" value="${escapeHtml(String(details.phone || submission.customerPhone || '').trim())}">
+            </div>
+            <div>
+              <label for="uploaderEditCustomerEmail">Email</label>
+              <input id="uploaderEditCustomerEmail" type="email" value="${escapeHtml(String(details.email || submission.customerEmail || '').trim())}">
+            </div>
+            <div>
+              <label for="uploaderEditRsaBalance">RSA Balance</label>
+              <input id="uploaderEditRsaBalance" type="number" step="0.01" value="${escapeHtml(String(details.rsaBalance || submission.rsaBalance || '').trim())}">
+            </div>
+            <div>
+              <label for="uploaderEditRsa25">25% RSA</label>
+              <input id="uploaderEditRsa25" type="number" step="0.01" value="${escapeHtml(String(details.rsa25 || details.rsa25Percent || submission.rsa25Percent || calculateRoundedRsa25(parseMoney(details.rsaBalance || submission.rsaBalance || 0))).trim())}">
+            </div>
+            <div>
+              <label for="uploaderEditLoanAmount">Loan Amount</label>
+              <input id="uploaderEditLoanAmount" type="number" step="0.01" value="${escapeHtml(String(details.loanAmount || submission.loanAmount || '').trim())}">
+            </div>
+            <div class="full-width">
+              <label for="uploaderEditReason">Reason for change *</label>
+              <textarea id="uploaderEditReason" rows="4" placeholder="Example: Customer account number was corrected after verification."></textarea>
+            </div>
+          </div>
+          <div id="uploaderEditAccountLookupStatus" style="display:none;margin-top:10px;font-size:12px;font-weight:700;"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="cancel-btn" data-uploader-edit-close="cancel">Cancel</button>
+          <button type="button" class="submit-btn" data-uploader-edit-close="submit">
+            <i class="fas fa-paper-plane"></i> Submit for Audit Approval
+          </button>
+        </div>
+      </div>
+    `;
+
+    const accountNameInput = modal.querySelector('#uploaderEditAccountName');
+    const accountNumberInput = modal.querySelector('#uploaderEditAccountNumber');
+    const accountBankSelect = modal.querySelector('#uploaderEditAccountBank');
+    const rsaBalanceInput = modal.querySelector('#uploaderEditRsaBalance');
+    const rsa25Input = modal.querySelector('#uploaderEditRsa25');
+    const statusEl = modal.querySelector('#uploaderEditAccountLookupStatus');
+
+    const setEditLookupStatus = (message = '', type = 'info') => {
+      if (!statusEl) return;
+      const text = String(message || '').trim();
+      statusEl.textContent = text;
+      statusEl.style.display = text ? 'block' : 'none';
+      const colors = { error: '#dc2626', success: '#15803d', info: '#64748b' };
+      statusEl.style.color = colors[type] || colors.info;
+      if (accountNumberInput) {
+        accountNumberInput.style.borderColor = type === 'error' ? '#dc2626' : '';
+        accountNumberInput.style.boxShadow = type === 'error' ? '0 0 0 3px rgba(220, 38, 38, 0.12)' : '';
+      }
+      if (accountBankSelect) {
+        accountBankSelect.style.borderColor = type === 'error' ? '#dc2626' : '';
+        accountBankSelect.style.boxShadow = type === 'error' ? '0 0 0 3px rgba(220, 38, 38, 0.12)' : '';
+      }
+    };
+
+    const syncRsa25FromBalance = () => {
+      const rawRsaBalance = String(rsaBalanceInput?.value || '').trim();
+      if (rsa25Input) {
+        rsa25Input.value = rawRsaBalance ? String(calculateRoundedRsa25(parseMoney(rawRsaBalance))) : '';
+      }
+    };
+
+    const resolveEditAccountName = async () => {
+      const accountNumber = String(accountNumberInput?.value || '').replace(/\D/g, '');
+      const bankCode = String(accountBankSelect?.value || '').trim();
+      if (!accountNumber && !bankCode) {
+        setEditLookupStatus('', 'info');
+        return;
+      }
+      if (accountNumber && accountNumber.length !== 10) {
+        setEditLookupStatus('Enter a valid 10-digit account number.', 'error');
+        return;
+      }
+      if (accountNumber.length === 10 && !bankCode) {
+        setEditLookupStatus('Select account bank to verify account name.', 'error');
+        return;
+      }
+      if (accountNumber.length !== 10 || !bankCode) {
+        setEditLookupStatus('', 'info');
+        return;
+      }
+
+      setEditLookupStatus('Verifying account name...', 'info');
+      try {
+        const accountName = await fetchResolvedAccountName(accountNumber, bankCode);
+        if (accountName && accountNameInput) {
+          accountNameInput.value = accountName;
+          document.getElementById('uploaderEditCustomerName').value = accountName;
+        }
+        setEditLookupStatus(accountName ? `Verified: ${accountName}` : 'Account verified.', 'success');
+      } catch (error) {
+        setEditLookupStatus(error.message || 'Could not verify account name.', 'error');
+      }
+    };
+
+    accountNumberInput?.addEventListener('input', () => {
+      const digits = String(accountNumberInput.value || '').replace(/\D/g, '');
+      if (accountNumberInput) accountNumberInput.value = digits;
+      if (digits.length === 10) {
+        void resolveEditAccountName();
+      }
+    });
+    accountBankSelect?.addEventListener('change', () => {
+      const digits = String(accountNumberInput?.value || '').replace(/\D/g, '');
+      if (digits.length === 10) {
+        void resolveEditAccountName();
+      }
+    });
+    rsaBalanceInput?.addEventListener('input', () => {
+      syncRsa25FromBalance();
+    });
+    rsa25Input?.addEventListener('input', () => {
+      const value = Number(rsa25Input.value || 0);
+      if (Number.isFinite(value) && value >= 0) {
+        const rsaBalance = Number(rsaBalanceInput?.value || 0);
+        if (!rsaBalance || Number(rsa25Input.value || 0) <= 0) return;
+      }
+    });
+
+    const close = (value) => {
+      modal.remove();
+      resolve(value);
+    };
+
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) {
+        close(null);
+        return;
+      }
+      const button = event.target.closest('[data-uploader-edit-close]');
+      if (!button) return;
+      if (button.dataset.uploaderEditClose === 'cancel') {
+        close(null);
+        return;
+      }
+
+      const customerName = String(document.getElementById('uploaderEditCustomerName')?.value || '').trim();
+      const accountNumber = String(document.getElementById('uploaderEditAccountNumber')?.value || '').replace(/\D/g, '');
+      const bankCode = String(document.getElementById('uploaderEditAccountBank')?.value || '').trim();
+      const accountName = String(document.getElementById('uploaderEditAccountName')?.value || '').trim();
+      const reason = String(document.getElementById('uploaderEditReason')?.value || '').trim();
+      const rsaBalance = String(document.getElementById('uploaderEditRsaBalance')?.value ?? '').trim();
+      const rsa25 = String(document.getElementById('uploaderEditRsa25')?.value ?? '').trim();
+      const loanAmount = String(document.getElementById('uploaderEditLoanAmount')?.value ?? '').trim();
+
+      if (accountNumber && accountNumber.length !== 10) {
+        showNotification('Account number must be 10 digits.', 'warning');
+        return;
+      }
+
+      close({
+        customerName,
+        accountNumber,
+        accountName: accountName || customerName,
+        accountBankCode: bankCode,
+        accountBank: String(document.getElementById('uploaderEditAccountBank')?.selectedOptions?.[0]?.dataset?.name || '').trim() || defaultBankName,
+        customerPhone: String(document.getElementById('uploaderEditCustomerPhone')?.value || '').replace(/\D/g, ''),
+        customerEmail: String(document.getElementById('uploaderEditCustomerEmail')?.value || '').trim(),
+        rsaBalance,
+        rsa25: rsa25 || String(calculateRoundedRsa25(parseMoney(rsaBalance))),
+        loanAmount,
+        reason
+      });
+    });
+
+    syncRsa25FromBalance();
+    if (accountNumberInput && String(accountNumberInput.value || '').replace(/\D/g, '').length === 10) {
+      void resolveEditAccountName();
+    }
+    document.body.appendChild(modal);
+    setTimeout(() => document.getElementById('uploaderEditCustomerName')?.focus(), 50);
+  });
+}
+
+window.openUploaderCustomerEditModal = async (submissionId) => {
+  if (!assertWritable('Customer detail edit request')) return;
+  const submission = allSubmissions.find((item) => item.id === submissionId);
+  if (!submission) {
+    showNotification('Application not found.', 'error');
+    return;
+  }
+
+  const data = await showUploaderCustomerEditModal(submission);
+  if (!data) return;
+
+  try {
+    const existingDetails = submission.customerDetails && typeof submission.customerDetails === 'object'
+      ? submission.customerDetails
+      : {};
+    const rsaBalance = data.rsaBalance || existingDetails.rsaBalance || submission.rsaBalance || '';
+    const rsa25 = data.rsa25 || existingDetails.rsa25 || existingDetails.rsa25Percent || submission.rsa25Percent || '';
+    const loanAmount = data.loanAmount || existingDetails.loanAmount || submission.loanAmount || '';
+    const previousStatus = String(submission.status || 'pending').trim() || 'pending';
+    const oldCustomerDetails = {
+      name: String(existingDetails.name || submission.customerName || '').trim(),
+      accountName: String(existingDetails.accountName || submission.accountName || '').trim(),
+      accountNo: String(existingDetails.accountNo || submission.accountNo || '').trim(),
+      accountBank: String(existingDetails.accountBank || submission.accountBank || '').trim(),
+      accountBankCode: String(existingDetails.accountBankCode || submission.accountBankCode || '').trim(),
+      phone: String(existingDetails.phone || submission.customerPhone || '').trim(),
+      email: String(existingDetails.email || submission.customerEmail || '').trim(),
+      rsaBalance: String(existingDetails.rsaBalance || submission.rsaBalance || '').trim(),
+      rsa25Percent: String(existingDetails.rsa25Percent || submission.rsa25Percent || '').trim(),
+      loanAmount: String(existingDetails.loanAmount || submission.loanAmount || '').trim()
+    };
+    const proposedCustomerDetails = {
+      ...oldCustomerDetails,
+      name: data.customerName || oldCustomerDetails.name,
+      accountName: data.accountName || oldCustomerDetails.accountName,
+      accountNo: data.accountNumber || oldCustomerDetails.accountNo,
+      accountBank: data.accountBank || oldCustomerDetails.accountBank,
+      accountBankCode: data.accountBankCode || oldCustomerDetails.accountBankCode,
+      phone: data.customerPhone || oldCustomerDetails.phone,
+      email: data.customerEmail || oldCustomerDetails.email,
+      rsaBalance: String(rsaBalance),
+      rsa25: String(rsa25),
+      rsa25Percent: String(rsa25),
+      loanAmount: String(loanAmount)
+    };
+    const updatePayload = {
+      customerDetailsEditPending: true,
+      customerDetailsEditRequested: true,
+      customerDetailsEditBefore: oldCustomerDetails,
+      customerDetailsEditProposed: proposedCustomerDetails,
+      customerDetailsEditPreviousStatus: previousStatus,
+      customerDetailsEditReturnStatus: previousStatus,
+      customerDetailsEditRequestedAt: serverTimestamp(),
+      customerDetailsEditRequestedBy: currentUser?.email || '',
+      customerDetailsEditReason: data.reason,
+      status: 'audit_pending',
+      updatedAt: serverTimestamp(),
+      updatedBy: currentUser?.email || ''
+    };
+
+    await updateDoc(doc(db, 'submissions', submissionId), updatePayload);
+    await addDoc(collection(db, 'audit'), {
+      action: 'uploader_customer_detail_edit_requested',
+      submissionId,
+      customerName: data.customerName,
+      accountNumber: data.accountNumber,
+      rsaBalance: data.rsaBalance,
+      loanAmount: data.loanAmount,
+      reason: data.reason,
+      performedBy: currentUser?.email || '',
+      timestamp: serverTimestamp()
+    }).catch(() => {});
+
+    showNotification('Customer detail update sent to Audit for approval.', 'success');
+    switchUploaderApplicationTab('customer_edit');
+  } catch (error) {
+    console.error('Uploader customer edit request failed:', error);
+    showNotification('Unable to send the customer detail change to Audit.', 'error');
+  }
+};
 
 function showPaymentMadeConfirmation(submission = {}) {
   return new Promise((resolve) => {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cmbank-rsa-v71';
+const CACHE_NAME = 'cmbank-rsa-v74';
 const BADGE_DB_NAME = 'cmbank-badge-db';
 const BADGE_STORE_NAME = 'appState';
 const BADGE_COUNT_KEY = 'unreadCount';

@@ -538,6 +538,10 @@
                     <span>Applications</span>
                     <span class="badge" id="applicationsCount">0</span>
                 </a>
+                <a href="#" class="nav-item" data-tab="edit-customer">
+                    <i class="fas fa-user-pen"></i>
+                    <span>Edit Customer</span>
+                </a>
                 <a href="#" class="nav-item" data-tab="paid">
                     <i class="fas fa-money-check-dollar"></i>
                     <span>Commission</span>
@@ -693,6 +697,9 @@
                         <button type="button" class="admin-subtab-btn" data-uploader-application-tab="sent_to_pfa">
                             Sent to PFA <span class="subtab-badge" id="appSentToPfaCount">0</span>
                         </button>
+                        <button type="button" class="admin-subtab-btn" data-uploader-application-tab="customer_edit">
+                            Edit Requests <span class="subtab-badge" id="appCustomerEditCount">0</span>
+                        </button>
                         <button type="button" class="admin-subtab-btn" data-uploader-application-tab="audit">
                             Audit <span class="subtab-badge" id="appAuditCount">0</span>
                         </button>
@@ -732,6 +739,20 @@
                             </tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <!-- Edit Customer Tab -->
+            <div id="editCustomerTab" class="tab-content">
+                <div class="table-section">
+                    <div class="filters-bar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                        <input type="text" id="uploaderEditCustomerSearchInput" placeholder="Search customer name or PEN number" style="flex:1;min-width:240px;">
+                        <button type="button" class="submit-btn" id="uploaderEditCustomerSearchBtn">
+                            <i class="fas fa-search"></i> Search
+                        </button>
+                    </div>
+                    <div id="uploaderEditCustomerSearchStatus" style="display:none;margin-top:12px;padding:10px 12px;border-radius:8px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;font-size:13px;font-weight:700;"></div>
+                    <div id="uploaderEditCustomerResults" style="margin-top:16px;display:grid;gap:10px;"></div>
                 </div>
             </div>
 
@@ -1630,7 +1651,7 @@
     <script type="module" src="js/backblaze-storage.js?v=20260724a"></script>
 
     <!-- 6. Document Uploader (main upload logic) -->
-<script type="module" src="js/document-uploader-v2.js?v=20260807a"></script>
+<script type="module" src="js/document-uploader-v2.js?v=20260918a"></script>
 
     <!-- 7. Dashboard (Track & Calculator only) -->
 <script type="module" src="js/uploader-dashboard.js?v=20260806a"></script>

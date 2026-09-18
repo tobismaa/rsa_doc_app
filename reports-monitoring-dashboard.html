@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
     <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
-    <link rel="stylesheet" href="css/audit-dashboard.css?v=20260715b">
+    <link rel="stylesheet" href="css/audit-dashboard.css?v=20260918a">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -72,6 +72,11 @@
                     <i class="fas fa-paper-plane"></i>
                     <span>Pending Request</span>
                     <span class="badge" id="auditSentToPfaCountBadge">0</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="customer-edits">
+                    <i class="fas fa-user-pen"></i>
+                    <span>Customer Edits</span>
+                    <span class="badge" id="auditCustomerEditCountBadge">0</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="paid">
                     <i class="fas fa-money-check-dollar"></i>
@@ -206,6 +211,28 @@
                                 </tr>
                             </thead>
                             <tbody id="auditSentToPfaTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="customer-editsTab" class="tab-content">
+                <div class="table-section">
+                    <div class="audit-table-toolbar">
+                        <h2>Customer Detail Edit Requests</h2>
+                    </div>
+                    <div class="table-container">
+                        <table class="documents-table">
+                            <thead>
+                                <tr>
+                                    <th>Uploader</th>
+                                    <th>Current Customer</th>
+                                    <th>Requested Customer</th>
+                                    <th>Requested At</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditCustomerEditTableBody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -858,7 +885,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/reports-monitoring.js?v=20260729a"></script>
+    <script type="module" src="js/reports-monitoring.js?v=20260918d"></script>
     <script type="module" src="js/shared/super-admin-dashboard-switcher.js?v=20260722c"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260715a"></script>
 </body>
