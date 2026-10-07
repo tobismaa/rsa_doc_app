@@ -18,7 +18,7 @@ import {
     getSubmissionApprovalEntryAt,
     getSubmissionRejectionEntryAt,
     getSubmissionOriginalUploadAt
-} from './shared/submission-stage.js?v=20261007c';
+} from './shared/submission-stage.js?v=20261007d';
 import {
     buildDashboardStageReport,
     renderDashboardStageReport,

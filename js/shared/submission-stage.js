@@ -82,7 +82,20 @@ function getSubmissionRsaEntryAt(submission = {}) {
 }
 
 function getSubmissionFinalSubmissionEntryAt(submission = {}) {
-    return pickTimestamp(submission?.finalSubmittedAt, submission?.rsaSubmittedAt, submission?.statusUpdatedAt, submission?.updatedAt);
+    const backdateValues = submission?.backdateRestoreSnapshot?.values;
+    const finalSubmissionWasBackdated = submission?.backdateRestoreStatus === 'available'
+        && backdateValues
+        && Object.prototype.hasOwnProperty.call(backdateValues, 'finalSubmittedAt');
+    return pickTimestamp(
+        submission?.effectiveFinalSubmittedAt,
+        finalSubmissionWasBackdated ? submission?.finalSubmittedAt : null,
+        submission?.finalSubmittedAt,
+        submission?.rsaSubmittedAt,
+        submission?.finalSubmissionAt,
+        submission?.rsaSubmissionAt,
+        submission?.statusUpdatedAt,
+        submission?.updatedAt
+    );
 }
 
 function getSubmissionPaymentEntryAt(submission = {}) {

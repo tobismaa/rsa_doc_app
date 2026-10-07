@@ -33,11 +33,12 @@ import {
   getSubmissionReviewEntryAt,
   getSubmissionApprovalEntryAt,
   getSubmissionRejectionEntryAt,
+  getSubmissionFinalSubmissionEntryAt,
   getSubmissionPaymentEntryAt,
   getSubmissionPaidEntryAt,
   getSubmissionClearedEntryAt,
   getSubmissionOriginalUploadAt
-} from './shared/submission-stage.js?v=20261007c';
+} from './shared/submission-stage.js?v=20261007d';
 import { getDefaultSystemSettings, getSystemSettings } from './shared/system-settings.js?v=20260724a';
 import {
   collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, doc,
@@ -6550,7 +6551,7 @@ function getUploaderPaymentStageEntryAt(submission = {}) {
       submission.paymentMadeAt ||
       getSubmissionPaymentEntryAt(submission);
   }
-  if (bucket === 'sent_to_pfa') return getSubmissionPaymentEntryAt(submission);
+  if (bucket === 'sent_to_pfa') return getSubmissionFinalSubmissionEntryAt(submission);
   return getSubmissionCurrentStageEntryAt(submission);
 }
 

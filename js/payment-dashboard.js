@@ -22,10 +22,11 @@ import {
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 import {
     getSubmissionOriginalUploadAt,
+    getSubmissionFinalSubmissionEntryAt,
     getSubmissionPaymentEntryAt,
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt
-} from './shared/submission-stage.js?v=20261007c';
+} from './shared/submission-stage.js?v=20261007d';
 import {
     buildDashboardStageReport,
     renderDashboardStageReport,
@@ -304,7 +305,7 @@ window.openPaymentApplicationDetails = (submissionId) => {
             fields: [
                 ['Status', getPaymentStatusLabel(sub)],
                 ['Uploaded Date', formatDateValue(getSubmissionOriginalUploadAt(sub))],
-                ['Sent to PFA Date', formatDateValue(getSubmissionPaymentEntryAt(sub))],
+                ['Sent to PFA Date', formatDateValue(getSubmissionFinalSubmissionEntryAt(sub))],
                 ['Paid Date', formatDateValue(getSubmissionPaidEntryAt(sub))],
                 ['Cleared Date', formatDateValue(getSubmissionClearedEntryAt(sub))],
                 ['Application ID', sub.id || '-']
@@ -858,7 +859,8 @@ function buildAgentPaymentGroups(records = []) {
 
         const paidAtMs = sub?.paidAt?.toMillis ? sub.paidAt.toMillis() : new Date(sub?.paidAt || 0).getTime();
         const clearedAtMs = sub?.clearedAt?.toMillis ? sub.clearedAt.toMillis() : new Date(sub?.clearedAt || 0).getTime();
-        const queueAtMs = sub?.rsaSubmittedAt?.toMillis ? sub.rsaSubmittedAt.toMillis() : new Date(sub?.rsaSubmittedAt || sub?.updatedAt || 0).getTime();
+        const sentToPfaAt = getSubmissionFinalSubmissionEntryAt(sub);
+        const queueAtMs = sentToPfaAt?.toMillis ? sentToPfaAt.toMillis() : new Date(sentToPfaAt || 0).getTime();
         if (Number.isFinite(paidAtMs) && paidAtMs > 0 && (!existing.latestPaidAt || paidAtMs > existing.latestPaidAt)) {
             existing.latestPaidAt = paidAtMs;
             existing.latestPaidBy = String(sub?.paidBy || '').trim();
@@ -895,7 +897,7 @@ function renderAgentBreakdownTable(group, mode = 'queue') {
             ? formatDateValue(sub?.clearedAt || sub?.updatedAt)
             : mode === 'paid'
                 ? formatDateValue(sub?.paidAt || sub?.updatedAt)
-                : formatDateValue(sub?.rsaSubmittedAt || sub?.updatedAt);
+                : formatDateValue(getSubmissionFinalSubmissionEntryAt(sub));
 
         return `
             <tr style="${reconciliationMatch ? 'background:rgba(220,252,231,0.28);' : ''}">

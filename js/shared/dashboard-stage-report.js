@@ -9,7 +9,7 @@ import {
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt,
     getSubmissionOriginalUploadAt
-} from './submission-stage.js?v=20261007c';
+} from './submission-stage.js?v=20261007d';
 
 function parseMoneyValue(value) {
     const num = Number(String(value ?? '').replace(/[^0-9.\-]/g, ''));

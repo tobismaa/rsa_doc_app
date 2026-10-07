@@ -37,7 +37,7 @@ import {
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt,
     getSubmissionOriginalUploadAt
-} from './shared/submission-stage.js?v=20261007c';
+} from './shared/submission-stage.js?v=20261007d';
 import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260724a';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 
@@ -1867,6 +1867,7 @@ const BACKDATE_STAGE_DEFINITIONS = [
         description: 'RSA officer who submitted to PFA',
         timestampField: 'finalSubmittedAt',
         timestampGetter: getSubmissionFinalSubmissionEntryAt,
+        mirrorTimestampFields: ['effectiveFinalSubmittedAt', 'rsaSubmittedAt', 'finalSubmissionAt', 'rsaSubmissionAt'],
         personField: 'assignedToRSA',
         mirrorPersonFields: ['finalSubmittedBy', 'rsaSubmittedBy'],
         roles: ['rsa']
