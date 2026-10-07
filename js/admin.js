@@ -43,7 +43,7 @@ import {
     getSubmissionPaymentEntryAt,
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt
-} from './shared/submission-stage.js?v=20260716a';
+} from './shared/submission-stage.js?v=20261007c';
 
 // Security: suppress console output in admin dashboard.
 (() => {

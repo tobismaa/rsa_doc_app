@@ -16,7 +16,23 @@ function pickTimestamp(...values) {
     return null;
 }
 
+function getSubmissionBackdatedUploadAt(submission = {}) {
+    if (getTimestampMillis(submission?.effectiveUploadedAt) > 0) {
+        return submission.effectiveUploadedAt;
+    }
+    const backdateValues = submission?.backdateRestoreSnapshot?.values;
+    const uploadWasBackdated = submission?.backdateRestoreStatus === 'available'
+        && backdateValues
+        && Object.prototype.hasOwnProperty.call(backdateValues, 'uploadedAt');
+    if (uploadWasBackdated) {
+        return pickTimestamp(submission?.uploadedAt, submission?.originalUploadedAt);
+    }
+    return null;
+}
+
 function getSubmissionOriginalUploadAt(submission = {}) {
+    const backdatedUploadAt = getSubmissionBackdatedUploadAt(submission);
+    if (backdatedUploadAt) return backdatedUploadAt;
     return pickTimestamp(
         submission?.originalUploadedAt,
         submission?.firstUploadedAt,
@@ -32,7 +48,8 @@ function getSubmissionDraftEntryAt(submission = {}) {
 }
 
 function getSubmissionReviewEntryAt(submission = {}) {
-    return pickTimestamp(submission?.reuploadedAt, submission?.uploadedAt, submission?.submittedAt, submission?.createdAt, submission?.updatedAt);
+    const backdatedUploadAt = getSubmissionBackdatedUploadAt(submission);
+    return pickTimestamp(backdatedUploadAt, submission?.reuploadedAt, submission?.uploadedAt, submission?.submittedAt, submission?.createdAt, submission?.updatedAt);
 }
 
 function getSubmissionApprovalEntryAt(submission = {}) {

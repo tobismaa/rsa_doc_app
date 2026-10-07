@@ -37,7 +37,7 @@ import {
     getSubmissionPaidEntryAt,
     getSubmissionClearedEntryAt,
     getSubmissionOriginalUploadAt
-} from './shared/submission-stage.js?v=20260716a';
+} from './shared/submission-stage.js?v=20261007c';
 import { clearSystemSettingsCache, getDefaultSystemSettings, getSystemSettings, normalizeAgentBankOptions } from './shared/system-settings.js?v=20260724a';
 import { getCurrentUserProfile as getCurrentUserProfileShared } from './shared/user-directory.js?v=20260518a';
 
@@ -1835,7 +1835,10 @@ const BACKDATE_STAGE_DEFINITIONS = [
         label: 'Application Uploaded',
         description: 'Uploader dashboard ownership',
         timestampField: 'uploadedAt',
-        timestampGetter: getSubmissionReviewEntryAt,
+        timestampGetter: getSubmissionOriginalUploadAt,
+        // Keep every legacy upload-date alias aligned so older and newer dashboards
+        // all display the exact date and time entered in the backdate editor.
+        mirrorTimestampFields: ['effectiveUploadedAt', 'originalUploadedAt', 'firstUploadedAt', 'initialUploadedAt', 'submittedAt'],
         personField: 'uploadedBy',
         roles: ['uploader', 'reviewer', 'rsa', 'admin', 'super_admin']
     },
@@ -1902,6 +1905,7 @@ const BACKDATE_STAGE_DEFINITIONS = [
 const BACKDATE_RESTORABLE_FIELDS = new Set([
     ...BACKDATE_STAGE_DEFINITIONS.flatMap((stage) => [
         stage.timestampField,
+        ...(stage.mirrorTimestampFields || []),
         stage.personField,
         ...(stage.mirrorPersonFields || [])
     ]),
@@ -2087,7 +2091,7 @@ function buildUploaderSheetRows(records = []) {
         rsa25: formatMoneyForSheet(getSubmissionTwentyFivePercent(sub)),
         commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
         status: String(sub.status || '').replace(/_/g, ' '),
-        uploadedAt: formatDate(getSubmissionReviewEntryAt(sub)),
+        uploadedAt: formatDate(getSubmissionOriginalUploadAt(sub)),
         rejectionReason: getRejectionReason(sub),
         rejectionOfficer: getRejectionOfficerName(sub),
         rejectionCount: getRejectionCount(sub)
@@ -3936,6 +3940,16 @@ async function saveBackdateChanges() {
                 field: stage.timestampField,
                 oldValue: oldTimeMs ? new Date(oldTimeMs).toISOString() : '',
                 newValue: newDate.toISOString()
+            });
+            (stage.mirrorTimestampFields || []).forEach((field) => {
+                const oldMirrorTimeMs = getTimestampMillis(submission?.[field]);
+                updates[field] = newDate;
+                changes.push({
+                    stage: stage.key,
+                    field,
+                    oldValue: oldMirrorTimeMs ? new Date(oldMirrorTimeMs).toISOString() : '',
+                    newValue: newDate.toISOString()
+                });
             });
         }
 

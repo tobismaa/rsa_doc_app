@@ -15,7 +15,7 @@ import {
     getSubmissionPaymentEntryAt,
     getSubmissionClearedEntryAt,
     getSubmissionOriginalUploadAt
-} from './shared/submission-stage.js?v=20260716a';
+} from './shared/submission-stage.js?v=20261007c';
 import {
     collection, query, where, orderBy, onSnapshot, getDocs, getDoc, doc, limit, serverTimestamp, updateDoc
 } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
