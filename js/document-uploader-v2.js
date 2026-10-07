@@ -7233,16 +7233,7 @@ function showUploaderCustomerEditModal(submission = {}) {
           <button class="close-btn" type="button" data-uploader-edit-close="cancel">&times;</button>
         </div>
         <div class="modal-body">
-          <p style="margin:0 0 16px;color:#475569;">Update customer info, account number, or amount, then choose how to submit. Audit approves customer detail changes before they are finalized.</p>
-          <div style="margin-bottom:16px;">
-            <label for="uploaderEditSubmissionMode">What would you like to submit? *</label>
-            <select id="uploaderEditSubmissionMode" required>
-              <option value="">Choose an option</option>
-              <option value="edit_only">Edit only</option>
-              <option value="edit_and_audit">Edit and submit for payment</option>
-            </select>
-            <p style="color:#475569;font-size:13px;">Edit only: request approval of the details and keep the current payment stage. Edit and submit for payment: request approval of the details and continue to Audit payment review.</p>
-          </div>
+          <p style="margin:0 0 16px;color:#475569;">Update customer info, account number, or amount. After clicking Submit Request, choose whether to submit the edit only or also submit it for payment.</p>
           <div class="customer-input-grid">
             <div>
               <label for="uploaderEditCustomerName">Customer Name *</label>
@@ -7398,11 +7389,6 @@ function showUploaderCustomerEditModal(submission = {}) {
         return;
       }
 
-      const submissionMode = modal.querySelector('#uploaderEditSubmissionMode')?.value;
-      if (!['edit_only', 'edit_and_audit'].includes(submissionMode)) {
-        showNotification('Choose Edit only or Edit and submit for payment.', 'warning');
-        return;
-      }
       const customerName = String(document.getElementById('uploaderEditCustomerName')?.value || '').trim();
       const accountNumber = String(document.getElementById('uploaderEditAccountNumber')?.value || '').replace(/\D/g, '');
       const bankCode = String(document.getElementById('uploaderEditAccountBank')?.value || '').trim();
@@ -7418,7 +7404,6 @@ function showUploaderCustomerEditModal(submission = {}) {
       }
 
       close({
-        submissionMode,
         customerName,
         accountNumber,
         accountName: accountName || customerName,
@@ -7442,6 +7427,71 @@ function showUploaderCustomerEditModal(submission = {}) {
   });
 }
 
+function showCustomerEditSubmissionChoice(submission = {}) {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal active uploader-customer-edit-choice-modal';
+    modal.innerHTML = `
+      <div class="modal-content payment-made-confirm-card" style="max-width:620px;">
+        <div class="payment-made-confirm-icon"><i class="fas fa-list-check"></i></div>
+        <h2>Choose How to Submit</h2>
+        <p>How do you want to submit the changes for <strong>${escapeHtml(submission.customerName || 'this customer')}</strong>?</p>
+        <div style="display:grid;gap:12px;margin:20px 0;">
+          <button type="button" class="action-btn" data-customer-edit-mode="edit_only" style="padding:14px;text-align:left;">
+            <strong><i class="fas fa-pen"></i> Edit Only</strong><br>
+            <small>Send the customer detail changes for approval without creating a payment request.</small>
+          </button>
+          <button type="button" class="submit-btn" data-customer-edit-mode="edit_and_audit" style="padding:14px;text-align:left;">
+            <strong><i class="fas fa-money-check-dollar"></i> Edit and Submit for Payment</strong><br>
+            <small>Send the changes for approval and continue to Audit payment review.</small>
+          </button>
+        </div>
+        <div class="payment-made-confirm-actions">
+          <button type="button" class="cancel-btn" data-customer-edit-mode="cancel">Cancel</button>
+        </div>
+      </div>`;
+    const close = (value) => {
+      modal.remove();
+      resolve(value);
+    };
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) return close(null);
+      const button = event.target.closest('[data-customer-edit-mode]');
+      if (!button) return;
+      close(button.dataset.customerEditMode === 'cancel' ? null : button.dataset.customerEditMode);
+    });
+    document.body.appendChild(modal);
+  });
+}
+
+function showCustomerEditSubmissionConfirmation(submission = {}, submissionMode = 'edit_only') {
+  return new Promise((resolve) => {
+    const submitsPayment = submissionMode === 'edit_and_audit';
+    const modal = document.createElement('div');
+    modal.className = 'modal active uploader-customer-edit-confirm-modal';
+    modal.innerHTML = `
+      <div class="modal-content payment-made-confirm-card">
+        <div class="payment-made-confirm-icon"><i class="fas fa-circle-question"></i></div>
+        <h2>Confirm Submission</h2>
+        <p>Are you sure you want to <strong>${submitsPayment ? 'edit and submit for payment' : 'submit this edit only'}</strong> for <strong>${escapeHtml(submission.customerName || 'this customer')}</strong>?</p>
+        <div class="payment-made-confirm-actions">
+          <button type="button" class="cancel-btn" data-customer-edit-confirm="no">Go Back</button>
+          <button type="button" class="submit-btn" data-customer-edit-confirm="yes"><i class="fas fa-check"></i> Yes, Submit</button>
+        </div>
+      </div>`;
+    const close = (value) => {
+      modal.remove();
+      resolve(value);
+    };
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) return close(false);
+      const button = event.target.closest('[data-customer-edit-confirm]');
+      if (button) close(button.dataset.customerEditConfirm === 'yes');
+    });
+    document.body.appendChild(modal);
+  });
+}
+
 window.openUploaderCustomerEditModal = async (submissionId) => {
   if (!assertWritable('Customer detail edit request')) return;
   const submission = allSubmissions.find((item) => item.id === submissionId);
@@ -7457,7 +7507,10 @@ window.openUploaderCustomerEditModal = async (submissionId) => {
   const data = await showUploaderCustomerEditModal(submission);
   if (!data) return;
 
-  const submitForPayment = data.submissionMode === 'edit_and_audit';
+  const submissionMode = await showCustomerEditSubmissionChoice(submission);
+  if (!submissionMode) return;
+  data.submissionMode = submissionMode;
+  const submitForPayment = submissionMode === 'edit_and_audit';
   const returnStatus = String(submission.status || '').toLowerCase() === 'audit_pending'
     ? (submission.customerDetailsEditReturnStatus || submission.customerDetailsEditPreviousStatus || submission.status)
     : submission.status;
@@ -7470,8 +7523,8 @@ window.openUploaderCustomerEditModal = async (submissionId) => {
       showNotification('Commission cannot be claimed because no agent is attached to this application.', 'error');
       return;
     }
-    if (!(await showPaymentMadeConfirmation(submission))) return;
   }
+  if (!(await showCustomerEditSubmissionConfirmation(submission, submissionMode))) return;
 
   try {
     const existingDetails = submission.customerDetails && typeof submission.customerDetails === 'object'
