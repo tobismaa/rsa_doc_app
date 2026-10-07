@@ -584,7 +584,7 @@ async function saveBlobToFolderPicker(blob, defaultFileName, customerName='Custo
             showNotification('Save cancelled','info');
         } else {
             showNotification('Save failed: '+error.message,'error');
-            await saveFileWithLocationPicker(blob, defaultFileName);
+
         }
         return false;
     }
@@ -619,7 +619,7 @@ async function saveFileWithLocationPicker(blob, defaultFileName) {
             showNotification('Save cancelled', 'info');
         } else {
             showNotification('Save failed: ' + error.message, 'error');
-            triggerDirectDownload(blob, defaultFileName);
+
         }
         return false;
     }
@@ -2390,98 +2390,99 @@ window.viewDocumentRSA = (submissionId, docIndex) => {
 };
 
 window.downloadDocumentRSA = async (submissionId, docIndex) => {
-    const sub = await getLatestSubmissionById(submissionId);
-    const docs = getEffectiveSubmissionDocuments(sub);
-    if (!sub || !docs[docIndex]) return;
-    
-    const doc = docs[docIndex];
     try {
+        // Open the picker while the download click still grants user activation.
+        const cachedSub = allSubmissions.find(s => s.id === submissionId);
+        const cachedDoc = getEffectiveSubmissionDocuments(cachedSub)[docIndex];
+        const fileHandle = typeof window.showSaveFilePicker === 'function'
+            ? await window.showSaveFilePicker({ suggestedName: cachedDoc?.name || 'document.pdf' })
+            : null;
         showLoader('Downloading document...');
+        const sub = await getLatestSubmissionById(submissionId);
+        const doc = getEffectiveSubmissionDocuments(sub)[docIndex];
+        if (!doc?.fileUrl) throw new Error('Document is no longer available');
         const response = await fetchWithCorsFallback(doc.fileUrl);
         const blob = await response.blob();
-        await downloadBlobAsFile(blob, doc.name);
-        showNotification('✅ Download started', 'success');
-    } catch (error) {
-        if (openDirectDocumentDownload(doc.fileUrl, doc.name)) {
-            showNotification('Storage blocked secure download, so the document opened directly.', 'warning');
+        if (fileHandle) {
+            const writable = await fileHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            showNotification('Document saved to the selected location', 'success');
         } else {
-            showNotification('Download failed: ' + error.message, 'error');
+            triggerDirectDownload(blob, doc.name || 'document.pdf');
         }
+    } catch (error) {
+        showNotification(error?.name === 'AbortError' ? 'Download cancelled' :
+            'Download failed: ' + error.message, error?.name === 'AbortError' ? 'info' : 'error');
     } finally {
         hideLoader();
     }
 };
 
 window.downloadAllRsa = async (submissionId) => {
-    const sub = await getLatestSubmissionById(submissionId);
-    if (!sub) return;
-
-    const docs = getEffectiveSubmissionDocuments(sub);
-    if (!docs.length) {
-        showNotification('No documents available for this application', 'warning');
-        return;
-    }
-
-    const safeCustomerName = (sub.customerName || 'Customer')
-        .replace(/[^a-zA-Z0-9\s_-]/g, '_')
-        .trim() || 'Customer';
-
     try {
+        // Choose the destination before any asynchronous submission lookup.
+        const rootFolder = typeof window.showDirectoryPicker === 'function'
+            ? await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' })
+            : null;
         showLoader('Preparing document download...');
-        let customerFolder = null;
-        let successCount = 0;
-        let directOpenedCount = 0;
-        let failedCount = 0;
-
-        if ('showDirectoryPicker' in window) {
-            showNotification('Select a destination folder to save all documents', 'info');
-            const rootFolder = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' });
-            customerFolder = await rootFolder.getDirectoryHandle(safeCustomerName, { create: true });
+        const sub = await getLatestSubmissionById(submissionId);
+        if (!sub) throw new Error('Application is no longer available');
+        const docs = getEffectiveSubmissionDocuments(sub);
+        if (!docs.length) {
+            showNotification('No documents available for this application', 'warning');
+            return;
         }
+        const safeCustomerName = (sub.customerName || 'Customer')
+            .replace(/[^a-zA-Z0-9\s_-]/g, '_').trim() || 'Customer';
+        const customerFolder = rootFolder
+            ? await rootFolder.getDirectoryHandle(safeCustomerName, { create: true })
+            : null;
+        let successCount = 0;
+        const failures = [];
+        const usedNames = new Set();
 
         for (let i = 0; i < docs.length; i++) {
             const docItem = docs[i];
-            if (!docItem?.fileUrl) continue;
-
+            const baseName = (docItem?.name || `${safeCustomerName}_document_${i + 1}.pdf`)
+                .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/[. ]+$/g, '') || `document_${i + 1}.pdf`;
+            let fileName = baseName;
+            let suffix = 2;
+            const dot = baseName.lastIndexOf('.');
+            while (usedNames.has(fileName.toLowerCase())) {
+                fileName = dot > 0
+                    ? `${baseName.slice(0, dot)} (${suffix++})${baseName.slice(dot)}`
+                    : `${baseName} (${suffix++})`;
+            }
+            usedNames.add(fileName.toLowerCase());
             showLoader(`Downloading ${i + 1} of ${docs.length}...`);
-            const fileName = (docItem.name || `${safeCustomerName}_document_${i + 1}.pdf`).replace(/[\\/:*?"<>|]/g, '_');
-
             try {
+                if (!docItem?.fileUrl) throw new Error('Missing document URL');
                 const response = await fetchWithCorsFallback(docItem.fileUrl);
                 const blob = await response.blob();
-
                 if (customerFolder) {
                     const fileHandle = await customerFolder.getFileHandle(fileName, { create: true });
                     const writable = await fileHandle.createWritable();
                     await writable.write(blob);
                     await writable.close();
                 } else {
-                    await downloadBlobAsFile(blob, fileName);
+                    triggerDirectDownload(blob, fileName);
                 }
                 successCount++;
-            } catch (docError) {
-                if (openDirectDocumentDownload(docItem.fileUrl, fileName)) {
-                    directOpenedCount++;
-                } else {
-                    failedCount++;
-                }
+            } catch (error) {
+                failures.push(`${fileName}: ${error.message}`);
             }
         }
-
-        if (failedCount > 0) {
-            showNotification(`Downloaded ${successCount}, opened ${directOpenedCount} directly, ${failedCount} failed`, 'warning');
-        } else if (directOpenedCount > 0) {
-            showNotification(`Storage blocked secure download for ${directOpenedCount} document(s), so they opened directly.`, 'warning');
-        } else {
-            showNotification('All documents downloaded successfully', 'success');
-            alert('All documents downloaded successfully.');
-        }
+        const result = customerFolder
+            ? `Saved ${successCount} of ${docs.length} documents to ${rootFolder.name}/${safeCustomerName}`
+            : `Started ${successCount} of ${docs.length} downloads using your browser's download location`;
+        showNotification(failures.length ? `${result}. ${failures.length} failed.` : result,
+            failures.length ? 'warning' : 'success');
+        alert(failures.length ? `${result}.\n\nFailed documents:\n${failures.join('\n')}` : result);
     } catch (error) {
-        if (error?.name === 'AbortError') {
-            showNotification('Download cancelled', 'info');
-        } else {
-            showNotification('Download failed: ' + (error?.message || 'Unknown error'), 'error');
-        }
+        showNotification(error?.name === 'AbortError' ? 'Download cancelled' :
+            'Download failed: ' + (error?.message || 'Unknown error'),
+            error?.name === 'AbortError' ? 'info' : 'error');
     } finally {
         hideLoader();
     }
