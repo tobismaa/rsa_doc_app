@@ -1771,6 +1771,7 @@ function getAuditAgentSummaryRowsForUser(emailKey = '') {
 function getAuditSentToPfaRows() {
     return allSubmissions
         .filter((sub) => isSentToPfaLifecycle(sub))
+        .filter((sub) => sub.customerDetailsEditPending !== true && sub.customerDetailsEditRequested !== true)
         .filter((sub) => sub.paymentMadeByUploader === true && String(sub.auditCommissionStatus || '').toLowerCase() === 'pending')
         .sort((a, b) => getStageTimestampMillis(b.auditCommissionSubmittedAt || b.paymentMadeAt || getSubmissionCurrentStageEntryAt(b)) - getStageTimestampMillis(a.auditCommissionSubmittedAt || a.paymentMadeAt || getSubmissionCurrentStageEntryAt(a)));
 }
@@ -1843,6 +1844,7 @@ window.openAuditCustomerEditReview = (submissionId) => {
             </div>
             <div class="modal-body">
                 <p style="margin:0 0 14px;color:#475569;">${escapeHtml(sub.customerDetailsEditReason || 'No reason provided.')}</p>
+                <p><strong>Request:</strong> ${sub.customerDetailsEditSubmitForPayment === true ? 'Edit and submit for payment. Approving these changes will send the application to payment review.' : 'Edit only. Approving these changes will restore the previous stage without creating a new payment request.'}</p>
                 <div class="table-container"><table class="documents-table"><thead><tr><th>Field</th><th>Current Information</th><th>Requested Information</th></tr></thead><tbody>${renderAuditCustomerEditComparison(before, proposed)}</tbody></table></div>
             </div>
             <div class="modal-footer">
@@ -1891,6 +1893,22 @@ window.openAuditCustomerEditReview = (submissionId) => {
                 updates.rsaBalance = proposed.rsaBalance || sub.rsaBalance || '';
                 updates.rsa25Percent = proposed.rsa25Percent || sub.rsa25Percent || '';
                 updates.loanAmount = proposed.loanAmount || sub.loanAmount || '';
+                if (sub.customerDetailsEditSubmitForPayment === true) {
+                    updates.paymentMadeByUploader = true;
+                    updates.paymentMadeAt = sub.customerDetailsEditRequestedAt || serverTimestamp();
+                    updates.paymentMadeBy = sub.customerDetailsEditRequestedBy || '';
+                    updates.auditCommissionStatus = 'pending';
+                    updates.auditCommissionRejectionReason = '';
+                    updates.auditCommissionSubmittedAt = serverTimestamp();
+                    updates.auditCommissionSubmittedBy = sub.customerDetailsEditRequestedBy || '';
+                    if (String(sub.auditCommissionStatus || '').toLowerCase() === 'rejected') {
+                        updates.auditCommissionResubmittedAt = serverTimestamp();
+                        updates.auditCommissionResubmittedBy = sub.customerDetailsEditRequestedBy || '';
+                        updates.auditCommissionResubmitComment = sub.customerDetailsEditReason || '';
+                        updates.auditCommissionResubmitCount = Number(sub.auditCommissionResubmitCount || 0) + 1;
+                    }
+                }
+
             }
             await updateDoc(doc(db, 'submissions', submissionId), updates);
             await addDoc(collection(db, 'audit'), {

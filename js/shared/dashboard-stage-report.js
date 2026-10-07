@@ -46,6 +46,14 @@ function getDateKey(value) {
 }
 
 function isDateWithinRange(value, startDateKey = '', endDateKey = '') {
+    if (startDateKey.includes('T') || endDateKey.includes('T')) {
+        // datetime-local inputs represent WAT, regardless of the device timezone.
+        const timestamp = getTimestampMillis(value);
+        const start = startDateKey ? Date.parse(`${startDateKey}+01:00`) : -Infinity;
+        const end = endDateKey ? Date.parse(`${endDateKey}+01:00`) : Infinity;
+        // Include the entire selected ending minute.
+        return Number.isFinite(timestamp) && timestamp > 0 && timestamp >= start && timestamp < end + 60000;
+    }
     const dateKey = getDateKey(value);
     if (!dateKey) return false;
     const start = String(startDateKey || '').trim();
@@ -132,7 +140,8 @@ function normalizeRsaReportRow(row = {}) {
         rsa25: row.rsa25 ?? '',
         commission: row.commission ?? '',
         status: row.status || '',
-        assignedAt: row.assignedAt || '-'
+        assignedAt: row.assignedAt || '-',
+        employer: row.employer || ''
     };
 }
 
@@ -185,6 +194,7 @@ function buildRsaSheetRows(records = [], resolveName = () => 'Unassigned') {
             commission: formatMoneyForSheet(getSubmissionCommissionOnePercent(sub)),
             status: String(sub.status || '').replace(/_/g, ' '),
             assignedAt: formatDate(getSubmissionRsaEntryAt(sub)),
+            employer: getCustomerDetailsValue(sub, ['employer']),
             stageTime: formatDate(getSubmissionFinalSubmissionEntryAt(sub))
         }));
 }
@@ -282,7 +292,7 @@ function buildPreviewValues(sheetId, row) {
         return [row.customerName, row.uploaderName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, String(row.rejectionCount || 0)];
     }
     if (sheetId === 'rsa') {
-        return [row.customerName, row.uploaderName, row.reviewerName, row.accountNumber, row.tenor, row.houseType, row.houseNumber, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt];
+        return [row.customerName, row.uploaderName, row.reviewerName, row.accountNumber, row.tenor, row.houseType, row.houseNumber, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, row.employer];
     }
     if (sheetId === 'payment') {
         return [row.customerName, row.uploaderName, row.rsaOfficerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt];
@@ -295,7 +305,7 @@ function buildDashboardTableValues(sheetId, row) {
         return [row.owner, row.customerName, row.uploaderName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, row.rejectionReason, String(row.rejectionCount || 0)];
     }
     if (sheetId === 'rsa') {
-        return [row.owner, row.customerName, row.uploaderName, row.reviewerName, row.accountNumber, row.tenor, row.houseType, row.houseNumber, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt];
+        return [row.owner, row.customerName, row.uploaderName, row.reviewerName, row.accountNumber, row.tenor, row.houseType, row.houseNumber, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt, row.employer];
     }
     if (sheetId === 'payment') {
         return [row.owner, row.customerName, row.uploaderName, row.rsaOfficerName, formatMoneyPreview(row.rsaBalance), formatMoneyPreview(row.rsa25), formatMoneyPreview(row.commission), row.status, row.assignedAt];
@@ -320,9 +330,9 @@ function getStageSheetConfig(stageId = '') {
         return {
             id: 'rsa',
             title: 'RSA Report',
-            excelHeaders: ['Customer Name', 'Uploader Name', 'Reviewer Name', 'Account Number', 'Tenor', 'House Type', 'House Number', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time'],
-            previewHeaders: ['Customer', 'Uploader', 'Reviewer', 'Account No', 'Tenor', 'House Type', 'House No', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned'],
-            columns: [{ width: 28 }, { width: 24 }, { width: 24 }, { width: 18 }, { width: 12 }, { width: 28 }, { width: 18 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }],
+            excelHeaders: ['Customer Name', 'Uploader Name', 'Reviewer Name', 'Account Number', 'Tenor', 'House Type', 'House Number', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time', 'Employer'],
+            previewHeaders: ['Customer', 'Uploader', 'Reviewer', 'Account No', 'Tenor', 'House Type', 'House No', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned', 'Employer'],
+            columns: [{ width: 28 }, { width: 24 }, { width: 24 }, { width: 18 }, { width: 12 }, { width: 28 }, { width: 18 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 30 }],
             decimalColumns: [8, 9, 10],
             integerColumns: []
         };
@@ -351,7 +361,10 @@ function getStageSheetConfig(stageId = '') {
 
 export function buildDashboardStageReport({ stageId = '', records = [], rangeStart = '', rangeEnd = '', resolveName = (email) => String(email || '').trim() || 'Unassigned' } = {}) {
     const stage = String(stageId || '').trim().toLowerCase() || 'uploader';
-    const dateRangeLabel = rangeStart && rangeEnd ? `${rangeStart} to ${rangeEnd}` : rangeStart || rangeEnd || '-';
+    const formatRangeBound = (value) => value.includes('T') ? `${value.replace('T', ' ')} WAT` : value;
+    const dateRangeLabel = rangeStart && rangeEnd
+        ? `${formatRangeBound(rangeStart)} to ${formatRangeBound(rangeEnd)}`
+        : formatRangeBound(rangeStart || rangeEnd || '-');
     const sourceRecords = records.filter((sub) => {
         if (stage === 'reviewer') return isDateWithinRange(getSubmissionReviewEntryAt(sub), rangeStart, rangeEnd);
         if (stage === 'rsa') return isDateWithinRange(getSubmissionRsaEntryAt(sub), rangeStart, rangeEnd);
@@ -441,7 +454,7 @@ export function renderDashboardStageReport(report, refs = {}) {
         const displayRows = report.rows.map((row) => buildDashboardTableValues(report.stageId, row));
         detailsBodyEl.innerHTML = displayRows.length
             ? displayRows.map((values) => `<tr>${values.map((value) => `<td>${String(value ?? '-')}</td>`).join('')}</tr>`).join('')
-            : `<tr><td colspan="${displayRows[0]?.length || (report.stageId === 'rsa' ? 13 : (report.stageId === 'uploader' || report.stageId === 'reviewer' ? 10 : 9))}" class="no-data">No records found for the selected date range.</td></tr>`;
+            : `<tr><td colspan="${displayRows[0]?.length || (report.stageId === 'rsa' ? 14 : (report.stageId === 'uploader' || report.stageId === 'reviewer' ? 10 : 9))}" class="no-data">No records found for the selected date range.</td></tr>`;
     }
 }
 

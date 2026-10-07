@@ -7072,7 +7072,8 @@ async function renderUploaderApplicationsTable() {
         ? `<div class="audit-frozen-uploader-notice"><i class="fas fa-snowflake"></i><span>Frozen by Audit</span><small>Wait for Audit to unfreeze this application.</small></div>`
         : auditRejected
         ? `<div class="audit-rejection-actions">
-            <button class="action-btn edit-btn" onclick="window.openAuditPaymentResubmitModal('${sub.id}')" title="Submit correction to Audit"><i class="fas fa-paper-plane"></i> Resubmit</button>
+            <button class="action-btn edit-btn" onclick="window.openUploaderCustomerEditModal('${sub.id}')" title="Edit customer details and submit directly to Audit"><i class="fas fa-pen"></i> Edit</button>
+          <button class="action-btn edit-btn" onclick="window.openAuditPaymentResubmitModal('${sub.id}')" title="Submit correction to Audit"><i class="fas fa-paper-plane"></i> Resubmit</button>
             <button class="action-btn dissolve-btn" onclick="window.dissolveAuditPaymentRequest('${sub.id}')" title="Return to Sent to PFA"><i class="fas fa-rotate-left"></i> Dissolve</button>
           </div>`
         : `<button class="action-btn edit-btn" onclick="window.openEditModal('${sub.id}')" title="Correction count: ${fixCount}"><i class="fas fa-paper-plane"></i> Resubmit</button>`;
@@ -7228,11 +7229,20 @@ function showUploaderCustomerEditModal(submission = {}) {
     modal.innerHTML = `
       <div class="modal-content large-modal" style="max-width:760px;">
         <div class="modal-header">
-          <h2><i class="fas fa-user-pen"></i> Edit customer details for audit</h2>
+          <h2><i class="fas fa-user-pen"></i> Edit customer details</h2>
           <button class="close-btn" type="button" data-uploader-edit-close="cancel">&times;</button>
         </div>
         <div class="modal-body">
-          <p style="margin:0 0 16px;color:#475569;">Update customer info, account number, or amount. The submission will be returned to Audit for approval before the change is finalized.</p>
+          <p style="margin:0 0 16px;color:#475569;">Update customer info, account number, or amount, then choose how to submit. Audit approves customer detail changes before they are finalized.</p>
+          <div style="margin-bottom:16px;">
+            <label for="uploaderEditSubmissionMode">What would you like to submit? *</label>
+            <select id="uploaderEditSubmissionMode" required>
+              <option value="">Choose an option</option>
+              <option value="edit_only">Edit only</option>
+              <option value="edit_and_audit">Edit and submit for payment</option>
+            </select>
+            <p style="color:#475569;font-size:13px;">Edit only: request approval of the details and keep the current payment stage. Edit and submit for payment: request approval of the details and continue to Audit payment review.</p>
+          </div>
           <div class="customer-input-grid">
             <div>
               <label for="uploaderEditCustomerName">Customer Name *</label>
@@ -7277,7 +7287,7 @@ function showUploaderCustomerEditModal(submission = {}) {
         <div class="modal-footer">
           <button type="button" class="cancel-btn" data-uploader-edit-close="cancel">Cancel</button>
           <button type="button" class="submit-btn" data-uploader-edit-close="submit">
-            <i class="fas fa-paper-plane"></i> Submit for Audit Approval
+            <i class="fas fa-paper-plane"></i> Submit Request
           </button>
         </div>
       </div>
@@ -7388,6 +7398,11 @@ function showUploaderCustomerEditModal(submission = {}) {
         return;
       }
 
+      const submissionMode = modal.querySelector('#uploaderEditSubmissionMode')?.value;
+      if (!['edit_only', 'edit_and_audit'].includes(submissionMode)) {
+        showNotification('Choose Edit only or Edit and submit for payment.', 'warning');
+        return;
+      }
       const customerName = String(document.getElementById('uploaderEditCustomerName')?.value || '').trim();
       const accountNumber = String(document.getElementById('uploaderEditAccountNumber')?.value || '').replace(/\D/g, '');
       const bankCode = String(document.getElementById('uploaderEditAccountBank')?.value || '').trim();
@@ -7403,6 +7418,7 @@ function showUploaderCustomerEditModal(submission = {}) {
       }
 
       close({
+        submissionMode,
         customerName,
         accountNumber,
         accountName: accountName || customerName,
@@ -7434,8 +7450,28 @@ window.openUploaderCustomerEditModal = async (submissionId) => {
     return;
   }
 
+  if (isAuditApplicationFrozen(submission)) {
+    showNotification('This application is frozen by Audit.', 'warning');
+    return;
+  }
   const data = await showUploaderCustomerEditModal(submission);
   if (!data) return;
+
+  const submitForPayment = data.submissionMode === 'edit_and_audit';
+  const returnStatus = String(submission.status || '').toLowerCase() === 'audit_pending'
+    ? (submission.customerDetailsEditReturnStatus || submission.customerDetailsEditPreviousStatus || submission.status)
+    : submission.status;
+  if (submitForPayment) {
+    if (!isUploaderSentToPfaStatus({ ...submission, status: returnStatus })) {
+      showNotification('Only Sent to PFA applications can be submitted for payment.', 'warning');
+      return;
+    }
+    if (!hasAssociatedCommissionAgent(submission)) {
+      showNotification('Commission cannot be claimed because no agent is attached to this application.', 'error');
+      return;
+    }
+    if (!(await showPaymentMadeConfirmation(submission))) return;
+  }
 
   try {
     const existingDetails = submission.customerDetails && typeof submission.customerDetails === 'object'
@@ -7444,7 +7480,7 @@ window.openUploaderCustomerEditModal = async (submissionId) => {
     const rsaBalance = data.rsaBalance || existingDetails.rsaBalance || submission.rsaBalance || '';
     const rsa25 = data.rsa25 || existingDetails.rsa25 || existingDetails.rsa25Percent || submission.rsa25Percent || '';
     const loanAmount = data.loanAmount || existingDetails.loanAmount || submission.loanAmount || '';
-    const previousStatus = String(submission.status || 'pending').trim() || 'pending';
+    const previousStatus = String(returnStatus || 'pending').trim() || 'pending';
     const oldCustomerDetails = {
       name: String(existingDetails.name || submission.customerName || '').trim(),
       accountName: String(existingDetails.accountName || submission.accountName || '').trim(),
@@ -7474,6 +7510,8 @@ window.openUploaderCustomerEditModal = async (submissionId) => {
     const updatePayload = {
       customerDetailsEditPending: true,
       customerDetailsEditRequested: true,
+      customerDetailsEditSubmissionMode: data.submissionMode,
+      customerDetailsEditSubmitForPayment: submitForPayment,
       customerDetailsEditBefore: oldCustomerDetails,
       customerDetailsEditProposed: proposedCustomerDetails,
       customerDetailsEditPreviousStatus: previousStatus,
@@ -7489,6 +7527,7 @@ window.openUploaderCustomerEditModal = async (submissionId) => {
     await updateDoc(doc(db, 'submissions', submissionId), updatePayload);
     await addDoc(collection(db, 'audit'), {
       action: 'uploader_customer_detail_edit_requested',
+      submissionMode: data.submissionMode,
       submissionId,
       customerName: data.customerName,
       accountNumber: data.accountNumber,
@@ -7499,7 +7538,7 @@ window.openUploaderCustomerEditModal = async (submissionId) => {
       timestamp: serverTimestamp()
     }).catch(() => {});
 
-    showNotification('Customer detail update sent to Audit for approval.', 'success');
+    showNotification(submitForPayment ? 'Customer edits submitted for approval and payment review.' : 'Customer edits submitted for approval only. No new payment request created.', 'success');
     switchUploaderApplicationTab('customer_edit');
   } catch (error) {
     console.error('Uploader customer edit request failed:', error);
@@ -7902,6 +7941,7 @@ async function renderRejectedTable() {
       ? `<div class="audit-frozen-uploader-notice"><i class="fas fa-snowflake"></i><span>Frozen by Audit</span><small>Wait for Audit to unfreeze this application.</small></div>`
       : auditRejected
       ? `<div class="audit-rejection-actions">
+          <button class="action-btn edit-btn" onclick="window.openUploaderCustomerEditModal('${sub.id}')" title="Edit customer details and submit directly to Audit"><i class="fas fa-pen"></i> Edit</button>
           <button class="action-btn edit-btn" onclick="window.openAuditPaymentResubmitModal('${sub.id}')" title="Submit correction to Audit"><i class="fas fa-paper-plane"></i> Resubmit</button>
           <button class="action-btn dissolve-btn" onclick="window.dissolveAuditPaymentRequest('${sub.id}')" title="Return to Sent to PFA"><i class="fas fa-rotate-left"></i> Dissolve</button>
         </div>`

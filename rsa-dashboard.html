@@ -214,16 +214,16 @@
                     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px;padding:18px;border:1px solid #dbe2ea;border-radius:18px;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%);box-shadow:0 10px 24px rgba(15,59,103,0.08);">
                         <div style="max-width:760px;">
                             <h2 style="margin:0 0 8px;color:#0f3b67;">RSA Report</h2>
-                            <p id="rsaReportMeta" style="margin:0;color:#64748b;font-size:14px;line-height:1.6;">RSA Level 2 can generate the RSA-only report here. The report uses the real RSA entry date for the selected date range.</p>
+                            <p id="rsaReportMeta" style="margin:0;color:#64748b;font-size:14px;line-height:1.6;">RSA Level 2 can generate the RSA-only report here. The report uses the RSA entry date and time. All times are West Africa Time (WAT).</p>
                         </div>
                         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;">
                             <label style="display:flex;flex-direction:column;gap:6px;">
-                                <span style="font-size:12px;font-weight:700;color:#334155;">Start Date</span>
-                                <input type="date" id="rsaReportStartDate" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;">
+                                <span style="font-size:12px;font-weight:700;color:#334155;">From Date &amp; Time (WAT)</span>
+                                <input type="datetime-local" step="60" id="rsaReportStartDate" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;">
                             </label>
                             <label style="display:flex;flex-direction:column;gap:6px;">
-                                <span style="font-size:12px;font-weight:700;color:#334155;">End Date</span>
-                                <input type="date" id="rsaReportEndDate" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;">
+                                <span style="font-size:12px;font-weight:700;color:#334155;">To Date &amp; Time (WAT)</span>
+                                <input type="datetime-local" step="60" id="rsaReportEndDate" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;">
                             </label>
                             <button type="button" class="action-btn" id="generateRsaStageReportBtn" style="background:#0f766e;color:#fff;border:none;">
                                 <i class="fas fa-chart-column"></i> Generate
@@ -260,10 +260,11 @@
                                     <th>1% Commission</th>
                                     <th>Status</th>
                                     <th>RSA Assigned Time</th>
+                                    <th>Employer</th>
                                 </tr>
                             </thead>
                             <tbody id="rsaReportDetailsBody">
-                                <tr><td colspan="13" class="no-data">Generate a report to see the application breakdown.</td></tr>
+                                <tr><td colspan="14" class="no-data">Generate a report to see the application breakdown.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -434,11 +435,11 @@
                 </div>
                 <div class="rsa-export-date-grid">
                     <label class="rsa-export-field">
-                        <span>Start Date</span>
+                        <span>From Date &amp; Time (WAT)</span>
                         <input type="date" id="rsaExcelStartDate">
                     </label>
                     <label class="rsa-export-field">
-                        <span>End Date</span>
+                        <span>To Date &amp; Time (WAT)</span>
                         <input type="date" id="rsaExcelEndDate">
                     </label>
                 </div>
@@ -767,7 +768,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script type="module" src="js/firebase-config.js?v=20260625c"></script>
-    <script type="module" src="js/rsa-dashboard.js?v=20261007a"></script>
+    <script type="module" src="js/rsa-dashboard.js?v=20261007c"></script>
     <script type="module" src="js/shared/super-admin-dashboard-switcher.js?v=20260722c"></script>
     <script src="js/table-enhancer.js?v=20260512b"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260715a"></script>

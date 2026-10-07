@@ -36,7 +36,7 @@ import {
     buildDashboardStageReport,
     renderDashboardStageReport,
     exportDashboardStageReportExcel
-} from './shared/dashboard-stage-report.js?v=20260610a';
+} from './shared/dashboard-stage-report.js?v=20261007b';
 import {
     getUploaderRoutingRule as getUploaderRoutingRuleShared,
     routingRuleDocId as routingRuleDocIdShared
@@ -381,9 +381,9 @@ function isCurrentRsaLevelTwo() {
 function initializeRsaReportDates() {
     const today = new Date();
     const sixDaysAgo = new Date(today.getTime() - (6 * 24 * 60 * 60 * 1000));
-    const toInputValue = (date) => `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
-    if (rsaReportStartDate && !rsaReportStartDate.value) rsaReportStartDate.value = toInputValue(sixDaysAgo);
-    if (rsaReportEndDate && !rsaReportEndDate.value) rsaReportEndDate.value = toInputValue(today);
+    const toInputValue = (date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+    if (rsaReportStartDate && !rsaReportStartDate.value) rsaReportStartDate.value = `${toInputValue(sixDaysAgo)}T00:00`;
+    if (rsaReportEndDate && !rsaReportEndDate.value) rsaReportEndDate.value = `${toInputValue(today)}T23:59`;
 }
 
 function resolveRsaKnownName(email) {
@@ -411,8 +411,11 @@ async function fetchRsaStageReportSourceRecords() {
 async function buildRsaStageReport() {
     const startDate = String(rsaReportStartDate?.value || '').trim();
     const endDate = String(rsaReportEndDate?.value || '').trim();
-    if (!startDate || !endDate) throw new Error('Choose both start date and end date.');
-    if (startDate > endDate) throw new Error('Start date cannot be after end date.');
+    if (!startDate || !endDate) throw new Error('Choose both From and To dates and times.');
+    if (!Number.isFinite(Date.parse(`${startDate}+01:00`)) || !Number.isFinite(Date.parse(`${endDate}+01:00`))) {
+        throw new Error('Choose valid dates and times.');
+    }
+    if (startDate > endDate) throw new Error('From date and time cannot be after To date and time.');
     const sourceRecords = await fetchRsaStageReportSourceRecords();
     return buildDashboardStageReport({
         stageId: 'rsa',
