@@ -7432,21 +7432,39 @@ function showCustomerEditSubmissionChoice(submission = {}) {
     const modal = document.createElement('div');
     modal.className = 'modal active uploader-customer-edit-choice-modal';
     modal.innerHTML = `
-      <div class="modal-content payment-made-confirm-card" style="max-width:620px;">
-        <div class="payment-made-confirm-icon"><i class="fas fa-list-check"></i></div>
-        <h2>Choose How to Submit</h2>
-        <p>How do you want to submit the changes for <strong>${escapeHtml(submission.customerName || 'this customer')}</strong>?</p>
-        <div style="display:grid;gap:12px;margin:20px 0;">
-          <button type="button" class="action-btn" data-customer-edit-mode="edit_only" style="padding:14px;text-align:left;">
-            <strong><i class="fas fa-pen"></i> Edit Only</strong><br>
-            <small>Send the customer detail changes for approval without creating a payment request.</small>
+      <div class="modal-content customer-edit-choice-card" role="dialog" aria-modal="true" aria-labelledby="customerEditChoiceTitle">
+        <button type="button" class="customer-edit-choice-close" data-customer-edit-mode="cancel" aria-label="Close">&times;</button>
+        <div class="customer-edit-choice-heading-icon"><i class="fas fa-route"></i></div>
+        <div class="customer-edit-choice-heading">
+          <span class="customer-edit-choice-step">Final step</span>
+          <h2 id="customerEditChoiceTitle">What should happen after this edit?</h2>
+          <p>Select one action for <strong>${escapeHtml(submission.customerName || 'this customer')}</strong>. You will confirm your choice on the next screen.</p>
+        </div>
+        <div class="customer-edit-choice-options">
+          <button type="button" class="customer-edit-choice-option edit-only" data-customer-edit-mode="edit_only">
+            <span class="customer-edit-option-icon"><i class="fas fa-user-pen"></i></span>
+            <span class="customer-edit-option-copy">
+              <span class="customer-edit-option-title">Save Customer Edit Only</span>
+              <span class="customer-edit-option-description">Use this when you only need to correct the customer's information.</span>
+              <span class="customer-edit-option-result"><i class="fas fa-circle-check"></i> No payment request will be created</span>
+            </span>
+            <span class="customer-edit-option-arrow"><i class="fas fa-chevron-right"></i></span>
           </button>
-          <button type="button" class="submit-btn" data-customer-edit-mode="edit_and_audit" style="padding:14px;text-align:left;">
-            <strong><i class="fas fa-money-check-dollar"></i> Edit and Submit for Payment</strong><br>
-            <small>Send the changes for approval and continue to Audit payment review.</small>
+          <button type="button" class="customer-edit-choice-option edit-and-payment" data-customer-edit-mode="edit_and_audit">
+            <span class="customer-edit-option-icon"><i class="fas fa-money-check-dollar"></i></span>
+            <span class="customer-edit-option-copy">
+              <span class="customer-edit-option-title">Save Edit and Submit for Payment</span>
+              <span class="customer-edit-option-description">Use this when the customer's information is corrected and payment has been made.</span>
+              <span class="customer-edit-option-result"><i class="fas fa-paper-plane"></i> Continues to Audit payment review</span>
+            </span>
+            <span class="customer-edit-option-arrow"><i class="fas fa-chevron-right"></i></span>
           </button>
         </div>
-        <div class="payment-made-confirm-actions">
+        <div class="customer-edit-choice-footer">
+          <i class="fas fa-shield-halved"></i>
+          <span>Customer detail changes still require Audit approval.</span>
+        </div>
+        <div class="payment-made-confirm-actions customer-edit-choice-actions">
           <button type="button" class="cancel-btn" data-customer-edit-mode="cancel">Cancel</button>
         </div>
       </div>`;
@@ -7461,6 +7479,7 @@ function showCustomerEditSubmissionChoice(submission = {}) {
       close(button.dataset.customerEditMode === 'cancel' ? null : button.dataset.customerEditMode);
     });
     document.body.appendChild(modal);
+    setTimeout(() => modal.querySelector('[data-customer-edit-mode="edit_only"]')?.focus(), 0);
   });
 }
 
