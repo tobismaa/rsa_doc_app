@@ -1,3 +1,4 @@
+import { getDocumentPreviewUrl } from './shared/document-preview.js?v=20261019d';
 import { auth, db } from './firebase-config.js?v=20260625c';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
 import {
@@ -3648,7 +3649,7 @@ function getAuditCorrectionSummaryHtml(submission = {}) {
     if (!latestDoc && !comment) return '';
 
     const docLink = latestDoc?.fileUrl
-        ? `<a href="${escapeHtml(latestDoc.fileUrl)}" target="_blank" rel="noopener">${escapeHtml(latestDoc.name || latestDoc.fileName || 'Correction document')}</a>`
+        ? `<a href="${escapeHtml(getDocumentPreviewUrl(latestDoc.fileUrl))}" target="_blank" rel="noopener">${escapeHtml(latestDoc.name || latestDoc.fileName || 'Correction document')}</a>`
         : escapeHtml(latestDoc?.name || latestDoc?.fileName || 'No document link');
 
     return `

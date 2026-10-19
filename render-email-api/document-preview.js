@@ -48,11 +48,12 @@ function createDocumentPreviewHandler(fetchDocument = fetch) {
                 reader.releaseLock();
             }
             const bytes = Buffer.concat(chunks);
+            const download = req.query.download === '1';
             const type = documentType(bytes);
-            if (!type) return res.status(415).type('text/plain').send('This file type cannot be previewed. Download the document to view it.');
-            const filename = decodeURIComponent(url.pathname.split('/').pop()).replace(/[^A-Za-z0-9._ -]/g, '_') || 'document';
-            res.set('Content-Type', type);
-            res.set('Content-Disposition', `inline; filename="${filename}"`);
+            if (!type && !download) return res.status(415).type('text/plain').send('This file type cannot be previewed. Download the document to view it.');
+            const filename = String((download && req.query.filename) || decodeURIComponent(url.pathname.split('/').pop())).replace(/[^A-Za-z0-9._ -]/g, '_') || 'document';
+            res.set('Content-Type', type || 'application/octet-stream');
+            res.set('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename="${filename}"`);
             res.set('Content-Security-Policy', "script-src 'none'");
             return res.send(bytes);
         } catch (_) {

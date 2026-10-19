@@ -1,4 +1,4 @@
-import { getDocumentPreviewUrl } from './shared/document-preview.js?v=20261019b';
+import { getDocumentPreviewUrl, getDocumentDownloadUrl } from './shared/document-preview.js?v=20261019d';
 import { auth, db } from './firebase-config.js?v=20260625c';
 import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
@@ -442,43 +442,21 @@ function updateRsaExcelAccessUI() {
 
 // ------- utility helpers (borrowed from viewer dashboard) -------
 async function fetchWithCorsFallback(url) {
-    const cleanUrl = url?.toString().trim().replace(/[\s\n\r\t]+/g, '');
+    const cleanUrl = String(url || '').trim();
     if (!cleanUrl) throw new Error('Invalid URL');
-
-    const proxyUrl = getBackblazeDownloadProxyUrl(cleanUrl);
-    if (proxyUrl) {
-        const proxyResponse = await fetch(proxyUrl, { credentials: 'same-origin' });
-        if (!proxyResponse.ok) throw new Error(`Document proxy failed: ${proxyResponse.status}`);
-        return proxyResponse;
-    }
-
-    try {
-        const response = await fetch(cleanUrl, { mode: 'cors', credentials: 'omit' });
-        if (!response.ok) throw new Error(`Document fetch failed: ${response.status}`);
-        return response;
-    } catch (error) {
-        error.corsBlocked = true;
-        throw error;
-    }
+    const response = await fetch(getDocumentDownloadUrl(cleanUrl), { mode: 'cors', credentials: 'omit' });
+    if (!response.ok) throw new Error(`Document download failed: ${response.status}`);
+    return response;
 }
 
-function getBackblazeDownloadProxyUrl(cleanUrl) {
-    try {
-        const parsed = new URL(cleanUrl);
-        const isBackblaze = parsed.protocol === 'https:' && /\.backblazeb2\.com$/i.test(parsed.hostname);
-        if (!isBackblaze || !parsed.pathname.startsWith('/file/cmbank-rsa-documents/')) return '';
-        return `/api/backblaze-download.php?url=${encodeURIComponent(cleanUrl)}`;
-    } catch (error) {
-        return '';
-    }
-}
+
 
 function openDirectDocumentDownload(fileUrl, fileName = 'document.pdf') {
     const cleanUrl = fileUrl?.toString().trim().replace(/[\s\n\r\t]+/g, '');
     if (!cleanUrl) return false;
 
     const link = document.createElement('a');
-    link.href = getBackblazeDownloadProxyUrl(cleanUrl) || cleanUrl;
+    link.href = getDocumentDownloadUrl(cleanUrl, fileName);
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
     link.download = (fileName || 'document.pdf').replace(/[\\/:*?"<>|]/g, '_');

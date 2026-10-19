@@ -16,3 +16,13 @@ export function getDocumentPreviewUrl(value) {
         return '';
     }
 }
+
+// Attachment mode also supports files that cannot be displayed inline.
+export function getDocumentDownloadUrl(value, fileName = '') {
+    const target = getDocumentPreviewUrl(value);
+    if (!target || target === String(value || '').trim()) return target;
+    const url = new URL(target);
+    url.searchParams.set('download', '1');
+    if (fileName) url.searchParams.set('filename', fileName);
+    return url.href;
+}

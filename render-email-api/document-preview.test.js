@@ -41,3 +41,19 @@ test('storage errors and failed fetches produce visible preview errors', async (
         assert.match(res.body,/document|Document/);
     }
 });
+
+test('download mode returns attachments and preserves bytes for non-preview formats', async () => {
+    const bytes = Buffer.from('PK example office document');
+    const res = result();
+    await createDocumentPreviewHandler(async () => new Response(bytes))({query:{url,download:'1',filename:'report.docx'}},res);
+    assert.equal(res.code,200);
+    assert.equal(res.headers['Content-Type'],'application/octet-stream');
+    assert.equal(res.headers['Content-Disposition'],'attachment; filename="report.docx"');
+    assert.deepEqual(res.body,bytes);
+});
+test('download mode sanitizes names and preserves PDF content type', async () => {
+    const res = result();
+    await createDocumentPreviewHandler(async () => new Response('%PDF-1.7 test'))({query:{url,download:'1',filename:'bad"/name.pdf'}},res);
+    assert.equal(res.headers['Content-Disposition'],'attachment; filename="bad__name.pdf"');
+    assert.equal(res.headers['Content-Type'],'application/pdf');
+});
