@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cmbank-rsa-v74';
+const CACHE_NAME = 'cmbank-rsa-v76';
 const BADGE_DB_NAME = 'cmbank-badge-db';
 const BADGE_STORE_NAME = 'appState';
 const BADGE_COUNT_KEY = 'unreadCount';
@@ -170,6 +170,8 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const requestUrl = new URL(event.request.url);
   if (requestUrl.origin !== self.location.origin) return;
+  // Private document responses must never enter the offline cache.
+  if (requestUrl.pathname === '/api/backblaze-download.php') return;
 
   const isHtmlRequest =
     event.request.mode === 'navigate' ||

@@ -15,6 +15,8 @@ const { createDailyReportWorkbookBuffer, createOutstandingReportWorkbookBuffer, 
 
 const execFileAsync = promisify(execFile);
 
+const { createDocumentPreviewHandler } = require('./document-preview');
+
 const app = express();
 const port = Number(process.env.PORT || 5000);
 const requireAuth = String(process.env.REQUIRE_FIREBASE_AUTH || 'true').toLowerCase() !== 'false';
@@ -499,6 +501,8 @@ async function backblazeJsonRequest(url, options = {}) {
     }
     return data;
 }
+
+app.get('/api/document-preview', createDocumentPreviewHandler());
 
 app.post('/api/backblaze-upload', backblazeUpload.single('file'), async (req, res) => {
     try {

@@ -35,7 +35,7 @@ $fileName = preg_replace('/[^A-Za-z0-9._ -]+/', '_', $fileName) ?: 'document.pdf
 $ch = curl_init($url);
 curl_setopt_array($ch, [
     CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_FOLLOWLOCATION => true,
+    CURLOPT_FOLLOWLOCATION => false,
     CURLOPT_CONNECTTIMEOUT => 15,
     CURLOPT_TIMEOUT => 120,
     CURLOPT_HEADER => false,
@@ -55,8 +55,23 @@ if ($body === false || $status < 200 || $status >= 300) {
     exit;
 }
 
+$inline = ($_GET['inline'] ?? '') === '1';
+if ($inline) {
+    // Inspect bytes rather than trusting the remote Content-Type for same-origin content.
+    $detector = new finfo(FILEINFO_MIME_TYPE);
+    $contentType = $detector->buffer($body);
+    $allowedTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!in_array($contentType, $allowedTypes, true)) {
+        http_response_code(415);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'This file type cannot be previewed. Download the document to view it.';
+        exit;
+    }
+}
+header('X-Content-Type-Options: nosniff');
+header("Content-Security-Policy: script-src 'none'; frame-ancestors 'self'");
 header('Content-Type: ' . ($contentType ?: 'application/octet-stream'));
-header('Content-Disposition: attachment; filename="' . addslashes($fileName) . '"');
+header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="' . addslashes($fileName) . '"');
 header('Content-Length: ' . strlen($body));
-header('Cache-Control: private, max-age=300');
+header('Cache-Control: private, no-store');
 echo $body;

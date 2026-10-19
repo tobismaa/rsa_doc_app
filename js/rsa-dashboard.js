@@ -1,3 +1,4 @@
+import { getDocumentPreviewUrl } from './shared/document-preview.js?v=20261019b';
 import { auth, db } from './firebase-config.js?v=20260625c';
 import { getSystemSettings } from './shared/system-settings.js?v=20260617a';
 import { performAppLogout } from './shared/logout.js?v=20260625b';
@@ -2386,7 +2387,7 @@ window.viewDocumentRSA = (submissionId, docIndex) => {
     const documentViewer = document.getElementById('documentViewer');
     
     if (viewerFileName) viewerFileName.textContent = doc.name;
-    if (documentViewer) documentViewer.src = buildViewerDocumentUrl(doc.fileUrl, sub, docIndex);
+    if (documentViewer) documentViewer.src = getDocumentPreviewUrl(buildViewerDocumentUrl(doc.fileUrl, sub, docIndex));
     
     const viewerModal = document.getElementById('viewerModal');
     if (viewerModal) viewerModal.classList.add('active');

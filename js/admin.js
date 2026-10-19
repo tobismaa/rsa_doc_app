@@ -1,3 +1,4 @@
+import { getDocumentPreviewUrl } from './shared/document-preview.js?v=20261019b';
 // js/admin.js - COMPLETE UPDATED VERSION WITH FIXED DOWNLOAD ALL
 import { auth, db } from './firebase-config.js?v=20260625c';
 import { ADMIN_API_BASE_URL } from './admin-api-config.js?v=20260618a';
@@ -3959,7 +3960,7 @@ window.viewSubmissionDocs = async (submissionId) => {
 
     if (viewerModal && viewerFileName && documentViewer) {
         viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel}`;
-        documentViewer.src = buildViewerDocumentUrl(firstDoc.fileUrl, sub, 0);
+        documentViewer.src = getDocumentPreviewUrl(buildViewerDocumentUrl(firstDoc.fileUrl, sub, 0));
         viewerModal.classList.add('active');
     }
 
@@ -3970,7 +3971,7 @@ window.viewSubmissionDocs = async (submissionId) => {
             const doc = docs[index];
             const docTypeLabel = DOCUMENT_TYPES[doc.documentType] || doc.documentType || 'Document';
             viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel} (${index + 1}/${docs.length})`;
-            documentViewer.src = buildViewerDocumentUrl(doc.fileUrl, sub, index);
+            documentViewer.src = getDocumentPreviewUrl(buildViewerDocumentUrl(doc.fileUrl, sub, index));
         };
 
         const addViewerNav = () => {
@@ -4871,7 +4872,7 @@ window.viewDocument = (fileUrl, fileName) => {
     if (viewerModal && viewerFileName && documentViewer) {
         viewerFileName.textContent = fileName;
         const cleanUrl = fileUrl?.trim();
-        documentViewer.src = cleanUrl || '';
+        documentViewer.src = getDocumentPreviewUrl(cleanUrl || '');
         viewerModal.classList.add('active');
     }
 };

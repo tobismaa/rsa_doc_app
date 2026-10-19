@@ -1,3 +1,4 @@
+import { getDocumentPreviewUrl } from './shared/document-preview.js?v=20261019b';
 ﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// js/document-uploader.js - COMPLETE FIXED VERSION WITH WORKING FILE SIZE MODALS AND CALCULATIONS
 import { auth, db } from './firebase-config.js';
 import { BackblazeStorage } from './backblaze-storage.js?v=20260724a';
@@ -4483,7 +4484,7 @@ window.viewSubmissionDocs = (submissionId) => {
   const docTypeLabel = DOCUMENT_TYPES.find(t => t.id === firstDoc.documentType)?.name || firstDoc.documentType || 'Document';
   if (viewerModal && viewerFileName && documentViewer) {
     viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel}`;
-    documentViewer.src = firstDoc.fileUrl?.trim();
+    documentViewer.src = getDocumentPreviewUrl(firstDoc.fileUrl?.trim());
     viewerModal.classList.add('active');
   }
   if (effectiveDocs.length > 1) {
@@ -4492,7 +4493,7 @@ window.viewSubmissionDocs = (submissionId) => {
       const doc = effectiveDocs[index];
       const docTypeLabel = DOCUMENT_TYPES.find(t => t.id === doc.documentType)?.name || doc.documentType || 'Document';
       viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel} (${index + 1}/${effectiveDocs.length})`;
-      documentViewer.src = doc.fileUrl?.trim();
+      documentViewer.src = getDocumentPreviewUrl(doc.fileUrl?.trim());
     };
     const addViewerNav = () => {
       const viewerHeader = viewerModal ? viewerModal.querySelector('.viewer-header') : document.querySelector('.viewer-header');

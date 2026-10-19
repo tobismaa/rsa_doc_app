@@ -1,3 +1,4 @@
+import { getDocumentPreviewUrl } from './shared/document-preview.js?v=20261019b';
 // js/reviewer-dashboard.js - FIXED VERSION WITH DIRECT SAVE ONLY
 import { auth, db } from './firebase-config.js?v=20260625c';
 import { queueUploaderApprovedEmail, queueUploaderRejectedEmail, queueRsaApprovalEmail } from './email-alerts.js';
@@ -1708,7 +1709,7 @@ function showDocumentAtIndex(index) {
     }
     
     // Set document source
-    documentViewer.src = buildViewerDocumentUrl(doc.fileUrl, currentViewerSubmission, index);
+    documentViewer.src = getDocumentPreviewUrl(buildViewerDocumentUrl(doc.fileUrl, currentViewerSubmission, index));
     
     // Update download button data
     if (viewerDownloadBtn) {
@@ -2167,7 +2168,7 @@ async function reviewDocument(action) {
 // ==================== VIEW DOCUMENT ====================
 window.viewDocument = (fileUrl, fileName, originalName = '') => {
     viewerFileName.textContent = fileName;
-    documentViewer.src = fileUrl?.trim();
+    documentViewer.src = getDocumentPreviewUrl(fileUrl?.trim());
     
     if (viewerDownloadBtn) {
         viewerDownloadBtn.style.display = 'inline-flex';
