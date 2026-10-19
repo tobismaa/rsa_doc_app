@@ -4472,7 +4472,12 @@ window.viewDocument = (docType) => {
   const docs = currentCustomerUploads[docType];
   if (!docs || docs.length === 0) return;
   const lastDoc = docs[docs.length - 1];
-  window.open(lastDoc.fileUrl, '_blank');
+  const previewUrl = getDocumentPreviewUrl(lastDoc.fileUrl);
+  if (!previewUrl) {
+    showNotification('Document preview is unavailable. Please upload the document again.', 'error');
+    return;
+  }
+  window.open(previewUrl, '_blank', 'noopener,noreferrer');
 };
 
 // ==================== VIEW SUBMISSION DOCUMENTS ====================
