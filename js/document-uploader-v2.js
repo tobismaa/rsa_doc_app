@@ -1196,6 +1196,15 @@ const rejectedTableBody = document.getElementById('rejectedTableBody');
 const applicationsTableBody = document.getElementById('applicationsTableBody');
 const applicationsTableHeadRow = applicationsTableBody?.closest('table')?.querySelector('thead tr');
 const applicationsSearch = document.getElementById('applicationsSearch');
+const valuationPaymentPanel = document.getElementById('valuationPaymentPanel');
+const valuationPaymentFileInput = document.getElementById('valuationPaymentFileInput');
+const valuationPaymentFileStatus = document.getElementById('valuationPaymentFileStatus');
+const valuationPaymentSummary = document.getElementById('valuationPaymentSummary');
+const valuationPaymentTableBody = document.getElementById('valuationPaymentTableBody');
+const valuationPaymentClearTableBody = document.getElementById('valuationPaymentClearTableBody');
+const runValuationPaymentBtn = document.getElementById('runValuationPaymentBtn');
+const exportValuationPaymentBtn = document.getElementById('exportValuationPaymentBtn');
+const clearSelectedValuationPaymentBtn = document.getElementById('clearSelectedValuationPaymentBtn');
 const uploaderApplicationReportStage = document.getElementById('uploaderApplicationReportStage');
 const uploaderApplicationReportStartDate = document.getElementById('uploaderApplicationReportStartDate');
 const uploaderApplicationReportEndDate = document.getElementById('uploaderApplicationReportEndDate');
@@ -1290,10 +1299,13 @@ let currentUploaderApplicationTab = 'draft';
 let currentUploaderPaidScope = 'mine';
 let uploaderApplicationsRenderId = 0;
 let currentUploaderApplicationReportRows = [];
+let valuationPaymentSourceFileName = '';
+let valuationPaymentRows = [];
+let valuationPaymentView = 'review';
 const expandedUploaderClearedBatchKeys = new Set();
 let submissionInProgress = false;
 const UPLOADER_DASHBOARD_TABS = ['overview', 'draft', 'applications', 'edit-customer', 'pending', 'approved', 'rejected', 'paid', 'reports', 'register-agent', 'profile', 'help'];
-const UPLOADER_APPLICATION_TABS = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'customer_edit', 'audit', 'paid', 'cleared'];
+const UPLOADER_APPLICATION_TABS = ['draft', 'pending', 'approved', 'rejected', 'sent_to_pfa', 'customer_edit', 'audit', 'valuation_payment', 'paid', 'cleared'];
 let registeredAgents = [];
 let agentAccountLookupSequence = 0;
 let agentAccountLookupDebounce = null;
@@ -3290,6 +3302,13 @@ function setupEventListeners() {
   });
   document.querySelectorAll('[data-uploader-application-tab]').forEach((button) => {
     button.addEventListener('click', () => switchUploaderApplicationTab(button.dataset.uploaderApplicationTab || 'pending'));
+  });
+  valuationPaymentFileInput?.addEventListener('change', handleValuationPaymentFileSelected);
+  runValuationPaymentBtn?.addEventListener('click', runValuationPaymentSchedule);
+  exportValuationPaymentBtn?.addEventListener('click', exportValuationPaymentSchedule);
+  clearSelectedValuationPaymentBtn?.addEventListener('click', clearSelectedValuationPayments);
+  document.querySelectorAll('[data-valuation-payment-view]').forEach((button) => {
+    button.addEventListener('click', () => switchValuationPaymentView(button.dataset.valuationPaymentView || 'review'));
   });
   document.querySelectorAll('[data-active-commission-scope]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -5961,7 +5980,7 @@ function getUploaderApplicationCounts() {
     const bucket = getUploaderApplicationBucket(sub);
     if (bucket && Object.prototype.hasOwnProperty.call(acc, bucket) && isVisibleUploaderApplicationForTab(sub, bucket)) acc[bucket] += 1;
     return acc;
-  }, { draft: 0, pending: 0, approved: 0, rejected: 0, sent_to_pfa: 0, customer_edit: 0, audit: 0, paid: 0, cleared: 0 });
+  }, { draft: 0, pending: 0, approved: 0, rejected: 0, sent_to_pfa: 0, customer_edit: 0, audit: 0, valuation_payment: 0, paid: 0, cleared: 0 });
 }
 
 function getUploaderDeletedReason(submission = {}) {
@@ -6580,6 +6599,243 @@ async function getUploaderPaymentResidentOfficer(submission = {}) {
   return getUserFullName(normalized);
 }
 
+function normalizeValuationPaymentAccount(value = '') {
+  return String(value || '').replace(/\D/g, '').trim();
+}
+
+function normalizeValuationPaymentName(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getValuationPaymentSubmissionAccount(submission = {}) {
+  return normalizeValuationPaymentAccount(
+    submission?.customerDetails?.accountNo || submission?.customerDetails?.accountNumber ||
+    submission?.accountNo || submission?.accountNumber || ''
+  );
+}
+
+function getValuationPaymentSubmissionName(submission = {}) {
+  return normalizeValuationPaymentName(submission.customerName || submission.customerDetails?.name || '');
+}
+
+function isValuationPaymentQualifiedSubmission(submission = {}) {
+  const status = String(submission.status || '').trim().toLowerCase();
+  return isUploaderSentToPfaStatus(submission) || ['paid', 'cleared'].includes(status) || submission.paymentMadeByUploader === true;
+}
+
+function getValuationPaymentDecision(row) {
+  const submission = row.submission;
+  if (!submission) return { decision: 'Not Qualified', reason: 'No matching application found in the system.' };
+  if (submission.valuationPaymentCleared === true) {
+    return { decision: 'Not Qualified', reason: 'Already cleared in Valuation Payment.' };
+  }
+  if (isValuationPaymentQualifiedSubmission(submission)) {
+    return { decision: 'Qualified', reason: 'Sent to PFA or payment already cleared.' };
+  }
+  return { decision: 'Not Qualified', reason: 'Application has not been sent to PFA and payment is not cleared.' };
+}
+
+function getValuationPaymentCellText(cell) {
+  if (!cell) return '';
+  if (cell.value && typeof cell.value === 'object' && 'result' in cell.value) return String(cell.value.result || '').trim();
+  return String(cell.text || cell.value || '').trim();
+}
+
+async function readValuationPaymentWorkbook(file) {
+  if (!window.ExcelJS) throw new Error('Excel reader is unavailable. Please refresh and try again.');
+  const workbook = new window.ExcelJS.Workbook();
+  await workbook.xlsx.load(await file.arrayBuffer());
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) throw new Error('The workbook does not contain a worksheet.');
+
+  let headerRowNumber = 0;
+  let headers = [];
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (headerRowNumber) return;
+    const values = row.values.slice(1).map((value) => String(value || '').trim());
+    const normalized = values.map((value) => value.toLowerCase().replace(/[^a-z0-9]+/g, ''));
+    if (normalized.includes('customername') && normalized.includes('accountnumber')) {
+      headerRowNumber = rowNumber;
+      headers = values;
+    }
+  });
+  if (!headerRowNumber) throw new Error('Expected Customer Name and Account Number columns were not found.');
+
+  const accountMatches = new Map();
+  const nameMatches = new Map();
+  allSubmissions.forEach((submission) => {
+    const account = getValuationPaymentSubmissionAccount(submission);
+    const name = getValuationPaymentSubmissionName(submission);
+    if (account && !accountMatches.has(account)) accountMatches.set(account, submission);
+    if (name && !nameMatches.has(name)) nameMatches.set(name, submission);
+  });
+
+  const rows = [];
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber <= headerRowNumber) return;
+    const values = row.values.slice(1).map((value) => String(value || '').trim());
+    if (!values.some(Boolean)) return;
+    const source = {};
+    headers.forEach((header, index) => { if (header) source[header] = values[index] || ''; });
+    const account = normalizeValuationPaymentAccount(source['Account Number']);
+    const name = normalizeValuationPaymentName(source['Customer Name']);
+    const submission = (account && accountMatches.get(account)) || (name && nameMatches.get(name)) || null;
+    const result = getValuationPaymentDecision({ submission });
+    rows.push({ source, submission, ...result, account, name });
+  });
+  return { headers, rows, worksheetName: worksheet.name };
+}
+
+function renderValuationPaymentSummary() {
+  if (!valuationPaymentSummary) return;
+  const qualified = valuationPaymentRows.filter((row) => row.decision === 'Qualified').length;
+  const notQualified = valuationPaymentRows.length - qualified;
+  valuationPaymentSummary.innerHTML = `
+    <div class="valuation-summary-card"><span>Total in report</span><strong>${valuationPaymentRows.length}</strong></div>
+    <div class="valuation-summary-card qualified"><span>Qualified</span><strong>${qualified}</strong></div>
+    <div class="valuation-summary-card not-qualified"><span>Not qualified</span><strong>${notQualified}</strong></div>
+  `;
+}
+
+function renderValuationPaymentRows() {
+  if (!valuationPaymentTableBody) return;
+  if (!valuationPaymentRows.length) {
+    valuationPaymentTableBody.innerHTML = '<tr><td colspan="8" class="no-data">Upload a valuation report and run the schedule.</td></tr>';
+  } else {
+    valuationPaymentTableBody.innerHTML = valuationPaymentRows.map((row, index) => `
+      <tr>
+        <td>${row.decision === 'Qualified' && row.submission ? `<input type="checkbox" class="valuation-payment-select" data-valuation-row-index="${index}" aria-label="Select ${escapeHtml(row.source['Customer Name'] || 'application')}">` : '-'}</td>
+        <td><strong>${escapeHtml(row.source['Customer Name'] || '-')}</strong></td>
+        <td>${escapeHtml(row.source['Account Number'] || '-')}</td>
+        <td>${escapeHtml(row.source['House Type'] || '-')}</td>
+        <td>${escapeHtml(row.source['Employer'] || '-')}</td>
+        <td>${escapeHtml(row.submission ? formatSubmissionStatusLabel(row.submission.status || '-') : 'Not found')}</td>
+        <td><span class="valuation-decision-badge ${row.decision === 'Qualified' ? 'qualified' : 'not-qualified'}">${row.decision}</span></td>
+        <td>${escapeHtml(row.reason)}</td>
+      </tr>
+    `).join('');
+  }
+  renderValuationPaymentClearRows();
+  renderValuationPaymentSummary();
+}
+
+function renderValuationPaymentClearRows() {
+  if (!valuationPaymentClearTableBody) return;
+  const rows = valuationPaymentRows.filter((row) => row.decision === 'Qualified' && row.submission);
+  valuationPaymentClearTableBody.innerHTML = rows.length ? rows.map((row, index) => `
+    <tr>
+      <td><input type="checkbox" class="valuation-payment-clear-select" data-valuation-clear-index="${valuationPaymentRows.indexOf(row)}" aria-label="Clear ${escapeHtml(row.source['Customer Name'] || 'application')}"></td>
+      <td><strong>${escapeHtml(row.source['Customer Name'] || '-')}</strong></td>
+      <td>${escapeHtml(row.source['Account Number'] || '-')}</td>
+      <td>${row.submission.valuationPaymentClearedAt ? safeFormatDate(row.submission.valuationPaymentClearedAt) : '-'}</td>
+      <td>Ready to clear</td>
+    </tr>
+  `).join('') : '<tr><td colspan="5" class="no-data">No qualified applications are available for clearing.</td></tr>';
+}
+
+async function handleValuationPaymentFileSelected(event) {
+  const file = event?.target?.files?.[0];
+  valuationPaymentSourceFileName = file?.name || '';
+  if (valuationPaymentFileStatus) valuationPaymentFileStatus.textContent = file ? `${file.name} selected. Click Run Schedule to analyze it.` : 'No valuation report loaded.';
+}
+
+async function runValuationPaymentSchedule() {
+  const file = valuationPaymentFileInput?.files?.[0];
+  if (!file) { showNotification('Choose the valuation report Excel file first.', 'warning'); return; }
+  if (runValuationPaymentBtn) { runValuationPaymentBtn.disabled = true; runValuationPaymentBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Reading'; }
+  try {
+    const result = await readValuationPaymentWorkbook(file);
+    valuationPaymentRows = result.rows;
+    if (valuationPaymentFileStatus) valuationPaymentFileStatus.textContent = `${file.name} loaded from sheet “${result.worksheetName}”. ${result.rows.length} application(s) analyzed.`;
+    renderValuationPaymentRows();
+    showNotification('Valuation payment schedule analyzed.', 'success');
+  } catch (error) {
+    valuationPaymentRows = [];
+    renderValuationPaymentRows();
+    if (valuationPaymentFileStatus) valuationPaymentFileStatus.textContent = error.message || 'Could not read the valuation report.';
+    showNotification(error.message || 'Could not read the valuation report.', 'error');
+  } finally {
+    if (runValuationPaymentBtn) { runValuationPaymentBtn.disabled = false; runValuationPaymentBtn.innerHTML = '<i class="fas fa-play"></i> Run Schedule'; }
+  }
+}
+
+async function clearSelectedValuationPayments() {
+  const indexes = Array.from(document.querySelectorAll('.valuation-payment-clear-select:checked'))
+    .map((input) => Number(input.dataset.valuationClearIndex))
+    .filter((index) => Number.isInteger(index));
+  const rows = indexes.map((index) => valuationPaymentRows[index]).filter((row) => row?.submission?.id);
+  if (!rows.length) { showNotification('Select at least one qualified application to clear.', 'warning'); return; }
+  if (clearSelectedValuationPaymentBtn) { clearSelectedValuationPaymentBtn.disabled = true; clearSelectedValuationPaymentBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clearing'; }
+  try {
+    await Promise.all(rows.map(async (row) => {
+      const payload = {
+        valuationPaymentCleared: true,
+        valuationPaymentClearedAt: serverTimestamp(),
+        valuationPaymentClearedBy: currentUser?.email || '',
+        valuationPaymentClearanceSourceFileName: valuationPaymentSourceFileName || ''
+      };
+      await updateDoc(doc(db, 'submissions', row.submission.id), payload);
+      Object.assign(row.submission, payload, { valuationPaymentClearedAt: new Date().toISOString() });
+      row.decision = 'Not Qualified';
+      row.reason = 'Already cleared in Valuation Payment.';
+    }));
+    renderValuationPaymentRows();
+    showNotification(`${rows.length} valuation payment application(s) cleared.`, 'success');
+  } catch (error) {
+    showNotification('Some valuation payments could not be cleared. Please try again.', 'error');
+  } finally {
+    if (clearSelectedValuationPaymentBtn) { clearSelectedValuationPaymentBtn.disabled = false; clearSelectedValuationPaymentBtn.innerHTML = '<i class="fas fa-check-double"></i> Clear Selected'; }
+  }
+}
+
+function switchValuationPaymentView(view = 'review') {
+  valuationPaymentView = view === 'clear' ? 'clear' : 'review';
+  document.querySelectorAll('[data-valuation-payment-view]').forEach((button) => button.classList.toggle('active', button.dataset.valuationPaymentView === valuationPaymentView));
+  document.querySelectorAll('[data-valuation-payment-panel]').forEach((panel) => { panel.style.display = panel.dataset.valuationPaymentPanel === valuationPaymentView ? '' : 'none'; });
+}
+
+async function exportValuationPaymentSchedule() {
+  if (!valuationPaymentRows.length) { showNotification('Run a valuation payment schedule before generating Excel.', 'warning'); return; }
+  if (!window.ExcelJS) { showNotification('Excel export is unavailable. Please refresh and try again.', 'error'); return; }
+  const sourceHeaders = Array.from(new Set(valuationPaymentRows.flatMap((row) => Object.keys(row.source))));
+  const extraHeaders = ['Decision', 'Reason', 'Matched Application ID', 'Application Status', 'Valuation Payment Status'];
+  const headers = [...sourceHeaders, ...extraHeaders];
+  const workbook = new window.ExcelJS.Workbook();
+  workbook.creator = 'RSA Document App';
+  ['Qualified', 'Not Qualified'].forEach((sheetName) => {
+    const sheet = workbook.addWorksheet(sheetName);
+    sheet.columns = headers.map((header) => ({ header, key: header, width: Math.min(42, Math.max(14, header.length + 3)) }));
+    valuationPaymentRows.filter((row) => (row.decision === 'Qualified') === (sheetName === 'Qualified')).forEach((row) => {
+      const values = Object.fromEntries(sourceHeaders.map((header) => [header, row.source[header] || '']));
+      Object.assign(values, {
+        Decision: row.decision,
+        Reason: row.reason,
+        'Matched Application ID': row.submission?.id || '',
+        'Application Status': row.submission?.status || 'Not found',
+        'Valuation Payment Status': row.submission?.valuationPaymentCleared ? 'Cleared' : 'Not cleared'
+      });
+      sheet.addRow(values);
+    });
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: sheetName === 'Qualified' ? 'FF166534' : 'FF991B1B' } };
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: headers.length } };
+  });
+  const buffer = await workbook.xlsx.writeBuffer();
+  const url = URL.createObjectURL(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `valuation-payment-schedule-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function getUploaderApplicationRows(tab = currentUploaderApplicationTab) {
   const search = String(applicationsSearch?.value || '').trim().toLowerCase();
   return allSubmissions
@@ -6619,6 +6875,7 @@ function renderUploaderApplicationBadges() {
     appSentToPfaCount: counts.sent_to_pfa,
     appCustomerEditCount: counts.customer_edit,
     appAuditCount: counts.audit,
+    appValuationPaymentCount: valuationPaymentRows.length,
     appPaidCount: counts.paid,
     appClearedCount: counts.cleared
   };
@@ -6933,6 +7190,15 @@ async function renderUploaderApplicationsTable() {
 
   renderUploaderApplicationBadges();
   if (!applicationsTableBody) return;
+
+  const applicationsSection = document.querySelector('#applicationsTab > .table-section');
+  if (applicationsSection) applicationsSection.style.display = renderTab === 'valuation_payment' ? 'none' : '';
+  if (valuationPaymentPanel) valuationPaymentPanel.style.display = renderTab === 'valuation_payment' ? '' : 'none';
+  if (renderTab === 'valuation_payment') {
+    switchValuationPaymentView(valuationPaymentView);
+    renderValuationPaymentRows();
+    return;
+  }
 
   const activeCommissionScopeStrip = document.getElementById('activeCommissionScopeStrip');
   if (activeCommissionScopeStrip) {

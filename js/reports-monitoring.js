@@ -36,7 +36,7 @@ let allSubmissions = [];
 let userDisplayNamesByEmail = new Map();
 let auditRenderTimer = null;
 let currentTab = 'overview';
-const AUDIT_DASHBOARD_TABS = ['overview', 'sent-to-pfa', 'customer-edits', 'paid', 'cleared', 'rejected', 'reconciliation', 'user-report', 'profile', 'help'];
+const AUDIT_DASHBOARD_TABS = ['overview', 'sent-to-pfa', 'customer-edits', 'paid', 'cleared', 'rejected', 'reconciliation', 'valuation-payment', 'user-report', 'profile', 'help'];
 const AUDIT_BULK_CLEAR_BATCH_SIZE = 200;
 const AUDIT_RECONCILIATION_VIEWS = ['excel', 'duplicates', 'ignored', 'deleted', 'rejected'];
 
@@ -75,6 +75,9 @@ let auditPaidReconciliationSelectedSubmissionIds = [];
 let auditPaidReconciliationActiveResultsTab = 'matched';
 let currentAuditRejectedScope = 'rejected';
 let currentAuditDuplicateHistoryFilter = 'all';
+let auditValuationPaymentRows = [];
+let auditValuationPaymentSourceFileName = '';
+let auditValuationPaymentView = 'qualified';
 let usersListenerStarted = false;
 let agentsListenerStarted = false;
 let submissionsListenerMode = '';
@@ -165,6 +168,12 @@ const exportPaymentReportPdfBtn = document.getElementById('exportPaymentReportPd
 const paymentPdfPreviewModal = document.getElementById('paymentPdfPreviewModal');
 const paymentPdfPreviewFrame = document.getElementById('paymentPdfPreviewFrame');
 const downloadPaymentPdfPreviewBtn = document.getElementById('downloadPaymentPdfPreviewBtn');
+const auditValuationPaymentFileInput = document.getElementById('auditValuationPaymentFileInput');
+const auditValuationPaymentFileStatus = document.getElementById('auditValuationPaymentFileStatus');
+const auditValuationPaymentSummary = document.getElementById('auditValuationPaymentSummary');
+const auditValuationPaymentTableBody = document.getElementById('auditValuationPaymentTableBody');
+const auditValuationPaymentClearTableBody = document.getElementById('auditValuationPaymentClearTableBody');
+const resetAuditValuationPaymentBtn = document.getElementById('resetAuditValuationPaymentBtn');
 
 function escapeHtml(text) {
     if (!text) return '';
@@ -2982,6 +2991,30 @@ function renderProfile() {
     });
 }
 
+function normalizeAuditValuationPaymentAccount(value = '') { return String(value || '').replace(/\D/g, ''); }
+function normalizeAuditValuationPaymentName(value = '') { return String(value || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim(); }
+function getAuditValuationPaymentAccount(sub = {}) { return normalizeAuditValuationPaymentAccount(sub.customerDetails?.accountNo || sub.customerDetails?.accountNumber || sub.accountNo || sub.accountNumber || ''); }
+function getAuditValuationPaymentName(sub = {}) { return normalizeAuditValuationPaymentName(sub.customerName || sub.customerDetails?.name || ''); }
+function isAuditValuationPaymentQualified(sub = {}) { const status = String(sub.status || '').toLowerCase(); return ['sent_to_pfa', 'rsa_submitted', 'paid', 'cleared'].includes(status) || sub.finalSubmitted === true || sub.rsaSubmitted === true || sub.paymentMadeByUploader === true; }
+function getAuditValuationPaymentDecision(row) { if (!row.submission) return ['Not Qualified', 'No matching application found in the system.']; if (row.submission.valuationPaymentCleared === true) return ['Not Qualified', 'Already cleared in Valuation Payment.']; if (isAuditValuationPaymentQualified(row.submission)) return ['Qualified', 'Sent to PFA or payment already cleared.']; return ['Not Qualified', 'Application has not been sent to PFA and payment is not cleared.']; }
+function formatAuditDate(value) { return formatDate(value); }
+function renderAuditValuationPayment() {
+    const qualified = auditValuationPaymentRows.filter((row) => row.decision === 'Qualified').length;
+    if (auditValuationPaymentSummary) auditValuationPaymentSummary.innerHTML = `<div class="audit-valuation-payment-card"><span>Total in report</span><strong>${auditValuationPaymentRows.length}</strong></div><div class="audit-valuation-payment-card qualified"><span>Qualified</span><strong>${qualified}</strong></div><div class="audit-valuation-payment-card not-qualified"><span>Not qualified</span><strong>${auditValuationPaymentRows.length - qualified}</strong></div>`;
+    const reviewRows = auditValuationPaymentRows.filter((row) => auditValuationPaymentView === 'not-qualified' ? row.decision !== 'Qualified' : row.decision === 'Qualified');
+    if (auditValuationPaymentTableBody) auditValuationPaymentTableBody.innerHTML = reviewRows.length ? reviewRows.map((row) => { const index = auditValuationPaymentRows.indexOf(row); return `<tr><td>${row.decision === 'Qualified' && row.submission ? `<input type="checkbox" class="audit-valuation-payment-select" data-audit-valuation-payment-index="${index}">` : '-'}</td><td><strong>${escapeHtml(row.source['Customer Name'] || '-')}</strong></td><td>${escapeHtml(row.source['Account Number'] || '-')}</td><td>${escapeHtml(row.source['House Type'] || '-')}</td><td>${escapeHtml(row.source['Employer'] || '-')}</td><td>${escapeHtml(row.submission?.status || 'Not found')}</td><td><span class="audit-valuation-payment-decision ${row.decision === 'Qualified' ? 'qualified' : 'not-qualified'}">${row.decision}</span></td><td>${escapeHtml(row.reason)}</td></tr>`; }).join('') : `<tr><td colspan="8" class="no-data">No ${auditValuationPaymentView === 'not-qualified' ? 'not qualified' : 'qualified'} applications found.</td></tr>`;
+    const clearRows = auditValuationPaymentRows.filter((row) => row.decision === 'Qualified' && row.submission);
+    if (auditValuationPaymentClearTableBody) auditValuationPaymentClearTableBody.innerHTML = clearRows.length ? clearRows.map((row) => `<tr><td><input type="checkbox" class="audit-valuation-payment-clear-select" data-audit-valuation-payment-index="${auditValuationPaymentRows.indexOf(row)}"></td><td><strong>${escapeHtml(row.source['Customer Name'] || '-')}</strong></td><td>${escapeHtml(row.source['Account Number'] || '-')}</td><td>${row.submission.valuationPaymentClearedAt ? formatAuditDate(row.submission.valuationPaymentClearedAt) : '-'}</td><td>Ready to clear</td></tr>`).join('') : '<tr><td colspan="5" class="no-data">No qualified applications are available for clearing.</td></tr>';
+}
+async function runAuditValuationPaymentSchedule() {
+    const file = auditValuationPaymentFileInput?.files?.[0]; if (!file || !window.ExcelJS) { showNotification(file ? 'Excel reader is unavailable. Please refresh.' : 'Choose the valuation report Excel file first.', 'warning'); return; }
+    try { const workbook = new window.ExcelJS.Workbook(); await workbook.xlsx.load(await file.arrayBuffer()); const sheet = workbook.worksheets[0]; let headers = []; let headerRow = 0; sheet.eachRow({ includeEmpty: false }, (row, number) => { if (headerRow) return; const values = row.values.slice(1).map((v) => String(v || '').trim()); const normalized = values.map((v) => v.toLowerCase().replace(/[^a-z0-9]+/g, '')); if (normalized.includes('customername') && normalized.includes('accountnumber')) { headers = values; headerRow = number; } }); if (!headerRow) throw new Error('Expected Customer Name and Account Number columns were not found.'); const accounts = new Map(); const names = new Map(); allSubmissions.forEach((sub) => { if (getAuditValuationPaymentAccount(sub)) accounts.set(getAuditValuationPaymentAccount(sub), sub); if (getAuditValuationPaymentName(sub)) names.set(getAuditValuationPaymentName(sub), sub); }); const rows = []; sheet.eachRow({ includeEmpty: false }, (row, number) => { if (number <= headerRow) return; const values = row.values.slice(1).map((v) => String(v || '').trim()); if (!values.some(Boolean)) return; const source = {}; headers.forEach((header, index) => { if (header) source[header] = values[index] || ''; }); const submission = accounts.get(normalizeAuditValuationPaymentAccount(source['Account Number'])) || names.get(normalizeAuditValuationPaymentName(source['Customer Name'])) || null; const [decision, reason] = getAuditValuationPaymentDecision({ submission }); rows.push({ source, submission, decision, reason }); }); auditValuationPaymentRows = rows; auditValuationPaymentSourceFileName = file.name; if (auditValuationPaymentFileStatus) auditValuationPaymentFileStatus.textContent = `${file.name} loaded. ${rows.length} application(s) analyzed.`; renderAuditValuationPayment(); showNotification('Valuation payment schedule analyzed.', 'success'); } catch (error) { auditValuationPaymentRows = []; renderAuditValuationPayment(); if (auditValuationPaymentFileStatus) auditValuationPaymentFileStatus.textContent = error.message || 'Could not read the valuation report.'; showNotification(error.message || 'Could not read the valuation report.', 'error'); }
+}
+async function clearAuditValuationPayments() { const indexes = Array.from(document.querySelectorAll('.audit-valuation-payment-clear-select:checked')).map((input) => Number(input.dataset.auditValuationPaymentIndex)); const rows = indexes.map((index) => auditValuationPaymentRows[index]).filter((row) => row?.submission?.id); if (!rows.length) { showNotification('Select at least one qualified application to clear.', 'warning'); return; } try { await Promise.all(rows.map(async (row) => { await updateDoc(doc(db, 'submissions', row.submission.id), { valuationPaymentCleared: true, valuationPaymentClearedAt: serverTimestamp(), valuationPaymentClearedBy: currentUser?.email || '', valuationPaymentClearanceSourceFileName: auditValuationPaymentSourceFileName }); Object.assign(row.submission, { valuationPaymentCleared: true, valuationPaymentClearedAt: new Date().toISOString() }); row.decision = 'Not Qualified'; row.reason = 'Already cleared in Valuation Payment.'; })); renderAuditValuationPayment(); showNotification(`${rows.length} valuation payment application(s) cleared.`, 'success'); } catch (_) { showNotification('Some valuation payments could not be cleared.', 'error'); } }
+async function exportAuditValuationPaymentSchedule() { if (!auditValuationPaymentRows.length || !window.ExcelJS) { showNotification(!auditValuationPaymentRows.length ? 'Run a valuation payment schedule first.' : 'Excel export is unavailable. Please refresh.', 'warning'); return; } const sourceHeaders = Array.from(new Set(auditValuationPaymentRows.flatMap((row) => Object.keys(row.source)))); const headers = [...sourceHeaders, 'Decision', 'Reason', 'Matched Application ID', 'Application Status', 'Valuation Payment Status']; const workbook = new window.ExcelJS.Workbook(); ['Qualified', 'Not Qualified'].forEach((sheetName) => { const sheet = workbook.addWorksheet(sheetName); sheet.columns = headers.map((header) => ({ header, key: header, width: Math.max(14, Math.min(42, header.length + 3)) })); auditValuationPaymentRows.filter((row) => (row.decision === 'Qualified') === (sheetName === 'Qualified')).forEach((row) => sheet.addRow({ ...row.source, Decision: row.decision, Reason: row.reason, 'Matched Application ID': row.submission?.id || '', 'Application Status': row.submission?.status || 'Not found', 'Valuation Payment Status': row.submission?.valuationPaymentCleared ? 'Cleared' : 'Not cleared' })); sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }; sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: sheetName === 'Qualified' ? 'FF166534' : 'FF991B1B' } }; sheet.views = [{ state: 'frozen', ySplit: 1 }]; }); const buffer = await workbook.xlsx.writeBuffer(); const url = URL.createObjectURL(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })); const link = document.createElement('a'); link.href = url; link.download = `valuation-payment-schedule-${new Date().toISOString().slice(0, 10)}.xlsx`; link.click(); URL.revokeObjectURL(url); }
+function switchAuditValuationPaymentView(view = 'qualified') { auditValuationPaymentView = ['qualified', 'not-qualified', 'clear'].includes(view) ? view : 'qualified'; document.querySelectorAll('[data-audit-valuation-payment-view]').forEach((button) => button.classList.toggle('active', button.dataset.auditValuationPaymentView === auditValuationPaymentView)); document.querySelectorAll('[data-audit-valuation-payment-panel]').forEach((panel) => { const panelView = panel.dataset.auditValuationPaymentPanel; const visible = auditValuationPaymentView === 'clear' ? panelView === 'clear' : panelView === 'review'; panel.style.display = visible ? '' : 'none'; }); renderAuditValuationPayment(); }
+function resetAuditValuationPayment() { auditValuationPaymentRows = []; auditValuationPaymentSourceFileName = ''; if (auditValuationPaymentFileInput) auditValuationPaymentFileInput.value = ''; if (auditValuationPaymentFileStatus) auditValuationPaymentFileStatus.textContent = 'No valuation report loaded.'; switchAuditValuationPaymentView('qualified'); renderAuditValuationPayment(); showNotification('Valuation payment schedule reset.', 'info'); }
+
 function renderCurrentTab() {
     renderAuditWorkflowBadges();
 
@@ -3026,6 +3059,10 @@ function renderCurrentTab() {
         renderAuditPaidReconciliation();
         return;
     }
+    if (currentTab === 'valuation-payment') {
+        renderAuditValuationPayment();
+        return;
+    }
     if (currentTab === 'user-report') {
         renderAuditUserReport();
     }
@@ -3055,6 +3092,7 @@ function switchTab(tabId) {
         cleared: 'Cleared',
         rejected: 'Rejected',
         reconciliation: 'Reconciliation',
+        'valuation-payment': 'Valuation Payment',
         'user-report': 'Commission Summary',
         profile: 'My Profile',
         help: 'Help & SOP'
@@ -3063,7 +3101,7 @@ function switchTab(tabId) {
 }
 
 function ensureDataForTab(tabId) {
-    const dataTabs = ['overview', 'sent-to-pfa', 'customer-edits', 'paid', 'cleared', 'rejected', 'reconciliation', 'user-report'];
+    const dataTabs = ['overview', 'sent-to-pfa', 'customer-edits', 'paid', 'cleared', 'rejected', 'reconciliation', 'valuation-payment', 'user-report'];
     if (dataTabs.includes(tabId)) loadUsers();
     if (dataTabs.includes(tabId)) loadAgents();
     if (dataTabs.includes(tabId)) loadSubmissions({ full: tabId === 'reconciliation' || tabId === 'user-report' });
@@ -4164,6 +4202,12 @@ function bindEvents() {
             switchTab(item.dataset.tab || 'overview');
         });
     });
+    auditValuationPaymentFileInput?.addEventListener('change', (event) => { auditValuationPaymentSourceFileName = event.target.files?.[0]?.name || ''; if (auditValuationPaymentFileStatus) auditValuationPaymentFileStatus.textContent = auditValuationPaymentSourceFileName ? `${auditValuationPaymentSourceFileName} selected. Click Run Schedule.` : 'No valuation report loaded.'; });
+    document.getElementById('runAuditValuationPaymentBtn')?.addEventListener('click', runAuditValuationPaymentSchedule);
+    document.getElementById('exportAuditValuationPaymentBtn')?.addEventListener('click', exportAuditValuationPaymentSchedule);
+    document.getElementById('clearAuditValuationPaymentBtn')?.addEventListener('click', clearAuditValuationPayments);
+    resetAuditValuationPaymentBtn?.addEventListener('click', resetAuditValuationPayment);
+    document.querySelectorAll('[data-audit-valuation-payment-view]').forEach((button) => button.addEventListener('click', () => switchAuditValuationPaymentView(button.dataset.auditValuationPaymentView || 'review')));
     document.querySelectorAll('[data-audit-paid-scope]').forEach((button) => {
         button.addEventListener('click', () => {
             currentAuditPaidScope = normalizeAuditPaidScope(button.dataset.auditPaidScope);

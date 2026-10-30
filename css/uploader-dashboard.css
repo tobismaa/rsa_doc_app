@@ -2974,3 +2974,40 @@ body.modal-open {
     font-size: 12px;
   }
 }
+/* Valuation payment audit workflow */
+.valuation-payment-panel {
+  margin-top: 0;
+  padding: 22px;
+  border: 1px solid #dbe5f0;
+  border-radius: 16px;
+  background: linear-gradient(145deg, #f8fbff 0%, #ffffff 55%);
+  box-shadow: 0 12px 30px rgba(15, 59, 103, 0.08);
+}
+.valuation-payment-header { display:flex; justify-content:space-between; gap:18px; align-items:flex-start; flex-wrap:wrap; }
+.valuation-payment-kicker { color:#2563eb; text-transform:uppercase; letter-spacing:.08em; font-size:11px; font-weight:800; }
+.valuation-payment-header h2 { margin:4px 0 6px; color:#0f3b67; }
+.valuation-payment-header p { margin:0; max-width:760px; color:#64748b; line-height:1.55; }
+.valuation-payment-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.valuation-upload-btn, .valuation-payment-actions .action-btn { border:0; border-radius:9px; padding:10px 13px; cursor:pointer; font-weight:700; background:#0f3b67; color:#fff; }
+.valuation-upload-btn { background:#0f766e; }
+.valuation-payment-file-status { margin:16px 0; padding:10px 12px; border-radius:9px; color:#475569; background:#eef4fb; font-size:13px; }
+.valuation-payment-summary { display:grid; grid-template-columns:repeat(3, minmax(120px, 1fr)); gap:10px; margin-bottom:18px; }
+.valuation-summary-card { padding:14px; border-radius:12px; background:#e8f0f8; color:#0f3b67; }
+.valuation-summary-card.qualified { background:#dcfce7; color:#166534; }
+.valuation-summary-card.not-qualified { background:#fee2e2; color:#991b1b; }
+.valuation-summary-card span { display:block; font-size:12px; font-weight:700; }
+.valuation-summary-card strong { display:block; font-size:24px; margin-top:4px; }
+.valuation-payment-inner-tabs { display:flex; gap:8px; margin-bottom:12px; border-bottom:1px solid #dbe5f0; }
+.valuation-payment-inner-tabs .admin-subtab-btn { border:0; background:transparent; color:#475569; padding:10px 12px; cursor:pointer; }
+.valuation-payment-inner-tabs .admin-subtab-btn.active { color:#0f3b67; border-bottom:3px solid #2563eb; }
+.valuation-payment-table-container { overflow:auto; }
+.valuation-payment-table-container table { min-width:960px; }
+.valuation-decision-badge { display:inline-block; padding:4px 8px; border-radius:999px; font-size:11px; font-weight:800; }
+.valuation-decision-badge.qualified { color:#166534; background:#dcfce7; }
+.valuation-decision-badge.not-qualified { color:#991b1b; background:#fee2e2; }
+.valuation-payment-clear-bar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+.valuation-payment-clear-bar p { margin:0; color:#475569; }
+@media (max-width: 700px) {
+  .valuation-payment-panel { padding:15px; }
+  .valuation-payment-summary { grid-template-columns:1fr; }
+}

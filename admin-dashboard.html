@@ -13,9 +13,10 @@
     <title>Admin Dashboard - CMBank RSA</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
-    <link rel="stylesheet" href="css/admin-dashboard.css?v=20260724c">
+    <link rel="stylesheet" href="css/admin-dashboard.css?v=20261030a">
     <!-- Security: DOMPurify for XSS protection -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 </head>
 <body>
     <!-- Security utilities loaded after DOM ready -->
@@ -828,7 +829,11 @@
 
             <!-- Audit Log Tab -->
             <div id="auditTab" class="tab-content">
-                <div class="audit-log">
+                <div class="audit-workflow-tabs">
+                    <button type="button" class="admin-subtab-btn active" data-audit-view="logs">Audit Logs</button>
+                    <button type="button" class="admin-subtab-btn" data-audit-view="valuation">Valuation Payment</button>
+                </div>
+                <div class="audit-log" id="auditLogsView" data-audit-panel="logs">
                     <h2>System Audit Log</h2>
                     <div class="filters-bar">
                         <input type="date" id="auditStartDate" aria-label="Audit start date">
@@ -865,6 +870,17 @@
                             </tbody>
                         </table>
                     </div>
+                </div>
+                <div id="auditValuationView" class="audit-valuation-view" data-audit-panel="valuation" style="display:none;">
+                    <div class="audit-valuation-header">
+                        <div><span class="audit-valuation-kicker">Audit workflow</span><h2>Valuation Payment</h2><p>Upload the valuation report, qualify applications sent to PFA or already cleared in payment, then clear valuation payments when completed.</p></div>
+                        <div class="audit-valuation-actions"><label class="audit-valuation-upload" for="auditValuationFileInput"><i class="fas fa-file-excel"></i> Choose Excel</label><input id="auditValuationFileInput" type="file" accept=".xlsx,.xls" hidden><button type="button" class="action-btn" id="runAuditValuationBtn"><i class="fas fa-play"></i> Run Schedule</button><button type="button" class="action-btn" id="exportAuditValuationBtn"><i class="fas fa-download"></i> Generate Excel</button></div>
+                    </div>
+                    <div id="auditValuationFileStatus" class="audit-valuation-status">No valuation report loaded.</div>
+                    <div id="auditValuationSummary" class="audit-valuation-summary"></div>
+                    <div class="audit-valuation-inner-tabs"><button type="button" class="admin-subtab-btn active" data-audit-valuation-view="review">Review Schedule</button><button type="button" class="admin-subtab-btn" data-audit-valuation-view="clear">Clear Valuation Payment</button></div>
+                    <div data-audit-valuation-panel="review"><div class="table-container"><table class="customers-table"><thead><tr><th>Clear</th><th>Customer Name</th><th>Account Number</th><th>House Type</th><th>Employer</th><th>Application Status</th><th>Decision</th><th>Reason</th></tr></thead><tbody id="auditValuationTableBody"><tr><td colspan="8" class="no-data">Upload a valuation report and run the schedule.</td></tr></tbody></table></div></div>
+                    <div data-audit-valuation-panel="clear" style="display:none;"><div class="audit-valuation-clear-bar"><span>Select qualified applications that have now received valuation payment.</span><button type="button" class="action-btn" id="clearAuditValuationBtn"><i class="fas fa-check-double"></i> Clear Selected</button></div><div class="table-container"><table class="customers-table"><thead><tr><th>Clear</th><th>Customer Name</th><th>Account Number</th><th>Cleared Date</th><th>Status</th></tr></thead><tbody id="auditValuationClearTableBody"><tr><td colspan="5" class="no-data">Run a schedule to see applications available for clearing.</td></tr></tbody></table></div></div>
                 </div>
             </div>
 
@@ -1496,7 +1512,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=20261019d"></script>
+    <script type="module" src="js/admin.js?v=20261030a"></script>
     <script type="module" src="js/shared/super-admin-dashboard-switcher.js?v=20260722c"></script>
     <script src="js/table-enhancer.js?v=20260512b"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260715a"></script>
