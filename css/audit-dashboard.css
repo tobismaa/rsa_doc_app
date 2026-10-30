@@ -1129,3 +1129,10 @@
 .audit-valuation-payment-panel table td { padding: 6px 7px; }
 .audit-valuation-payment-decision { padding: 3px 6px; font-size: 10px; }
 .audit-valuation-payment-clearbar { gap: 6px; margin-bottom: 6px; font-size: 11px; }
+.audit-valuation-payment-report-page .audit-valuation-payment-head { margin-bottom: 12px; }
+.audit-valuation-payment-report-page .audit-valuation-payment-summary { grid-template-columns: repeat(2, minmax(150px, 240px)); }
+.audit-valuation-payment-card small { display: block; font-size: 10px; color: inherit; opacity: .75; }
+.audit-valuation-payment-modal-content { width: 98%; max-width: 1500px; max-height: 96vh; }
+.audit-valuation-payment-modal-content .modal-body { max-height: 80vh; min-height: 58vh; overflow-y: auto; }
+.modal-content.large-modal.audit-valuation-payment-modal-content { width: min(1200px, 90vw) !important; max-width: 1200px !important; height: auto; max-height: 85vh !important; }
+.modal-content.large-modal.audit-valuation-payment-modal-content .modal-body { max-height: calc(85vh - 150px); min-height: 0; }
