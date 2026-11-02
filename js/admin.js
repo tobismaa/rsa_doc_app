@@ -4556,7 +4556,7 @@ function normalizeAuditValuationName(value = '') { return String(value || '').to
 function auditValuationAccount(sub = {}) { return normalizeAuditValuationAccount(sub.customerDetails?.accountNo || sub.customerDetails?.accountNumber || sub.accountNo || sub.accountNumber || ''); }
 function auditValuationName(sub = {}) { return normalizeAuditValuationName(sub.customerName || sub.customerDetails?.name || ''); }
 function auditValuationQualified(sub = {}) {
-    const status = String(sub.status || '').trim().toLowerCase();
+    const status = String(sub.status || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
     // A draft must never qualify, even when an old submission flag was left behind.
     if (status === 'draft' || !sub.id) return false;
     return ['sent_to_pfa', 'rsa_submitted', 'paid', 'cleared'].includes(status)
@@ -4576,7 +4576,7 @@ function auditValuationSourceValue(source = {}, aliases = []) {
     return key ? source[key] : '';
 }
 function auditValuationMatchPriority(sub = {}) {
-    const status = String(sub.status || '').trim().toLowerCase();
+    const status = String(sub.status || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
     const priorities = {
         sent_to_pfa: 100,
         rsa_submitted: 95,
