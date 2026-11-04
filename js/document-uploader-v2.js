@@ -130,9 +130,19 @@ function calculateRoundedRsa25(rsaBalance) {
 }
 
 function parseMoney(value) {
-  const raw = String(value ?? '').replace(/[^0-9.\-]/g, '');
+  const raw = String(value ?? '').replace(/,/g, '').replace(/[^0-9.\-]/g, '');
   const num = Number(raw);
   return Number.isFinite(num) ? num : 0;
+}
+
+function formatRsaBalanceInputValue(value) {
+  const input = String(value ?? '').replace(/,/g, '').replace(/[^0-9.]/g, '');
+  if (!input) return '';
+
+  const parts = input.split('.');
+  const integerPart = parts[0] || '0';
+  const decimalPart = parts.length > 1 ? `.${parts.slice(1).join('').slice(0, 2)}` : '';
+  return `${Number(integerPart).toLocaleString('en-US')}${decimalPart}`;
 }
 
 function normalizeLoanAmountValue(value) {
@@ -2900,7 +2910,7 @@ function setPropertyByRsaAndUpdate(rsaAmount) {
     if (feeFmt) feeFmt.textContent = formatCurrency(rule.fee);
 
     // Calculate 25% of RSA rounded down to the nearest thousand.
-    const rsaBalance = parseFloat(rsaAmount) || 0;
+    const rsaBalance = parseMoney(rsaAmount);
     const rsa25Rounded = calculateRoundedRsa25(rsaBalance);
 
     // Property value must equal loan amount + rounded 25% contribution.
@@ -2977,7 +2987,7 @@ window.calculateTenorFromDob = function(dobString) {
 function calculateAndDisplayCustomerInfo() {
   const dob = document.getElementById('customerDob')?.value;
   const nin = document.getElementById('customerNIN')?.value?.trim() || '';
-  const rsaBalance = parseFloat(document.getElementById('rsaBalance')?.value || 0);
+  const rsaBalance = parseMoney(document.getElementById('rsaBalance')?.value || 0);
 
   if (!dob) return;
 
@@ -3090,11 +3100,16 @@ async function saveCustomerDetails() {
   });
 
   if (missingFields.length > 0) {
-    showNotification('Please fill all required fields before saving', 'error');
+    syncCustomerDetailCompletionStatuses(true);
+    document.getElementById(missingFields[0])?.focus();
+    showNotification('Please complete the highlighted fields: ' + missingFields.map((id) => {
+      return CUSTOMER_DETAIL_REQUIRED_FIELDS.find((field) => field.id === id)?.label || id;
+    }).join(', '), 'error');
     return false;
   }
 
   if (invalidFields.length > 0) {
+    syncCustomerDetailCompletionStatuses(true);
     showNotification('Invalid fields: ' + invalidFields.join(', '), 'error');
     return false;
   }
@@ -3104,7 +3119,7 @@ async function saveCustomerDetails() {
     return false;
   }
 
-  const rsaBalance = parseFloat(document.getElementById('rsaBalance')?.value || 0);
+  const rsaBalance = parseMoney(document.getElementById('rsaBalance')?.value || 0);
 
   // Calculate 25% rounded down to the nearest thousand.
   const rsa25Rounded = calculateRoundedRsa25(rsaBalance);
@@ -3541,9 +3556,14 @@ function setupEventListeners() {
   }
 
   // ===== UPDATED: RSA Balance input listener with auto-fill =====
+  document.getElementById('rsaBalance')?.addEventListener('keydown', (e) => {
+    if (e.key === ',') e.preventDefault();
+  });
   document.getElementById('rsaBalance')?.addEventListener('input', (e) => {
-    const rawStr = String(e.target.value).replace(/[^0-9.\-]+/g, '');
-    const raw = parseFloat(rawStr) || 0;
+    const input = e.target;
+    const formattedValue = formatRsaBalanceInputValue(input.value);
+    if (input.value !== formattedValue) input.value = formattedValue;
+    const raw = parseMoney(formattedValue);
 
     // Calculate 25% rounded down to the nearest thousand.
     const rsa25Rounded = calculateRoundedRsa25(raw);
@@ -3583,7 +3603,7 @@ function setupEventListeners() {
     // Also recalculate property fields if RSA balance exists
     const rsaBalance = document.getElementById('rsaBalance')?.value;
     if (rsaBalance && rsaBalance.trim() !== '') {
-      const rsaVal = parseFloat(rsaBalance) || 0;
+      const rsaVal = parseMoney(rsaBalance);
       if (typeof setPropertyByRsaAndUpdate === 'function') {
         setPropertyByRsaAndUpdate(rsaVal);
       } else if (window.setPropertyByRsaAndUpdate) {
@@ -3615,7 +3635,7 @@ function setupEventListeners() {
     });
   }
   try {
-    const rsaVal = parseFloat(document.getElementById('rsaBalance')?.value || 0);
+    const rsaVal = parseMoney(document.getElementById('rsaBalance')?.value || 0);
     if (rsaVal && window.setPropertyByRsaAndUpdate) window.setPropertyByRsaAndUpdate(rsaVal);
     const dob = document.getElementById('customerDob')?.value;
     if (dob && window.calculateTenorFromDob) {
@@ -4790,16 +4810,36 @@ function isCustomerDetailFieldComplete(fieldId = '') {
   return true;
 }
 
-function syncCustomerDetailCompletionStatuses() {
+function syncCustomerDetailCompletionStatuses(showErrors = false) {
   CUSTOMER_DETAIL_REQUIRED_FIELDS.forEach((field) => {
     const input = document.getElementById(field.id);
     const statusEl = getCustomerDetailCompletionStatusEl(field.id);
     if (!input || !statusEl) return;
     const isComplete = isCustomerDetailFieldComplete(field.id);
-    statusEl.textContent = isComplete ? '' : 'Incomplete';
-    statusEl.classList.toggle('incomplete', !isComplete);
-    input.classList.toggle('customer-field-incomplete', !isComplete);
+    const invalid = showErrors && !isComplete;
+    statusEl.textContent = invalid ? 'Required' : '';
+    statusEl.classList.toggle('incomplete', invalid);
+    input.classList.toggle('customer-field-incomplete', invalid);
   });
+}
+
+function highlightMissingSubmissionFields() {
+  const requiredFields = [
+    ...CUSTOMER_DETAIL_REQUIRED_FIELDS,
+    { id: 'propertyType' },
+    { id: 'propertyValue' },
+    { id: 'loanAmount' }
+  ];
+  let firstMissing = null;
+  requiredFields.forEach((field) => {
+    const input = document.getElementById(field.id);
+    if (!input) return;
+    const invalid = !isCustomerDetailFieldComplete(field.id) || !String(getRequiredSubmissionFieldValue(field.id) || '').trim();
+    input.classList.toggle('customer-field-incomplete', invalid);
+    if (invalid && !firstMissing) firstMissing = input;
+  });
+  syncCustomerDetailCompletionStatuses(true);
+  return firstMissing;
 }
 
 function bindCustomerCompletionFieldListeners() {
@@ -4908,6 +4948,11 @@ function hydrateEditableSubmissionRequiredFields() {
     setFieldValueIfEmpty(fieldId, storedValue);
   });
 
+  const rsaBalanceInput = document.getElementById('rsaBalance');
+  if (rsaBalanceInput && rsaBalanceInput.value) {
+    rsaBalanceInput.value = formatRsaBalanceInputValue(rsaBalanceInput.value);
+  }
+
   ['propertyType', 'propertyValue', 'facilityFee', 'loanAmount'].forEach((fieldId) => {
     setFieldValueIfEmpty(fieldId, getDerivedSubmissionFieldValue(fieldId, submission));
   });
@@ -4991,7 +5036,9 @@ async function submitCustomer() {
     }
     const missingFields = getMissingRequiredSubmissionFields();
     if (missingFields.length > 0) {
-      return showNotification('All fields are compulsory. Missing or invalid: ' + missingFields.join(', '), 'error');
+      const firstMissing = highlightMissingSubmissionFields();
+      firstMissing?.focus();
+      return showNotification('Please complete the highlighted fields: ' + missingFields.join(', '), 'error');
     }
     if (duplicateFieldChecking && !(await waitForDuplicateFieldChecks())) {
       return showNotification('Please wait for duplicate check to finish.', 'error');
