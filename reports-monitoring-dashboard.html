@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
     <link rel="stylesheet" href="css/admin-dashboard.css?v=20260423e">
-    <link rel="stylesheet" href="css/audit-dashboard.css?v=20261030f">
+    <link rel="stylesheet" href="css/audit-dashboard.css?v=20261110b">
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -99,7 +99,7 @@
                 </a>
                 <a href="#" class="nav-item" data-tab="valuation-payment">
                     <i class="fas fa-house-circle-check"></i>
-                    <span>Valuation Payment</span>
+                    <span>Valuation</span>
                 </a>
                 <a href="#" class="nav-item" data-tab="user-report">
                     <i class="fas fa-users-viewfinder"></i>
@@ -547,21 +547,22 @@
 
             <div id="valuation-paymentTab" class="tab-content">
                 <section class="audit-valuation-payment-panel audit-valuation-payment-report-page">
-                    <div class="audit-valuation-payment-head"><div><span class="audit-valuation-payment-kicker">Audit report</span><h2>Cleared Valuation Payment</h2><p>View all applications cleared through valuation payment.</p></div><button type="button" class="action-btn audit-valuation-upload" id="openAuditValuationPaymentModalBtn"><i class="fas fa-file-upload"></i> Upload Valuation Report</button></div>
+                    <div class="audit-valuation-payment-head"><div><span class="audit-valuation-payment-kicker">Audit report</span><h2>Valuation</h2><p>Review valuation schedule clearances. This history is separate from regular payment clearances and updates for all audit users.</p></div><button type="button" class="action-btn audit-valuation-upload" id="openAuditValuationPaymentModalBtn"><i class="fas fa-file-upload"></i> Upload Valuation Report</button></div>
                     <div id="auditValuationClearedSummary" class="audit-valuation-payment-summary"></div>
+                    <div class="audit-valuation-history-filters" role="group" aria-label="Filter cleared valuation history"><button type="button" class="active" data-audit-valuation-history-filter="all">All clearances</button><button type="button" data-audit-valuation-history-filter="mine">Cleared by me</button><button type="button" data-audit-valuation-history-filter="others">Cleared by others</button></div>
                     <div class="table-container"><table class="documents-table"><thead><tr><th>Customer Name</th><th>Account Number</th><th>House Type</th><th>Employer</th><th>Amount</th><th>Cleared Date</th><th>Cleared By</th></tr></thead><tbody id="auditValuationClearedTableBody"><tr><td colspan="7" class="no-data">No cleared valuation payments found.</td></tr></tbody></table></div>
                 </section>
             </div>
 
             <div id="auditValuationPaymentModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="auditValuationPaymentModalTitle">
                 <div class="modal-content large-modal audit-valuation-payment-modal-content">
-                    <div class="modal-header"><h2 id="auditValuationPaymentModalTitle"><i class="fas fa-file-excel"></i> Valuation Payment Schedule</h2><button class="close-btn" id="closeAuditValuationPaymentModalBtn" aria-label="Close">&times;</button></div>
+                    <div class="modal-header"><h2 id="auditValuationPaymentModalTitle"><i class="fas fa-file-excel"></i> Valuation Schedule</h2><button class="close-btn" id="closeAuditValuationPaymentModalBtn" aria-label="Close">&times;</button></div>
                     <div class="modal-body">
-                        <div class="audit-valuation-payment-head"><div><span class="audit-valuation-payment-kicker">Upload and process</span><p>Run the report, review Qualified and Not Qualified lists, clear selected payments, or generate Excel.</p></div><div class="audit-valuation-payment-actions"><label class="action-btn audit-valuation-upload" for="auditValuationPaymentFileInput"><i class="fas fa-file-excel"></i> Choose Excel</label><input id="auditValuationPaymentFileInput" type="file" accept=".xlsx,.xls" hidden><button type="button" class="action-btn" id="runAuditValuationPaymentBtn"><i class="fas fa-play"></i> Run</button><button type="button" class="action-btn" id="exportAuditValuationPaymentBtn"><i class="fas fa-download"></i> Generate Excel</button><button type="button" class="action-btn" id="resetAuditValuationPaymentBtn"><i class="fas fa-rotate-left"></i> Reset</button></div></div>
+                        <div class="audit-valuation-payment-head"><div><span class="audit-valuation-payment-kicker">Upload and process</span><p>Review the schedule, then use the separate Clear Valuation tab to record valuation clearances. These do not clear regular payments.</p></div><div class="audit-valuation-payment-actions"><label class="action-btn audit-valuation-upload" for="auditValuationPaymentFileInput"><i class="fas fa-file-excel"></i> Choose Excel</label><input id="auditValuationPaymentFileInput" type="file" accept=".xlsx,.xls" hidden><button type="button" class="action-btn" id="runAuditValuationPaymentBtn"><i class="fas fa-play"></i> Run</button><button type="button" class="action-btn" id="exportAuditValuationPaymentBtn"><i class="fas fa-download"></i> Generate Excel</button><button type="button" class="action-btn" id="resetAuditValuationPaymentBtn"><i class="fas fa-rotate-left"></i> Reset</button></div></div>
                         <div id="auditValuationPaymentFileStatus" class="audit-valuation-payment-status">No valuation report loaded.</div><div id="auditValuationPaymentSummary" class="audit-valuation-payment-summary"></div>
-                        <div class="admin-subtab-strip audit-valuation-payment-inner-tabs"><button type="button" class="admin-subtab-btn active" data-audit-valuation-payment-view="qualified">Qualified</button><button type="button" class="admin-subtab-btn" data-audit-valuation-payment-view="not-qualified">Not Qualified</button><button type="button" class="admin-subtab-btn" data-audit-valuation-payment-view="clear">Clear Valuation Payment</button></div>
-                        <div data-audit-valuation-payment-panel="review"><div class="table-container"><table class="documents-table"><thead><tr><th>Clear</th><th>Customer Name</th><th>Account Number</th><th>House Type</th><th>Employer</th><th>Application Status</th><th>Decision</th><th>Reason</th></tr></thead><tbody id="auditValuationPaymentTableBody"><tr><td colspan="8" class="no-data">Upload a valuation report and run the schedule.</td></tr></tbody></table></div></div>
-                        <div data-audit-valuation-payment-panel="clear" style="display:none;"><div class="audit-valuation-payment-clearbar"><span>Select qualified applications that have now received valuation payment.</span><button type="button" class="action-btn" id="clearAuditValuationPaymentBtn"><i class="fas fa-check-double"></i> Clear Selected</button></div><div class="table-container"><table class="documents-table"><thead><tr><th>Clear</th><th>Customer Name</th><th>Account Number</th><th>Cleared Date</th><th>Status</th></tr></thead><tbody id="auditValuationPaymentClearTableBody"><tr><td colspan="5" class="no-data">Run a schedule to see applications available for clearing.</td></tr></tbody></table></div></div>
+                        <div class="admin-subtab-strip audit-valuation-payment-inner-tabs"><button type="button" class="admin-subtab-btn active" data-audit-valuation-payment-view="qualified">Qualified</button><button type="button" class="admin-subtab-btn" data-audit-valuation-payment-view="not-qualified">Not Qualified</button><button type="button" class="admin-subtab-btn" data-audit-valuation-payment-view="clear">Clear Valuation</button></div>
+                        <div data-audit-valuation-payment-panel="review"><div class="table-container"><table class="documents-table"><thead><tr><th>Customer Name</th><th>Account Number</th><th>House Type</th><th>Employer</th><th>Application Status</th><th>Decision</th><th>Reason</th></tr></thead><tbody id="auditValuationPaymentTableBody"><tr><td colspan="7" class="no-data">Upload a valuation report and run the schedule.</td></tr></tbody></table></div></div>
+                        <div data-audit-valuation-payment-panel="clear" style="display:none;"><div class="audit-valuation-payment-clearbar"><span>Select qualified applications that have now received valuation clearance.</span><div class="audit-valuation-payment-actions"><button type="button" class="action-btn" id="selectAllAuditValuationPaymentBtn" disabled><i class="fas fa-check-square"></i> Select All</button><button type="button" class="action-btn" id="clearAuditValuationPaymentBtn"><i class="fas fa-check-double"></i> Clear Selected</button></div></div><div class="table-container"><table class="documents-table"><thead><tr><th>Select</th><th>Customer Name</th><th>Account Number</th><th>Cleared Date</th><th>Status</th></tr></thead><tbody id="auditValuationPaymentClearTableBody"><tr><td colspan="5" class="no-data">Run a schedule to see applications available for valuation clearing.</td></tr></tbody></table></div></div>
                     </div>
                     <div class="modal-footer"><button type="button" class="cancel-btn" id="closeAuditValuationPaymentModalFooterBtn">Close</button></div>
                 </div>
@@ -892,6 +893,21 @@
         </div>
     </div>
 
+    <div id="auditEopPreviewModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="auditEopPreviewTitle">
+        <div class="modal-content large-modal audit-eop-preview-modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-file-arrow-up"></i> <span id="auditEopPreviewTitle">Evidence of Payment</span></h2>
+                <button type="button" class="close-btn" id="closeAuditEopPreviewModalBtn" aria-label="Close EOP preview">&times;</button>
+            </div>
+            <div class="modal-body">
+                <iframe id="auditEopPreviewFrame" title="Evidence of Payment Preview"></iframe>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="cancel-btn" id="closeAuditEopPreviewFooterBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
     <div id="paymentPdfPreviewModal" class="modal">
         <div class="modal-content large-modal" style="max-width:1100px;">
             <div class="modal-header">
@@ -911,7 +927,7 @@
     </div>
 
     <script src="js/table-enhancer.js?v=20260512b"></script>
-    <script type="module" src="js/reports-monitoring.js?v=20261110a"></script>
+    <script type="module" src="js/reports-monitoring.js?v=20261110i"></script>
     <script type="module" src="js/shared/super-admin-dashboard-switcher.js?v=20260722c"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260715a"></script>
 </body>
