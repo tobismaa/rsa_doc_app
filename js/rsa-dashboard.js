@@ -615,8 +615,94 @@ function triggerDirectDownload(blob, fileName) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
     showNotification('✅ Download started','success');
+}
+
+const ZIP_CRC_TABLE = new Uint32Array(256);
+for (let i = 0; i < ZIP_CRC_TABLE.length; i++) {
+    let value = i;
+    for (let bit = 0; bit < 8; bit++) {
+        value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    ZIP_CRC_TABLE[i] = value >>> 0;
+}
+
+function calculateZipCrc32(bytes) {
+    let crc = 0xffffffff;
+    for (const byte of bytes) {
+        crc = ZIP_CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+}
+
+async function createStoredZipBlob(files) {
+    if (files.length > 0xffff) throw new Error('Too many documents to package into one ZIP file');
+
+    const encoder = new TextEncoder();
+    const localParts = [];
+    const centralParts = [];
+    const now = new Date();
+    const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
+    const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+    let localOffset = 0;
+
+    for (const { fileName, blob } of files) {
+        const nameBytes = encoder.encode(fileName);
+        if (nameBytes.length > 0xffff || blob.size > 0xffffffff) {
+            throw new Error(`"${fileName}" is too large for a standard ZIP archive`);
+        }
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const crc = calculateZipCrc32(bytes);
+        const size = bytes.length;
+        if (size > 0xffffffff || localOffset + 30 + nameBytes.length + size > 0xffffffff) {
+            throw new Error('The documents are too large for a standard ZIP archive');
+        }
+
+        const localHeader = new Uint8Array(30 + nameBytes.length);
+        const localView = new DataView(localHeader.buffer);
+        localView.setUint32(0, 0x04034b50, true);
+        localView.setUint16(4, 20, true);
+        localView.setUint16(6, 0x0800, true);
+        localView.setUint16(8, 0, true);
+        localView.setUint16(10, dosTime, true);
+        localView.setUint16(12, dosDate, true);
+        localView.setUint32(14, crc, true);
+        localView.setUint32(18, size, true);
+        localView.setUint32(22, size, true);
+        localView.setUint16(26, nameBytes.length, true);
+        localHeader.set(nameBytes, 30);
+        localParts.push(localHeader, blob);
+
+        const centralHeader = new Uint8Array(46 + nameBytes.length);
+        const centralView = new DataView(centralHeader.buffer);
+        centralView.setUint32(0, 0x02014b50, true);
+        centralView.setUint16(4, 20, true);
+        centralView.setUint16(6, 20, true);
+        centralView.setUint16(8, 0x0800, true);
+        centralView.setUint16(10, 0, true);
+        centralView.setUint16(12, dosTime, true);
+        centralView.setUint16(14, dosDate, true);
+        centralView.setUint32(16, crc, true);
+        centralView.setUint32(20, size, true);
+        centralView.setUint32(24, size, true);
+        centralView.setUint16(28, nameBytes.length, true);
+        centralView.setUint32(42, localOffset, true);
+        centralHeader.set(nameBytes, 46);
+        centralParts.push(centralHeader);
+        localOffset += localHeader.length + size;
+    }
+
+    const centralSize = centralParts.reduce((total, part) => total + part.length, 0);
+    if (localOffset + centralSize > 0xffffffff) throw new Error('The documents are too large for a standard ZIP archive');
+    const endRecord = new Uint8Array(22);
+    const endView = new DataView(endRecord.buffer);
+    endView.setUint32(0, 0x06054b50, true);
+    endView.setUint16(8, files.length, true);
+    endView.setUint16(10, files.length, true);
+    endView.setUint32(12, centralSize, true);
+    endView.setUint32(16, localOffset, true);
+    return new Blob([...localParts, ...centralParts, endRecord], { type: 'application/zip' });
 }
 
 async function downloadBlobAsFile(blob, fileName) {
@@ -2413,11 +2499,18 @@ window.downloadDocumentRSA = async (submissionId, docIndex) => {
 
 window.downloadAllRsa = async (submissionId) => {
     let downloadStage = 'opening the folder picker';
+    let folderPickerIssue = '';
     try {
         // Choose the destination before any asynchronous submission lookup.
-        const rootFolder = typeof window.showDirectoryPicker === 'function'
-            ? await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' })
-            : null;
+        let rootFolder = null;
+        if (typeof window.showDirectoryPicker === 'function') {
+            try {
+                rootFolder = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' });
+            } catch (error) {
+                if (error?.name === 'AbortError') throw error;
+                folderPickerIssue = `${error?.name || 'Error'}: ${error?.message || 'Unknown error'}`;
+            }
+        }
         downloadStage = 'loading the application documents';
         showLoader('Preparing document download...');
         const sub = await getLatestSubmissionById(submissionId);
@@ -2430,6 +2523,7 @@ window.downloadAllRsa = async (submissionId) => {
         }
         let successCount = 0;
         const failures = [];
+        const browserDownloadFiles = [];
         const usedNames = new Set();
 
         for (let i = 0; i < docs.length; i++) {
@@ -2458,16 +2552,32 @@ window.downloadAllRsa = async (submissionId) => {
                     await writable.write(blob);
                     await writable.close();
                 } else {
-                    triggerDirectDownload(blob, fileName);
+                    browserDownloadFiles.push({ fileName, blob });
                 }
                 successCount++;
             } catch (error) {
                 failures.push(`${fileName}: ${error.name || 'Error'}: ${error.message || 'Unknown error'}`);
             }
         }
-        const result = rootFolder
-            ? `Saved ${successCount} of ${docs.length} documents directly to the selected folder: ${rootFolder.name}`
-            : `Started ${successCount} of ${docs.length} downloads using your browser's download location`;
+        let result;
+        if (rootFolder) {
+            result = `Saved ${successCount} of ${docs.length} documents directly to the selected folder: ${rootFolder.name}`;
+        } else if (browserDownloadFiles.length) {
+            downloadStage = 'creating a ZIP file for your documents';
+            showLoader('Preparing one download for all documents...');
+            const zipBlob = await createStoredZipBlob(browserDownloadFiles);
+            const customerName = String(sub.customerName || 'RSA_documents')
+                .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/[. ]+$/g, '') || 'RSA_documents';
+            triggerDirectDownload(zipBlob, `${customerName}_documents.zip`);
+            result = `Started one ZIP download containing ${browserDownloadFiles.length} of ${docs.length} documents`;
+        } else {
+            result = `Downloaded 0 of ${docs.length} documents`;
+        }
+        if (folderPickerIssue) {
+            result += browserDownloadFiles.length
+                ? `.\nFolder selection was unavailable (${folderPickerIssue}); the ZIP was sent to your browser's download location`
+                : `.\nFolder selection was unavailable (${folderPickerIssue}), and no document could be downloaded`;
+        }
         showNotification(failures.length ? `${result}. ${failures.length} failed.` : result,
             failures.length ? 'warning' : 'success');
         if (failures.length) {
