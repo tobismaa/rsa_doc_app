@@ -2412,17 +2412,20 @@ window.downloadDocumentRSA = async (submissionId, docIndex) => {
 };
 
 window.downloadAllRsa = async (submissionId) => {
+    let downloadStage = 'opening the folder picker';
     try {
         // Choose the destination before any asynchronous submission lookup.
         const rootFolder = typeof window.showDirectoryPicker === 'function'
             ? await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' })
             : null;
+        downloadStage = 'loading the application documents';
         showLoader('Preparing document download...');
         const sub = await getLatestSubmissionById(submissionId);
         if (!sub) throw new Error('Application is no longer available');
         const docs = getEffectiveSubmissionDocuments(sub);
         if (!docs.length) {
             showNotification('No documents available for this application', 'warning');
+            alert('Download failed.\n\nCause: No documents are available for this application.');
             return;
         }
         let successCount = 0;
@@ -2444,9 +2447,11 @@ window.downloadAllRsa = async (submissionId) => {
             usedNames.add(fileName.toLowerCase());
             showLoader(`Downloading ${i + 1} of ${docs.length}...`);
             try {
+                downloadStage = `downloading "${fileName}"`;
                 if (!docItem?.fileUrl) throw new Error('Missing document URL');
                 const response = await fetchWithCorsFallback(docItem.fileUrl);
                 const blob = await response.blob();
+                if (!blob.size) throw new Error('The server returned an empty file');
                 if (rootFolder) {
                     const fileHandle = await rootFolder.getFileHandle(fileName, { create: true });
                     const writable = await fileHandle.createWritable();
@@ -2457,7 +2462,7 @@ window.downloadAllRsa = async (submissionId) => {
                 }
                 successCount++;
             } catch (error) {
-                failures.push(`${fileName}: ${error.message}`);
+                failures.push(`${fileName}: ${error.name || 'Error'}: ${error.message || 'Unknown error'}`);
             }
         }
         const result = rootFolder
@@ -2465,11 +2470,19 @@ window.downloadAllRsa = async (submissionId) => {
             : `Started ${successCount} of ${docs.length} downloads using your browser's download location`;
         showNotification(failures.length ? `${result}. ${failures.length} failed.` : result,
             failures.length ? 'warning' : 'success');
-        alert(failures.length ? `${result}.\n\nFailed documents:\n${failures.join('\n')}` : result);
+        if (failures.length) {
+            alert(`${result}.\n\nThe following documents failed:\n${failures.join('\n')}`);
+        } else {
+            alert(result);
+        }
     } catch (error) {
-        showNotification(error?.name === 'AbortError' ? 'Download cancelled' :
-            'Download failed: ' + (error?.message || 'Unknown error'),
-            error?.name === 'AbortError' ? 'info' : 'error');
+        if (error?.name === 'AbortError') {
+            showNotification('Download cancelled', 'info');
+        } else {
+            const details = `${error?.name || 'Error'}: ${error?.message || 'Unknown error'}`;
+            showNotification(`Download failed while ${downloadStage}: ${details}`, 'error');
+            alert(`Download failed while ${downloadStage}.\n\nCause: ${details}`);
+        }
     } finally {
         hideLoader();
     }
