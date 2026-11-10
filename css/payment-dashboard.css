@@ -6,6 +6,37 @@
   background: #f5f8fb;
 }
 
+.payment-sent-to-pfa-table {
+  min-width: 1320px;
+}
+
+.payment-sent-to-pfa-table th,
+.payment-sent-to-pfa-table td {
+  padding: 8px 9px;
+  font-size: 12px;
+}
+
+.payment-sent-to-pfa-table td:nth-child(3) > div {
+  font-size: 11px !important;
+}
+
+.payment-queue-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.payment-queue-actions .action-btn {
+  flex-shrink: 0;
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .payment-lookup-hero {
   min-height: calc(100vh - 150px);
   display: grid;

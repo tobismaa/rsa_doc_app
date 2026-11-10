@@ -12,7 +12,7 @@
     <title>CMBank RSA - RSA Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/shared-dashboard.css?v=20260423a">
-    <link rel="stylesheet" href="css/reviewer-dashboard.css?v=20260508d">
+    <link rel="stylesheet" href="css/reviewer-dashboard.css?v=20261110a">
     <!-- Security: DOMPurify for XSS protection -->
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
     <!-- PDF-Lib needed for merging documents -->
@@ -135,7 +135,7 @@
                         </div>
                     </div>
                     <div class="table-container">
-                        <table class="customers-table" id="rsaTable" style="min-width:800px;">
+                        <table class="customers-table rsa-processing-table" id="rsaTable">
                             <thead>
                                 <tr>
                                     <th style="width:44px;"><input type="checkbox" id="rsaSelectAllRows" title="Select all shown"></th>
@@ -165,7 +165,7 @@
                         <button id="finalFilterBtn" class="action-btn" style="padding:6px 12px;">Filter</button>
                     </div>
                     <div class="table-container">
-                        <table class="customers-table" style="min-width:800px;">
+                        <table class="customers-table rsa-finally-submitted-table">
                             <thead>
                                 <tr>
                                     <th>Customer</th>
@@ -768,7 +768,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script type="module" src="js/firebase-config.js?v=20260625c"></script>
-    <script type="module" src="js/rsa-dashboard.js?v=20261019d"></script>
+    <script type="module" src="js/rsa-dashboard.js?v=20261110b"></script>
     <script type="module" src="js/shared/super-admin-dashboard-switcher.js?v=20260722c"></script>
     <script src="js/table-enhancer.js?v=20260512b"></script>
     <script type="module" src="js/profile-completion-guard.js?v=20260715a"></script>

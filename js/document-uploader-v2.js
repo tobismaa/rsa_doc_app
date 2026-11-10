@@ -186,6 +186,7 @@ let MAX_PDF_SIZE_BYTES = 1.5 * 1024 * 1024; // 1.5MB
 const userFullNames = new Map();
 let customerDetailsSaved = false;
 const auditDuplicateRestoreInFlight = new Set();
+const eopSubmissionLocks = new Set();
 const RR_COUNTER_DOC = doc(db, 'counters', 'roundRobin');
 const STORAGE_CAP_FULL_UPLOAD_MESSAGE = 'Failed to upload. Storage cap full.';
 const DEFAULT_CUSTOMER_ACCOUNT_BANK_CODE = '90089';
@@ -2015,7 +2016,18 @@ function getUploadedDocumentTypes() {
 }
 
 function getEffectiveSubmissionDocuments(submission = null) {
-  const rawDocs = Array.isArray(submission?.documents) ? submission.documents : [];
+  const rawDocs = Array.isArray(submission?.documents) ? [...submission.documents] : [];
+  const eopDocs = Array.isArray(submission?.auditCommissionEopDocuments)
+    ? [...submission.auditCommissionEopDocuments]
+    : [];
+  if (submission?.auditCommissionEopDocument) eopDocs.push(submission.auditCommissionEopDocument);
+  eopDocs.forEach((eopDoc) => {
+    const alreadyIncluded = rawDocs.some((docItem) => (
+      (eopDoc?.fileId && docItem?.fileId === eopDoc.fileId) ||
+      (eopDoc?.fileUrl && docItem?.fileUrl === eopDoc.fileUrl)
+    ));
+    if (!alreadyIncluded) rawDocs.push({ ...eopDoc, documentType: eopDoc.documentType || 'eop' });
+  });
   if (rawDocs.length <= 1) return rawDocs;
 
   const latestByType = new Map();
@@ -3813,7 +3825,7 @@ function showErrorDetailModal(message) {
 }
 
 function closeViewerModal() {
-  if (viewerModal) viewerModal.classList.remove('active');
+  if (viewerModal) viewerModal.classList.remove('active', 'viewer-modal-on-top');
   if (documentViewer) documentViewer.src = '';
   const viewerHeader = document.querySelector('.viewer-header');
   if (viewerHeader) {
@@ -4525,7 +4537,10 @@ window.viewSubmissionDocs = (submissionId) => {
   const effectiveDocs = getEffectiveSubmissionDocuments(sub);
   if (!sub || effectiveDocs.length === 0) { showNotification('No documents available', 'error'); return; }
   const firstDoc = effectiveDocs[0];
-  const docTypeLabel = DOCUMENT_TYPES.find(t => t.id === firstDoc.documentType)?.name || firstDoc.documentType || 'Document';
+  const getDocumentTypeLabel = (documentType) => documentType === 'eop'
+    ? 'Evidence of Payment (EOP)'
+    : DOCUMENT_TYPES.find((type) => type.id === documentType)?.name || documentType || 'Document';
+  const docTypeLabel = getDocumentTypeLabel(firstDoc.documentType);
   if (viewerModal && viewerFileName && documentViewer) {
     viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel}`;
     documentViewer.src = getDocumentPreviewUrl(firstDoc.fileUrl?.trim());
@@ -4535,7 +4550,7 @@ window.viewSubmissionDocs = (submissionId) => {
     let currentIndex = 0;
     const showDoc = (index) => {
       const doc = effectiveDocs[index];
-      const docTypeLabel = DOCUMENT_TYPES.find(t => t.id === doc.documentType)?.name || doc.documentType || 'Document';
+      const docTypeLabel = getDocumentTypeLabel(doc.documentType);
       viewerFileName.textContent = `${sub.customerName} - ${docTypeLabel} (${index + 1}/${effectiveDocs.length})`;
       documentViewer.src = getDocumentPreviewUrl(doc.fileUrl?.trim());
     };
@@ -7393,6 +7408,7 @@ async function renderUploaderApplicationsTable() {
         : auditRejected
         ? `<div class="audit-rejection-actions">
             <button class="action-btn edit-btn" onclick="window.openUploaderCustomerEditModal('${sub.id}')" title="Edit customer details and submit directly to Audit"><i class="fas fa-pen"></i> Edit</button>
+            <button class="action-btn edit-btn" onclick="window.markUploaderPaymentMadeWithEop('${sub.id}')" title="Upload EOP and resubmit to Audit"><i class="fas fa-file-arrow-up"></i> Payment Made (EOP)</button>
           <button class="action-btn edit-btn" onclick="window.openAuditPaymentResubmitModal('${sub.id}')" title="Submit correction to Audit"><i class="fas fa-paper-plane"></i> Resubmit</button>
             <button class="action-btn dissolve-btn" onclick="window.dissolveAuditPaymentRequest('${sub.id}')" title="Return to Sent to PFA"><i class="fas fa-rotate-left"></i> Dissolve</button>
           </div>`
@@ -7466,7 +7482,9 @@ async function renderUploaderApplicationsTable() {
   if (renderTab === 'sent_to_pfa') sharedColumns.push('Customer Account');
   sharedColumns.push('Agent', 'PFA');
   if (renderTab === 'paid') sharedColumns.push('Uploaded By');
-  sharedColumns.push('Time Entered', 'Current Officer', 'Action');
+  sharedColumns.push('Time Entered');
+  if (renderTab !== 'sent_to_pfa') sharedColumns.push('Current Officer');
+  sharedColumns.push('Action');
   setUploaderApplicationsColumns(sharedColumns);
   if (!rows.length) {
     const label = renderTab === 'paid'
@@ -7484,6 +7502,9 @@ async function renderUploaderApplicationsTable() {
     const paymentButton = renderTab === 'sent_to_pfa'
       ? `<button class="action-btn view-btn-small" ${canReportPayment ? '' : 'disabled'} onclick="window.markUploaderPaymentMade('${sub.id}')"><i class="fas fa-money-bill-wave"></i> ${auditStatus === 'pending' ? 'Reported' : 'Payment Made'}</button>`
       : '';
+    const paymentEopButton = renderTab === 'sent_to_pfa'
+      ? `<button class="action-btn view-btn-small" ${canReportPayment ? '' : 'disabled'} onclick="window.markUploaderPaymentMadeWithEop('${sub.id}')"><i class="fas fa-file-arrow-up"></i> Payment Made (EOP)</button>`
+      : '';
     const auditLabel = renderTab === 'audit'
       ? '<span class="audit-pending-pill"><i class="fas fa-hourglass-half"></i> Pending Audit</span>'
       : '';
@@ -7494,6 +7515,14 @@ async function renderUploaderApplicationsTable() {
     const customerAccountCell = renderTab === 'sent_to_pfa'
       ? `<td>${renderUploaderCopyableCustomerAccount(sub)}</td>`
       : '';
+    const sentToPfaActions = `
+      <button class="action-btn edit-btn" onclick="window.openUploaderCustomerEditModal('${sub.id}')"><i class="fas fa-pen"></i> Edit</button>
+      ${paymentButton}
+      ${paymentEopButton}
+      ${auditLabel}
+      ${getUploaderSubmissionDetailsButtonHtml(sub.id)}
+      ${renderTab === 'sent_to_pfa' ? '' : getUploaderSubmissionDocsButtonHtml(sub.id)}
+    `;
     html += `
       <tr data-submission-id="${sub.id}">
         <td><strong>${escapeHtml(sub.customerName || '-')}</strong></td>
@@ -7502,14 +7531,10 @@ async function renderUploaderApplicationsTable() {
         <td>${escapeHtml(getSubmissionPfaName(sub))}</td>
         ${uploadedByCell}
         <td>${safeFormatDate(getUploaderPaymentStageEntryAt(sub))}</td>
-        <td>${escapeHtml(residentOfficer)}</td>
-        <td>
-          <button class="action-btn edit-btn" onclick="window.openUploaderCustomerEditModal('${sub.id}')"><i class="fas fa-pen"></i> Edit</button>
-          ${paymentButton}
-          ${auditLabel}
-          ${getUploaderSubmissionDetailsButtonHtml(sub.id)}
-          ${getUploaderSubmissionDocsButtonHtml(sub.id)}
-        </td>
+        ${renderTab === 'sent_to_pfa' ? '' : `<td>${escapeHtml(residentOfficer)}</td>`}
+        <td>${renderTab === 'sent_to_pfa'
+          ? `<div class="uploader-sent-to-pfa-actions">${sentToPfaActions}</div>`
+          : sentToPfaActions}</td>
       </tr>
     `;
   }
@@ -7973,6 +7998,53 @@ function showPaymentMadeConfirmation(submission = {}) {
   });
 }
 
+function showPaymentMadeEopDialog(submission = {}) {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal active payment-made-confirm-modal';
+    modal.innerHTML = `
+      <div class="modal-content payment-made-confirm-card">
+        <div class="payment-made-confirm-icon">
+          <i class="fas fa-file-circle-check"></i>
+        </div>
+        <h2>Payment Made (EOP)</h2>
+        <p>Upload Evidence of Payment for <strong>${escapeHtml(submission.customerName || 'this application')}</strong>. The document will be sent to Audit for review.</p>
+        <label class="audit-resubmit-field">
+          <span>Evidence of Payment (EOP) *</span>
+          <input id="paymentMadeEopFile" type="file" accept=".pdf,image/*" required>
+        </label>
+        <div class="payment-made-confirm-actions">
+          <button type="button" class="cancel-btn" data-confirm-payment-eop="no">Cancel</button>
+          <button type="button" class="submit-btn" data-confirm-payment-eop="yes">
+            <i class="fas fa-paper-plane"></i> Submit to Audit
+          </button>
+        </div>
+      </div>
+    `;
+    const close = (value) => {
+      modal.remove();
+      resolve(value);
+    };
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) {
+        close(null);
+        return;
+      }
+      const button = event.target.closest('[data-confirm-payment-eop]');
+      if (!button) return;
+      if (button.dataset.confirmPaymentEop === 'no') {
+        close(null);
+        return;
+      }
+      const fileInput = modal.querySelector('#paymentMadeEopFile');
+      const file = fileInput?.files?.[0] || null;
+      fileInput?.classList.toggle('invalid', !file);
+      if (file) close(file);
+    });
+    document.body.appendChild(modal);
+  });
+}
+
 function showAuditPaymentResubmitDialog(submission = {}) {
   return new Promise((resolve) => {
     const modal = document.createElement('div');
@@ -8122,6 +8194,116 @@ window.markUploaderPaymentMade = async (submissionId) => {
     switchUploaderApplicationTab('audit');
   } catch (error) {
     showNotification('Failed to report payment made.', 'error');
+  }
+};
+
+window.markUploaderPaymentMadeWithEop = async (submissionId) => {
+  if (!assertWritable('Payment made report with EOP')) return;
+  const sub = allSubmissions.find((item) => item.id === submissionId);
+  if (!sub) {
+    showNotification('Application not found', 'error');
+    return;
+  }
+  if (!isUploaderSentToPfaStatus(sub)) {
+    showNotification('Only Sent to PFA applications can be submitted with EOP.', 'warning');
+    return;
+  }
+  if (!hasAssociatedCommissionAgent(sub)) {
+    showNotification('Commission cannot be claimed because no agent is attached to this application.', 'error');
+    return;
+  }
+
+  const selectedFile = await showPaymentMadeEopDialog(sub);
+  if (!selectedFile) return;
+
+  const isImage = Boolean(selectedFile.type && selectedFile.type.startsWith('image/'));
+  const isPdf = selectedFile.type === 'application/pdf' || String(selectedFile.name || '').toLowerCase().endsWith('.pdf');
+  if (!isImage && !isPdf) {
+    showNotification('EOP must be a PDF or image.', 'error');
+    return;
+  }
+
+  const lockKey = `payment-made-eop:${submissionId}`;
+  if (eopSubmissionLocks.has(lockKey)) {
+    showNotification('EOP submission is already running. Please wait.', 'info');
+    return;
+  }
+  eopSubmissionLocks.add(lockKey);
+
+  try {
+    let fileToUpload = selectedFile;
+    if (isImage && fileToUpload.size > MAX_IMAGE_UPLOAD_BYTES) {
+      fileToUpload = await compressImageTo200KB(fileToUpload, MAX_IMAGE_UPLOAD_BYTES);
+    } else if (isPdf && fileToUpload.size > MAX_PDF_SIZE_BYTES) {
+      fileToUpload = await compressPdfUnderLimit(fileToUpload, MAX_PDF_SIZE_BYTES);
+    }
+
+    showNotification('Uploading EOP document...', 'info');
+    const storage = new BackblazeStorage();
+    const uploadResult = await storage.uploadFile(fileToUpload, sub.customerName || 'application', 'eop');
+    const uploadedAt = await getTrustedNowIso();
+    const eopDocument = {
+      name: selectedFile.name,
+      fileName: uploadResult.fileName || fileToUpload.name,
+      fileId: uploadResult.fileId || '',
+      fileUrl: uploadResult.fileUrl || '',
+      documentType: 'eop',
+      uploadedAt,
+      uploadedBy: currentUser?.email || ''
+    };
+    const wasRejected = String(sub.auditCommissionStatus || '').toLowerCase() === 'rejected';
+    const updatePayload = {
+      paymentMadeByUploader: true,
+      paymentMadeAt: serverTimestamp(),
+      paymentMadeBy: currentUser?.email || '',
+      auditCommissionStatus: 'pending',
+      auditCommissionRejectionReason: '',
+      auditCommissionSubmittedAt: serverTimestamp(),
+      auditCommissionSubmittedBy: currentUser?.email || '',
+      auditCommissionEopDocument: eopDocument,
+      auditCommissionEopDocuments: arrayUnion(eopDocument),
+      updatedAt: serverTimestamp()
+    };
+    if (wasRejected) {
+      updatePayload.auditCommissionResubmittedAt = serverTimestamp();
+      updatePayload.auditCommissionResubmittedBy = currentUser?.email || '';
+      updatePayload.auditCommissionResubmitComment = 'EOP uploaded';
+      updatePayload.auditCommissionResubmitCount = Number(sub.auditCommissionResubmitCount || 0) + 1;
+    }
+    await updateDoc(doc(db, 'submissions', submissionId), updatePayload);
+
+    await addDoc(collection(db, 'audit'), {
+      action: 'uploader_payment_made_reported_with_eop',
+      submissionId,
+      customerName: sub.customerName || '',
+      pfaName: getSubmissionPfaName(sub),
+      eopFileName: eopDocument.name,
+      performedBy: currentUser?.email || '',
+      timestamp: serverTimestamp()
+    }).catch(() => {});
+
+    await notifyAdminPushEvent({
+      currentUser,
+      eventType: 'commission_payment_reported',
+      title: 'Payment Request Submitted with EOP',
+      body: `${sub.customerName || 'An application'} was submitted to Audit with Evidence of Payment.`,
+      clickUrl: '/reports-monitoring-dashboard.html',
+      meta: {
+        submissionId,
+        customerName: sub.customerName || '',
+        pfaName: getSubmissionPfaName(sub),
+        uploadedBy: sub.uploadedBy || '',
+        submittedBy: currentUser?.email || ''
+      }
+    }).catch(() => {});
+
+    showNotification('EOP submitted to Audit for review.', 'success');
+    switchUploaderApplicationTab('audit');
+  } catch (error) {
+    const reason = getUploadErrorMessage(error);
+    showNotification(reason === STORAGE_CAP_FULL_UPLOAD_MESSAGE ? reason : `Failed to submit EOP to Audit: ${reason || 'Unknown upload error'}`, 'error');
+  } finally {
+    eopSubmissionLocks.delete(lockKey);
   }
 };
 
@@ -8929,13 +9111,20 @@ window.viewSubmissionDetails = async (submissionId) => {
         `).join('')}
       </div>
       <div class="modal-footer">
+        <button class="action-btn view-btn-small" type="button" data-view-submission-docs>
+          <i class="fas fa-eye"></i> Docs
+        </button>
         <button class="cancel-btn" type="button">Close</button>
       </div>
     </div>
   `;
   document.body.appendChild(detailsModal);
   const close = () => detailsModal.remove();
-  detailsModal.querySelectorAll('button').forEach((btn) => btn.addEventListener('click', close));
+  detailsModal.querySelectorAll('.close-btn, .modal-footer .cancel-btn').forEach((btn) => btn.addEventListener('click', close));
+  detailsModal.querySelector('[data-view-submission-docs]')?.addEventListener('click', () => {
+    viewerModal?.classList.add('viewer-modal-on-top');
+    window.viewSubmissionDocs(submissionId);
+  });
   detailsModal.addEventListener('click', (event) => {
     if (event.target === detailsModal) close();
   });

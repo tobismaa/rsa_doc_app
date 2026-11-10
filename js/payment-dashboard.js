@@ -2155,7 +2155,7 @@ function renderPaymentQueue() {
         const reconciliationBadge = reconciliationMatch
             ? `<div style="margin-top:6px;"><span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;"><i class="fas fa-link"></i> Excel matched</span></div>`
             : '';
-        const actionHtml = `${getPaymentDetailsButtonHtml(sub.id)} <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>`;
+        const actionHtml = `<div class="payment-queue-actions">${getPaymentDetailsButtonHtml(sub.id)} <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button></div>`;
 
         return `
             <tr>

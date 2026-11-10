@@ -2788,6 +2788,44 @@ button,
 
 /* ==================== END OF VIEWER DASHBOARD CSS ==================== */
 
+#rsaTable.rsa-processing-table,
+.customers-table.rsa-finally-submitted-table {
+  min-width: 1480px;
+  table-layout: auto;
+}
+
+#rsaTable.rsa-processing-table th,
+#rsaTable.rsa-processing-table td,
+.rsa-finally-submitted-table th,
+.rsa-finally-submitted-table td {
+  padding: 7px 8px;
+  font-size: 12px;
+}
+
+#rsaTable.rsa-processing-table td:last-child,
+.rsa-finally-submitted-table td:last-child {
+  white-space: nowrap;
+}
+
+.rsa-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.rsa-row-actions .action-btn {
+  flex-shrink: 0;
+  width: auto !important;
+  min-width: max-content;
+  min-height: 32px;
+  padding: 5px 7px;
+  font-size: 11px;
+  gap: 4px;
+  white-space: nowrap;
+}
+
 /* Match reviewer desktop scale with uploader dashboard */
 @media screen and (min-width: 769px) {
   .sidebar {

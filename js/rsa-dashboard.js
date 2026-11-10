@@ -680,6 +680,7 @@ function getRsaExcelRows(submissions) {
 
         return [
             index + 1,
+            resolveRsaKnownName(sub.assignedToRSA),
             details.accountNo || '',
             toTitleCaseWords(sub.customerName || details.name || ''),
             toTitleCaseWords(details.originatingTP || ''),
@@ -712,8 +713,12 @@ async function downloadRsaExcel(submissions, scopeLabel = 'selected') {
         return;
     }
 
+    const assignedRsaEmails = [...new Set(submissions.map((sub) => sub.assignedToRSA).filter(Boolean))];
+    await Promise.all(assignedRsaEmails.map((email) => getUserFullName(email)));
+
     const headers = [
         'S/N',
+        'RSA USER',
         'ACCOUNT NUMBER',
         'Full Name (Surname First)',
         'Originating Contact Centre',
@@ -741,6 +746,7 @@ async function downloadRsaExcel(submissions, scopeLabel = 'selected') {
 
     worksheet.columns = [
         { width: 8 },
+        { width: 28 },
         { width: 18 },
         { width: 30 },
         { width: 28 },
@@ -1844,10 +1850,12 @@ function renderFinallySubmittedTab() {
             <td>${submittedAt}</td>
             <td><span class="status-badge status-approved">Sent to PFA</span></td>
             <td>
+              <div class="rsa-row-actions">
                 <button class="action-btn" onclick="window.openCustomerDetails('${sub.id}')"><i class="fas fa-eye"></i> App Details</button>
                 <button class="action-btn" onclick="window.downloadAllRsa('${sub.id}')"><i class="fas fa-download"></i> Download All</button>
                 <button class="action-btn merge-btn" onclick="window.openMergeModal('${sub.id}')"><i class="fas fa-compress-alt"></i> Merge</button>
                 <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>
+              </div>
             </td>
         </tr>`;
     });
@@ -1889,12 +1897,14 @@ function renderRsaRows(submissions) {
             ? 'Processing to PFA'
             : (status.charAt(0).toUpperCase() + status.slice(1));
         const actions = `
+          <div class="rsa-row-actions">
             <button class="action-btn" onclick="window.openCustomerDetails('${sub.id}')"><i class="fas fa-eye"></i> App Details</button>
             <button class="action-btn" onclick="window.downloadAllRsa('${sub.id}')"><i class="fas fa-download"></i> Download All</button>
             <button class="action-btn merge-btn" onclick="window.openMergeModal('${sub.id}')"><i class="fas fa-compress-alt"></i> Merge</button>
             <button class="action-btn" onclick="window.openApplicationChat('${sub.id}')"><i class="fas fa-comments"></i> Chat</button>
             <button class="action-btn" style="background:#dc2626;color:#fff;border:none;" onclick="window.rejectRsaSubmission('${sub.id}')"><i class="fas fa-times-circle"></i> Reject</button>
             <button class="action-btn" style="background:#10b981;color:#fff;border:none;" onclick="window.finalSubmitRsa('${sub.id}')"><i class="fas fa-paper-plane"></i> Final Submit</button>
+          </div>
         `;
         return `<tr>
             <td><input type="checkbox" class="rsa-export-select" value="${sub.id}" title="Select ${sub.customerName || 'customer'} for Excel"></td>
@@ -2415,18 +2425,13 @@ window.downloadAllRsa = async (submissionId) => {
             showNotification('No documents available for this application', 'warning');
             return;
         }
-        const safeCustomerName = (sub.customerName || 'Customer')
-            .replace(/[^a-zA-Z0-9\s_-]/g, '_').trim() || 'Customer';
-        const customerFolder = rootFolder
-            ? await rootFolder.getDirectoryHandle(safeCustomerName, { create: true })
-            : null;
         let successCount = 0;
         const failures = [];
         const usedNames = new Set();
 
         for (let i = 0; i < docs.length; i++) {
             const docItem = docs[i];
-            const baseName = (docItem?.name || `${safeCustomerName}_document_${i + 1}.pdf`)
+            const baseName = (docItem?.name || `document_${i + 1}.pdf`)
                 .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/[. ]+$/g, '') || `document_${i + 1}.pdf`;
             let fileName = baseName;
             let suffix = 2;
@@ -2442,8 +2447,8 @@ window.downloadAllRsa = async (submissionId) => {
                 if (!docItem?.fileUrl) throw new Error('Missing document URL');
                 const response = await fetchWithCorsFallback(docItem.fileUrl);
                 const blob = await response.blob();
-                if (customerFolder) {
-                    const fileHandle = await customerFolder.getFileHandle(fileName, { create: true });
+                if (rootFolder) {
+                    const fileHandle = await rootFolder.getFileHandle(fileName, { create: true });
                     const writable = await fileHandle.createWritable();
                     await writable.write(blob);
                     await writable.close();
@@ -2455,8 +2460,8 @@ window.downloadAllRsa = async (submissionId) => {
                 failures.push(`${fileName}: ${error.message}`);
             }
         }
-        const result = customerFolder
-            ? `Saved ${successCount} of ${docs.length} documents to ${rootFolder.name}/${safeCustomerName}`
+        const result = rootFolder
+            ? `Saved ${successCount} of ${docs.length} documents directly to the selected folder: ${rootFolder.name}`
             : `Started ${successCount} of ${docs.length} downloads using your browser's download location`;
         showNotification(failures.length ? `${result}. ${failures.length} failed.` : result,
             failures.length ? 'warning' : 'success');

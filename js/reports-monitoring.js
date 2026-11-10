@@ -2280,9 +2280,14 @@ function renderAuditMoneyRows(body, rows, mode) {
     body.innerHTML = rows.map((sub) => {
         const { rsaBalance, twentyFive, commission } = getSubmissionFinancials(sub);
         const uploaderName = getUserDisplayName(sub.uploadedBy || sub.auditCommissionSubmittedBy || '');
+        const eopDocument = getAuditEopDocument(sub);
+        const eopLink = eopDocument?.fileUrl
+            ? `<a class="action-btn" href="${escapeHtml(getDocumentPreviewUrl(eopDocument.fileUrl))}" target="_blank" rel="noopener noreferrer"><i class="fas fa-file-arrow-up"></i> View EOP</a>`
+            : '';
         const actionCell = mode === 'sent'
             ? `<div class="audit-paid-actions">
                    <button class="action-btn" onclick="window.openMonitoringApplicationDetails('${sub.id}')"><i class="fas fa-eye"></i> View</button>
+                   ${eopLink}
                    <button class="action-btn" onclick="window.acceptAuditCommission('${sub.id}')"><i class="fas fa-check"></i> Accept</button>
                    <button class="action-btn" style="background:#b91c1c;color:#fff;border:none;" onclick="window.rejectAuditCommission('${sub.id}')"><i class="fas fa-times"></i> Reject</button>
                </div>`
@@ -3178,6 +3183,7 @@ function openApplicationDetailsModal(submissionId) {
         ['Customer Account Number', getCustomerAccountNumber(sub)],
         ['Audit Commission Status', statusLabel(sub.auditCommissionStatus || '-')],
         ['Audit Rejection Reason', sub.auditCommissionRejectionReason || '-'],
+        ['EOP Document', ''],
         ['Uploaded At', formatDate(getSubmissionOriginalUploadAt(sub))],
         ['Updated At', formatDate(sub.updatedAt || sub.uploadedAt)]
     ];
@@ -3189,7 +3195,11 @@ function openApplicationDetailsModal(submissionId) {
         body.innerHTML = rows.map(([label, value]) => `
             <tr>
                 <th style="width:240px;background:#f8fafc;">${escapeHtml(label)}</th>
-                <td>${label === 'Customer Account Number' ? renderCopyableCustomerAccount(sub) : escapeHtml(value)}</td>
+                <td>${label === 'Customer Account Number'
+                    ? renderCopyableCustomerAccount(sub)
+                    : label === 'EOP Document'
+                        ? getAuditEopDocumentLinkHtml(sub)
+                        : escapeHtml(value)}</td>
             </tr>
         `).join('');
     }
@@ -3719,6 +3729,25 @@ function getLatestAuditCorrectionDocument(submission = {}) {
         ? submission.auditCommissionCorrectionDocuments
         : [];
     return docs.length ? docs[docs.length - 1] : null;
+}
+
+function getAuditEopDocument(submission = {}) {
+    if (submission.auditCommissionEopDocument && typeof submission.auditCommissionEopDocument === 'object') {
+        return submission.auditCommissionEopDocument;
+    }
+    const docs = Array.isArray(submission.auditCommissionEopDocuments)
+        ? submission.auditCommissionEopDocuments
+        : [];
+    return docs.length ? docs[docs.length - 1] : null;
+}
+
+function getAuditEopDocumentLinkHtml(submission = {}) {
+    const eopDocument = getAuditEopDocument(submission);
+    if (!eopDocument) return 'Not provided';
+    const fileName = String(eopDocument.name || eopDocument.fileName || 'Evidence of Payment').trim();
+    return eopDocument.fileUrl
+        ? `<a href="${escapeHtml(getDocumentPreviewUrl(eopDocument.fileUrl))}" target="_blank" rel="noopener noreferrer">${escapeHtml(fileName)}</a>`
+        : escapeHtml(fileName);
 }
 
 function getAuditCorrectionSummaryHtml(submission = {}) {

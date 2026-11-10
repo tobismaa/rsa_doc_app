@@ -3011,3 +3011,31 @@ body.modal-open {
   .valuation-payment-panel { padding:15px; }
   .valuation-payment-summary { grid-template-columns:1fr; }
 }
+
+#applicationsTab .uploader-sent-to-pfa-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+#applicationsTab .uploader-sent-to-pfa-actions .action-btn {
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 30px;
+  margin: 0;
+  padding: 5px 7px;
+  font-size: 11px;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+#applicationsTab #applicationsTableBody > tr > td:last-child {
+  white-space: nowrap;
+}
+
+#viewerModal.viewer-modal-on-top {
+  z-index: 10002 !important;
+}
