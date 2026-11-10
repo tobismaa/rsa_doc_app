@@ -242,7 +242,7 @@ function applySheetBodyStyle(row) {
     });
 }
 
-function renderGroupedSheet({ worksheet, reportTitle, summaryRows = [], groupRows = [], tableHeaders = [], columns = [], decimalColumns = [], integerColumns = [] }) {
+function renderGroupedSheet({ worksheet, reportTitle, summaryRows = [], groupRows = [], tableHeaders = [], columns = [], decimalColumns = [], integerColumns = [], includeOwnerColumn = false }) {
     worksheet.columns = columns;
     const titleRow = worksheet.addRow([reportTitle]);
     worksheet.mergeCells(`A${titleRow.number}:${String.fromCharCode(64 + tableHeaders.length)}${titleRow.number}`);
@@ -274,7 +274,8 @@ function renderGroupedSheet({ worksheet, reportTitle, summaryRows = [], groupRow
             applySheetHeaderStyle(headerRow);
         }
 
-        const dataRow = worksheet.addRow(Object.values(item).slice(1));
+        const dataValues = Object.values(item).slice(1);
+        const dataRow = worksheet.addRow(includeOwnerColumn ? [item.owner, ...dataValues] : dataValues);
         applySheetBodyStyle(dataRow);
         dataRow.eachCell((cell, colNumber) => {
             if (decimalColumns.includes(colNumber) && typeof cell.value === 'number') {
@@ -330,10 +331,10 @@ function getStageSheetConfig(stageId = '') {
         return {
             id: 'rsa',
             title: 'RSA Report',
-            excelHeaders: ['Customer Name', 'Uploader Name', 'Reviewer Name', 'Account Number', 'Tenor', 'House Type', 'House Number', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time', 'Employer'],
+            excelHeaders: ['RSA Officer', 'Customer Name', 'Uploader Name', 'Reviewer Name', 'Account Number', 'Tenor', 'House Type', 'House Number', 'RSA Balance', '25% RSA Balance', '1% Commission', 'Status', 'RSA Assigned Time', 'Employer'],
             previewHeaders: ['Customer', 'Uploader', 'Reviewer', 'Account No', 'Tenor', 'House Type', 'House No', 'RSA Bal', '25%', '1% Comm', 'Status', 'Assigned', 'Employer'],
-            columns: [{ width: 28 }, { width: 24 }, { width: 24 }, { width: 18 }, { width: 12 }, { width: 28 }, { width: 18 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 30 }],
-            decimalColumns: [8, 9, 10],
+            columns: [{ width: 24 }, { width: 28 }, { width: 24 }, { width: 24 }, { width: 18 }, { width: 12 }, { width: 28 }, { width: 18 }, { width: 16 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 22 }, { width: 30 }],
+            decimalColumns: [9, 10, 11],
             integerColumns: []
         };
     }
@@ -475,7 +476,8 @@ export async function exportDashboardStageReportExcel(report, creatorName = 'CMB
         tableHeaders: report.excelHeaders,
         columns: report.columns,
         decimalColumns: report.decimalColumns,
-        integerColumns: report.integerColumns
+        integerColumns: report.integerColumns,
+        includeOwnerColumn: report.stageId === 'rsa'
     });
 
     const buffer = await workbook.xlsx.writeBuffer();
