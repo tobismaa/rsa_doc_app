@@ -705,6 +705,41 @@ async function createStoredZipBlob(files) {
     return new Blob([...localParts, ...centralParts, endRecord], { type: 'application/zip' });
 }
 
+function sanitizeDownloadName(value, fallback) {
+    return String(value || fallback)
+        .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_')
+        .replace(/[. ]+$/g, '')
+        .trim() || fallback;
+}
+
+function getDownloadDocumentType(docItem, index) {
+    const type = String(docItem?.documentType || '').trim();
+    return type ? (DOCUMENT_TYPES[type] || type.replace(/[_-]+/g, ' ')) : `Document ${index + 1}`;
+}
+
+function getDownloadFileExtension(docItem) {
+    const candidates = [docItem?.name, docItem?.fileName, docItem?.fileUrl];
+    for (const candidate of candidates) {
+        const path = String(candidate || '').split(/[?#]/, 1)[0];
+        const match = path.match(/(\.[a-z0-9]{1,10})$/i);
+        if (match) return match[1];
+    }
+
+    const mimeType = String(docItem?.mimeType || docItem?.contentType || docItem?.type || '')
+        .split(';', 1)[0].trim().toLowerCase();
+    const extensionByMimeType = {
+        'application/pdf': '.pdf',
+        'image/jpeg': '.jpg',
+        'image/png': '.png',
+        'image/webp': '.webp',
+        'application/msword': '.doc',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+        'application/vnd.ms-excel': '.xls',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx'
+    };
+    return extensionByMimeType[mimeType] || '';
+}
+
 async function downloadBlobAsFile(blob, fileName) {
     return saveFileWithLocationPicker(blob, fileName);
 }
@@ -2521,6 +2556,15 @@ window.downloadAllRsa = async (submissionId) => {
             alert('Download failed.\n\nCause: No documents are available for this application.');
             return;
         }
+        const customerFolderName = sanitizeDownloadName(
+            sub.customerName || sub.customerDetails?.name,
+            'Unknown Customer'
+        );
+        let destinationFolder = null;
+        if (rootFolder) {
+            downloadStage = `creating the "${customerFolderName}" customer folder`;
+            destinationFolder = await rootFolder.getDirectoryHandle(customerFolderName, { create: true });
+        }
         let successCount = 0;
         const failures = [];
         const browserDownloadFiles = [];
@@ -2528,54 +2572,54 @@ window.downloadAllRsa = async (submissionId) => {
 
         for (let i = 0; i < docs.length; i++) {
             const docItem = docs[i];
-            const baseName = (docItem?.name || `document_${i + 1}.pdf`)
-                .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/[. ]+$/g, '') || `document_${i + 1}.pdf`;
-            let fileName = baseName;
-            let suffix = 2;
-            const dot = baseName.lastIndexOf('.');
-            while (usedNames.has(fileName.toLowerCase())) {
-                fileName = dot > 0
-                    ? `${baseName.slice(0, dot)} (${suffix++})${baseName.slice(dot)}`
-                    : `${baseName} (${suffix++})`;
-            }
-            usedNames.add(fileName.toLowerCase());
+            const documentType = sanitizeDownloadName(getDownloadDocumentType(docItem, i), `Document ${i + 1}`);
             showLoader(`Downloading ${i + 1} of ${docs.length}...`);
             try {
-                downloadStage = `downloading "${fileName}"`;
+                downloadStage = `downloading "${documentType}"`;
                 if (!docItem?.fileUrl) throw new Error('Missing document URL');
                 const response = await fetchWithCorsFallback(docItem.fileUrl);
                 const blob = await response.blob();
                 if (!blob.size) throw new Error('The server returned an empty file');
-                if (rootFolder) {
-                    const fileHandle = await rootFolder.getFileHandle(fileName, { create: true });
+                const extension = getDownloadFileExtension({
+                    ...docItem,
+                    mimeType: docItem?.mimeType || docItem?.contentType || blob.type
+                });
+                const baseName = sanitizeDownloadName(`${customerFolderName} - ${documentType}${extension}`, `Document_${i + 1}${extension}`);
+                let fileName = baseName;
+                let suffix = 2;
+                while (usedNames.has(fileName.toLowerCase())) {
+                    fileName = `${baseName.slice(0, baseName.length - extension.length)} (${suffix++})${extension}`;
+                }
+                usedNames.add(fileName.toLowerCase());
+                downloadStage = `saving "${customerFolderName}/${fileName}"`;
+                if (destinationFolder) {
+                    const fileHandle = await destinationFolder.getFileHandle(fileName, { create: true });
                     const writable = await fileHandle.createWritable();
                     await writable.write(blob);
                     await writable.close();
                 } else {
-                    browserDownloadFiles.push({ fileName, blob });
+                    browserDownloadFiles.push({ fileName: `${customerFolderName}/${fileName}`, blob });
                 }
                 successCount++;
             } catch (error) {
-                failures.push(`${fileName}: ${error.name || 'Error'}: ${error.message || 'Unknown error'}`);
+                failures.push(`${documentType}: ${error.name || 'Error'}: ${error.message || 'Unknown error'}`);
             }
         }
         let result;
-        if (rootFolder) {
-            result = `Saved ${successCount} of ${docs.length} documents directly to the selected folder: ${rootFolder.name}`;
+        if (destinationFolder) {
+            result = `Saved ${successCount} of ${docs.length} documents to "${customerFolderName}" inside the selected folder: ${rootFolder.name}`;
         } else if (browserDownloadFiles.length) {
             downloadStage = 'creating a ZIP file for your documents';
             showLoader('Preparing one download for all documents...');
             const zipBlob = await createStoredZipBlob(browserDownloadFiles);
-            const customerName = String(sub.customerName || 'RSA_documents')
-                .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/[. ]+$/g, '') || 'RSA_documents';
-            triggerDirectDownload(zipBlob, `${customerName}_documents.zip`);
-            result = `Started one ZIP download containing ${browserDownloadFiles.length} of ${docs.length} documents`;
+            triggerDirectDownload(zipBlob, `${customerFolderName}_documents.zip`);
+            result = `Started one ZIP download containing the "${customerFolderName}" folder with ${browserDownloadFiles.length} of ${docs.length} documents`;
         } else {
             result = `Downloaded 0 of ${docs.length} documents`;
         }
         if (folderPickerIssue) {
             result += browserDownloadFiles.length
-                ? `.\nFolder selection was unavailable (${folderPickerIssue}); the ZIP was sent to your browser's download location`
+                ? `.\nFolder selection was unavailable (${folderPickerIssue}); the ZIP with the customer folder was sent to your browser's download location`
                 : `.\nFolder selection was unavailable (${folderPickerIssue}), and no document could be downloaded`;
         }
         showNotification(failures.length ? `${result}. ${failures.length} failed.` : result,
