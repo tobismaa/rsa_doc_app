@@ -89,6 +89,10 @@ function getSubmissionCustomerName(submission = {}) {
     return String(submission?.customerName || submission?.customerDetails?.name || '').trim();
 }
 
+function normalizeTrackAccountNumber(value) {
+    return String(value || '').replace(/\D/g, '');
+}
+
 function getPenNumberQueryVariants(penNo = '') {
     const raw = String(penNo || '').trim();
     const normalized = normalizePenNumber(raw);
@@ -413,6 +417,20 @@ async function performGlobalTrackSearch() {
         snapshots.filter(Boolean).forEach((snapshot) => {
             snapshot.forEach((docSnapItem) => addTrackResult(resultMap, docSnapItem));
         });
+
+        // Account numbers are stored in either the nested customer details or
+        // the legacy top-level field, so search both locations.
+        const normalizedAccountNo = normalizeTrackAccountNumber(searchTerm);
+        if (/^\d{10}$/.test(normalizedAccountNo)) {
+            const accountQueries = [
+                query(submissionsRef, where('customerDetails.accountNo', '==', normalizedAccountNo)),
+                query(submissionsRef, where('accountNo', '==', normalizedAccountNo))
+            ];
+            const accountSnapshots = await Promise.all(accountQueries.map((q) => getDocs(q).catch(() => null)));
+            accountSnapshots.filter(Boolean).forEach((snapshot) => {
+                snapshot.forEach((docSnapItem) => addTrackResult(resultMap, docSnapItem));
+            });
+        }
 
         const normalizedName = normalizeTrackSearchText(searchTerm);
         const allSubmissionsQuery = query(submissionsRef, limit(5000));
